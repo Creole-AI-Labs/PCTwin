@@ -1,434 +1,306 @@
-//! Fixed tables and conversions between each system's own values and the neutral ones.
-//!
-//! Every table here is data checked on [`crate::schema::CHECKED_ON`]; nothing is guessed. A native
-//! value that is not on a table is kept as the system's own name (`windows:...`) so the same
-//! system can still take it back exactly, and another system gets a guided step instead.
+//! Between a place's native field values and a setting's neutral value, driven by the row's
+//! [`Codec`]. Pure: no system is touched here, so planning can ask what a new system can hold
+//! ([`quantize`]) before anything changes.
 
-use crate::schema::System;
+use pctwin_recipe::SettingValue;
 
-/// Pointer speed: Windows' slider has 20 steps (1 to 20, `MouseSensitivity`).
-pub fn windows_speed_to_neutral(step: i64) -> Option<i64> {
-    if !(1..=20).contains(&step) {
-        return None;
-    }
-    Some(((step - 1) * 1000 + 9) / 19)
+use crate::catalogue::{Catalogue, Codec, Field, Kind, Place, Row, json_to_setting};
+use crate::value::{ValueType, file_uri, path_of_file_uri, plain_name};
+
+/// A field's value as the system holds it. `None` beside it (in a `Vec<Option<Native>>`) means
+/// the field is not set.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Native {
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Bool(bool),
+    List(Vec<String>),
 }
 
-/// The Windows step nearest to a neutral speed (0 to 1000).
-pub fn neutral_to_windows_speed(p: i64) -> Option<i64> {
-    if !(0..=1000).contains(&p) {
-        return None;
-    }
-    Some((p * 19 + 500) / 1000 + 1)
-}
-
-/// Pointer speed on a Mac: `com.apple.mouse.scaling`, 0.0 to 3.0, kept to three decimals.
-pub fn mac_speed_to_neutral(scaling: f64) -> Option<i64> {
-    if !scaling.is_finite() || !(0.0..=3.0).contains(&scaling) {
-        return None;
-    }
-    Some((scaling / 3.0 * 1000.0).round() as i64)
-}
-
-/// The Mac value for a neutral speed, as `defaults` writes it.
-pub fn neutral_to_mac_speed(p: i64) -> Option<String> {
-    if !(0..=1000).contains(&p) {
-        return None;
-    }
-    Some(format!("{:.3}", p as f64 * 3.0 / 1000.0))
-}
-
-/// Pointer speed on GNOME: `org.gnome.desktop.peripherals.mouse speed`, -1.0 to 1.0.
-pub fn gnome_speed_to_neutral(speed: f64) -> Option<i64> {
-    if !speed.is_finite() || !(-1.0..=1.0).contains(&speed) {
-        return None;
-    }
-    Some(((speed + 1.0) * 500.0).round() as i64)
-}
-
-pub fn neutral_to_gnome_speed(p: i64) -> Option<String> {
-    if !(0..=1000).contains(&p) {
-        return None;
-    }
-    Some(format!("{:.3}", p as f64 / 500.0 - 1.0))
-}
-
-/// The neutral speed nearest `p` that `system` can hold exactly: what its own slider would read
-/// back after `p` is written. `None` when the system has no pointer speed PCTwin writes.
-pub fn quantize_speed(system: System, p: i64) -> Option<i64> {
-    match system {
-        System::Windows => neutral_to_windows_speed(p).and_then(windows_speed_to_neutral),
-        System::Mac => neutral_to_mac_speed(p)
-            .and_then(|s| s.parse::<f64>().ok())
-            .and_then(mac_speed_to_neutral),
-        System::Gnome => neutral_to_gnome_speed(p)
-            .and_then(|s| s.parse::<f64>().ok())
-            .and_then(gnome_speed_to_neutral),
-        System::Kde | System::OtherLinux => None,
-    }
-}
-
-/// One keyboard layout under each system's own name.
-pub struct Layout {
-    pub neutral: &'static str,
-    /// Windows keyboard layout ID (`HKCU\Keyboard Layout\Preload`).
-    pub windows: &'static str,
-    /// XKB layout, with `+variant` (GNOME `input-sources`).
-    pub xkb: &'static str,
-    /// macOS input source ID (`com.apple.HIToolbox AppleEnabledInputSources`).
-    pub mac: &'static str,
-}
-
-pub const LAYOUTS: &[Layout] = &[
-    Layout {
-        neutral: "us",
-        windows: "00000409",
-        xkb: "us",
-        mac: "com.apple.keylayout.US",
-    },
-    Layout {
-        neutral: "us-intl",
-        windows: "00020409",
-        xkb: "us+intl",
-        mac: "com.apple.keylayout.USInternational-PC",
-    },
-    Layout {
-        neutral: "gb",
-        windows: "00000809",
-        xkb: "gb",
-        mac: "com.apple.keylayout.British",
-    },
-    Layout {
-        neutral: "fr",
-        windows: "0000040c",
-        xkb: "fr",
-        mac: "com.apple.keylayout.French",
-    },
-    Layout {
-        neutral: "de",
-        windows: "00000407",
-        xkb: "de",
-        mac: "com.apple.keylayout.German",
-    },
-    Layout {
-        neutral: "es",
-        windows: "0000040a",
-        xkb: "es",
-        mac: "com.apple.keylayout.Spanish-ISO",
-    },
-    Layout {
-        neutral: "it",
-        windows: "00000410",
-        xkb: "it",
-        mac: "com.apple.keylayout.Italian",
-    },
-    Layout {
-        neutral: "pt",
-        windows: "00000816",
-        xkb: "pt",
-        mac: "com.apple.keylayout.Portuguese",
-    },
-    Layout {
-        neutral: "br",
-        windows: "00000416",
-        xkb: "br",
-        mac: "com.apple.keylayout.Brazilian",
-    },
-    Layout {
-        neutral: "ar",
-        windows: "00000401",
-        xkb: "ara",
-        mac: "com.apple.keylayout.Arabic",
-    },
-    Layout {
-        neutral: "he",
-        windows: "0000040d",
-        xkb: "il",
-        mac: "com.apple.keylayout.Hebrew",
-    },
-    Layout {
-        neutral: "ru",
-        windows: "00000419",
-        xkb: "ru",
-        mac: "com.apple.keylayout.Russian",
-    },
-];
-
-/// The neutral name of a layout read on `system` (its own ID, as the system spells it).
-/// Not on the table: kept as `<system>:<id>` so the same system can take it back.
-pub fn layout_to_neutral(system: System, native: &str) -> Option<String> {
-    let lower = native.to_ascii_lowercase();
-    let found = LAYOUTS.iter().find(|l| match system {
-        System::Windows => l.windows == lower,
-        System::Mac => l.mac == native,
-        System::Gnome | System::Kde | System::OtherLinux => l.xkb == native,
-    });
-    if let Some(l) = found {
-        return Some(l.neutral.to_string());
-    }
-    let ok = !native.is_empty()
-        && native.len() <= 100
-        && native
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'));
-    ok.then(|| format!("{}:{native}", prefix(system)))
-}
-
-/// The layout's ID on `system`: from the table, or the system's own ID if it was read there.
-/// `None` when this system has no equivalent PCTwin knows (a guided step instead).
-pub fn layout_from_neutral(system: System, neutral: &str) -> Option<String> {
-    if let Some((p, id)) = neutral.split_once(':') {
-        return (p == prefix(system)).then(|| id.to_string());
-    }
-    LAYOUTS.iter().find(|l| l.neutral == neutral).map(|l| {
-        match system {
-            System::Windows => l.windows,
-            System::Mac => l.mac,
-            System::Gnome | System::Kde | System::OtherLinux => l.xkb,
-        }
-        .to_string()
-    })
-}
-
-fn prefix(system: System) -> &'static str {
-    match system {
-        System::Windows => "windows",
-        System::Mac => "mac",
-        System::Gnome | System::Kde | System::OtherLinux => "xkb",
-    }
-}
-
-/// One browser under each system's own name.
-pub struct Browser {
-    pub neutral: &'static str,
-    /// The start of the Windows ProgId its `https` choice names (Firefox and Vivaldi add a
-    /// per-install suffix).
-    pub windows_progid: &'static str,
-    /// Its name in `HKCU\Software\RegisteredApplications`, for the Default apps page link.
-    pub windows_registered: &'static str,
-    /// The Mac bundle ID.
-    pub mac: &'static str,
-    /// Its `.desktop` file names (distribution, Snap, Flatpak).
-    pub linux: &'static [&'static str],
-}
-
-pub const BROWSERS: &[Browser] = &[
-    Browser {
-        neutral: "firefox",
-        windows_progid: "FirefoxURL",
-        windows_registered: "Firefox",
-        mac: "org.mozilla.firefox",
-        linux: &[
-            "firefox.desktop",
-            "firefox_firefox.desktop",
-            "org.mozilla.firefox.desktop",
-        ],
-    },
-    Browser {
-        neutral: "chrome",
-        windows_progid: "ChromeHTML",
-        windows_registered: "Google Chrome",
-        mac: "com.google.chrome",
-        linux: &["google-chrome.desktop", "com.google.Chrome.desktop"],
-    },
-    Browser {
-        neutral: "edge",
-        windows_progid: "MSEdgeHTM",
-        windows_registered: "Microsoft Edge",
-        mac: "com.microsoft.edgemac",
-        linux: &["microsoft-edge.desktop", "com.microsoft.Edge.desktop"],
-    },
-    Browser {
-        neutral: "brave",
-        windows_progid: "BraveHTML",
-        windows_registered: "Brave",
-        mac: "com.brave.browser",
-        linux: &["brave-browser.desktop", "com.brave.Browser.desktop"],
-    },
-    Browser {
-        neutral: "opera",
-        windows_progid: "OperaStable",
-        windows_registered: "Opera Stable",
-        mac: "com.operasoftware.opera",
-        linux: &["opera.desktop", "com.opera.Opera.desktop"],
-    },
-    Browser {
-        neutral: "vivaldi",
-        windows_progid: "VivaldiHTM",
-        windows_registered: "Vivaldi",
-        mac: "com.vivaldi.vivaldi",
-        linux: &["vivaldi-stable.desktop", "com.vivaldi.Vivaldi.desktop"],
-    },
-    Browser {
-        neutral: "safari",
-        windows_progid: "",
-        windows_registered: "",
-        mac: "com.apple.safari",
-        linux: &[],
-    },
-];
-
-/// The neutral browser a system's own choice names; `None` for one not on the table.
-pub fn browser_to_neutral(system: System, native: &str) -> Option<&'static str> {
-    BROWSERS
-        .iter()
-        .find(|b| match system {
-            System::Windows => {
-                !b.windows_progid.is_empty()
-                    && (native == b.windows_progid
-                        || native
-                            .strip_prefix(b.windows_progid)
-                            .is_some_and(|rest| rest.starts_with(['-', '.'])))
+/// The neutral value the native fields mean; `Ok(None)` when nothing is set (the system's
+/// default applies). `Err` (plain words) when the native value is not one the row knows.
+pub fn decode(
+    cat: &Catalogue,
+    row: &Row,
+    place: &Place,
+    natives: &[Option<Native>],
+) -> Result<Option<SettingValue>, String> {
+    let Some(codec) = place.codec() else {
+        return Err("this setting has no way to read it".into());
+    };
+    let first = natives.first().cloned().flatten();
+    let unknown = || "a value PCTwin does not know".to_string();
+    let v = match codec {
+        Codec::Same => match first {
+            None => return Ok(None),
+            Some(Native::Text(t)) if t.is_empty() => return Ok(None),
+            Some(n) => same_to_neutral(&row.value, n).ok_or_else(unknown)?,
+        },
+        Codec::Flag { mask } => match first {
+            None => return Ok(None),
+            Some(Native::Int(i)) => SettingValue::Bool(i & mask != 0),
+            Some(_) => return Err(unknown()),
+        },
+        Codec::Table { rows } => {
+            let hit = rows.iter().find(|r| {
+                r.native.len() == natives.len()
+                    && r.native
+                        .iter()
+                        .zip(natives)
+                        .all(|(m, n)| matches(m, n.as_ref()))
+            });
+            match hit {
+                Some(r) => json_to_setting(&r.neutral).ok_or_else(unknown)?,
+                None if natives.iter().all(Option::is_none) => return Ok(None),
+                None => return Err(unknown()),
             }
-            System::Mac => b.mac.eq_ignore_ascii_case(native),
-            System::Gnome | System::Kde | System::OtherLinux => b.linux.contains(&native),
-        })
-        .map(|b| b.neutral)
-}
-
-/// Whether `system` has the neutral browser at all (Safari has no Windows or Linux version).
-pub fn browser_exists_on(system: System, neutral: &str) -> bool {
-    BROWSERS.iter().any(|b| {
-        b.neutral == neutral
-            && match system {
-                System::Windows => !b.windows_progid.is_empty(),
-                System::Mac => !b.mac.is_empty(),
-                System::Gnome | System::Kde | System::OtherLinux => !b.linux.is_empty(),
+        }
+        Codec::Linear {
+            native, neutral, ..
+        } => {
+            let x = match first {
+                None => return Ok(None),
+                Some(Native::Int(i)) => i as f64,
+                Some(Native::Float(f)) => f,
+                Some(_) => return Err(unknown()),
+            };
+            let (lo, hi) = (native[0].min(native[1]), native[0].max(native[1]));
+            if !(lo..=hi).contains(&x) {
+                return Err("a value outside what the system allows".into());
             }
-    })
-}
-
-/// Windows time zone names and their IANA names (Unicode CLDR `windowsZones.xml`, the "001"
-/// territory rows). A zone not here is reported as not readable, never guessed.
-pub const WINDOWS_ZONES: &[(&str, &str)] = &[
-    ("UTC", "Etc/UTC"),
-    ("GMT Standard Time", "Europe/London"),
-    ("Greenwich Standard Time", "Atlantic/Reykjavik"),
-    ("W. Europe Standard Time", "Europe/Berlin"),
-    ("Romance Standard Time", "Europe/Paris"),
-    ("Central Europe Standard Time", "Europe/Budapest"),
-    ("Russian Standard Time", "Europe/Moscow"),
-    ("Turkey Standard Time", "Europe/Istanbul"),
-    ("W. Central Africa Standard Time", "Africa/Lagos"),
-    ("South Africa Standard Time", "Africa/Johannesburg"),
-    ("E. Africa Standard Time", "Africa/Nairobi"),
-    ("Egypt Standard Time", "Africa/Cairo"),
-    ("Morocco Standard Time", "Africa/Casablanca"),
-    ("Eastern Standard Time", "America/New_York"),
-    ("Central Standard Time", "America/Chicago"),
-    ("Mountain Standard Time", "America/Denver"),
-    ("Pacific Standard Time", "America/Los_Angeles"),
-    ("SA Pacific Standard Time", "America/Bogota"),
-    ("E. South America Standard Time", "America/Sao_Paulo"),
-    ("Argentina Standard Time", "America/Buenos_Aires"),
-    ("India Standard Time", "Asia/Kolkata"),
-    ("Pakistan Standard Time", "Asia/Karachi"),
-    ("Bangladesh Standard Time", "Asia/Dhaka"),
-    ("SE Asia Standard Time", "Asia/Bangkok"),
-    ("Singapore Standard Time", "Asia/Singapore"),
-    ("China Standard Time", "Asia/Shanghai"),
-    ("Korea Standard Time", "Asia/Seoul"),
-    ("Tokyo Standard Time", "Asia/Tokyo"),
-    ("Arabian Standard Time", "Asia/Dubai"),
-    ("Arab Standard Time", "Asia/Riyadh"),
-    ("Israel Standard Time", "Asia/Jerusalem"),
-    ("Iran Standard Time", "Asia/Tehran"),
-    ("AUS Eastern Standard Time", "Australia/Sydney"),
-];
-
-pub fn windows_zone_to_iana(windows: &str) -> Option<&'static str> {
-    WINDOWS_ZONES
-        .iter()
-        .find(|(w, _)| *w == windows)
-        .map(|(_, i)| *i)
-}
-
-pub fn iana_to_windows_zone(iana: &str) -> Option<&'static str> {
-    WINDOWS_ZONES
-        .iter()
-        .find(|(_, i)| *i == iana)
-        .map(|(w, _)| *w)
-}
-
-/// Windows `WallpaperStyle` (and `TileWallpaper`) values for each neutral style.
-pub fn windows_style(neutral: &str) -> Option<(&'static str, &'static str)> {
-    Some(match neutral {
-        "fill" => ("10", "0"),
-        "fit" => ("6", "0"),
-        "stretch" => ("2", "0"),
-        "tile" => ("0", "1"),
-        "center" => ("0", "0"),
-        "span" => ("22", "0"),
-        _ => return None,
-    })
-}
-
-pub fn windows_style_to_neutral(style: &str, tile: &str) -> Option<&'static str> {
-    Some(match (style, tile) {
-        ("10", _) => "fill",
-        ("6", _) => "fit",
-        ("2", _) => "stretch",
-        ("0", "1") => "tile",
-        ("0", _) => "center",
-        ("22", _) => "span",
-        _ => return None,
-    })
-}
-
-/// GNOME `picture-options` for each neutral style.
-pub fn gnome_style(neutral: &str) -> Option<&'static str> {
-    Some(match neutral {
-        "fill" => "zoom",
-        "fit" => "scaled",
-        "stretch" => "stretched",
-        "tile" => "wallpaper",
-        "center" => "centered",
-        "span" => "spanned",
-        _ => return None,
-    })
-}
-
-pub fn gnome_style_to_neutral(native: &str) -> Option<&'static str> {
-    ["fill", "fit", "stretch", "tile", "center", "span"]
-        .into_iter()
-        .find(|n| gnome_style(n) == Some(native))
-}
-
-/// A Unix path as a `file://` address, every byte outside the unreserved set and `/` encoded.
-pub fn file_uri(path: &str) -> Option<String> {
-    if !path.starts_with('/') {
-        return None;
-    }
-    let mut out = String::from("file://");
-    for b in path.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(b));
-        } else {
-            out.push_str(&format!("%{b:02X}"));
+            let n = neutral[0] as f64
+                + (x - native[0]) * (neutral[1] - neutral[0]) as f64 / (native[1] - native[0]);
+            SettingValue::Int(n.round() as i64)
         }
-    }
-    Some(out)
+        Codec::FileUri => match first {
+            None => return Ok(None),
+            Some(Native::Text(t)) if t.is_empty() => return Ok(None),
+            Some(Native::Text(t)) => SettingValue::Text(path_of_file_uri(&t).ok_or_else(unknown)?),
+            Some(_) => return Err(unknown()),
+        },
+        Codec::Lookup {
+            table,
+            column,
+            prefix,
+        } => match first {
+            None => return Ok(None),
+            Some(Native::Text(t)) if t.is_empty() => return Ok(None),
+            Some(Native::Text(t)) => {
+                let tab = cat.tables.get(table).ok_or_else(unknown)?;
+                SettingValue::Text(
+                    tab.lookup(column, &t, "neutral", *prefix)
+                        .ok_or_else(|| "not on PCTwin's list yet".to_string())?
+                        .to_string(),
+                )
+            }
+            Some(_) => return Err(unknown()),
+        },
+        Codec::ListLookup { table, column } => match first {
+            None => return Ok(None),
+            Some(Native::List(items)) => {
+                let tab = cat.tables.get(table).ok_or_else(unknown)?;
+                let mut out: Vec<String> = Vec::new();
+                for item in items {
+                    let n = match tab.lookup(column, &item, "neutral", false) {
+                        Some(n) => n.to_string(),
+                        None => {
+                            let own = format!("{column}:{item}");
+                            if !plain_name(&own) {
+                                return Err(unknown());
+                            }
+                            own
+                        }
+                    };
+                    if !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+                SettingValue::Text(out.join(","))
+            }
+            Some(_) => return Err(unknown()),
+        },
+        Codec::SplitFirst { sep } => match first {
+            None => return Ok(None),
+            Some(Native::Text(t)) => {
+                let name = t
+                    .split(sep.as_str())
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if name.is_empty() {
+                    return Ok(None);
+                }
+                SettingValue::Text(name)
+            }
+            Some(_) => return Err(unknown()),
+        },
+    };
+    row.value
+        .check(row.id.as_str(), &v)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(v))
 }
 
-/// The path a local `file://` address names; `None` for any other address or broken encoding.
-pub fn path_of_file_uri(uri: &str) -> Option<String> {
-    let rest = uri.strip_prefix("file://")?;
-    if !rest.starts_with('/') {
-        return None;
-    }
-    let bytes = rest.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
+/// The native field values that hold `value` (`None` for a field to remove). `Err` when this
+/// place cannot hold it at all.
+pub fn encode(
+    cat: &Catalogue,
+    row: &Row,
+    place: &Place,
+    value: &SettingValue,
+) -> Result<Vec<Option<Native>>, String> {
+    row.value
+        .check(row.id.as_str(), value)
+        .map_err(|e| e.to_string())?;
+    let fields = place.fields();
+    let cannot = || "the new laptop's system cannot hold this value".to_string();
+    let codec = place.codec().ok_or_else(cannot)?;
+    Ok(match codec {
+        Codec::Same => vec![Some(same_to_native(&fields[0], value).ok_or_else(cannot)?)],
+        Codec::Table { rows } => {
+            let r = rows
+                .iter()
+                .find(|r| json_to_setting(&r.neutral).as_ref() == Some(value))
+                .ok_or_else(cannot)?;
+            let lits = r.write.as_ref().unwrap_or(&r.native);
+            lits.iter()
+                .zip(fields)
+                .map(|(l, f)| literal_to_native(f, l).ok_or_else(cannot))
+                .collect::<Result<_, _>>()?
         }
+        Codec::Linear {
+            native,
+            neutral,
+            decimals,
+        } => {
+            let SettingValue::Int(v) = value else {
+                return Err(cannot());
+            };
+            let x = native[0]
+                + (*v - neutral[0]) as f64 * (native[1] - native[0])
+                    / (neutral[1] - neutral[0]) as f64;
+            let n = match fields[0].kind {
+                Kind::Float => {
+                    let p = 10f64.powi(i32::from((*decimals).min(6)));
+                    Native::Float((x * p).round() / p)
+                }
+                _ => Native::Int(x.round() as i64),
+            };
+            vec![Some(n)]
+        }
+        Codec::FileUri => {
+            let SettingValue::Text(p) = value else {
+                return Err(cannot());
+            };
+            vec![Some(Native::Text(file_uri(p).ok_or_else(cannot)?))]
+        }
+        Codec::Lookup { table, column, .. } => {
+            let SettingValue::Text(v) = value else {
+                return Err(cannot());
+            };
+            let tab = cat.tables.get(table).ok_or_else(cannot)?;
+            vec![Some(Native::Text(
+                tab.lookup("neutral", v, column, false)
+                    .ok_or_else(cannot)?
+                    .to_string(),
+            ))]
+        }
+        Codec::ListLookup { table, column } => {
+            let SettingValue::Text(v) = value else {
+                return Err(cannot());
+            };
+            let tab = cat.tables.get(table).ok_or_else(cannot)?;
+            let mut out = Vec::new();
+            for item in v.split(',').filter(|i| !i.is_empty()) {
+                let native = match item.split_once(':') {
+                    Some((col, id)) if col == column => id.to_string(),
+                    Some(_) => return Err(cannot()),
+                    None => tab
+                        .lookup("neutral", item, column, false)
+                        .ok_or_else(cannot)?
+                        .to_string(),
+                };
+                out.push(native);
+            }
+            vec![Some(Native::List(out))]
+        }
+        Codec::SplitFirst { .. } | Codec::Flag { .. } => return Err(cannot()),
+    })
+}
+
+/// What `value` becomes on this place once written and read back: the nearest value the
+/// system holds exactly. `Err` when it cannot hold it.
+pub fn quantize(
+    cat: &Catalogue,
+    row: &Row,
+    place: &Place,
+    value: &SettingValue,
+) -> Result<SettingValue, String> {
+    let natives = encode(cat, row, place, value)?;
+    decode(cat, row, place, &natives)?.ok_or_else(|| "nothing would be set".into())
+}
+
+fn same_to_neutral(t: &ValueType, n: Native) -> Option<SettingValue> {
+    Some(match (t, n) {
+        (ValueType::Int { .. }, Native::Int(i)) => SettingValue::Int(i),
+        (ValueType::Bool, Native::Bool(b)) => SettingValue::Bool(b),
+        (ValueType::Bool, Native::Int(i @ (0 | 1))) => SettingValue::Bool(i == 1),
+        (ValueType::List { .. }, Native::List(l)) => SettingValue::Text(l.join(",")),
+        (
+            ValueType::Choice { .. }
+            | ValueType::Name { .. }
+            | ValueType::FilePath
+            | ValueType::List { .. },
+            Native::Text(s),
+        ) => SettingValue::Text(s),
+        _ => return None,
+    })
+}
+
+fn same_to_native(f: &Field, v: &SettingValue) -> Option<Native> {
+    Some(match (f.kind, v) {
+        (Kind::Dword | Kind::Int | Kind::SzInt, SettingValue::Int(i)) => Native::Int(*i),
+        (Kind::Float, SettingValue::Int(i)) => Native::Float(*i as f64),
+        (Kind::Bool, SettingValue::Bool(b)) => Native::Bool(*b),
+        (Kind::Dword | Kind::Int, SettingValue::Bool(b)) => Native::Int(i64::from(*b)),
+        (Kind::Sz | Kind::String, SettingValue::Text(t)) => Native::Text(t.clone()),
+        (k, SettingValue::Text(t)) if k.is_list() => Native::List(
+            t.split(',')
+                .filter(|i| !i.is_empty())
+                .map(str::to_string)
+                .collect(),
+        ),
+        _ => return None,
+    })
+}
+
+/// Whether a table's match value fits a native field value.
+fn matches(m: &serde_json::Value, n: Option<&Native>) -> bool {
+    use serde_json::Value as J;
+    match (m, n) {
+        (J::Null, None) => true,
+        (J::Object(_), Some(_)) => true, // `{"any": true}`, checked when the catalogue was read
+        (J::Bool(b), Some(Native::Bool(x))) => b == x,
+        (J::Number(j), Some(Native::Int(x))) => j.as_i64() == Some(*x),
+        (J::Number(j), Some(Native::Float(x))) => j.as_f64() == Some(*x),
+        (J::String(s), Some(Native::Text(x))) => s == x,
+        // A registry text field holding a number, matched against a number or its text.
+        (J::String(s), Some(Native::Int(x))) => s.parse::<i64>().ok() == Some(*x),
+        _ => false,
     }
-    let s = String::from_utf8(out).ok()?;
-    (!s.contains('\0')).then_some(s)
+}
+
+fn literal_to_native(f: &Field, l: &serde_json::Value) -> Option<Option<Native>> {
+    use serde_json::Value as J;
+    Some(match (f.kind, l) {
+        (_, J::Null) => None,
+        (Kind::Bool, J::Bool(b)) => Some(Native::Bool(*b)),
+        (Kind::Dword | Kind::Int | Kind::SzInt, J::Number(n)) => Some(Native::Int(n.as_i64()?)),
+        (Kind::SzInt, J::String(s)) => Some(Native::Int(s.parse().ok()?)),
+        (Kind::Float, J::Number(n)) => Some(Native::Float(n.as_f64()?)),
+        (Kind::Sz | Kind::String, J::String(s)) => Some(Native::Text(s.clone())),
+        _ => return None,
+    })
 }

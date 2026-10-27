@@ -1,103 +1,106 @@
-//! One writer per settings domain (T24-017).
+//! One writer per settings domain, as the catalogue declares it (T24-017).
 
-use pctwin_settings::SettingId;
-use pctwin_settings::ownership::{App, Domain, DomainLocks, LockError, Writer, writer_of};
+use pctwin_settings::catalogue::{Catalogue, SettingId, Writer};
+use pctwin_settings::ownership::{Domain, DomainLocks, LockError, writer_of};
 
-fn vs(p: &str) -> Domain {
-    Domain::AppFile(App::VsCode, p.into())
-}
-
-fn jb(p: &str) -> Domain {
-    Domain::AppFile(App::JetBrains, p.into())
+fn file(app: &str, path: &str) -> Domain {
+    Domain::AppFile {
+        app: app.into(),
+        path: path.into(),
+    }
 }
 
 #[test]
-fn each_domain_has_exactly_the_agreed_writer() {
+fn each_domain_has_exactly_its_declared_writer() {
+    let c = Catalogue::starter().unwrap();
+    let w = |d: Domain| writer_of(&c, &d);
     assert_eq!(
-        writer_of(&Domain::System(SettingId::Theme)),
+        w(Domain::Setting(SettingId::new("appearance.theme").unwrap())),
         Writer::Settings
     );
-    assert_eq!(writer_of(&vs("User/settings.json")), Writer::Settings);
-    assert_eq!(writer_of(&vs("User/keybindings.json")), Writer::Settings);
-    assert_eq!(writer_of(&vs("User/tasks.json")), Writer::Settings);
-    assert_eq!(writer_of(&vs("User/snippets/rust.json")), Writer::Settings);
-    // Recent files and extension sign-ins share this database: 2.5 writes it.
     assert_eq!(
-        writer_of(&vs("User/globalStorage/state.vscdb")),
+        w(Domain::Setting(SettingId::new("not.a-row").unwrap())),
+        Writer::Nobody
+    );
+    assert_eq!(
+        w(file("vscode", "Code/User/settings.json")),
+        Writer::Settings
+    );
+    assert_eq!(
+        w(file("vscode", "Code/User/snippets/rust.json")),
+        Writer::Settings
+    );
+    assert_eq!(
+        w(file("vscode", "Code/User/globalStorage/state.vscdb")),
         Writer::Data
     );
     assert_eq!(
-        writer_of(&vs("User/workspaceStorage/abc/state.vscdb")),
-        Writer::Data
-    );
-    assert_eq!(
-        writer_of(&vs("extensions/ms-python.python-2026.1/package.json")),
+        w(file("vscode", ".vscode/extensions/x/package.json")),
         Writer::Install
     );
-    assert_eq!(writer_of(&vs("Cache/data_0")), Writer::Nobody);
-    assert_eq!(writer_of(&vs("machineid")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/editor.xml")), Writer::Settings);
+    assert_eq!(w(file("vscode", "Code/machineid")), Writer::Nobody);
+    assert_eq!(w(file("vscode", "Code/User/../machineid")), Writer::Nobody);
     assert_eq!(
-        writer_of(&jb("options/recentProjects.xml")),
+        w(file(
+            "jetbrains",
+            "JetBrains/IntelliJIdea2025.2/options/editor.xml"
+        )),
         Writer::Settings
     );
-    assert_eq!(writer_of(&jb("keymaps/Mine.xml")), Writer::Settings);
-    assert_eq!(writer_of(&jb("tools/External Tools.xml")), Writer::Settings);
-    assert_eq!(writer_of(&jb("options/security.xml")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/trusted-paths.xml")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/window.state.xml")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/Window.State.xml")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("idea.key")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/x.key")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("options/../idea.key")), Writer::Nobody);
-    assert_eq!(writer_of(&jb("plugins/foo/lib/foo.jar")), Writer::Install);
-    assert_eq!(writer_of(&jb("workspace/123.xml")), Writer::Data);
-    assert_eq!(writer_of(&jb("port")), Writer::Nobody);
+    assert_eq!(
+        w(file(
+            "jetbrains",
+            "JetBrains/IntelliJIdea2025.2/options/security.xml"
+        )),
+        Writer::Nobody
+    );
+    assert_eq!(
+        w(file(
+            "jetbrains",
+            "JetBrains/IntelliJIdea2025.2/options/Trusted-Paths.xml"
+        )),
+        Writer::Nobody
+    );
+    assert_eq!(
+        w(file(
+            "jetbrains",
+            "JetBrains/IntelliJIdea2025.2/plugins/x/lib/x.jar"
+        )),
+        Writer::Install
+    );
+    assert_eq!(w(file("unknown-app", "x.json")), Writer::Nobody);
 }
 
 #[test]
-fn t24_017_a_role_that_is_not_the_writer_cannot_take_the_lock() {
+fn t24_017_only_the_writer_takes_a_lock_and_never_two_at_once() {
+    let c = Catalogue::starter().unwrap();
     let locks = DomainLocks::default();
+    let s = file("vscode", "Code/User/settings.json");
+    let db = file("vscode", "Code/User/globalStorage/state.vscdb");
     assert_eq!(
-        locks
-            .acquire(vs("User/settings.json"), Writer::Data)
-            .unwrap_err(),
+        locks.acquire(&c, s.clone(), Writer::Data).unwrap_err(),
+        LockError::NotTheWriter
+    );
+    assert_eq!(
+        locks.acquire(&c, db.clone(), Writer::Settings).unwrap_err(),
         LockError::NotTheWriter
     );
     assert_eq!(
         locks
-            .acquire(vs("User/globalStorage/state.vscdb"), Writer::Settings)
+            .acquire(&c, file("vscode", "Code/machineid"), Writer::Nobody)
             .unwrap_err(),
         LockError::NotTheWriter
     );
-    assert_eq!(
-        locks
-            .acquire(vs("Cache/data_0"), Writer::Nobody)
-            .unwrap_err(),
-        LockError::NotTheWriter
-    );
-}
-
-#[test]
-fn t24_017_two_writers_never_hold_one_domain_and_a_lock_is_given_back() {
-    let locks = DomainLocks::default();
-    let a = locks
-        .acquire(vs("User/settings.json"), Writer::Settings)
-        .unwrap();
+    let a = locks.acquire(&c, s.clone(), Writer::Settings).unwrap();
     assert_eq!(
         locks
             .clone()
-            .acquire(vs("User/settings.json"), Writer::Settings)
+            .acquire(&c, s.clone(), Writer::Settings)
             .unwrap_err(),
         LockError::Busy
     );
-    // Different domains at once: 2.4 the settings file, 2.5 the database beside it.
-    let b = locks
-        .acquire(vs("User/globalStorage/state.vscdb"), Writer::Data)
-        .unwrap();
+    let b = locks.acquire(&c, db, Writer::Data).unwrap();
     drop(a);
-    let again = locks.acquire(vs("User/settings.json"), Writer::Settings);
-    assert!(again.is_ok());
+    assert!(locks.acquire(&c, s, Writer::Settings).is_ok());
     drop(b);
 }

@@ -1,119 +1,114 @@
-//! From what the old laptop held to what the new laptop gets (Phase 2.4 plan sections 4 to 6).
+//! From what the old laptop held to what the new laptop gets (Phase 2.4 plan sections 4 to 6),
+//! for whatever rows the catalogue holds.
 //!
 //! [`plan`] takes the old laptop's [`Capture`], the new laptop's [`Target`] probe and the
-//! person's [`Choices`], and gives each setting one declared [`Outcome`] (`exact`, `equivalent`,
-//! `guided`, `unsupported` or `not-applicable`) and one [`Action`]. Only [`Action::Apply`]
-//! changes anything, and only through the executor (its recipe: [`Planned::recipe`]); every
-//! other action is a handoff, a guided step, a request to the administrator helper, a wait for a
-//! dependency or nothing at all.
+//! person's [`Choices`], and gives each catalogue row one declared [`Outcome`] (`exact`,
+//! `equivalent`, `guided`, `unsupported` or `not-applicable`) and one [`Action`]. Only
+//! [`Action::Apply`] changes anything, and only through the executor ([`Planned::recipe`]).
 //!
 //! The rules, each tested:
-//! - An equivalent that changes the meaning (an automatic theme on a system that has none, a
-//!   browser the new system does not have) waits for the person's choice (T24-006).
+//! - What the new system cannot hold exactly is an equivalent: the nearest value it can hold
+//!   (pointer speed), or, when the meaning changes (an automatic theme on a system without one),
+//!   a question with the values it can hold (T24-006).
 //! - A setting the new laptop's organisation manages is left alone (T24-013).
-//! - Privacy approvals and security controls are never settings: they are listed as "approve
-//!   again" or "left as the new laptop has it", never copied (T24-014, T24-023).
-//! - A desktop picture is applied only once its file has arrived inside the person's folders on
-//!   the new laptop; a cloud placeholder waits (T24-007); a path outside them is refused (T24-024).
-//! - Display positions are never copied; scaling is guided (T24-008).
-//! - A printer that is not on the new laptop needs choosing again (T24-016).
+//! - Privacy approvals and switched-off protections are listed, never copied (T24-014, T24-023).
+//! - A file setting is applied only once its file has arrived inside the person's folders on the
+//!   new laptop; a cloud placeholder waits (T24-007); a path outside them is refused (T24-024).
+//! - A device that is not on the new laptop is chosen again (T24-016).
 //! - The new laptop's stronger accessibility choice is kept unless the person allows the change.
-//! - The settings go to the person the move maps them to, never to an account that merely has
-//!   the same name (T24-004).
+//! - Lists marked add-only only ever grow (keyboard layouts: no layout in use disappears).
+//! - Settings go to the person the move maps them to, never to a same-named account (T24-004).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use pctwin_recipe::{Arch, Os, Platform, Recipe, RecipeError, RecipeId, SettingValue, Step};
 use serde::{Deserialize, Serialize};
 
+use crate::catalogue::{Catalogue, Merge, Place, Protected, Route, Row, SettingId, System};
 use crate::codec;
-use crate::schema::{
-    Route, SCHEMA_VERSION, SchemaError, SettingId, Support, System, check_value, support,
-};
+use crate::value::{ValueError, ValueType, inside};
+
+/// The capture format.
+pub const CAPTURE_FORMAT: u32 = 1;
 
 /// What reading one setting on the old laptop found.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Reading {
     Value(SettingValue),
-    /// The system has nothing set (its default applies).
+    /// Nothing set: the system's default applies.
     NotSet,
     /// The organisation manages it: not the person's choice, not moved.
     Managed,
     /// It could not be read, and why (plain words).
     Unreadable(String),
-    /// This system has no such setting.
+    /// The system has no such setting.
     NotApplicable,
-    /// PCTwin does not read it on this system yet.
+    /// The catalogue has no place for it on this system yet.
     NotBuilt,
 }
 
-/// A privacy approval or security control the old laptop had. Recorded so the person knows,
-/// never copied: approvals are given again on the new laptop, and a switched-off protection is
-/// never switched off again because it was on the old one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Protected {
-    CameraAccess,
-    MicrophoneAccess,
-    LocationAccess,
-    ScreenRecording,
-    FilesAccess,
-    /// A protection that was switched off on the old laptop.
-    SecurityOff(SecurityControl),
+/// A setting found in a known store that the catalogue has no row for yet: counted and named
+/// (never its value), so the catalogue can grow.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Found {
+    pub store: String,
+    pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityControl {
-    Firewall,
-    SmartScreen,
-    Gatekeeper,
-    DownloadScan,
-}
-
-/// Everything read on the old laptop: one reading per setting on the list, and the protected
-/// things noted. Nothing else is read (T24-013: "do not crawl").
+/// Everything read on the old laptop.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Capture {
-    pub schema: u32,
+    pub format: u32,
+    /// The catalogue revision it was read with.
+    pub catalogue: u64,
     pub system: System,
     pub readings: BTreeMap<SettingId, Reading>,
     #[serde(default)]
     pub protected: BTreeSet<Protected>,
+    /// Found, not yet supported.
+    #[serde(default)]
+    pub unsupported: Vec<Found>,
 }
 
 impl Capture {
-    pub fn new(system: System) -> Self {
+    pub fn new(system: System, catalogue: u64) -> Self {
         Self {
-            schema: SCHEMA_VERSION,
+            format: CAPTURE_FORMAT,
+            catalogue,
             system,
             readings: BTreeMap::new(),
             protected: BTreeSet::new(),
+            unsupported: Vec::new(),
         }
     }
 
-    /// How many settings on the list were read with a value, and how many there are.
+    /// How many catalogue rows were read (with a value or as not set), of how many.
     pub fn coverage(&self) -> (usize, usize) {
         let read = self
             .readings
             .values()
             .filter(|r| matches!(r, Reading::Value(_) | Reading::NotSet))
             .count();
-        (read, SettingId::ALL.len())
+        (read, self.readings.len())
     }
 
-    /// Reads a saved capture: a newer list is refused, every value is checked again.
-    pub fn from_json(bytes: &[u8]) -> Result<Self, PlanError> {
+    /// Reads a saved capture: a newer format is refused; every value is checked against `cat`
+    /// again, and a setting it does not know is refused.
+    pub fn from_json(bytes: &[u8], cat: &Catalogue) -> Result<Self, PlanError> {
         let c: Capture =
             serde_json::from_slice(bytes).map_err(|e| PlanError::Damaged(e.to_string()))?;
-        if c.schema == 0 || c.schema > SCHEMA_VERSION {
-            return Err(PlanError::NewerSchema(c.schema));
+        if c.format == 0 || c.format > CAPTURE_FORMAT {
+            return Err(PlanError::NewerFormat(c.format));
         }
         for (id, r) in &c.readings {
+            let row = cat
+                .row(id.as_str())
+                .ok_or_else(|| PlanError::UnknownSetting(id.as_str().to_string()))?;
             if let Reading::Value(v) = r {
-                check_value(*id, v)?;
+                row.value.check(id.as_str(), v)?;
             }
         }
         Ok(c)
@@ -123,11 +118,9 @@ impl Capture {
 /// Where a file the old laptop pointed at is on the new laptop, from the move's item map.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arrival {
-    /// It arrived, here.
     Arrived(String),
-    /// Not yet (a cloud placeholder to download first, or still being copied): a dependency.
+    /// Not yet (a cloud placeholder to download first, or still being copied).
     NotYet,
-    /// It is not part of the move.
     NotMoved,
 }
 
@@ -146,72 +139,58 @@ impl PathMap for BTreeMap<String, Arrival> {
 #[derive(Debug, Clone, Default)]
 pub struct Target {
     pub current: BTreeMap<SettingId, Reading>,
-    /// Settings the organisation manages on the new laptop.
     pub managed: BTreeSet<SettingId>,
-    /// The person's folders on the new laptop (full paths): a desktop picture must be inside one.
+    /// The person's folders on the new laptop (full paths).
     pub roots: Vec<String>,
-    /// Browsers installed on the new laptop (neutral names).
-    pub browsers: BTreeSet<String>,
-    /// Printers on the new laptop, by name.
-    pub printers: BTreeSet<String>,
+    /// Apps installed on the new laptop, by their neutral names.
+    pub apps: BTreeSet<String>,
+    /// Devices on the new laptop, by name.
+    pub devices: BTreeSet<String>,
 }
 
-/// The person's answers to the questions planning asks.
+/// The person's answers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Choice {
     /// Use this value (one of the options offered).
     Use(SettingValue),
     /// Keep what the new laptop has.
     Keep,
-    /// Allow the change (lowering the new laptop's accessibility setting; startup apps).
+    /// Allow the change (lowering accessibility; an opt-in).
     Allow,
 }
 
 pub type Choices = BTreeMap<SettingId, Choice>;
 
-/// Who the settings belong to, as the move mapped people (accounts by their stable IDs, never
-/// by name).
+/// Who the settings belong to, as the move mapped people (stable account IDs, never names).
 #[derive(Debug, Clone)]
 pub struct People<'a> {
     pub old_account: &'a str,
     pub new_account: &'a str,
-    /// Every (old account, new account) pair the move approved.
     pub mapped: &'a [(String, String)],
 }
 
-/// How a setting's meaning carries over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Outcome {
-    /// The same value with the same meaning.
     Exact,
-    /// A close value on the new system; the person chooses when the meaning changes.
     Equivalent,
-    /// The person does it on the system's own page.
     Guided,
-    /// PCTwin cannot move it (managed, unreadable, protected).
     Unsupported,
-    /// The new system has no such setting.
     NotApplicable,
 }
 
-/// Something the setting waits for.
+/// Something a setting waits for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dependency {
-    /// A file (the desktop picture) that has not arrived yet.
     File(String),
-    /// An app (a browser) that 2.1 installs first.
     App(String),
 }
 
-/// What happens to a setting.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// Set it, through the executor's journaled compare-and-write.
     Apply(SettingValue),
-    /// The new laptop already holds exactly this.
     AlreadySet,
-    /// The person picks first; nothing changes until then.
     NeedsChoice {
         options: Vec<SettingValue>,
         why: &'static str,
@@ -220,45 +199,40 @@ pub enum Action {
     Handoff(SettingValue),
     /// The person does it; the old value is shown.
     Guided(Option<SettingValue>),
-    /// Ask the administrator helper's fixed action.
     Privileged(SettingValue),
-    /// Shown as its own choice, unticked.
     OptIn(SettingValue),
-    /// Waits for a file or an app.
     Wait(Dependency),
-    /// Left as it is, and why.
     Leave(&'static str),
 }
 
-/// One setting's plan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Planned {
     pub id: SettingId,
     pub outcome: Outcome,
     pub action: Action,
-    /// The old laptop's value, if read.
     pub old: Option<SettingValue>,
-    /// The new laptop's value before the move, if read.
     pub before: Option<SettingValue>,
 }
 
-/// The whole settings plan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettingsPlan {
     pub system: System,
     pub settings: Vec<Planned>,
-    /// Privacy approvals and switched-off protections: listed, never copied.
     pub protected: Vec<(Protected, &'static str)>,
+    /// Found on the old laptop with no catalogue row yet.
+    pub unsupported: Vec<Found>,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum PlanError {
     #[error(transparent)]
-    Schema(#[from] SchemaError),
+    Value(#[from] ValueError),
     #[error("these settings belong to another person on the new laptop")]
     OwnerMismatch,
-    #[error("these settings were read by a newer PCTwin (list {0}); update PCTwin")]
-    NewerSchema(u32),
+    #[error("these settings were read by a newer PCTwin (format {0}); update PCTwin")]
+    NewerFormat(u32),
+    #[error("PCTwin does not know the setting {0}")]
+    UnknownSetting(String),
     #[error("the saved settings are damaged: {0}")]
     Damaged(String),
     #[error("a settings recipe could not be made: {0}")]
@@ -275,23 +249,24 @@ pub const APPROVE_AGAIN: &str = "you give this permission again on the new lapto
 pub const PROTECTION_KEPT: &str =
     "this protection was off on the old laptop; it stays on, as the new laptop has it";
 pub const MANAGED: &str = "your organisation manages this setting on the new laptop";
+pub const MANAGED_BEFORE: &str = "the old laptop's organisation managed this setting";
+pub const DEFAULT_BEFORE: &str = "the old laptop used the system's default";
 pub const NOT_READ: &str = "PCTwin could not read this on the old laptop";
-pub const OUTSIDE: &str = "the picture is not inside your folders on the new laptop";
-pub const NOT_MOVED: &str = "the picture was not part of the move";
+pub const OUTSIDE: &str = "the file is not inside your folders on the new laptop";
+pub const NOT_MOVED: &str = "the file was not part of the move";
 pub const KEPT_STRONGER: &str =
     "the new laptop has a stronger accessibility setting; it is kept unless you choose otherwise";
-pub const NO_AUTO: &str = "the new laptop has no automatic light and dark; choose one";
-pub const NO_BROWSER: &str = "this browser does not exist on the new laptop's system; choose one";
-pub const NO_PRINTER: &str = "this printer is not on the new laptop; choose a printer again";
-pub const NO_LAYOUT: &str = "the new laptop names this keyboard differently; add it in Settings";
-pub const POSITIONS: &str =
-    "screen positions are not copied: the new laptop's screens are arranged as they are";
+pub const CHOOSE: &str = "the new laptop cannot hold this exactly; choose what to use";
+pub const NO_APP: &str = "this app does not exist on the new laptop's system; choose one";
+pub const NO_DEVICE: &str = "this device is not on the new laptop; choose one again";
+pub const NOT_THERE: &str = "the new laptop has no such setting";
 pub const KEPT_BY_YOU: &str = "you chose to keep the new laptop's setting";
 
-/// Plans every setting on the list.
+/// Plans every row of the catalogue.
 pub fn plan(
+    cat: &Catalogue,
     capture: &Capture,
-    target_system: System,
+    to: System,
     target: &Target,
     files: &dyn PathMap,
     choices: &Choices,
@@ -304,35 +279,41 @@ pub fn plan(
     if !people.mapped.contains(&pair) {
         return Err(PlanError::OwnerMismatch);
     }
-    if capture.schema == 0 || capture.schema > SCHEMA_VERSION {
-        return Err(PlanError::NewerSchema(capture.schema));
+    if capture.format == 0 || capture.format > CAPTURE_FORMAT {
+        return Err(PlanError::NewerFormat(capture.format));
+    }
+    for (id, r) in &capture.readings {
+        let row = cat
+            .row(id.as_str())
+            .ok_or_else(|| PlanError::UnknownSetting(id.as_str().to_string()))?;
+        if let Reading::Value(v) = r {
+            row.value.check(id.as_str(), v)?;
+        }
     }
     let mut settings = Vec::new();
-    for id in SettingId::ALL {
+    for row in &cat.settings {
         let reading = capture
             .readings
-            .get(&id)
+            .get(&row.id)
             .cloned()
             .unwrap_or(Reading::NotBuilt);
-        if let Reading::Value(v) = &reading {
-            check_value(id, v)?;
-        }
-        let before = match target.current.get(&id) {
+        let before = match target.current.get(&row.id) {
             Some(Reading::Value(v)) => Some(v.clone()),
             _ => None,
         };
-        let p = plan_one(
-            id,
-            capture.system,
-            &reading,
-            target_system,
+        let p = One {
+            cat,
+            row,
+            from: capture.system,
+            to,
             target,
             files,
-            choices.get(&id),
+            choice: choices.get(&row.id),
             before,
-        );
+        }
+        .plan(&reading);
         if let Action::Apply(v) = &p.action {
-            check_value(id, v)?;
+            row.value.check(row.id.as_str(), v)?;
         }
         settings.push(p);
     }
@@ -340,175 +321,273 @@ pub fn plan(
         .protected
         .iter()
         .map(|p| {
-            let why = match p {
-                Protected::SecurityOff(_) => PROTECTION_KEPT,
-                _ => APPROVE_AGAIN,
+            let why = if p.is_protection_off() {
+                PROTECTION_KEPT
+            } else {
+                APPROVE_AGAIN
             };
             (*p, why)
         })
         .collect();
     Ok(SettingsPlan {
-        system: target_system,
+        system: to,
         settings,
         protected,
+        unsupported: capture.unsupported.clone(),
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn plan_one(
-    id: SettingId,
+struct One<'a> {
+    cat: &'a Catalogue,
+    row: &'a Row,
     from: System,
-    reading: &Reading,
     to: System,
-    target: &Target,
-    files: &dyn PathMap,
-    choice: Option<&Choice>,
+    target: &'a Target,
+    files: &'a dyn PathMap,
+    choice: Option<&'a Choice>,
     before: Option<SettingValue>,
-) -> Planned {
-    let old = match reading {
-        Reading::Value(v) => Some(v.clone()),
-        _ => None,
-    };
-    let done = |outcome, action| Planned {
-        id,
-        outcome,
-        action,
-        old: old.clone(),
-        before: before.clone(),
-    };
-    let sup = support(to, id);
-    if sup == Support::NotApplicable {
-        return done(
-            Outcome::NotApplicable,
-            Action::Leave("the new laptop has no such setting"),
-        );
-    }
-    let Some(value) = old.clone() else {
-        let why = match reading {
-            Reading::Managed => "the old laptop's organisation managed this setting",
-            Reading::NotSet | Reading::NotApplicable => "the old laptop used the system's default",
-            _ => NOT_READ,
-        };
-        return done(Outcome::Unsupported, Action::Leave(why));
-    };
-    if target.managed.contains(&id) {
-        return done(Outcome::Unsupported, Action::Leave(MANAGED));
-    }
-    if choice == Some(&Choice::Keep) {
-        return done(Outcome::Exact, Action::Leave(KEPT_BY_YOU));
-    }
-    // Map the value onto the new system: (outcome, value to use) or an action that stops here.
-    let mapped: Result<(Outcome, SettingValue), Action> = match id.route() {
-        Route::Handoff => {
-            return match id {
-                SettingId::DefaultBrowser => browser(&value, to, target, choice, done),
-                _ => done(Outcome::Guided, Action::Handoff(value)),
-            };
-        }
-        Route::Guided => {
-            return match id {
-                SettingId::DefaultPrinter => match &value {
-                    SettingValue::Text(name) if target.printers.contains(name) => {
-                        done(Outcome::Guided, Action::Guided(Some(value)))
-                    }
-                    _ => done(
-                        Outcome::Guided,
-                        Action::NeedsChoice {
-                            options: target
-                                .printers
-                                .iter()
-                                .map(|p| SettingValue::Text(p.clone()))
-                                .collect(),
-                            why: NO_PRINTER,
-                        },
-                    ),
-                },
-                SettingId::DisplayScaling => done(Outcome::Guided, Action::Guided(Some(value))),
-                _ => done(Outcome::Guided, Action::Guided(Some(value))),
-            };
-        }
-        Route::Privileged => {
-            return done(
-                if from == to {
-                    Outcome::Exact
-                } else {
-                    Outcome::Equivalent
-                },
-                Action::Privileged(value),
-            );
-        }
-        Route::OptIn => {
-            return match choice {
-                Some(Choice::Allow) => done(Outcome::Guided, Action::Guided(Some(value))),
-                _ => done(Outcome::Guided, Action::OptIn(value)),
-            };
-        }
-        Route::Native => map_native(id, from, to, &value, target, files),
-    };
-    let (outcome, mut new_value) = match mapped {
-        Ok(m) => m,
-        Err(action) => {
-            let outcome = match action {
-                Action::Wait(_) => Outcome::Exact,
-                Action::NeedsChoice { .. } => Outcome::Equivalent,
-                Action::Guided(_) => Outcome::Guided,
-                _ => Outcome::Unsupported,
-            };
-            // The person's pick for a question.
-            if let (Action::NeedsChoice { options, .. }, Some(Choice::Use(v))) = (&action, choice)
-                && options.contains(v)
-            {
-                return finish(
-                    id,
-                    Outcome::Equivalent,
-                    v.clone(),
-                    to,
-                    done,
-                    &before,
-                    choice,
-                );
-            }
-            return done(outcome, action);
-        }
-    };
-    if sup == Support::Guided {
-        return done(Outcome::Guided, Action::Guided(Some(new_value)));
-    }
-    if let Some(Choice::Use(v)) = choice
-        && outcome == Outcome::Equivalent
-    {
-        new_value = v.clone();
-    }
-    finish(id, outcome, new_value, to, done, &before, choice)
 }
 
-/// The last checks before a native change: already set, and the new laptop's stronger
-/// accessibility choice.
-fn finish(
-    id: SettingId,
-    outcome: Outcome,
-    value: SettingValue,
-    to: System,
-    done: impl Fn(Outcome, Action) -> Planned,
-    before: &Option<SettingValue>,
-    choice: Option<&Choice>,
-) -> Planned {
-    if support(to, id) != Support::Native {
-        return done(Outcome::Guided, Action::Guided(Some(value)));
-    }
-    if before.as_ref() == Some(&value) {
-        return done(outcome, Action::AlreadySet);
-    }
-    if id.accessibility() && lowers(before.as_ref(), &value) && choice != Some(&Choice::Allow) {
-        return done(
+impl One<'_> {
+    fn done(&self, old: &Option<SettingValue>, outcome: Outcome, action: Action) -> Planned {
+        Planned {
+            id: self.row.id.clone(),
             outcome,
-            Action::NeedsChoice {
-                options: vec![value],
-                why: KEPT_STRONGER,
-            },
-        );
+            action,
+            old: old.clone(),
+            before: self.before.clone(),
+        }
     }
-    done(outcome, Action::Apply(value))
+
+    fn plan(&self, reading: &Reading) -> Planned {
+        let old = match reading {
+            Reading::Value(v) => Some(v.clone()),
+            _ => None,
+        };
+        let row = self.row;
+        if row.not_applicable.contains(&self.to) {
+            return self.done(&old, Outcome::NotApplicable, Action::Leave(NOT_THERE));
+        }
+        let Some(value) = old.clone() else {
+            let why = match reading {
+                Reading::Managed => MANAGED_BEFORE,
+                Reading::NotSet | Reading::NotApplicable => DEFAULT_BEFORE,
+                _ => NOT_READ,
+            };
+            return self.done(&old, Outcome::Unsupported, Action::Leave(why));
+        };
+        if self.target.managed.contains(&row.id) {
+            return self.done(&old, Outcome::Unsupported, Action::Leave(MANAGED));
+        }
+        if self.choice == Some(&Choice::Keep) {
+            return self.done(&old, Outcome::Exact, Action::Leave(KEPT_BY_YOU));
+        }
+        let outcome_by_system = if self.from == self.to {
+            Outcome::Exact
+        } else {
+            Outcome::Equivalent
+        };
+        match row.route {
+            Route::Handoff => return self.app(&old, value, Action::Handoff),
+            Route::Guided => {
+                if row.device {
+                    return self.device(&old, value);
+                }
+                return self.done(&old, Outcome::Guided, Action::Guided(Some(value)));
+            }
+            Route::Privileged => {
+                return self.done(&old, outcome_by_system, Action::Privileged(value));
+            }
+            Route::OptIn => {
+                let action = match self.choice {
+                    Some(Choice::Allow) => Action::Guided(Some(value)),
+                    _ => Action::OptIn(value),
+                };
+                return self.done(&old, Outcome::Guided, action);
+            }
+            Route::Native => {}
+        }
+        let Some(place) = row.places.get(&self.to).filter(|p| !p.read_only()) else {
+            return self.done(&old, Outcome::Guided, Action::Guided(Some(value)));
+        };
+        // The value to use on the new laptop, before asking whether it can hold it.
+        let wanted = match (&row.value, &value) {
+            (ValueType::FilePath, SettingValue::Text(old_path)) => {
+                match self.files.arrival(old_path) {
+                    Arrival::Arrived(p) if inside(&p, &self.target.roots) => SettingValue::Text(p),
+                    Arrival::Arrived(_) => {
+                        return self.done(&old, Outcome::Unsupported, Action::Leave(OUTSIDE));
+                    }
+                    Arrival::NotYet => {
+                        return self.done(
+                            &old,
+                            Outcome::Exact,
+                            Action::Wait(Dependency::File(old_path.clone())),
+                        );
+                    }
+                    Arrival::NotMoved => {
+                        return self.done(&old, Outcome::Unsupported, Action::Leave(NOT_MOVED));
+                    }
+                }
+            }
+            (ValueType::List { .. }, SettingValue::Text(list)) if row.merge == Merge::AddOnly => {
+                let mut out: Vec<String> = match &self.before {
+                    Some(SettingValue::Text(t)) if !t.is_empty() => {
+                        t.split(',').map(str::to_string).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                for item in list.split(',').filter(|i| !i.is_empty()) {
+                    if !out.iter().any(|o| o == item) {
+                        out.push(item.to_string());
+                    }
+                }
+                SettingValue::Text(out.join(","))
+            }
+            _ => value.clone(),
+        };
+        let held = self.hold(place, &wanted);
+        let (outcome, mut new_value) = match held {
+            Some(q) if q == wanted => (Outcome::Exact, q),
+            Some(q) => (Outcome::Equivalent, q),
+            None => {
+                // The meaning changes: offer what the new system can hold.
+                let options: Vec<SettingValue> = match &row.value {
+                    ValueType::Choice { options } => options
+                        .iter()
+                        .map(|o| SettingValue::Text(o.clone()))
+                        .filter(|o| self.hold(place, o).as_ref() == Some(o))
+                        .collect(),
+                    ValueType::Bool => [false, true]
+                        .into_iter()
+                        .map(SettingValue::Bool)
+                        .filter(|o| self.hold(place, o).as_ref() == Some(o))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                if options.is_empty() {
+                    return self.done(&old, Outcome::Guided, Action::Guided(Some(value)));
+                }
+                match self.choice {
+                    Some(Choice::Use(v)) if options.contains(v) => (Outcome::Equivalent, v.clone()),
+                    _ => {
+                        return self.done(
+                            &old,
+                            Outcome::Equivalent,
+                            Action::NeedsChoice {
+                                options,
+                                why: CHOOSE,
+                            },
+                        );
+                    }
+                }
+            }
+        };
+        if outcome == Outcome::Equivalent
+            && let Some(Choice::Use(v)) = self.choice
+            && self.hold(place, v).as_ref() == Some(v)
+        {
+            new_value = v.clone();
+        }
+        if self.before.as_ref() == Some(&new_value) {
+            return self.done(&old, outcome, Action::AlreadySet);
+        }
+        if row.accessibility
+            && lowers(self.before.as_ref(), &new_value)
+            && self.choice != Some(&Choice::Allow)
+        {
+            return self.done(
+                &old,
+                outcome,
+                Action::NeedsChoice {
+                    options: vec![new_value],
+                    why: KEPT_STRONGER,
+                },
+            );
+        }
+        self.done(&old, outcome, Action::Apply(new_value))
+    }
+
+    /// What `v` becomes on the new laptop's place, if it can hold it.
+    fn hold(&self, place: &Place, v: &SettingValue) -> Option<SettingValue> {
+        codec::quantize(self.cat, self.row, place, v).ok()
+    }
+
+    /// An app setting (default browser): the app must exist on the new system and be installed.
+    fn app(
+        &self,
+        old: &Option<SettingValue>,
+        value: SettingValue,
+        then: fn(SettingValue) -> Action,
+    ) -> Planned {
+        let Some(table) = self
+            .row
+            .app_table
+            .as_ref()
+            .and_then(|t| self.cat.tables.get(t))
+        else {
+            return self.done(old, Outcome::Guided, then(value));
+        };
+        let SettingValue::Text(name) = &value else {
+            return self.done(old, Outcome::Unsupported, Action::Leave(NOT_READ));
+        };
+        let exists = |n: &str| {
+            table
+                .lookup("neutral", n, self.to.column(), false)
+                .is_some()
+        };
+        if !exists(name) {
+            let options: Vec<SettingValue> = self
+                .target
+                .apps
+                .iter()
+                .filter(|a| exists(a))
+                .map(|a| SettingValue::Text(a.clone()))
+                .collect();
+            if let Some(Choice::Use(v)) = self.choice
+                && options.contains(v)
+            {
+                return self.done(old, Outcome::Equivalent, then(v.clone()));
+            }
+            return self.done(
+                old,
+                Outcome::Equivalent,
+                Action::NeedsChoice {
+                    options,
+                    why: NO_APP,
+                },
+            );
+        }
+        if !self.target.apps.contains(name) {
+            return self.done(
+                old,
+                Outcome::Exact,
+                Action::Wait(Dependency::App(name.clone())),
+            );
+        }
+        self.done(old, Outcome::Exact, then(value))
+    }
+
+    fn device(&self, old: &Option<SettingValue>, value: SettingValue) -> Planned {
+        match &value {
+            SettingValue::Text(name) if self.target.devices.contains(name) => {
+                self.done(old, Outcome::Guided, Action::Guided(Some(value)))
+            }
+            _ => self.done(
+                old,
+                Outcome::Guided,
+                Action::NeedsChoice {
+                    options: self
+                        .target
+                        .devices
+                        .iter()
+                        .map(|d| SettingValue::Text(d.clone()))
+                        .collect(),
+                    why: NO_DEVICE,
+                },
+            ),
+        }
+    }
 }
 
 /// Whether `new` is a weaker accessibility setting than `before`.
@@ -520,151 +599,33 @@ fn lowers(before: Option<&SettingValue>, new: &SettingValue) -> bool {
     }
 }
 
-fn map_native(
-    id: SettingId,
-    from: System,
-    to: System,
-    value: &SettingValue,
-    target: &Target,
-    files: &dyn PathMap,
-) -> Result<(Outcome, SettingValue), Action> {
-    let same = from == to;
-    let exact = |v: SettingValue| Ok((Outcome::Exact, v));
-    match (id, value) {
-        (SettingId::Theme, SettingValue::Text(t)) if t == "auto" && to != System::Mac => {
-            Err(Action::NeedsChoice {
-                options: vec![
-                    SettingValue::Text("light".into()),
-                    SettingValue::Text("dark".into()),
-                ],
-                why: NO_AUTO,
-            })
-        }
-        (SettingId::PointerSpeed, SettingValue::Int(p)) => {
-            let q = codec::quantize_speed(to, *p).ok_or(Action::Guided(Some(value.clone())))?;
-            let outcome = if same && q == *p {
-                Outcome::Exact
-            } else {
-                Outcome::Equivalent
-            };
-            Ok((outcome, SettingValue::Int(q)))
-        }
-        (SettingId::Wallpaper, SettingValue::Text(old_path)) => match files.arrival(old_path) {
-            Arrival::Arrived(new_path) => {
-                if inside(&new_path, &target.roots) {
-                    exact(SettingValue::Text(new_path))
-                } else {
-                    Err(Action::Leave(OUTSIDE))
-                }
-            }
-            Arrival::NotYet => Err(Action::Wait(Dependency::File(old_path.clone()))),
-            Arrival::NotMoved => Err(Action::Leave(NOT_MOVED)),
-        },
-        (SettingId::KeyboardLayouts, SettingValue::Text(list)) => {
-            // Layouts are only ever added, in the old laptop's order after the new laptop's own,
-            // so no layout the person types with now is taken away.
-            let mut out: Vec<String> = match target.current.get(&id) {
-                Some(Reading::Value(SettingValue::Text(t))) if !t.is_empty() => {
-                    t.split(',').map(str::to_string).collect()
-                }
-                _ => Vec::new(),
-            };
-            for l in list.split(',').filter(|l| !l.is_empty()) {
-                if codec::layout_from_neutral(to, l).is_none() {
-                    return Err(Action::Guided(Some(value.clone())));
-                }
-                if !out.iter().any(|o| o == l) {
-                    out.push(l.to_string());
-                }
-            }
-            exact(SettingValue::Text(out.join(",")))
-        }
-        _ => exact(value.clone()),
-    }
-}
-
-fn browser(
-    value: &SettingValue,
-    to: System,
-    target: &Target,
-    choice: Option<&Choice>,
-    done: impl Fn(Outcome, Action) -> Planned,
-) -> Planned {
-    let SettingValue::Text(name) = value else {
-        return done(Outcome::Unsupported, Action::Leave(NOT_READ));
-    };
-    if !codec::browser_exists_on(to, name) {
-        let options: Vec<SettingValue> = target
-            .browsers
-            .iter()
-            .map(|b| SettingValue::Text(b.clone()))
-            .collect();
-        if let Some(Choice::Use(v)) = choice
-            && options.contains(v)
-        {
-            return done(Outcome::Equivalent, Action::Handoff(v.clone()));
-        }
-        return done(
-            Outcome::Equivalent,
-            Action::NeedsChoice {
-                options,
-                why: NO_BROWSER,
-            },
-        );
-    }
-    if !target.browsers.contains(name) {
-        return done(Outcome::Exact, Action::Wait(Dependency::App(name.clone())));
-    }
-    done(Outcome::Exact, Action::Handoff(value.clone()))
-}
-
-/// Whether `path` is inside one of `roots` (whole folder names only, either separator, letters'
-/// case ignored on Windows paths).
-pub fn inside(path: &str, roots: &[String]) -> bool {
-    if !crate::schema::full_path(path) {
-        return false;
-    }
-    let norm = |s: &str| {
-        let s = s.replace('\\', "/");
-        if s.as_bytes().get(1) == Some(&b':') {
-            s.to_lowercase()
-        } else {
-            s
-        }
-    };
-    let p = norm(path);
-    roots.iter().any(|r| {
-        let r = norm(r.trim_end_matches(['/', '\\']));
-        !r.is_empty() && p.len() > r.len() && p.starts_with(&r) && p.as_bytes()[r.len()] == b'/'
-    })
-}
-
 impl Planned {
-    /// The executor recipe that applies this setting: one checked `apply-setting` step, for the
-    /// new laptop's system. `None` unless the action is [`Action::Apply`].
-    pub fn recipe(&self, os: Os) -> Result<Option<Recipe>, PlanError> {
+    /// The executor recipe that applies this setting: one checked `apply-setting` step for the
+    /// new laptop's system, versioned by the catalogue revision. `None` unless the action is
+    /// [`Action::Apply`].
+    pub fn recipe(&self, os: Os, revision: u64) -> Result<Option<Recipe>, PlanError> {
         let Action::Apply(value) = &self.action else {
             return Ok(None);
         };
-        check_value(self.id, value)?;
-        let id = RecipeId::new(&format!("pctwin.settings.{}", self.id.key()))?;
+        let id = RecipeId::new(&format!("pctwin.settings.{}", self.id.as_str()))?;
+        let version = u32::try_from(revision).map_err(|_| PlanError::Recipe("revision".into()))?;
         let platforms = [Arch::X86_64, Arch::Aarch64]
             .into_iter()
             .map(|arch| Platform { os, arch })
             .collect();
         Ok(Some(Recipe::new(
             id,
-            SCHEMA_VERSION,
+            version,
             platforms,
             vec![Step::ApplySetting {
-                key: self.id.key().to_string(),
+                key: self.id.as_str().to_string(),
                 value: value.clone(),
             }],
         )?))
     }
 }
 
-/// Which system a recipe platform's OS is, for the systems that are one OS.
+/// The recipe platform OS of a system.
 pub fn os_of(system: System) -> Os {
     match system {
         System::Windows => Os::Windows,

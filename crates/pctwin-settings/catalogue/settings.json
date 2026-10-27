@@ -1,0 +1,1908 @@
+{
+ "format": 1,
+ "revision": 1,
+ "checked_on": "2026-10-27",
+ "tables": {
+  "layouts": {
+   "columns": [
+    "neutral",
+    "windows",
+    "xkb",
+    "mac"
+   ],
+   "rows": [
+    [
+     "us",
+     "00000409",
+     "us",
+     "U.S."
+    ],
+    [
+     "us-intl",
+     "00020409",
+     "us+intl",
+     "U.S. International - PC"
+    ],
+    [
+     "gb",
+     "00000809",
+     "gb",
+     "British"
+    ],
+    [
+     "fr",
+     "0000040c",
+     "fr",
+     "French"
+    ],
+    [
+     "de",
+     "00000407",
+     "de",
+     "German"
+    ],
+    [
+     "es",
+     "0000040a",
+     "es",
+     "Spanish - ISO"
+    ],
+    [
+     "it",
+     "00000410",
+     "it",
+     "Italian"
+    ],
+    [
+     "pt",
+     "00000816",
+     "pt",
+     "Portuguese"
+    ],
+    [
+     "br",
+     "00000416",
+     "br",
+     "Brazilian"
+    ],
+    [
+     "ar",
+     "00000401",
+     "ara",
+     "Arabic"
+    ],
+    [
+     "he",
+     "0000040d",
+     "il",
+     "Hebrew"
+    ],
+    [
+     "ru",
+     "00000419",
+     "ru",
+     "Russian"
+    ]
+   ]
+  },
+  "browsers": {
+   "columns": [
+    "neutral",
+    "windows",
+    "windows-registered",
+    "mac",
+    "linux"
+   ],
+   "rows": [
+    [
+     "firefox",
+     "FirefoxURL",
+     "Firefox",
+     "org.mozilla.firefox",
+     "firefox.desktop"
+    ],
+    [
+     "firefox",
+     "",
+     "",
+     "",
+     "firefox_firefox.desktop"
+    ],
+    [
+     "firefox",
+     "",
+     "",
+     "",
+     "org.mozilla.firefox.desktop"
+    ],
+    [
+     "chrome",
+     "ChromeHTML",
+     "Google Chrome",
+     "com.google.chrome",
+     "google-chrome.desktop"
+    ],
+    [
+     "chrome",
+     "",
+     "",
+     "",
+     "com.google.Chrome.desktop"
+    ],
+    [
+     "edge",
+     "MSEdgeHTM",
+     "Microsoft Edge",
+     "com.microsoft.edgemac",
+     "microsoft-edge.desktop"
+    ],
+    [
+     "brave",
+     "BraveHTML",
+     "Brave",
+     "com.brave.browser",
+     "brave-browser.desktop"
+    ],
+    [
+     "opera",
+     "OperaStable",
+     "Opera Stable",
+     "com.operasoftware.opera",
+     "opera.desktop"
+    ],
+    [
+     "vivaldi",
+     "VivaldiHTM",
+     "Vivaldi",
+     "com.vivaldi.vivaldi",
+     "vivaldi-stable.desktop"
+    ],
+    [
+     "safari",
+     "",
+     "",
+     "com.apple.safari",
+     ""
+    ]
+   ]
+  },
+  "time-zones": {
+   "columns": [
+    "neutral",
+    "windows"
+   ],
+   "rows": [
+    [
+     "Etc/UTC",
+     "UTC"
+    ],
+    [
+     "Europe/London",
+     "GMT Standard Time"
+    ],
+    [
+     "Atlantic/Reykjavik",
+     "Greenwich Standard Time"
+    ],
+    [
+     "Europe/Berlin",
+     "W. Europe Standard Time"
+    ],
+    [
+     "Europe/Paris",
+     "Romance Standard Time"
+    ],
+    [
+     "Europe/Budapest",
+     "Central Europe Standard Time"
+    ],
+    [
+     "Europe/Moscow",
+     "Russian Standard Time"
+    ],
+    [
+     "Europe/Istanbul",
+     "Turkey Standard Time"
+    ],
+    [
+     "Africa/Lagos",
+     "W. Central Africa Standard Time"
+    ],
+    [
+     "Africa/Johannesburg",
+     "South Africa Standard Time"
+    ],
+    [
+     "Africa/Nairobi",
+     "E. Africa Standard Time"
+    ],
+    [
+     "Africa/Cairo",
+     "Egypt Standard Time"
+    ],
+    [
+     "Africa/Casablanca",
+     "Morocco Standard Time"
+    ],
+    [
+     "America/New_York",
+     "Eastern Standard Time"
+    ],
+    [
+     "America/Chicago",
+     "Central Standard Time"
+    ],
+    [
+     "America/Denver",
+     "Mountain Standard Time"
+    ],
+    [
+     "America/Los_Angeles",
+     "Pacific Standard Time"
+    ],
+    [
+     "America/Bogota",
+     "SA Pacific Standard Time"
+    ],
+    [
+     "America/Sao_Paulo",
+     "E. South America Standard Time"
+    ],
+    [
+     "America/Buenos_Aires",
+     "Argentina Standard Time"
+    ],
+    [
+     "Asia/Kolkata",
+     "India Standard Time"
+    ],
+    [
+     "Asia/Karachi",
+     "Pakistan Standard Time"
+    ],
+    [
+     "Asia/Dhaka",
+     "Bangladesh Standard Time"
+    ],
+    [
+     "Asia/Bangkok",
+     "SE Asia Standard Time"
+    ],
+    [
+     "Asia/Singapore",
+     "Singapore Standard Time"
+    ],
+    [
+     "Asia/Shanghai",
+     "China Standard Time"
+    ],
+    [
+     "Asia/Seoul",
+     "Korea Standard Time"
+    ],
+    [
+     "Asia/Tokyo",
+     "Tokyo Standard Time"
+    ],
+    [
+     "Asia/Dubai",
+     "Arabian Standard Time"
+    ],
+    [
+     "Asia/Riyadh",
+     "Arab Standard Time"
+    ],
+    [
+     "Asia/Jerusalem",
+     "Israel Standard Time"
+    ],
+    [
+     "Asia/Tehran",
+     "Iran Standard Time"
+    ],
+    [
+     "Australia/Sydney",
+     "AUS Eastern Standard Time"
+    ]
+   ]
+  }
+ },
+ "settings": [
+  {
+   "id": "appearance.theme",
+   "value": {
+    "choice": {
+     "options": [
+      "light",
+      "dark",
+      "auto"
+     ]
+    }
+   },
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+     "fields": [
+      {
+       "name": "AppsUseLightTheme",
+       "kind": "dword"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         0
+        ],
+        "neutral": "dark"
+       },
+       {
+        "native": [
+         1
+        ],
+        "neutral": "light"
+       }
+      ]
+     },
+     "refresh": {
+      "broadcast": "ImmersiveColorSet"
+     }
+    },
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "NSGlobalDomain",
+     "fields": [
+      {
+       "name": "AppleInterfaceStyle",
+       "kind": "string"
+      },
+      {
+       "name": "AppleInterfaceStyleSwitchesAutomatically",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         {
+          "any": true
+         },
+         true
+        ],
+        "neutral": "auto",
+        "write": [
+         null,
+         true
+        ]
+       },
+       {
+        "native": [
+         null,
+         true
+        ],
+        "neutral": "auto",
+        "write": [
+         null,
+         true
+        ]
+       },
+       {
+        "native": [
+         "Dark",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "dark",
+        "write": [
+         "Dark",
+         false
+        ]
+       },
+       {
+        "native": [
+         "Dark",
+         null
+        ],
+        "neutral": "dark",
+        "write": [
+         "Dark",
+         false
+        ]
+       },
+       {
+        "native": [
+         null,
+         {
+          "any": true
+         }
+        ],
+        "neutral": "light",
+        "write": [
+         null,
+         false
+        ]
+       },
+       {
+        "native": [
+         null,
+         null
+        ],
+        "neutral": "light",
+        "write": [
+         null,
+         false
+        ]
+       }
+      ]
+     },
+     "refresh": "sign-in"
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.interface",
+     "fields": [
+      {
+       "name": "color-scheme",
+       "kind": "string"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         "prefer-dark"
+        ],
+        "neutral": "dark"
+       },
+       {
+        "native": [
+         "default"
+        ],
+        "neutral": "light"
+       },
+       {
+        "native": [
+         "prefer-light"
+        ],
+        "neutral": "light",
+        "write": [
+         "default"
+        ]
+       }
+      ]
+     }
+    },
+    "kde": {
+     "mechanism": "kde-config",
+     "file": "kdeglobals",
+     "group": "General",
+     "fields": [
+      {
+       "name": "ColorScheme",
+       "kind": "string"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         "BreezeDark"
+        ],
+        "neutral": "dark"
+       },
+       {
+        "native": [
+         "BreezeLight"
+        ],
+        "neutral": "light"
+       },
+       {
+        "native": [
+         "BreezeClassic"
+        ],
+        "neutral": "light"
+       }
+      ]
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:colors"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Appearance-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "appearance.taskbar-theme",
+   "value": {
+    "choice": {
+     "options": [
+      "light",
+      "dark"
+     ]
+    }
+   },
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+     "fields": [
+      {
+       "name": "SystemUsesLightTheme",
+       "kind": "dword"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         0
+        ],
+        "neutral": "dark"
+       },
+       {
+        "native": [
+         1
+        ],
+        "neutral": "light"
+       }
+      ]
+     },
+     "refresh": {
+      "broadcast": "ImmersiveColorSet"
+     }
+    }
+   },
+   "not_applicable": [
+    "mac",
+    "gnome",
+    "kde",
+    "other-linux"
+   ]
+  },
+  {
+   "id": "accessibility.high-contrast",
+   "value": "bool",
+   "route": "guided",
+   "accessibility": true,
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Accessibility\\HighContrast",
+     "fields": [
+      {
+       "name": "Flags",
+       "kind": "sz-int"
+      }
+     ],
+     "codec": {
+      "codec": "flag",
+      "mask": 1
+     },
+     "read_only": true
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.a11y.interface",
+     "fields": [
+      {
+       "name": "high-contrast",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "read_only": true
+    },
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "com.apple.universalaccess",
+     "fields": [
+      {
+       "name": "increaseContrast",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:easeofaccess-highcontrast"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Accessibility-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "accessibility.text-size",
+   "value": {
+    "int": {
+     "min": 100,
+     "max": 225
+    }
+   },
+   "accessibility": true,
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Accessibility",
+     "fields": [
+      {
+       "name": "TextScaleFactor",
+       "kind": "dword"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "refresh": "sign-in"
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.interface",
+     "fields": [
+      {
+       "name": "text-scaling-factor",
+       "kind": "float"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       1.0,
+       2.25
+      ],
+      "neutral": [
+       100,
+       225
+      ],
+      "decimals": 2
+     }
+    }
+   },
+   "not_applicable": [
+    "mac"
+   ],
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:easeofaccess-display"
+    }
+   }
+  },
+  {
+   "id": "accessibility.reduce-motion",
+   "value": "bool",
+   "accessibility": true,
+   "places": {
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.interface",
+     "fields": [
+      {
+       "name": "enable-animations",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         true
+        ],
+        "neutral": false
+       },
+       {
+        "native": [
+         false
+        ],
+        "neutral": true
+       }
+      ]
+     }
+    },
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "com.apple.universalaccess",
+     "fields": [
+      {
+       "name": "reduceMotion",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:easeofaccess-visualeffects"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Accessibility-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "desktop.wallpaper",
+   "value": "file-path",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Desktop",
+     "fields": [
+      {
+       "name": "Wallpaper",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "refresh": "sign-in",
+     "policy": [
+      {
+       "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+       "value": "Wallpaper"
+      },
+      {
+       "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\ActiveDesktop",
+       "value": "NoChangingWallPaper"
+      },
+      {
+       "hive": "machine",
+       "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+       "value": "Wallpaper"
+      },
+      {
+       "hive": "machine",
+       "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\ActiveDesktop",
+       "value": "NoChangingWallPaper"
+      }
+     ]
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.background",
+     "fields": [
+      {
+       "name": "picture-uri",
+       "kind": "string"
+      }
+     ],
+     "codec": {
+      "codec": "file-uri"
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:personalization-background"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Wallpaper-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "desktop.wallpaper-style",
+   "value": {
+    "choice": {
+     "options": [
+      "fill",
+      "fit",
+      "stretch",
+      "tile",
+      "center",
+      "span"
+     ]
+    }
+   },
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Desktop",
+     "fields": [
+      {
+       "name": "WallpaperStyle",
+       "kind": "sz"
+      },
+      {
+       "name": "TileWallpaper",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         "10",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "fill",
+        "write": [
+         "10",
+         "0"
+        ]
+       },
+       {
+        "native": [
+         "6",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "fit",
+        "write": [
+         "6",
+         "0"
+        ]
+       },
+       {
+        "native": [
+         "2",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "stretch",
+        "write": [
+         "2",
+         "0"
+        ]
+       },
+       {
+        "native": [
+         "22",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "span",
+        "write": [
+         "22",
+         "0"
+        ]
+       },
+       {
+        "native": [
+         "0",
+         "1"
+        ],
+        "neutral": "tile"
+       },
+       {
+        "native": [
+         "0",
+         {
+          "any": true
+         }
+        ],
+        "neutral": "center",
+        "write": [
+         "0",
+         "0"
+        ]
+       }
+      ]
+     },
+     "refresh": "sign-in",
+     "policy": [
+      {
+       "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+       "value": "WallpaperStyle"
+      }
+     ]
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.background",
+     "fields": [
+      {
+       "name": "picture-options",
+       "kind": "string"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         "zoom"
+        ],
+        "neutral": "fill"
+       },
+       {
+        "native": [
+         "scaled"
+        ],
+        "neutral": "fit"
+       },
+       {
+        "native": [
+         "stretched"
+        ],
+        "neutral": "stretch"
+       },
+       {
+        "native": [
+         "wallpaper"
+        ],
+        "neutral": "tile"
+       },
+       {
+        "native": [
+         "centered"
+        ],
+        "neutral": "center"
+       },
+       {
+        "native": [
+         "spanned"
+        ],
+        "neutral": "span"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "pointer.speed",
+   "value": {
+    "int": {
+     "min": 0,
+     "max": 1000
+    }
+   },
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Mouse",
+     "fields": [
+      {
+       "name": "MouseSensitivity",
+       "kind": "sz-int"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       1,
+       20
+      ],
+      "neutral": [
+       0,
+       1000
+      ]
+     },
+     "refresh": "sign-in",
+     "policy": [
+      {
+       "key": "Software\\Policies\\Microsoft\\Control Panel\\Mouse",
+       "value": "MouseSensitivity"
+      }
+     ]
+    },
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "NSGlobalDomain",
+     "fields": [
+      {
+       "name": "com.apple.mouse.scaling",
+       "kind": "float"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       0,
+       3
+      ],
+      "neutral": [
+       0,
+       1000
+      ],
+      "decimals": 3
+     },
+     "refresh": "sign-in"
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.peripherals.mouse",
+     "fields": [
+      {
+       "name": "speed",
+       "kind": "float"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       -1,
+       1
+      ],
+      "neutral": [
+       0,
+       1000
+      ],
+      "decimals": 3
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:mousetouchpad"
+    }
+   }
+  },
+  {
+   "id": "pointer.primary-button",
+   "value": {
+    "choice": {
+     "options": [
+      "left",
+      "right"
+     ]
+    }
+   },
+   "risk": "may-strand",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Mouse",
+     "fields": [
+      {
+       "name": "SwapMouseButtons",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         "0"
+        ],
+        "neutral": "left"
+       },
+       {
+        "native": [
+         "1"
+        ],
+        "neutral": "right"
+       }
+      ]
+     },
+     "refresh": "sign-in",
+     "policy": [
+      {
+       "key": "Software\\Policies\\Microsoft\\Control Panel\\Mouse",
+       "value": "SwapMouseButtons"
+      }
+     ]
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.peripherals.mouse",
+     "fields": [
+      {
+       "name": "left-handed",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "table",
+      "rows": [
+       {
+        "native": [
+         false
+        ],
+        "neutral": "left"
+       },
+       {
+        "native": [
+         true
+        ],
+        "neutral": "right"
+       }
+      ]
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:mousetouchpad"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Mouse-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "pointer.natural-scroll",
+   "value": "bool",
+   "places": {
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "NSGlobalDomain",
+     "fields": [
+      {
+       "name": "com.apple.swipescrolldirection",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "refresh": "sign-in"
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.peripherals.touchpad",
+     "fields": [
+      {
+       "name": "natural-scroll",
+       "kind": "bool"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:devices-touchpad"
+    }
+   }
+  },
+  {
+   "id": "keyboard.layouts",
+   "value": {
+    "list": {
+     "max": 16
+    }
+   },
+   "merge": "add-only",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Keyboard Layout\\Preload",
+     "fields": [
+      {
+       "name": "Preload",
+       "kind": "numbered-values"
+      }
+     ],
+     "codec": {
+      "codec": "list-lookup",
+      "table": "layouts",
+      "column": "windows"
+     },
+     "read_only": true
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.input-sources",
+     "fields": [
+      {
+       "name": "sources",
+       "kind": "source-list"
+      }
+     ],
+     "codec": {
+      "codec": "list-lookup",
+      "table": "layouts",
+      "column": "xkb"
+     }
+    },
+    "mac": {
+     "mechanism": "mac-pref",
+     "domain": "com.apple.HIToolbox",
+     "fields": [
+      {
+       "name": "AppleEnabledInputSources",
+       "kind": "dict-list",
+       "item": "KeyboardLayout Name",
+       "where_key": "InputSourceKind",
+       "where_value": "Keyboard Layout"
+      }
+     ],
+     "codec": {
+      "codec": "list-lookup",
+      "table": "layouts",
+      "column": "mac"
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:keyboard"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "display.scaling",
+   "value": {
+    "int": {
+     "min": 100,
+     "max": 500
+    }
+   },
+   "route": "guided",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Control Panel\\Desktop",
+     "fields": [
+      {
+       "name": "LogPixels",
+       "kind": "dword"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       96,
+       480
+      ],
+      "neutral": [
+       100,
+       500
+      ]
+     },
+     "read_only": true
+    },
+    "gnome": {
+     "mechanism": "gsettings",
+     "schema": "org.gnome.desktop.interface",
+     "fields": [
+      {
+       "name": "scaling-factor",
+       "kind": "int"
+      }
+     ],
+     "codec": {
+      "codec": "linear",
+      "native": [
+       1,
+       5
+      ],
+      "neutral": [
+       100,
+       500
+      ]
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:display"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Displays-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "apps.default-browser",
+   "value": {
+    "name": {}
+   },
+   "route": "handoff",
+   "app_table": "browsers",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
+     "fields": [
+      {
+       "name": "ProgId",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "lookup",
+      "table": "browsers",
+      "column": "windows",
+      "prefix": true
+     },
+     "read_only": true
+    },
+    "mac": {
+     "mechanism": "special",
+     "special": {
+      "mac-url-handler": "https"
+     },
+     "codec": {
+      "codec": "lookup",
+      "table": "browsers",
+      "column": "mac"
+     }
+    },
+    "gnome": {
+     "mechanism": "special",
+     "special": "xdg-default-browser",
+     "codec": {
+      "codec": "lookup",
+      "table": "browsers",
+      "column": "linux"
+     }
+    },
+    "kde": {
+     "mechanism": "special",
+     "special": "xdg-default-browser",
+     "codec": {
+      "codec": "lookup",
+      "table": "browsers",
+      "column": "linux"
+     }
+    },
+    "other-linux": {
+     "mechanism": "special",
+     "special": "xdg-default-browser",
+     "codec": {
+      "codec": "lookup",
+      "table": "browsers",
+      "column": "linux"
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:defaultapps",
+     "app_param": {
+      "name": "registeredAppUser",
+      "table": "browsers",
+      "column": "windows-registered"
+     }
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Desktop-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "apps.file-handler.pdf",
+   "value": {
+    "name": {}
+   },
+   "route": "handoff",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\UserChoice",
+     "fields": [
+      {
+       "name": "ProgId",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:defaultapps"
+    }
+   }
+  },
+  {
+   "id": "time.zone",
+   "value": {
+    "name": {}
+   },
+   "route": "privileged",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "SYSTEM\\CurrentControlSet\\Control\\TimeZoneInformation",
+     "fields": [
+      {
+       "name": "TimeZoneKeyName",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "lookup",
+      "table": "time-zones",
+      "column": "windows"
+     },
+     "hive": "machine",
+     "read_only": true
+    },
+    "mac": {
+     "mechanism": "special",
+     "special": "localtime-link",
+     "codec": {
+      "codec": "same"
+     }
+    },
+    "gnome": {
+     "mechanism": "special",
+     "special": "localtime-link",
+     "codec": {
+      "codec": "same"
+     }
+    },
+    "kde": {
+     "mechanism": "special",
+     "special": "localtime-link",
+     "codec": {
+      "codec": "same"
+     }
+    },
+    "other-linux": {
+     "mechanism": "special",
+     "special": "localtime-link",
+     "codec": {
+      "codec": "same"
+     }
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:dateandtime"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Date-Time-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "apps.startup",
+   "value": {
+    "list": {
+     "max": 64
+    }
+   },
+   "route": "opt-in",
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+     "fields": [
+      {
+       "name": "Run",
+       "kind": "value-names"
+      }
+     ],
+     "codec": {
+      "codec": "same"
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:startupapps"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "devices.default-printer",
+   "value": {
+    "name": {
+     "kind": "device"
+    }
+   },
+   "route": "guided",
+   "device": true,
+   "places": {
+    "windows": {
+     "mechanism": "registry",
+     "key": "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
+     "fields": [
+      {
+       "name": "Device",
+       "kind": "sz"
+      }
+     ],
+     "codec": {
+      "codec": "split-first",
+      "sep": ","
+     },
+     "read_only": true
+    }
+   },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:printers"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Print-Scan-Settings.extension"
+    }
+   }
+  }
+ ],
+ "protected": [
+  {
+   "what": "camera-access",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-consent",
+    "key": "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam"
+   }
+  },
+  {
+   "what": "microphone-access",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-consent",
+    "key": "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone"
+   }
+  },
+  {
+   "what": "location-access",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-consent",
+    "key": "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\location"
+   }
+  },
+  {
+   "what": "download-scan-off",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-equals",
+    "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Attachments",
+    "value": "SaveZoneInformation",
+    "equals": 1
+   }
+  },
+  {
+   "what": "smart-screen-off",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-equals",
+    "hive": "machine",
+    "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+    "value": "SmartScreenEnabled",
+    "equals": "Off"
+   }
+  },
+  {
+   "what": "firewall-off",
+   "system": "windows",
+   "probe": {
+    "kind": "registry-equals",
+    "hive": "machine",
+    "key": "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\StandardProfile",
+    "value": "EnableFirewall",
+    "equals": 0
+   }
+  },
+  {
+   "what": "gatekeeper-off",
+   "system": "mac",
+   "probe": {
+    "kind": "gatekeeper-off"
+   }
+  }
+ ],
+ "discover": [
+  {
+   "system": "windows",
+   "store": {
+    "mechanism": "registry",
+    "key": "Control Panel\\Keyboard"
+   }
+  },
+  {
+   "system": "gnome",
+   "store": {
+    "mechanism": "gsettings",
+    "schema": "org.gnome.desktop.wm.preferences"
+   }
+  }
+ ],
+ "apps": [
+  {
+   "app": "vscode",
+   "min_version": "1.80",
+   "files": [
+    {
+     "root": "config",
+     "path": "Code/User/settings.json",
+     "format": "jsonc",
+     "writer": "settings",
+     "rewrite_paths": true,
+     "default": "copy",
+     "rules": [
+      {
+       "at": "telemetry.*",
+       "rule": "drop"
+      },
+      {
+       "at": "settingssync.*",
+       "rule": "drop"
+      },
+      {
+       "at": "sync.*",
+       "rule": "drop"
+      },
+      {
+       "at": "remote.ssh.*",
+       "rule": "hold-back"
+      },
+      {
+       "at": "terminal.integrated.profiles.*",
+       "rule": "hold-back"
+      },
+      {
+       "at": "terminal.integrated.automationprofile.*",
+       "rule": "hold-back"
+      },
+      {
+       "at": "terminal.integrated.env.*",
+       "rule": "hold-back"
+      },
+      {
+       "at": "terminal.integrated.shell*",
+       "rule": "hold-back"
+      },
+      {
+       "at": "*.path",
+       "rule": "hold-back"
+      },
+      {
+       "at": "*interpreterpath",
+       "rule": "hold-back"
+      },
+      {
+       "at": "*.args",
+       "rule": "hold-back"
+      }
+     ]
+    },
+    {
+     "root": "config",
+     "path": "Code/User/keybindings.json",
+     "format": "jsonc",
+     "writer": "settings",
+     "default": "copy",
+     "rules": [
+      {
+       "at": "*/args",
+       "rule": "hold-back"
+      }
+     ],
+     "cross_os": [
+      {
+       "at": "*/key",
+       "rule": "swap-modifiers"
+      }
+     ]
+    },
+    {
+     "root": "config",
+     "path": "Code/User/tasks.json",
+     "format": "jsonc",
+     "writer": "settings",
+     "rewrite_paths": true,
+     "default": "copy",
+     "rules": [
+      {
+       "at": "tasks/*/runoptions/runon",
+       "rule": {
+        "disable": "default"
+       }
+      }
+     ]
+    },
+    {
+     "root": "config",
+     "path": "Code/User/snippets/*.json",
+     "format": "jsonc",
+     "writer": "settings",
+     "default": "copy"
+    },
+    {
+     "root": "config",
+     "path": "Code/User/globalStorage/**",
+     "format": "opaque",
+     "writer": "data"
+    },
+    {
+     "root": "config",
+     "path": "Code/User/workspaceStorage/**",
+     "format": "opaque",
+     "writer": "data"
+    },
+    {
+     "root": "home",
+     "path": ".vscode/extensions/**",
+     "format": "opaque",
+     "writer": "install"
+    },
+    {
+     "root": "config",
+     "path": "Code/Cache/**",
+     "format": "opaque",
+     "writer": "nobody"
+    },
+    {
+     "root": "config",
+     "path": "Code/machineid",
+     "format": "opaque",
+     "writer": "nobody"
+    }
+   ]
+  },
+  {
+   "app": "jetbrains",
+   "min_version": "2023.1",
+   "versioned_folder": "*",
+   "files": [
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/recentProjects.xml",
+     "format": "xml",
+     "writer": "settings",
+     "rewrite_paths": true,
+     "default": "copy",
+     "macros": {
+      "$USER_HOME$": "home"
+     },
+     "rules": [
+      {
+       "at": "application/component/option/map/entry/@key",
+       "rule": "rewrite-path"
+      },
+      {
+       "at": "application/component/option/@value",
+       "rule": "rewrite-path"
+      }
+     ]
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/security.xml",
+     "format": "opaque",
+     "writer": "nobody"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/trusted-paths.xml",
+     "format": "opaque",
+     "writer": "nobody"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/jdk.table.xml",
+     "format": "opaque",
+     "writer": "nobody"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/window.state.xml",
+     "format": "opaque",
+     "writer": "nobody"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/options/*.xml",
+     "format": "xml",
+     "writer": "settings",
+     "default": "copy"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/codestyles/*.xml",
+     "format": "xml",
+     "writer": "settings",
+     "default": "copy"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/colors/*.icls",
+     "format": "xml",
+     "writer": "settings",
+     "default": "copy"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/keymaps/*.xml",
+     "format": "xml",
+     "writer": "settings",
+     "default": "copy"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/tools/*.xml",
+     "format": "xml",
+     "writer": "settings",
+     "default": "hold-back"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/plugins/**",
+     "format": "opaque",
+     "writer": "install"
+    },
+    {
+     "root": "config",
+     "path": "JetBrains/*/*.key",
+     "format": "opaque",
+     "writer": "nobody"
+    }
+   ]
+  }
+ ],
+ "exceptions": [
+  {
+   "system": "windows",
+   "store": "Software\\Valve\\Steam",
+   "name": "AutoLoginUser",
+   "reason": "signing in to Steam moves with Steam's own account, not as a setting"
+  },
+  {
+   "system": "windows",
+   "store": "Software\\*\\*\\Updater*",
+   "name": "*",
+   "reason": "an app's updater state belongs to the old laptop's install"
+  }
+ ],
+ "labels": [
+  {
+   "system": "windows",
+   "store": "Control Panel\\Desktop*",
+   "label": "Desktop and screen"
+  },
+  {
+   "system": "windows",
+   "store": "Control Panel\\Mouse*",
+   "label": "Mouse"
+  },
+  {
+   "system": "windows",
+   "store": "Control Panel\\Keyboard*",
+   "label": "Keyboard"
+  },
+  {
+   "system": "mac",
+   "store": "com.apple.dock",
+   "label": "Dock"
+  },
+  {
+   "system": "mac",
+   "store": "com.apple.finder",
+   "label": "Finder"
+  }
+ ]
+}
