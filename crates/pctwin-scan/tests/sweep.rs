@@ -2016,6 +2016,8 @@ fn the_table_names_places_in_the_record_and_changes_nothing() {
     write(&lab.ada.join("Documents/Backup/00008030/Manifest.db"), 10);
     write(&lab.ada.join("Documents/Backup/00008030/DCIM/a.jpg"), 10);
     write(&lab.ada.join("Documents/disk.vhdx"), 10);
+    write(&lab.ada.join("Documents/notes.txt"), 10);
+    write(&lab.ada.join("Documents/Screenshots/a.png"), 10);
     let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
     let before = s.record.clone();
     let named = pctwin_scan::Recogniser::shipped().record(&s.record);
@@ -2046,7 +2048,14 @@ fn the_table_names_places_in_the_record_and_changes_nothing() {
         .map(|id| shown(s.record.items.iter().find(|i| i.id == *id).unwrap()))
         .collect();
     assert!(found.iter().any(|f| f.ends_with("Backup")), "{found:?}");
-    assert!(!found.iter().any(|f| f.ends_with("disk.vhdx")));
+    // Only folders, and never one the table named.
+    assert!(
+        !found
+            .iter()
+            .any(|f| f.ends_with("disk.vhdx") || f.ends_with("notes.txt"))
+    );
+    assert!(!found.iter().any(|f| f.ends_with("Screenshots")));
+    assert!(what_of("Screenshots").contains(&pctwin_scan::What::Screenshots));
 }
 
 /// Folders with the same names and sizes all the way down look like copies (one group, not one

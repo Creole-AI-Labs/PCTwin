@@ -692,6 +692,8 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     write(dir.path(), "Brand2.WOFF2", b"wOF2....");
     write(dir.path(), "readme.txt", b"hello");
     write(dir.path(), "x.xfont", b"XF");
+    // A folder named like a font is not a font file.
+    std::fs::create_dir(dir.path().join("Folder.woff2")).unwrap();
     assert_eq!(
         font_with(shipped_font_files(), "Brand", &folders),
         Outcome::NeedsAttention {
@@ -719,12 +721,14 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     let bytes = br#"{"format":1,"catalogue":"font-files","version":2,"rows":[
         {"extension":"xfont","name":"X font"},
         {"extension":"X.Y","name":"bad"},
-        {"extension":"ok","name":" "}
+        {"extension":"ok","name":" "},
+        {"extension":"","name":"Empty"},
+        {"extension":"abcdefghijklmnopq","name":"Long"}
     ]}"#;
     let sig = test_key::sign(bytes, "font-files", 2);
     let rows = Catalogue::<FontFileRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
     assert_eq!(rows.rows().len(), 1);
-    assert_eq!(rows.report().skipped.len(), 2);
+    assert_eq!(rows.report().skipped.len(), 4);
     assert_eq!(
         font_with(&rows, "Brand", &folders),
         Outcome::NeedsAttention {
