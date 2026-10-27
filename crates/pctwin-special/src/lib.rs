@@ -3,4 +3,5 @@
 
 pub mod component;
 pub mod content;
+pub mod roots;
 pub mod sniff;
