@@ -101,7 +101,8 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
     assert_eq!(adapters.observe(&as_action), Observed::Present);
     // The new laptop's probe and the result word.
     let entries = read_machine_entries();
-    let probe = pctwin_apps::after::probe(&app, &entries);
+    let probe =
+        pctwin_apps::after::probe(&app, pctwin_apps::after::InstallScope::Machine, &entries);
     assert!(probe.found);
     let result = pctwin_apps::after::result(
         &app,
