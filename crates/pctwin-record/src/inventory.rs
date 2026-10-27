@@ -2,7 +2,10 @@
 //! found, in a small manifest and pages, so no laptop is too big to send and neither laptop has to
 //! hold the whole list at once. Version 3 (move protocol 4, 24 October 2026) is the same with the
 //! person's own essentials, in order, at the end of the manifest (only the order: see
-//! [`encode_inventory_ordered`]).
+//! [`encode_inventory_ordered`]). Version 4 (move protocol 5, 27 October 2026) adds every app
+//! found on the old laptop after the order ([`crate::apps`]), and is the first that may carry a
+//! cloud service by its ID (place kind 3): an older reader refuses both as a newer format, so it
+//! asks for an update instead of calling the list damaged ([`encode_inventory_with_apps`]).
 //!
 //! - The **manifest** holds the format, the old laptop's ID, how many items and pages follow, and
 //!   the owners and places, each stored once.
@@ -41,14 +44,19 @@ use std::collections::{HashMap, HashSet};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CloudProvider, Fingerprint, FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath,
-    LaptopId, LeftOutReason, ManagedBy, Owner, Place, Portability, RawName, RecordError, Storage,
+    AppList, CloudProvider, Fingerprint, FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName,
+    ItemPath, LaptopId, LeftOutReason, ManagedBy, Owner, Place, Portability, RawName, RecordError,
+    Storage,
 };
 
-/// The inventory format this app writes and reads: 3 (move protocol 4) also carries the
+/// The inventory format this app writes and reads: 4 (move protocol 5) also carries the apps
+/// found on the old laptop and cloud services by their ID; 3 (move protocol 4) carries the
 /// person's own essentials in order (see [`encode_inventory_ordered`]); 2 (move protocol 3), which
-/// is otherwise the same, is still written for a laptop one version behind and still read.
-pub const INVENTORY_FORMAT: u32 = 3;
+/// is otherwise the same, is still written for a laptop one or two versions behind and still
+/// read.
+pub const INVENTORY_FORMAT: u32 = 4;
+/// The format before the apps, written for move protocol 4.
+const ORDERED_FORMAT: u32 = 3;
 /// The format before the personal order, written for move protocol 3.
 const UNORDERED_FORMAT: u32 = 2;
 /// What each ID of the personal order takes in the reader: the ID in its list and in its set.
@@ -58,7 +66,9 @@ pub const PAGE_ITEMS: usize = 10_000;
 /// Most bytes in one encoded page.
 pub const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
 /// Most bytes in the manifest (it holds only counts, owners and places).
-pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+/// Most bytes in a format 2 or 3 manifest, as readers of those formats allow.
+const MAX_OLD_MANIFEST_BYTES: usize = 1024 * 1024;
 /// Longest name, in bytes (or UTF-16 units for an exact Windows name).
 pub const MAX_NAME_LEN: usize = 4096;
 /// Most parts in one path (its folders and its own name), as the safety gate allows.
@@ -335,7 +345,7 @@ pub fn encode_inventory(
     laptop: &LaptopId,
     items: &[Item],
 ) -> Result<EncodedInventory, RecordError> {
-    encode_counted(laptop, items, None, MAX_HELD).map(|(encoded, _)| encoded)
+    encode_counted(laptop, items, None, None, MAX_HELD).map(|(encoded, _)| encoded)
 }
 
 /// [`encode_inventory`] in format 3 (move protocol 4), with the person's own essentials in the
@@ -346,7 +356,23 @@ pub fn encode_inventory_ordered(
     items: &[Item],
     personal: &[ItemId],
 ) -> Result<EncodedInventory, RecordError> {
-    encode_counted(laptop, items, Some(personal), MAX_HELD).map(|(encoded, _)| encoded)
+    encode_counted(laptop, items, Some(personal), None, MAX_HELD).map(|(encoded, _)| encoded)
+}
+
+/// [`encode_inventory_ordered`] in format 4 (move protocol 5): also every app found on the old
+/// laptop (`apps`, checked by [`AppList::validate`]), and cloud services by their ID.
+pub fn encode_inventory_with_apps(
+    laptop: &LaptopId,
+    items: &[Item],
+    personal: &[ItemId],
+    apps: &AppList,
+) -> Result<EncodedInventory, RecordError> {
+    encode_counted(laptop, items, Some(personal), Some(apps), MAX_HELD).map(|(encoded, _)| encoded)
+}
+
+/// Whether `place` can be written only in format 4: a cloud service named by its ID.
+pub fn needs_format_4(place: &Place) -> bool {
+    matches!(&place.storage, Storage::Cloud { provider } if provider_code(*provider).is_none())
 }
 
 /// Whether `items` fit in what one move's list may hold on the new laptop, `limit` (the move
@@ -354,7 +380,13 @@ pub fn encode_inventory_ordered(
 /// big; a list that is wrong in another way is an error.
 pub fn fits_one_move(items: &[Item], limit: u64) -> Result<bool, RecordError> {
     let room = crate::MAX_PERSONAL as u64 * PERSONAL_COST;
-    match encode_counted(&LaptopId([0; 16]), items, None, limit.saturating_sub(room)) {
+    match encode_counted(
+        &LaptopId([0; 16]),
+        items,
+        None,
+        None,
+        limit.saturating_sub(room),
+    ) {
         Ok(_) => Ok(true),
         Err(RecordError::TooBigForOneMove) => Ok(false),
         Err(e) => Err(e),
@@ -367,8 +399,18 @@ fn encode_counted(
     laptop: &LaptopId,
     items: &[Item],
     personal: Option<&[ItemId]>,
+    apps: Option<&AppList>,
     limit: u64,
 ) -> Result<(EncodedInventory, Vec<u64>), RecordError> {
+    let format = match (apps, personal) {
+        (Some(_), _) => INVENTORY_FORMAT,
+        (None, Some(_)) => ORDERED_FORMAT,
+        (None, None) => UNORDERED_FORMAT,
+    };
+    // A cloud service by its ID is not something an older reader knows: written only in format 4.
+    if format < INVENTORY_FORMAT && items.iter().any(|i| needs_format_4(&i.place)) {
+        return Err(bad("a cloud service only a newer PCTwin's list can carry"));
+    }
     if let Some(order) = personal {
         let ids: HashSet<ItemId> = items.iter().map(|i| i.id).collect();
         let mut seen = HashSet::new();
@@ -437,11 +479,7 @@ fn encode_counted(
 
     let mut m = Writer(Vec::new());
     m.0.extend_from_slice(MAGIC);
-    m.u32(if personal.is_some() {
-        INVENTORY_FORMAT
-    } else {
-        UNORDERED_FORMAT
-    });
+    m.u32(format);
     m.0.extend_from_slice(&laptop.0);
     m.u64(items.len() as u64);
     m.u32(u32::try_from(pages.len()).map_err(|_| bad("too many pages"))?);
@@ -459,7 +497,15 @@ fn encode_counted(
             m.0.extend_from_slice(&id.0);
         }
     }
-    if m.0.len() > MAX_MANIFEST_BYTES {
+    if let Some(apps) = apps {
+        crate::apps::write_apps(&mut m.0, apps)?;
+    }
+    let most = if format == INVENTORY_FORMAT {
+        MAX_MANIFEST_BYTES
+    } else {
+        MAX_OLD_MANIFEST_BYTES
+    };
+    if m.0.len() > most {
         return Err(bad("the manifest is too large"));
     }
     Ok((
@@ -691,7 +737,8 @@ impl<'a> Reader<'a> {
             _ => return Err(bad("an unknown kind of owner")),
         })
     }
-    fn place(&mut self) -> Result<Place, RecordError> {
+    /// A place; a cloud service by its ID only when `open_ids` (format 4 and later).
+    fn place(&mut self, open_ids: bool) -> Result<Place, RecordError> {
         let role = role_of(self.u8()?)?;
         let storage = match self.u8()? {
             0 => Storage::SystemDrive,
@@ -701,7 +748,7 @@ impl<'a> Reader<'a> {
             2 => Storage::Cloud {
                 provider: provider_of(self.u8()?)?,
             },
-            3 => {
+            3 if open_ids => {
                 let id = self.text(CloudProvider::MAX_ID)?;
                 match CloudProvider::new(&id) {
                     // The five with codes are only ever written by code: one written by its ID
@@ -740,6 +787,8 @@ pub struct InventoryReader {
     ids: HashSet<ItemId>,
     /// The person's own essentials, first first (format 3; empty from format 2).
     personal: Vec<ItemId>,
+    /// The apps found on the old laptop (format 4; empty before).
+    apps: AppList,
     hash: Fingerprinter,
 }
 
@@ -768,7 +817,7 @@ impl InventoryReader {
         if format > INVENTORY_FORMAT {
             return Err(RecordError::NewerFormat { found: format });
         }
-        if format != INVENTORY_FORMAT && format != UNORDERED_FORMAT {
+        if !matches!(format, UNORDERED_FORMAT | ORDERED_FORMAT | INVENTORY_FORMAT) {
             return Err(bad("an inventory format this app does not read"));
         }
         let mut id = [0u8; 16];
@@ -795,12 +844,12 @@ impl InventoryReader {
         }
         let mut places = Vec::new();
         for _ in 0..places_n {
-            places.push(r.place()?);
+            places.push(r.place(format >= INVENTORY_FORMAT)?);
         }
         // The person's own essentials, first first: each an item the pages must hold, once.
         let mut personal = Vec::new();
         let mut held = 0;
-        if format == INVENTORY_FORMAT {
+        if format >= ORDERED_FORMAT {
             let n = r.u32()? as usize;
             if n > crate::MAX_PERSONAL || n > items as usize {
                 return Err(bad("a personal order longer than the inventory allows"));
@@ -815,6 +864,14 @@ impl InventoryReader {
                 personal.push(ItemId(one));
             }
             hold(&mut 0, &mut held, n as u64 * PERSONAL_COST)?;
+        }
+        let mut apps = AppList::default();
+        if format >= INVENTORY_FORMAT {
+            let (list, cost) = crate::apps::read_apps(&mut r.rest)?;
+            hold(&mut 0, &mut held, cost)?;
+            apps = list;
+        } else if manifest.len() > MAX_OLD_MANIFEST_BYTES {
+            return Err(bad("the manifest is too large"));
         }
         if !r.rest.is_empty() {
             return Err(bad("the manifest has bytes after its end"));
@@ -853,12 +910,23 @@ impl InventoryReader {
             held,
             ids: HashSet::new(),
             personal,
+            apps,
             hash: Fingerprinter::new(manifest),
         })
     }
 
     /// The person's own essentials in the order they move, first first: checked against the
     /// pages by [`finish`](Self::finish).
+    /// The apps found on the old laptop (format 4; empty from an older format).
+    pub fn apps(&self) -> &AppList {
+        &self.apps
+    }
+
+    /// Takes the apps out, leaving none.
+    pub fn take_apps(&mut self) -> AppList {
+        std::mem::take(&mut self.apps)
+    }
+
     pub fn personal(&self) -> &[ItemId] {
         &self.personal
     }
@@ -1380,7 +1448,7 @@ mod tests {
                 inclusion: Inclusion::Included,
             });
         }
-        let (enc, held_after) = encode_counted(&laptop, &items, None, MAX_HELD).unwrap();
+        let (enc, held_after) = encode_counted(&laptop, &items, None, None, MAX_HELD).unwrap();
         assert!(enc.pages.len() >= 3);
         let mut reader = InventoryReader::start(&enc.manifest).unwrap();
         for (page, written) in enc.pages.iter().zip(&held_after) {
@@ -1534,7 +1602,8 @@ mod tests {
         let laptop = LaptopId([9; 16]);
         let items = plain(&laptop, 50);
         let personal: Vec<ItemId> = items.iter().take(20).map(|i| i.id).collect();
-        let (enc, held_after) = encode_counted(&laptop, &items, Some(&personal), MAX_HELD).unwrap();
+        let (enc, held_after) =
+            encode_counted(&laptop, &items, Some(&personal), None, MAX_HELD).unwrap();
         let mut reader = InventoryReader::start(&enc.manifest).unwrap();
         for page in &enc.pages {
             drop(reader.page(page).unwrap());
@@ -1564,13 +1633,13 @@ mod tests {
     fn a_list_past_what_one_move_holds_is_told_apart() {
         let laptop = LaptopId([9; 16]);
         let items = plain(&laptop, 100);
-        let (_, held) = encode_counted(&laptop, &items, None, MAX_HELD).unwrap();
+        let (_, held) = encode_counted(&laptop, &items, None, None, MAX_HELD).unwrap();
         let need = *held.last().unwrap();
         let room = crate::MAX_PERSONAL as u64 * PERSONAL_COST;
         assert!(fits_one_move(&items, need + room).unwrap());
         assert!(!fits_one_move(&items, need + room - 1).unwrap());
         assert!(matches!(
-            encode_counted(&laptop, &items, None, need - 1),
+            encode_counted(&laptop, &items, None, None, need - 1),
             Err(RecordError::TooBigForOneMove)
         ));
         assert!(fits_one_move(&items, MAX_HELD).unwrap());

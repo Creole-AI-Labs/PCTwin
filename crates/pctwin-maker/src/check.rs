@@ -505,28 +505,93 @@ fn finish(
 /// own reader only (the old laptop is read-only and may be offline). The copy's bytes must be
 /// the bytes signed, or there is no maker to anchor on.
 pub fn windows_maker_of(path: &Path) -> Result<crate::facts::WindowsSigner, String> {
-    let mut f = open_held(path).map_err(|e| e.to_string())?;
-    let size = f.metadata().map_err(|e| e.to_string())?.len();
-    let (head, tail) = ends(&mut f, size).map_err(|e| e.to_string())?;
+    match windows_old_copy(path).maker {
+        OldMaker::Signed(signer) => Ok(signer),
+        OldMaker::Unsigned => Err("the old copy is not signed".into()),
+        OldMaker::NotRead(why) => Err(why),
+    }
+}
+
+/// Who made the old laptop's own copy of a Windows program or installer package, kept apart:
+/// signed (and by whom), read and carrying no signature, or not readable (with why).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per app on the old laptop; boxing would only add noise"
+)]
+pub enum OldMaker {
+    Signed(crate::facts::WindowsSigner),
+    Unsigned,
+    NotRead(String),
+}
+
+/// What PCTwin's own reader finds in the old laptop's copy: its maker and what it is built for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OldCopy {
+    pub maker: OldMaker,
+    pub arch: Option<Arch>,
+}
+
+/// Reads the old laptop's own copy of a Windows program or installer package (see
+/// [`windows_maker_of`]), never running it, never asking the system (the old laptop is only
+/// read).
+pub fn windows_old_copy(path: &Path) -> OldCopy {
+    let not_read = |why: String| OldCopy {
+        maker: OldMaker::NotRead(why),
+        arch: None,
+    };
+    let mut f = match open_held(path) {
+        Ok(f) => f,
+        Err(e) => return not_read(e.to_string()),
+    };
+    let size = match f.metadata() {
+        Ok(m) => m.len(),
+        Err(e) => return not_read(e.to_string()),
+    };
+    if size == 0 {
+        return not_read("the old copy is empty".into());
+    }
+    let (head, tail) = match ends(&mut f, size) {
+        Ok(ends) => ends,
+        Err(e) => return not_read(e.to_string()),
+    };
     let s = sniff(&head, &tail);
     if s.compound {
-        return match read_msi(&f)?.signature {
-            MsiSignature::Signed(signer) => signer,
-            MsiSignature::None => Err("the old copy is not signed".into()),
-            MsiSignature::Broken(why) => Err(why),
+        let read = match read_msi(&f) {
+            Ok(read) => read,
+            Err(why) => return not_read(why),
+        };
+        let maker = match read.signature {
+            MsiSignature::Signed(Ok(signer)) => OldMaker::Signed(signer),
+            MsiSignature::Signed(Err(why)) | MsiSignature::Broken(why) => OldMaker::NotRead(why),
+            MsiSignature::None => OldMaker::Unsigned,
+        };
+        return OldCopy {
+            maker,
+            arch: read.arch,
         };
     }
     if s.format != Format::WindowsProgram {
-        return Err("the old copy is not a Windows program".into());
+        return not_read("the old copy is not a Windows program".into());
     }
-    match read_pe(&mut f, size).map_err(|e| e.to_string())? {
-        PeSignature::Signed {
-            signer,
+    let maker = match read_pe(&mut f, size) {
+        Err(e) => OldMaker::NotRead(e.to_string()),
+        Ok(PeSignature::Signed {
+            signer: Ok(signer),
             digest_matches: true,
-        } => signer,
-        PeSignature::Signed { .. } => Err("the old copy was changed after it was signed".into()),
-        PeSignature::None => Err("the old copy is not signed".into()),
-        PeSignature::Broken(why) => Err(why),
+        }) => OldMaker::Signed(signer),
+        Ok(PeSignature::Signed {
+            signer: Err(why), ..
+        }) => OldMaker::NotRead(why),
+        Ok(PeSignature::Signed { .. }) => {
+            OldMaker::NotRead("the old copy was changed after it was signed".into())
+        }
+        Ok(PeSignature::None) => OldMaker::Unsigned,
+        Ok(PeSignature::Broken(why)) => OldMaker::NotRead(why),
+    };
+    OldCopy {
+        maker,
+        arch: s.arch,
     }
 }
 

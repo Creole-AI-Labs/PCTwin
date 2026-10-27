@@ -374,6 +374,63 @@ impl<S: Read + Write> Client<S> {
         }
     }
 
+    /// Phase 2.1: sends package `artifact` of the sealed plan (`size` bytes whose SHA-256 is
+    /// `sha256`, read from `from`) to the helper's own folder. `Ok(Err)`: the broker refused it
+    /// (not in the plan, or not those bytes), and kept nothing.
+    pub fn stage(
+        &mut self,
+        artifact: u64,
+        sha256: crate::broker::actions::Hex32,
+        size: u64,
+        from: &mut impl Read,
+    ) -> Result<Result<(), crate::broker::Denial>, ClientError> {
+        use base64::Engine as _;
+        send_request(
+            &mut self.stream,
+            &Request::StagePackage {
+                artifact,
+                sha256,
+                size,
+            },
+        )?;
+        if let Answer::Denied(why) =
+            self.expect_answer(|a| matches!(a, Answer::Staging | Answer::Denied(_)))?
+        {
+            return Ok(Err(why));
+        }
+        let mut buf = vec![0u8; crate::protocol::STAGE_PIECE];
+        let mut sent = 0u64;
+        loop {
+            let want = usize::try_from((size - sent).min(buf.len() as u64)).unwrap_or(buf.len());
+            if want == 0 {
+                // Fewer bytes than announced: the helper keeps nothing until it has them all.
+                return Ok(Err(crate::broker::Denial::Unsafe));
+            }
+            let n = from
+                .read(&mut buf[..want])
+                .map_err(|e| ClientError::Frame(FrameError::Io(e)))?;
+            if n == 0 {
+                return Ok(Err(crate::broker::Denial::Unsafe));
+            }
+            sent += n as u64;
+            let bytes = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+            send_request(&mut self.stream, &Request::StageBytes { bytes })?;
+            match self.expect_answer(|a| {
+                matches!(
+                    a,
+                    Answer::Staging | Answer::Staged { .. } | Answer::Denied(_)
+                )
+            })? {
+                Answer::Staged { artifact: a } if a == artifact && sent == size => {
+                    return Ok(Ok(()));
+                }
+                Answer::Staging if sent < size => {}
+                Answer::Denied(why) => return Ok(Err(why)),
+                _ => return Err(ClientError::OutOfTurn),
+            }
+        }
+    }
+
     /// Phase 2 broker: the move was stopped (or the person's session changed): nothing new
     /// starts in this helper session, ever.
     pub fn revoke(&mut self) -> Result<(), ClientError> {

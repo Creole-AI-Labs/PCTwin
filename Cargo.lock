@@ -3610,6 +3610,7 @@ name = "pctwin-app"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "pctwin-apps",
  "pctwin-discovery",
  "pctwin-doctor",
  "pctwin-gate",
@@ -3619,6 +3620,7 @@ dependencies = [
  "pctwin-journal",
  "pctwin-journey",
  "pctwin-link",
+ "pctwin-maker",
  "pctwin-move",
  "pctwin-orchestrate",
  "pctwin-pairing",
@@ -3643,6 +3645,32 @@ dependencies = [
  "tokio",
  "whoami",
  "zeroize",
+]
+
+[[package]]
+name = "pctwin-apps"
+version = "0.1.0"
+dependencies = [
+ "pctwin-catalogue",
+ "pctwin-grant",
+ "pctwin-helper",
+ "pctwin-helper-os",
+ "pctwin-maker",
+ "pctwin-record",
+ "pctwin-types",
+ "plist",
+ "reqwest",
+ "roxmltree",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "url",
+ "windows",
+ "winreg",
 ]
 
 [[package]]
@@ -3738,6 +3766,7 @@ dependencies = [
 name = "pctwin-helper"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "getrandom 0.4.3",
  "pctwin-catalogue",
@@ -3754,6 +3783,7 @@ dependencies = [
  "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
+ "winreg",
  "wmi",
  "zeroize",
 ]

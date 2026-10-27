@@ -31,7 +31,7 @@ use std::time::Duration;
 use pctwin_record::inventory::MAX_MANIFEST_BYTES;
 use pctwin_record::{
     EncodedInventory, Inclusion, InventoryReader, LeftOutReason, MAX_PAGE_BYTES, Record,
-    encode_inventory, encode_inventory_ordered,
+    encode_inventory, encode_inventory_ordered, encode_inventory_with_apps, needs_format_4,
 };
 
 use crate::{Channel, PIECE_MAX, TransferError, VersionGap};
@@ -112,6 +112,15 @@ pub async fn send_inventory(
     if version < PAGED_FROM {
         return Err(TransferError::VersionGap(VersionGap::OtherLaptopOlder));
     }
+    // From move protocol 5 the list carries the apps found and cloud services by their ID.
+    if version >= crate::APPS_SINCE {
+        return send_paged(ch, record, Form::WithApps).await;
+    }
+    // A new laptop on version 4 or 3 cannot read either: it would refuse the list as damaged,
+    // so it is asked to update before anything is sent.
+    if needs_protocol_5(record) {
+        return Err(TransferError::VersionGap(VersionGap::OtherLaptopOlder));
+    }
     // An older new laptop knows no order: it is sent the list it always read.
     let ordered = version >= crate::PERSONAL_SINCE;
     // Nor what only move protocol 4 can say (a folder too big to list, one that can be made
@@ -120,7 +129,30 @@ pub async fn send_inventory(
     if !ordered && record.items.iter().any(needs_protocol_4) {
         return Err(TransferError::VersionGap(VersionGap::OtherLaptopOlder));
     }
-    send_paged(ch, record, ordered).await
+    send_paged(
+        ch,
+        record,
+        if ordered {
+            Form::Ordered
+        } else {
+            Form::Unordered
+        },
+    )
+    .await
+}
+
+/// Whether `record` holds something only move protocol 5's list carries: apps, or a cloud
+/// service by its ID.
+fn needs_protocol_5(record: &Record) -> bool {
+    !record.apps.is_empty() || record.items.iter().any(|i| needs_format_4(&i.place))
+}
+
+/// Which form of the list is written.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Form {
+    Unordered,
+    Ordered,
+    WithApps,
 }
 
 /// Whether `item` says something only move protocol 4's list carries.
@@ -139,17 +171,24 @@ fn needs_protocol_4(item: &pctwin_record::Item) -> bool {
 async fn send_paged(
     ch: &mut impl Channel,
     record: &Record,
-    ordered: bool,
+    form: Form,
 ) -> Result<(), TransferError> {
     if !undecided(record) || record.revision != 1 || record.previous.is_some() {
         return Err(refused(
             "it already says where people or shared things go, which only the new laptop decides",
         ));
     }
-    let encoded = if ordered {
-        encode_inventory_ordered(&record.source_laptop, &record.items, &record.personal)
-    } else {
-        encode_inventory(&record.source_laptop, &record.items)
+    let encoded = match form {
+        Form::WithApps => encode_inventory_with_apps(
+            &record.source_laptop,
+            &record.items,
+            &record.personal,
+            &record.apps,
+        ),
+        Form::Ordered => {
+            encode_inventory_ordered(&record.source_laptop, &record.items, &record.personal)
+        }
+        Form::Unordered => encode_inventory(&record.source_laptop, &record.items),
     };
     let EncodedInventory { manifest, pages } = encoded.map_err(|e| refused(&e.to_string()))?;
     send_blob(ch, MANIFEST, &manifest).await?;
@@ -239,10 +278,12 @@ async fn receive_paged(ch: &mut impl Channel) -> Result<Record, TransferError> {
     drop(bytes);
     let laptop = reader.laptop();
     let personal = reader.personal().to_vec();
+    let apps = reader.take_apps();
     let crossed = reader.finish().map_err(|e| refused(&e.to_string()))?;
     let mut record = Record::new(laptop);
     record.items = items;
     record.personal = personal;
+    record.apps = apps;
     record.inventory = Some(crossed);
     record.validate().map_err(|e| refused(&e.to_string()))?;
     Ok(record)

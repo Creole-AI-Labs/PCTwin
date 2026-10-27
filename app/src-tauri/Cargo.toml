@@ -35,6 +35,9 @@ rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 zeroize = "1.9.0"
 pctwin-discovery = { path = "../../crates/pctwin-discovery" }
 pctwin-doctor = { path = "../../crates/pctwin-doctor" }
+# Phase 2.1: the apps on the old laptop, with who made each.
+pctwin-apps = { path = "../../crates/pctwin-apps" }
+pctwin-maker = { path = "../../crates/pctwin-maker" }
 pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-helper = { path = "../../crates/pctwin-helper" }
 pctwin-helper-os = { path = "../../crates/pctwin-helper-os" }

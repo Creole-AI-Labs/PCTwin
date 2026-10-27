@@ -97,6 +97,37 @@ impl<'s> Session<'s> {
                 broker.close();
                 Answer::Denied(Denial::Revoked)
             }
+            Request::StagePackage {
+                artifact,
+                sha256,
+                size,
+            } => match broker.stage_begin(artifact, sha256, size) {
+                Ok(()) => Answer::Staging,
+                Err(why) => Answer::Denied(why),
+            },
+            Request::StageBytes { bytes } => {
+                use base64::Engine as _;
+                // Decoded only if its text could hold no more than one piece.
+                let decoded = (bytes.len() <= crate::protocol::STAGE_PIECE.div_ceil(3) * 4)
+                    .then(|| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(bytes.as_bytes())
+                            .ok()
+                    })
+                    .flatten();
+                match decoded {
+                    Some(piece) => match broker.stage_bytes(&piece) {
+                        Ok(None) => Answer::Staging,
+                        Ok(Some(artifact)) => Answer::Staged { artifact },
+                        Err(why) => Answer::Denied(why),
+                    },
+                    None => {
+                        // A piece that cannot be read ends the package.
+                        broker.stage_abort();
+                        Answer::Denied(Denial::Unsafe)
+                    }
+                }
+            }
             _ => Answer::Denied(Denial::NotAvailable),
         }
     }
@@ -331,7 +362,11 @@ impl<'s> Session<'s> {
                     let answer = self.hand_over_at_sign_in(&account);
                     send_answer(channel, &answer)?;
                 }
-                request @ (Request::SealPlan { .. } | Request::Act(_) | Request::Revoke) => {
+                request @ (Request::SealPlan { .. }
+                | Request::Act(_)
+                | Request::Revoke
+                | Request::StagePackage { .. }
+                | Request::StageBytes { .. }) => {
                     let answer = self.broker_answer(request);
                     send_answer(channel, &answer)?;
                 }

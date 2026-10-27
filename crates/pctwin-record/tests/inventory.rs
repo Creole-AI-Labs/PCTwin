@@ -961,10 +961,26 @@ fn a_found_cloud_service_crosses_by_its_id() {
             3,
         ),
     ];
-    let enc = encode_inventory(&laptop(), &items).unwrap();
+    // Only format 4 (move protocol 5) carries a service by its ID: an older reader would call
+    // the list damaged, so the older formats are never written with one.
+    assert!(encode_inventory(&laptop(), &items).is_err());
+    assert!(pctwin_record::encode_inventory_ordered(&laptop(), &items, &[]).is_err());
+    let none = pctwin_record::AppList::default();
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &none).unwrap();
     let (_, back, _) = decode_inventory(&enc).unwrap();
     assert_eq!(back, items);
-    assert_eq!(encode_inventory(&laptop(), &back).unwrap(), enc);
+    assert_eq!(
+        pctwin_record::encode_inventory_with_apps(&laptop(), &back, &[], &none).unwrap(),
+        enc
+    );
+
+    // The same manifest marked format 3 (without the apps that format lacks) is refused: a
+    // format 3 list never holds a service by its ID.
+    let mut old = enc.clone();
+    old.manifest[8..12].copy_from_slice(&3u32.to_be_bytes());
+    let n = old.manifest.len();
+    old.manifest.truncate(n - 8);
+    assert!(InventoryReader::start(&old.manifest).is_err());
 
     // One of the first five written by its ID is not how any PCTwin writes it: refused.
     let at = enc
@@ -979,4 +995,344 @@ fn a_found_cloud_service_crosses_by_its_id() {
     let mut bad = enc.clone();
     bad.manifest[at..at + 7].copy_from_slice(b"ZZZZZZZ");
     assert!(decode_inventory(&bad).is_err());
+}
+
+// ------------------------------------------------------------ apps (format 4, Phase 2.1)
+
+fn signer() -> pctwin_record::SignerId {
+    pctwin_record::SignerId {
+        common_name: Some("Example Maker Ltd".into()),
+        organization: Some("Example Maker Ltd".into()),
+        country: Some("GB".into()),
+        certificate: [7; 32],
+        issuer: "Example CA".into(),
+        public_key: Some([9; 32]),
+        ..Default::default()
+    }
+}
+
+fn every_kind_of_app(installer: ItemId) -> pctwin_record::AppList {
+    use pctwin_record::*;
+    let app = |name: &str, found: FoundWhere, maker: AppMaker, system: AppSystem| FoundApp {
+        name: name.into(),
+        version: Some("1.2.3".into()),
+        publisher: Some("Example".into()),
+        owner: Owner::Shared,
+        system,
+        found,
+        arch: AppArch {
+            known: true,
+            x64: true,
+            ..AppArch::UNKNOWN
+        },
+        maker,
+        web: Some("https://example.invalid/app".into()),
+        update_feed: None,
+        installers: vec![],
+        notes: vec![],
+    };
+    let mut first = app(
+        "Writer",
+        FoundWhere::WindowsEntry {
+            view: RegistryView::Machine32,
+            key: "{11111111-2222-3333-4444-555555555555}".into(),
+            product_code: Some("{11111111-2222-3333-4444-555555555555}".into()),
+        },
+        AppMaker::Windows(Box::new(signer())),
+        AppSystem::Windows,
+    );
+    first.installers = vec![installer];
+    first.owner = person("S-1");
+    first.notes = vec![AppNote::Registration {
+        owner: Some("Ada".into()),
+        company: None,
+        product_id: Some("00330-80000".into()),
+    }];
+    let mut mac = app(
+        "Painter",
+        FoundWhere::MacBundle {
+            bundle_id: "com.example.painter".into(),
+            folder: "Painter.app".into(),
+            app_store_id: Some(497_799_835),
+        },
+        AppMaker::MacTeam {
+            team_id: "ABCDE12345".into(),
+        },
+        AppSystem::Mac,
+    );
+    mac.update_feed = Some("https://example.invalid/appcast.xml".into());
+    AppList {
+        found: vec![
+            first,
+            app(
+                "Notes",
+                FoundWhere::WindowsPackage {
+                    family_name: "Example.Notes_8wekyb3d8bbwe".into(),
+                    signing: PackageSigning::Store,
+                },
+                AppMaker::WindowsPackage {
+                    publisher: "CN=Example".into(),
+                },
+                AppSystem::Windows,
+            ),
+            mac,
+            app(
+                "Viewer",
+                FoundWhere::Deb {
+                    package: "viewer".into(),
+                },
+                AppMaker::Repository {
+                    origin: "Ubuntu".into(),
+                },
+                AppSystem::Linux,
+            ),
+            app(
+                "Editor",
+                FoundWhere::Rpm {
+                    package: "editor".into(),
+                },
+                AppMaker::Rpm {
+                    key: "a1b2c3d4".into(),
+                },
+                AppSystem::Linux,
+            ),
+            app(
+                "Maps",
+                FoundWhere::Flatpak {
+                    app_id: "org.example.Maps".into(),
+                    remote: "flathub".into(),
+                    remote_url: Some("https://dl.flathub.org/repo/".into()),
+                    system_wide: true,
+                },
+                AppMaker::Flatpak {
+                    remote_url: "https://dl.flathub.org/repo/".into(),
+                    app_id: "org.example.Maps".into(),
+                    key: [3; 32],
+                },
+                AppSystem::Linux,
+            ),
+            app(
+                "Chat",
+                FoundWhere::Snap {
+                    name: "chat".into(),
+                },
+                AppMaker::Unsigned,
+                AppSystem::Linux,
+            ),
+            app(
+                "Old tool",
+                FoundWhere::WindowsEntry {
+                    view: RegistryView::Person,
+                    key: "OldTool".into(),
+                    product_code: None,
+                },
+                AppMaker::NotRead {
+                    why: "Its program could not be found.".into(),
+                },
+                AppSystem::Windows,
+            ),
+        ],
+        not_read: vec![AppsNotRead {
+            owner: person("S-2"),
+            place: AppPlace::WindowsPersonList,
+            why: "Their own apps cannot be read while they are signed out.".into(),
+        }],
+    }
+}
+
+fn one_installer() -> Vec<Item> {
+    vec![item(
+        person("S-1"),
+        place(FolderRole::Downloads, Storage::SystemDrive),
+        text(&["setup.msi"]),
+        1,
+    )]
+}
+
+/// Phase 2.1, step 1: every kind of app found crosses in format 4 exactly, with its maker, and
+/// the list counts in the fingerprint the person approves.
+#[test]
+fn every_kind_of_app_crosses_with_its_maker() {
+    let items = one_installer();
+    let apps = every_kind_of_app(items[0].id);
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &apps).unwrap();
+    assert_eq!(
+        u32::from_be_bytes(enc.manifest[8..12].try_into().unwrap()),
+        4
+    );
+    let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+    assert_eq!(reader.apps(), &apps);
+    assert_eq!(reader.take_apps(), apps);
+    // Another list, another fingerprint.
+    let mut fewer = apps.clone();
+    fewer.found.pop();
+    let other = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &fewer).unwrap();
+    assert_ne!(other.fingerprint(), enc.fingerprint());
+    // Every manifest cut short is refused, never a panic.
+    for cut in 12..enc.manifest.len() {
+        assert!(InventoryReader::start(&enc.manifest[..cut]).is_err());
+    }
+}
+
+/// A list PCTwin never writes is refused: hidden characters, a value no writer makes.
+#[test]
+fn an_app_list_breaking_the_rules_is_refused() {
+    let items = one_installer();
+    let apps = every_kind_of_app(items[0].id);
+    let mut hidden = apps.clone();
+    hidden.found[0].name = "Writer\u{202E}exe".into();
+    assert!(pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &hidden).is_err());
+    let mut empty = apps.clone();
+    empty.found[0].name = "  ".into();
+    assert!(empty.validate().is_err());
+    let mut long = apps.clone();
+    long.found[0].web = Some("x".repeat(pctwin_record::apps::MAX_APP_URL + 1));
+    assert!(long.validate().is_err());
+
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &apps).unwrap();
+    // The Flatpak's "for everyone" flag follows its remote's address; a 2 there is no writer's
+    // value.
+    let url = b"https://dl.flathub.org/repo/";
+    let at = enc
+        .manifest
+        .windows(url.len())
+        .position(|w| w == url)
+        .unwrap()
+        + url.len();
+    assert_eq!(enc.manifest[at], 1);
+    let mut forged = enc.manifest.clone();
+    forged[at] = 2;
+    assert!(InventoryReader::start(&forged).is_err());
+    // A name with a control character, written by hand.
+    let mut forged = enc.manifest.clone();
+    let w = forged.windows(6).position(|w| w == b"Writer").unwrap();
+    forged[w] = 0x07;
+    assert!(InventoryReader::start(&forged).is_err());
+    // An unknown kind of maker (the Mac Team ID's kind byte sits before its length).
+    let mut forged = enc.manifest.clone();
+    let t = forged.windows(10).position(|w| w == b"ABCDE12345").unwrap();
+    assert_eq!(forged[t - 5], 2);
+    forged[t - 5] = 9;
+    assert!(InventoryReader::start(&forged).is_err());
+}
+
+/// An installer named by an app must be a file of the same record; a record without apps is
+/// written as before apps existed.
+#[test]
+fn an_app_installer_outside_the_record_is_refused() {
+    let items = one_installer();
+    let mut record = pctwin_record::Record::new(laptop());
+    record.items = items.clone();
+    record.apps = every_kind_of_app(items[0].id);
+    record.validate().unwrap();
+    let before = record.fingerprint();
+    record.apps.found[0].installers =
+        vec![ItemId::from_hex("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee").unwrap()];
+    assert!(record.validate().is_err());
+    record.apps = Default::default();
+    assert!(
+        !String::from_utf8(record.to_json())
+            .unwrap()
+            .contains("apps")
+    );
+    assert_ne!(record.fingerprint(), before);
+}
+
+/// Rosetta is ending: an app built for Intel Macs only is told apart from one built for both.
+#[test]
+fn intel_only_is_known_only_when_the_processors_are() {
+    use pctwin_record::AppArch;
+    let a = |known, x64, arm64| AppArch {
+        known,
+        x86: false,
+        x64,
+        arm64,
+    };
+    assert!(a(true, true, false).intel_only());
+    assert!(!a(true, true, true).intel_only());
+    assert!(!a(true, false, true).intel_only());
+    assert!(!a(false, true, false).intel_only());
+}
+
+/// A format 3 manifest is held to the 1 MB its own readers allow, even though a format 4 one may
+/// be larger: a laptop cannot pass an old-format list past the old bound.
+#[test]
+fn an_old_format_manifest_keeps_its_old_size_limit() {
+    let items: Vec<Item> = (0..3000)
+        .map(|n| {
+            item(
+                person(&format!("S-{n}-{}", "x".repeat(400))),
+                place(FolderRole::Documents, Storage::SystemDrive),
+                text(&["a.txt"]),
+                n,
+            )
+        })
+        .collect();
+    let none = pctwin_record::AppList::default();
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &none).unwrap();
+    assert!(enc.manifest.len() > 1024 * 1024);
+    assert!(InventoryReader::start(&enc.manifest).is_ok());
+    let mut old = enc.manifest.clone();
+    old[8..12].copy_from_slice(&3u32.to_be_bytes());
+    old.truncate(old.len() - 8);
+    assert!(InventoryReader::start(&old).is_err());
+    // Nor is one written.
+    assert!(pctwin_record::encode_inventory_ordered(&laptop(), &items, &[]).is_err());
+}
+
+/// An app's lists keep their bounds when read.
+#[test]
+fn an_app_with_too_many_installers_is_refused() {
+    let items = one_installer();
+    let mut apps = every_kind_of_app(items[0].id);
+    apps.found[0].installers = vec![items[0].id; pctwin_record::apps::MAX_INSTALLERS];
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &apps).unwrap();
+    // The count byte sits right before the 16 installers; one more is past the bound.
+    let mut forged = enc.manifest.clone();
+    let id = items[0].id;
+    let first = forged
+        .windows(16 * 16)
+        .position(|w| {
+            w.chunks(16).all(|c| {
+                c == id
+                    .to_hex()
+                    .as_bytes()
+                    .chunks(2)
+                    .map(|h| u8::from_str_radix(std::str::from_utf8(h).unwrap(), 16).unwrap())
+                    .collect::<Vec<u8>>()
+                    .as_slice()
+            })
+        })
+        .unwrap();
+    assert_eq!(forged[first - 1], 16);
+    forged[first - 1] = 17;
+    assert!(InventoryReader::start(&forged).is_err());
+    apps.found[0].installers.push(items[0].id);
+    assert!(apps.validate().is_err());
+}
+
+/// Values no writer makes are refused, each where it is read: an unknown kind of maker in place
+/// of one with nothing after it, and processors claimed without being known.
+#[test]
+fn an_app_value_no_writer_makes_is_refused() {
+    let items = one_installer();
+    let apps = every_kind_of_app(items[0].id);
+    let enc = pctwin_record::encode_inventory_with_apps(&laptop(), &items, &[], &apps).unwrap();
+    // "Chat": its snap name, its processors (known, x64: 0b0101) and its maker (unsigned: 6).
+    let at = enc
+        .manifest
+        .windows(6)
+        .position(|w| w == b"chat\x05\x06")
+        .unwrap();
+    let mut forged = enc.manifest.clone();
+    forged[at + 5] = 9;
+    assert!(InventoryReader::start(&forged).is_err());
+    // x64 claimed, "known" not set.
+    let mut forged = enc.manifest.clone();
+    forged[at + 4] = 0b0100;
+    assert!(InventoryReader::start(&forged).is_err());
+    // A bit beyond the four.
+    let mut forged = enc.manifest.clone();
+    forged[at + 4] = 0b1_0101;
+    assert!(InventoryReader::start(&forged).is_err());
 }

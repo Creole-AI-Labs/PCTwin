@@ -1003,7 +1003,9 @@ fn the_built_in_adapters_claim_nothing_they_cannot_do() {
         artifact: h,
         sha256: Hex32(sha(b"x")),
         kind: PackageKind::Msi,
-        scope: InstallScope::Machine,
+        // For the person alone: the helper never runs an installer for that, so nothing is
+        // started here (the real install is proven only by the administrator CI jobs).
+        scope: InstallScope::User,
         maker: Box::new(test_maker()),
     };
     assert!(matches!(
@@ -1022,9 +1024,14 @@ fn the_built_in_adapters_claim_nothing_they_cannot_do() {
     ));
     assert_eq!(a.observe(&restore_point()), Observed::Absent);
     assert_eq!(a.observe(&hibernate()), Observed::Unknown);
+    // Windows' own list holds no product from these bytes; elsewhere it cannot be looked at.
     assert_eq!(
         a.observe(&install_action(1, InstallScope::Machine)),
-        Observed::Unknown
+        if cfg!(windows) {
+            Observed::Absent
+        } else {
+            Observed::Unknown
+        }
     );
     #[cfg(not(windows))]
     assert_eq!(
@@ -1617,4 +1624,188 @@ fn the_helpers_own_maker_check_of_a_real_package() {
         check_package(&held, &action(maker, wrong), &limits),
         MakerCheck::Refused
     );
+}
+
+/// Phase 2.1: a package reaches the helper's own folder only for an install the sealed plan
+/// names by exactly that handle and those bytes, all of them, once; anything else keeps nothing.
+#[test]
+fn a_package_is_kept_only_for_the_sealed_plan_and_only_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let digest = sha(PACKAGE);
+    let plan = ApprovedPlan {
+        generation: 3,
+        operations: vec![PlannedOperation {
+            action_id: id("install.app"),
+            action: install_action(5, InstallScope::Machine),
+        }],
+    };
+    let launch = LaunchSeal {
+        generation: plan.generation,
+        digest: plan.digest(),
+    };
+    let mut authority = FakeAuthority {
+        answer: Consent::Granted,
+        asked: 0,
+        during: None,
+    };
+    let mut journal = FakeJournal::default();
+    let mut adapters = FakeAdapters::default();
+    let clock = Now::real;
+    let mut b = Broker::new(
+        launch,
+        TOKEN,
+        Staging::new(dir.path().to_path_buf()),
+        &mut authority,
+        &mut journal,
+        &mut adapters,
+        &clock,
+    );
+    let size = PACKAGE.len() as u64;
+    // Not before the plan is sealed.
+    assert_eq!(
+        b.stage_begin(5, Hex32(digest), size),
+        Err(Denial::NotSealed)
+    );
+    b.seal(plan).unwrap();
+    // Not a handle or bytes the plan names.
+    assert_eq!(
+        b.stage_begin(6, Hex32(digest), size),
+        Err(Denial::NotInPlan)
+    );
+    assert_eq!(
+        b.stage_begin(5, Hex32([0; 32]), size),
+        Err(Denial::NotInPlan)
+    );
+    // Bytes without a start are refused.
+    assert_eq!(b.stage_bytes(PACKAGE), Err(Denial::NotInPlan));
+    // Other bytes of the right length: nothing kept, nothing left in the folder.
+    b.stage_begin(5, Hex32(digest), size).unwrap();
+    assert_eq!(b.stage_begin(5, Hex32(digest), size), Err(Denial::Replayed));
+    let other = vec![0x5a; PACKAGE.len()];
+    assert_eq!(b.stage_bytes(&other), Err(Denial::Unsafe));
+    assert!(!b.staging().holds(5));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    // More than announced: refused, nothing kept.
+    b.stage_begin(5, Hex32(digest), size - 1).unwrap();
+    assert_eq!(b.stage_bytes(PACKAGE), Err(Denial::Unsafe));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    // In two pieces, exactly: kept as 5, its name beginning with half its SHA-256.
+    b.stage_begin(5, Hex32(digest), size).unwrap();
+    let (a, rest) = PACKAGE.split_at(PACKAGE.len() / 2);
+    assert_eq!(b.stage_bytes(a), Ok(None));
+    assert_eq!(b.stage_bytes(rest), Ok(Some(5)));
+    assert!(b.staging().holds(5));
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 1);
+    assert!(names[0].starts_with(&staging::staged_prefix(&digest)));
+    // Once only.
+    assert_eq!(b.stage_begin(5, Hex32(digest), size), Err(Denial::Replayed));
+    // An abandoned package leaves nothing; a closed broker takes nothing.
+    b.close();
+    assert_eq!(b.stage_begin(5, Hex32(digest), size), Err(Denial::Closed));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+/// An installer program's kind is part of the approved action: the helper checks it is a
+/// Windows program, never an installer package, and the plan cannot name switches.
+#[test]
+fn an_installer_program_is_checked_as_a_program() {
+    let mut a = match install_action(1, InstallScope::Machine) {
+        Action::InstallVerifiedPackage(p) => p,
+        _ => unreachable!(),
+    };
+    a.kind = PackageKind::Exe(ExeKind::Inno);
+    let e = maker::expected_of(&a, pctwin_maker::facts::Arch::X64);
+    assert_eq!(e.formats, vec![pctwin_maker::facts::Format::WindowsProgram]);
+    let json = serde_json::to_string(&Action::InstallVerifiedPackage(a.clone())).unwrap();
+    assert!(json.contains("\"inno\""));
+    // A field for switches does not exist.
+    let with_switches = json.replace("\"scope\"", "\"switches\":\"/S\",\"scope\"");
+    assert!(serde_json::from_str::<Action>(&with_switches).is_err());
+    // Nor a kind PCTwin does not know (Nullsoft has no restart switch).
+    let nsis = json.replace("\"inno\"", "\"nullsoft\"");
+    assert!(serde_json::from_str::<Action>(&nsis).is_err());
+}
+
+/// The Mac App Store action takes a store number and nothing else, asks for an administrator only
+/// on a Mac, and is the installs role's.
+#[test]
+fn the_mac_app_store_action_is_a_number_only() {
+    let a = Action::InstallFromMacAppStore(InstallFromMacAppStore {
+        adam_id: 497_799_835,
+    });
+    assert_eq!(a.audience(), pctwin_grant::Audience::Install);
+    assert_eq!(a.needs_admin(), cfg!(target_os = "macos"));
+    let json = serde_json::to_string(&a).unwrap();
+    assert!(
+        serde_json::from_str::<Action>(&json.replace("497799835", "\"497799835; rm\"")).is_err()
+    );
+    assert!(
+        serde_json::from_str::<Action>(&json.replace("}}", ",\"path\":\"/tmp/mas\"}}")).is_err()
+    );
+}
+
+/// The staging folder's own rules, below the broker: a short package is never kept, a handle is
+/// kept once, and a package part way through when the session closes leaves nothing.
+#[test]
+fn staging_keeps_only_whole_packages_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Staging::new(dir.path().to_path_buf());
+    let digest = sha(PACKAGE);
+    let mut a = s.begin(4, digest, PACKAGE.len() as u64 + 1).unwrap();
+    a.write(PACKAGE).unwrap();
+    assert!(s.finish(a).is_err(), "one byte short");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    let mut a = s.begin(4, digest, PACKAGE.len() as u64).unwrap();
+    a.write(PACKAGE).unwrap();
+    assert_eq!(s.finish(a), Ok(4));
+    assert!(
+        s.begin(4, digest, PACKAGE.len() as u64).is_err(),
+        "kept once"
+    );
+    assert!(s.begin(0, digest, 1).is_err());
+}
+
+#[test]
+fn a_package_part_way_leaves_nothing_when_the_session_closes() {
+    let dir = tempfile::tempdir().unwrap();
+    let digest = sha(PACKAGE);
+    let plan = ApprovedPlan {
+        generation: 3,
+        operations: vec![PlannedOperation {
+            action_id: id("install.app"),
+            action: install_action(5, InstallScope::Machine),
+        }],
+    };
+    let launch = LaunchSeal {
+        generation: plan.generation,
+        digest: plan.digest(),
+    };
+    let mut authority = FakeAuthority {
+        answer: Consent::Granted,
+        asked: 0,
+        during: None,
+    };
+    let mut journal = FakeJournal::default();
+    let mut adapters = FakeAdapters::default();
+    let clock = Now::real;
+    let mut b = Broker::new(
+        launch,
+        TOKEN,
+        Staging::new(dir.path().to_path_buf()),
+        &mut authority,
+        &mut journal,
+        &mut adapters,
+        &clock,
+    );
+    b.seal(plan).unwrap();
+    b.stage_begin(5, Hex32(digest), PACKAGE.len() as u64)
+        .unwrap();
+    assert_eq!(b.stage_bytes(&PACKAGE[..10]), Ok(None));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    b.close();
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }

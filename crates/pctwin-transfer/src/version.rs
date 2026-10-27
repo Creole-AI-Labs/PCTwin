@@ -29,10 +29,20 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// looks to the other like a lost connection. No version was released before 4, so the oldest
 /// spoken is 3, one version back: version 2's one JSON document had none of the paged list's
 /// memory bounds, and a laptop saying it speaks only 2 could otherwise force it.
+///
+/// Version 5 (27 October 2026) sends the apps found on the old laptop with the list (the scan
+/// inventory version 4), and cloud services found on the laptop by their own ID. Version 4 was
+/// given out in test builds, so 5 keeps speaking 4 and 3: with a laptop on 4, an old laptop whose
+/// list holds either asks for PCTwin to be updated there, before anything is sent
+/// ([`APPS_SINCE`]).
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 3,
-    newest: 4,
+    newest: 5,
 };
+
+/// The first move protocol version whose list (the scan inventory version 4) carries the apps
+/// found on the old laptop and cloud services by their ID.
+pub const APPS_SINCE: u16 = 5;
 
 /// The first move protocol version with `Hold` (a pause told to the other laptop).
 pub const HOLD_SINCE: u16 = 4;

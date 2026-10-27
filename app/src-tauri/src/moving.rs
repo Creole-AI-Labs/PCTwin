@@ -1920,6 +1920,9 @@ async fn run_old<R: Runtime>(
             }
         }
     }
+    // Phase 2.1, discovery first: every app on this laptop, with who made each, and the
+    // installers in this move its own maker signed. Read only; nothing is run.
+    record.apps = old_laptop_apps(&sweep.census, &record, &roots);
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,
@@ -2427,6 +2430,57 @@ pub fn move_stop(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
 #[tauri::command]
 pub fn move_report(moving: State<'_, AppMoving>) -> Vec<ReportItem> {
     moving.report()
+}
+
+/// Every app on this laptop (Phase 2.1, step 1), with the installer files in `record` that the
+/// same maker signed (Windows; read by PCTwin's own signature reader, never run).
+fn old_laptop_apps(
+    census: &pctwin_scan::Census,
+    record: &Record,
+    roots: &HashMap<ItemId, std::path::PathBuf>,
+) -> pctwin_record::AppList {
+    let people: Vec<(String, Option<std::path::PathBuf>)> = census
+        .residents
+        .iter()
+        .filter_map(|r| Some((r.account_id.clone()?, r.home.clone())))
+        .collect();
+    #[cfg_attr(
+        not(windows),
+        expect(unused_mut, reason = "installers are linked on Windows only")
+    )]
+    let mut apps = pctwin_apps::found::read_here(&people, &census.me);
+    #[cfg(windows)]
+    {
+        let candidates: Vec<(ItemId, std::path::PathBuf)> = record
+            .items
+            .iter()
+            .filter(|i| i.kind == pctwin_record::ItemKind::File)
+            .filter(|i| {
+                i.path.parts().last().is_some_and(|n| {
+                    let n = n.display().to_ascii_lowercase();
+                    pctwin_apps::found::INSTALLER_ENDINGS
+                        .iter()
+                        .any(|e| n.ends_with(&format!(".{e}")))
+                })
+            })
+            .filter_map(|i| {
+                let mut path = roots.get(&i.id)?.clone();
+                for part in i.path.parts() {
+                    path.push(part.on_disk());
+                }
+                Some((i.id, path))
+            })
+            .take(pctwin_apps::found::MAX_INSTALLER_FILES)
+            .collect();
+        pctwin_apps::found::link_installers(
+            &mut apps,
+            &candidates,
+            &pctwin_maker::windows_old_copy,
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = (record, roots);
+    apps
 }
 
 #[cfg(test)]

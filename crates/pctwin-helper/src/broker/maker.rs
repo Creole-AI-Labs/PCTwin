@@ -54,6 +54,7 @@ pub fn expected_of(action: &InstallVerifiedPackage, arch: Arch) -> Expected {
         maker: Maker::Windows((*action.maker).clone()),
         formats: match action.kind {
             PackageKind::Msi => vec![Format::WindowsInstaller],
+            PackageKind::Exe(_) => vec![Format::WindowsProgram],
         },
         arch,
         bytes: Some(Sha256(action.sha256.0)),

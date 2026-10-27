@@ -1259,6 +1259,43 @@ jobs:
           --ignored --exact an_elevated_install_stopped_before_its_outcome_is_never_done_twice
           --nocapture
 
+  admin-winget:
+    # Phase 2.1, end to end as an administrator: a real signed Windows Installer package is
+    # downloaded with winget as the runner's account, matched to the app by its product code,
+    # kept in the helper's own folder, checked by the helper's own maker check, installed by the
+    # helper's real adapter, found again by its exact bytes in Windows' own list (so a crash never
+    # installs it twice), given its result word, and removed. Only that one test runs.
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
+    name: Admin winget install (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the test
+        shell: bash
+        run: cargo test -p pctwin-apps --test admin_winget --locked --no-run
+      - name: Download, check, install, find by its bytes, remove
+        timeout-minutes: 20
+        shell: bash
+        run: >-
+          cargo test -p pctwin-apps --test admin_winget --locked --
+          --ignored --exact a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes
+          --nocapture
+
   security:
     needs: changes
     if: needs.changes.outputs.security == 'true'
@@ -1289,6 +1326,7 @@ jobs:
       - lab-handoff
       - lab-two-machines
       - admin-e2e
+      - admin-winget
       - security
     runs-on: ubuntu-latest
     timeout-minutes: 5

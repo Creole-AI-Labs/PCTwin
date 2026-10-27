@@ -9,7 +9,12 @@
 //!    jam staging for good).
 //! 1. [`Staging::admit`] copies the bytes into a new file of the helper's own, under a random
 //!    name the helper chose (never one made before, so nothing left behind can be in its way),
-//!    hashing as it writes; a copy whose SHA-256 is not the approved one is removed.
+//!    hashing as it writes; a copy whose SHA-256 is not the approved one is removed. The name
+//!    begins with the first half of the approved SHA-256 ([`staged_prefix`]): Windows Installer
+//!    records the package's name for every product it installs, so after a crash the helper can
+//!    tell from Windows' own list whether these exact bytes were installed (Phase 2.1). The app
+//!    sends the bytes over the channel ([`Staging::begin`], [`Admission`]), only for a package
+//!    the sealed plan names, under the handle the plan gives it.
 //! 2. [`Staging::open_verified`], at the moment of use, opens that file without following a link,
 //!    on Windows so that nobody may write, rename or delete it while it is open (and fails if
 //!    anyone already holds it open for writing), checks it is a plain file, and hashes it again
@@ -82,10 +87,7 @@ impl Staging {
     /// SHA-256 is `expected`. Its handle is returned.
     pub fn admit(&mut self, from: &mut impl Read, expected: [u8; 32]) -> Result<u64, StageError> {
         let handle = self.next;
-        let mut bits = [0u8; 16];
-        getrandom::fill(&mut bits).map_err(|_| StageError::Io)?;
-        let name: String = bits.iter().map(|b| format!("{b:02x}")).collect();
-        let path = self.root.join(format!("p-{name}.pkg"));
+        let path = self.fresh_path(&expected)?;
         let mut out = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -104,6 +106,73 @@ impl Staging {
                 Err(other.err().unwrap_or(StageError::Changed))
             }
         }
+    }
+
+    /// A new file name of the helper's own for a package of `expected` bytes.
+    fn fresh_path(&self, expected: &[u8; 32]) -> Result<PathBuf, StageError> {
+        let mut bits = [0u8; 16];
+        getrandom::fill(&mut bits).map_err(|_| StageError::Io)?;
+        let name: String = bits.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(self
+            .root
+            .join(format!("{}{name}.pkg", staged_prefix(expected))))
+    }
+
+    /// Starts keeping a package sent over the channel as `handle`, of `size` bytes whose SHA-256
+    /// must be `expected`. A handle already kept is refused (one package per handle).
+    pub fn begin(
+        &mut self,
+        handle: u64,
+        expected: [u8; 32],
+        size: u64,
+    ) -> Result<Admission, StageError> {
+        if self.kept.contains_key(&handle) || handle == 0 {
+            return Err(StageError::Unknown);
+        }
+        if size > self.limit {
+            return Err(StageError::TooLarge);
+        }
+        let path = self.fresh_path(&expected)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|_| StageError::Io)?;
+        Ok(Admission {
+            handle,
+            expected,
+            size,
+            path,
+            file: Some(file),
+            hash: Sha256::new(),
+            written: 0,
+        })
+    }
+
+    /// Keeps a finished admission: its bytes are exactly `size` long and their SHA-256 is the
+    /// approved one, or the file is removed.
+    pub fn finish(&mut self, mut a: Admission) -> Result<u64, StageError> {
+        let result = match a.file.take() {
+            Some(f) if a.written == a.size => f.sync_all().map_err(|_| StageError::Io),
+            _ => Err(StageError::Changed),
+        };
+        let digest: [u8; 32] = std::mem::take(&mut a.hash).finalize().into();
+        match result {
+            Ok(()) if digest == a.expected && !self.kept.contains_key(&a.handle) => {
+                self.kept.insert(a.handle, a.path.clone());
+                self.next = self.next.max(a.handle + 1);
+                Ok(a.handle)
+            }
+            other => {
+                let _ = std::fs::remove_file(&a.path);
+                Err(other.err().unwrap_or(StageError::Changed))
+            }
+        }
+    }
+
+    /// Whether `handle` is kept.
+    pub fn holds(&self, handle: u64) -> bool {
+        self.kept.contains_key(&handle)
     }
 
     /// The package `handle`, opened and checked again as described above.
@@ -139,6 +208,57 @@ impl Staging {
     #[cfg(test)]
     pub(crate) fn path_of(&self, handle: u64) -> Option<&Path> {
         self.kept.get(&handle).map(PathBuf::as_path)
+    }
+}
+
+/// The start of every staged file's name for a package of `sha256` bytes: `p-`, then the first
+/// 16 bytes of the SHA-256 in hexadecimal, then `-`.
+pub fn staged_prefix(sha256: &[u8; 32]) -> String {
+    let half: String = sha256[..16].iter().map(|b| format!("{b:02x}")).collect();
+    format!("p-{half}-")
+}
+
+/// A package arriving over the channel, written as it comes and hashed as it is written.
+pub struct Admission {
+    handle: u64,
+    expected: [u8; 32],
+    size: u64,
+    path: PathBuf,
+    file: Option<File>,
+    hash: Sha256,
+    written: u64,
+}
+
+impl Admission {
+    /// The next bytes. More than announced is refused (and the file removed by
+    /// [`Staging::finish`] or on drop).
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), StageError> {
+        if self.written + bytes.len() as u64 > self.size {
+            return Err(StageError::TooLarge);
+        }
+        let f = self.file.as_mut().ok_or(StageError::Changed)?;
+        f.write_all(bytes).map_err(|_| StageError::Io)?;
+        self.hash.update(bytes);
+        self.written += bytes.len() as u64;
+        Ok(())
+    }
+
+    /// Whether every announced byte has arrived.
+    pub fn complete(&self) -> bool {
+        self.written == self.size
+    }
+
+    pub fn handle(&self) -> u64 {
+        self.handle
+    }
+}
+
+impl Drop for Admission {
+    /// One never finished leaves nothing behind.
+    fn drop(&mut self) {
+        if self.file.take().is_some() {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 

@@ -767,3 +767,78 @@ async fn a_folder_too_big_to_list_asks_an_older_new_laptop_to_update() {
     s.unwrap();
     assert_eq!(got.unwrap().items, r.items);
 }
+
+/// Phase 2.1, step 1: the apps found on the old laptop cross with the list from move protocol 5,
+/// and count in the fingerprint of what crossed. A new laptop on 4 or 3 is asked to update
+/// before anything is sent (it would otherwise refuse the list as damaged), whether the list
+/// holds apps or a cloud service by its ID; a list with neither still crosses to it as before.
+#[tokio::test]
+async fn apps_cross_from_protocol_five_and_an_older_new_laptop_is_asked_to_update() {
+    use pctwin_record::*;
+    let mut r = record(3);
+    r.apps.found.push(FoundApp {
+        name: "Writer".into(),
+        version: Some("2.0".into()),
+        publisher: None,
+        owner: Owner::Shared,
+        system: AppSystem::Windows,
+        found: FoundWhere::WindowsEntry {
+            view: RegistryView::Machine,
+            key: "Writer".into(),
+            product_code: None,
+        },
+        arch: AppArch::UNKNOWN,
+        maker: AppMaker::Unsigned,
+        web: None,
+        update_feed: None,
+        installers: vec![],
+        notes: vec![],
+    });
+    let (mut old, mut new) = pair();
+    let (s, got) = tokio::join!(
+        send_inventory(&mut old, &r, pctwin_transfer::APPS_SINCE),
+        receive_inventory(&mut new, pctwin_transfer::APPS_SINCE)
+    );
+    s.unwrap();
+    let got = got.unwrap();
+    assert_eq!(got.apps, r.apps);
+    assert_eq!(got.items, r.items);
+    let crossed = encode_inventory_with_apps(&r.source_laptop, &r.items, &r.personal, &r.apps)
+        .unwrap()
+        .fingerprint();
+    assert_eq!(got.inventory, Some(crossed));
+
+    let mut cloud = record(3);
+    cloud.items[0].place.storage = Storage::Cloud {
+        provider: CloudProvider::new("pcloud").unwrap(),
+    };
+    for older in [pctwin_transfer::PERSONAL_SINCE, PAGED] {
+        for asks in [&r, &cloud] {
+            let (mut old, new) = pair();
+            let sent = send_inventory(&mut old, asks, older).await;
+            assert!(
+                matches!(
+                    sent,
+                    Err(TransferError::VersionGap(
+                        pctwin_transfer::VersionGap::OtherLaptopOlder
+                    ))
+                ),
+                "{sent:?}"
+            );
+            drop(old);
+            let mut new = new;
+            assert!(matches!(
+                receive_inventory(&mut new, older).await,
+                Err(TransferError::ConnectionDropped)
+            ));
+        }
+        let plain = record(3);
+        let (mut old, mut new) = pair();
+        let (s, got) = tokio::join!(
+            send_inventory(&mut old, &plain, older),
+            receive_inventory(&mut new, older)
+        );
+        s.unwrap();
+        assert_eq!(got.unwrap().items, plain.items);
+    }
+}

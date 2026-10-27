@@ -35,6 +35,7 @@
 //! secret.
 
 pub mod actions;
+pub mod installs;
 pub mod journal;
 pub mod maker;
 pub mod receipt;
@@ -55,10 +56,13 @@ use serde::{Deserialize, Serialize};
 
 use pctwin_grant::{Audience, Expiry, MAX_LIFETIME, Now};
 
-use actions::{Action, ApprovedPlan, Hex16, Hex32, Id, InstallVerifiedPackage, NamedSetting};
+use actions::{
+    Action, ApprovedPlan, Hex16, Hex32, Id, InstallFromMacAppStore, InstallVerifiedPackage,
+    NamedSetting,
+};
 use receipt::{Outcome, Receipt};
 use restore::RestorePointResult;
-use staging::{StageError, Staging, VerifiedArtifact};
+use staging::{Admission, StageError, Staging, VerifiedArtifact};
 
 /// The broker's protocol version. An app that speaks another is refused.
 pub const PROTOCOL: u32 = 1;
@@ -307,6 +311,14 @@ pub trait Adapters {
     ) -> Effect;
     fn apply_setting(&mut self, setting: &NamedSetting, stop: &Revoker) -> Effect;
     fn restore_point(&mut self, stop: &Revoker) -> Effect;
+    /// Installs one app from the Mac App Store (only on a Mac, with a root-owned `mas`).
+    fn install_from_store(&mut self, action: &InstallFromMacAppStore, stop: &Revoker) -> Effect {
+        let _ = (action, stop);
+        Effect::Failed {
+            code: NOT_AVAILABLE,
+            native: NativeText::new(""),
+        }
+    }
     /// Whether `action` is really in place now (after the helper stopped mid-way).
     fn observe(&mut self, action: &Action) -> Observed;
     /// The helper's own maker check of `package`, held, for `action` ([`maker::check_package`]
@@ -318,8 +330,9 @@ pub trait Adapters {
     ) -> maker::MakerCheck;
 }
 
-/// The adapters this build has: installers and settings come with 2.1 and 2.4, so they say "not
-/// available"; the restore point is Windows' own.
+/// The adapters this build has: installs (2.1: Windows Installer packages and installer programs
+/// of a known kind, and the Mac App Store; [`installs`]), and Windows' own restore point.
+/// Settings come with 2.4, so they say "not available".
 pub struct BuiltInAdapters;
 
 /// The code for "this laptop cannot do that yet".
@@ -334,11 +347,19 @@ impl Adapters for BuiltInAdapters {
         maker::check_package(package, action, &pctwin_maker::Limits::default())
     }
 
-    fn install(&mut self, _: &VerifiedArtifact, _: &InstallVerifiedPackage, _: &Revoker) -> Effect {
-        Effect::Failed {
-            code: NOT_AVAILABLE,
-            native: NativeText::new(""),
-        }
+    /// The installer runs to its end once started, whatever stop arrives meanwhile: stopping one
+    /// part way can leave an app half installed. Its real result is reported.
+    fn install(
+        &mut self,
+        package: &VerifiedArtifact,
+        action: &InstallVerifiedPackage,
+        _: &Revoker,
+    ) -> Effect {
+        installs::install(package, action)
+    }
+
+    fn install_from_store(&mut self, action: &InstallFromMacAppStore, _: &Revoker) -> Effect {
+        installs::install_from_store(action)
     }
 
     fn apply_setting(&mut self, _: &NamedSetting, _: &Revoker) -> Effect {
@@ -372,7 +393,15 @@ impl Adapters for BuiltInAdapters {
     fn observe(&mut self, action: &Action) -> Observed {
         match action {
             Action::CreateRestorePoint(_) => Observed::Absent,
-            Action::InstallVerifiedPackage(_) | Action::ApplyNamedSetting(_) => Observed::Unknown,
+            #[cfg(windows)]
+            Action::InstallVerifiedPackage(p) => installs::observed(
+                p,
+                installs::running_command_lines(),
+                installs::installed_package_names(),
+            ),
+            #[cfg(not(windows))]
+            Action::InstallVerifiedPackage(_) => Observed::Unknown,
+            Action::InstallFromMacAppStore(_) | Action::ApplyNamedSetting(_) => Observed::Unknown,
         }
     }
 }
@@ -396,6 +425,8 @@ pub struct Broker<'a> {
     revoker: Revoker,
     receipt_key: [u8; 32],
     staging: Staging,
+    /// A package arriving from the app, for the sealed plan.
+    admission: Option<Admission>,
     authority: &'a mut dyn NativeAuthority,
     journal: &'a mut dyn IntentJournal,
     adapters: &'a mut dyn Adapters,
@@ -422,6 +453,7 @@ impl<'a> Broker<'a> {
             revoker: Revoker::default(),
             receipt_key: receipt::receipt_key(session_token),
             staging,
+            admission: None,
             authority,
             journal,
             adapters,
@@ -435,9 +467,61 @@ impl<'a> Broker<'a> {
         self.revoker.clone()
     }
 
-    /// The helper's packages (filled by 2.1's staging, later).
+    /// The helper's packages.
     pub fn staging(&mut self) -> &mut Staging {
         &mut self.staging
+    }
+
+    /// Starts taking package `artifact` from the app: `size` bytes whose SHA-256 is `sha256`.
+    /// Only for a package an install of the sealed plan names by exactly that handle and those
+    /// bytes, once, and one at a time.
+    pub fn stage_begin(&mut self, artifact: u64, sha256: Hex32, size: u64) -> Result<(), Denial> {
+        self.still_open()?;
+        let plan = self.plan.as_ref().ok_or(Denial::NotSealed)?;
+        let named = plan.operations.iter().any(|o| {
+            matches!(&o.action, Action::InstallVerifiedPackage(p)
+                if p.artifact == artifact && p.sha256 == sha256)
+        });
+        if !named {
+            return Err(Denial::NotInPlan);
+        }
+        if self.admission.is_some() || self.staging.holds(artifact) {
+            return Err(Denial::Replayed);
+        }
+        self.admission = Some(
+            self.staging
+                .begin(artifact, sha256.0, size)
+                .map_err(|_| Denial::Unsafe)?,
+        );
+        Ok(())
+    }
+
+    /// Drops the package being taken (nothing of it is kept).
+    pub fn stage_abort(&mut self) {
+        self.admission = None;
+    }
+
+    /// The next bytes of the package being taken. `Ok(Some(handle))` once every byte has come
+    /// and they are the approved ones.
+    pub fn stage_bytes(&mut self, bytes: &[u8]) -> Result<Option<u64>, Denial> {
+        if let Err(e) = self.still_open() {
+            self.admission = None;
+            return Err(e);
+        }
+        let Some(a) = self.admission.as_mut() else {
+            return Err(Denial::NotInPlan);
+        };
+        if a.write(bytes).is_err() {
+            self.admission = None;
+            return Err(Denial::Unsafe);
+        }
+        if !a.complete() {
+            return Ok(None);
+        }
+        let Some(a) = self.admission.take() else {
+            return Err(Denial::Unsafe);
+        };
+        self.staging.finish(a).map(Some).map_err(|_| Denial::Unsafe)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -471,6 +555,7 @@ impl<'a> Broker<'a> {
         self.plan = None;
         self.lease = None;
         self.deadline = None;
+        self.admission = None;
         self.staging.clear();
     }
 
@@ -643,6 +728,7 @@ impl<'a> Broker<'a> {
             (Action::InstallVerifiedPackage(p), Some(package)) => {
                 self.adapters.install(package, p, &stop)
             }
+            (Action::InstallFromMacAppStore(a), _) => self.adapters.install_from_store(a, &stop),
             (Action::ApplyNamedSetting(s), _) => self.adapters.apply_setting(&s.setting, &stop),
             (Action::CreateRestorePoint(_), _) => self.adapters.restore_point(&stop),
             (Action::InstallVerifiedPackage(_), None) => return Err(Denial::Unsafe),
