@@ -387,15 +387,106 @@ pub enum FolderRole {
     Other,
 }
 
-/// A cloud storage service whose folder is on the laptop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CloudProvider {
-    OneDrive,
-    ICloud,
-    Dropbox,
-    GoogleDrive,
-    Other,
+/// A cloud storage service whose folder is on the laptop, by an open ID (Phase 2 adoption,
+/// changes 7 and 8): any service found on the laptop gets one, whether or not PCTwin has a
+/// catalogue row naming it. An ID is 1 to [`CloudProvider::MAX_ID`] bytes of `a-z`, `0-9` and
+/// `-`, not starting or ending with `-`. The first five IDs are the ones every earlier record
+/// used (`one-drive`, `i-cloud`, `dropbox`, `google-drive`, `other`), so earlier records, item
+/// IDs and fingerprints read the same; [`CloudProvider::Other`] stays "a cloud PCTwin found but
+/// could not tell which".
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CloudProvider {
+    len: u8,
+    id: [u8; CloudProvider::MAX_ID],
+}
+
+#[allow(non_upper_case_globals)]
+impl CloudProvider {
+    /// The longest ID, in bytes.
+    pub const MAX_ID: usize = 15;
+    pub const OneDrive: Self = Self::fixed("one-drive");
+    pub const ICloud: Self = Self::fixed("i-cloud");
+    pub const Dropbox: Self = Self::fixed("dropbox");
+    pub const GoogleDrive: Self = Self::fixed("google-drive");
+    /// A cloud PCTwin found but could not tell which.
+    pub const Other: Self = Self::fixed("other");
+
+    const fn fixed(id: &str) -> Self {
+        let bytes = id.as_bytes();
+        assert!(Self::ok(bytes), "a fixed provider ID is valid");
+        let mut out = [0u8; Self::MAX_ID];
+        let mut i = 0;
+        while i < bytes.len() {
+            out[i] = bytes[i];
+            i += 1;
+        }
+        Self {
+            len: bytes.len() as u8,
+            id: out,
+        }
+    }
+
+    const fn ok(b: &[u8]) -> bool {
+        if b.is_empty() || b.len() > Self::MAX_ID || b[0] == b'-' || b[b.len() - 1] == b'-' {
+            return false;
+        }
+        let mut i = 0;
+        while i < b.len() {
+            if !(b[i].is_ascii_lowercase() || b[i].is_ascii_digit() || b[i] == b'-') {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    /// A provider by its ID, checked.
+    pub fn new(id: &str) -> Option<Self> {
+        Self::ok(id.as_bytes()).then(|| Self::fixed(id))
+    }
+
+    /// A provider's ID made from the name a laptop gave it (a sync root's provider name, a cloud
+    /// folder's name): lower case, every run of other characters one `-`, cut to
+    /// [`MAX_ID`](Self::MAX_ID). A name with nothing usable in it is [`Other`](Self::Other).
+    pub fn from_found_name(name: &str) -> Self {
+        let mut id = String::new();
+        for c in name.chars() {
+            if id.len() >= Self::MAX_ID {
+                break;
+            }
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                id.push(c);
+            } else if !id.is_empty() && !id.ends_with('-') {
+                id.push('-');
+            }
+        }
+        Self::new(id.trim_end_matches('-')).unwrap_or(Self::Other)
+    }
+
+    pub fn as_str(&self) -> &str {
+        // Only checked ASCII is ever stored.
+        std::str::from_utf8(&self.id[..usize::from(self.len)]).unwrap_or("other")
+    }
+}
+
+impl std::fmt::Debug for CloudProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CloudProvider({})", self.as_str())
+    }
+}
+
+impl Serialize for CloudProvider {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CloudProvider {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::new(&s).ok_or_else(|| serde::de::Error::custom("not a cloud provider ID"))
+    }
 }
 
 /// Where a folder really is.

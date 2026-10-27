@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "catalogue": "cloud-providers",
+  "version": 1,
+  "rows": [
+    {
+      "id": "one-drive",
+      "name": "OneDrive",
+      "found-as": ["OneDrive"],
+      "personal-accounts": ["", "Personal"],
+      "routes": [
+        {"env": {"system": "windows", "name": "OneDrive"}},
+        {"env": {"system": "windows", "name": "OneDriveConsumer"}},
+        {"env": {"system": "windows", "name": "OneDriveCommercial", "work": true}},
+        {"registry": {"system": "windows", "key": "HKCU\\Software\\Microsoft\\OneDrive\\Accounts", "value": "UserFolder"}}
+      ]
+    },
+    {
+      "id": "i-cloud",
+      "name": "iCloud Drive",
+      "found-as": ["iCloudDrive", "iCloud"],
+      "routes": [
+        {"folder": {"system": "windows", "base": "home", "path": ["iCloudDrive"]}},
+        {"folder": {"system": "mac", "base": "home", "path": ["Library", "Mobile Documents", "com~apple~CloudDocs"]}}
+      ]
+    },
+    {
+      "id": "dropbox",
+      "name": "Dropbox",
+      "found-as": ["Dropbox"],
+      "personal-accounts": ["", "Personal"],
+      "routes": [
+        {"json-accounts": {"system": "windows", "base": "local-app-data", "file": ["Dropbox", "info.json"]}},
+        {"json-accounts": {"system": "windows", "base": "app-data", "file": ["Dropbox", "info.json"]}},
+        {"json-accounts": {"system": "mac", "base": "home", "file": [".dropbox", "info.json"]}},
+        {"json-accounts": {"system": "linux", "base": "home", "file": [".dropbox", "info.json"]}},
+        {"folder": {"system": "mac", "base": "home", "path": ["Dropbox"]}},
+        {"folder": {"system": "linux", "base": "home", "path": ["Dropbox"]}}
+      ]
+    },
+    {
+      "id": "google-drive",
+      "name": "Google Drive",
+      "found-as": ["GoogleDrive", "Google Drive", "DriveFS"]
+    },
+    {
+      "id": "box",
+      "name": "Box",
+      "found-as": ["Box"]
+    },
+    {
+      "id": "mega",
+      "name": "MEGA",
+      "found-as": ["MEGA", "MEGAsync"]
+    },
+    {
+      "id": "pcloud",
+      "name": "pCloud",
+      "found-as": ["pCloud", "pCloudDrive"],
+      "routes": [
+        {"folder": {"system": "linux", "base": "home", "path": ["pCloudDrive"]}}
+      ]
+    },
+    {
+      "id": "nextcloud",
+      "name": "Nextcloud",
+      "found-as": ["Nextcloud"]
+    },
+    {
+      "id": "proton-drive",
+      "name": "Proton Drive",
+      "found-as": ["ProtonDrive", "Proton Drive"]
+    }
+  ]
+}

@@ -181,10 +181,19 @@ impl Writer {
                 label(drive)?;
                 self.bytes(drive.as_bytes())?;
             }
-            Storage::Cloud { provider } => {
-                self.u8(2);
-                self.u8(provider_code(*provider));
-            }
+            Storage::Cloud { provider } => match provider_code(*provider) {
+                Some(code) => {
+                    self.u8(2);
+                    self.u8(code);
+                }
+                // A provider found on the laptop beyond the first five: by its ID. A reader
+                // from before open provider IDs refuses this place kind as damaged; it never
+                // reads it as another provider.
+                None => {
+                    self.u8(3);
+                    self.bytes(provider.as_str().as_bytes())?;
+                }
+            },
         }
         Ok(())
     }
@@ -692,6 +701,17 @@ impl<'a> Reader<'a> {
             2 => Storage::Cloud {
                 provider: provider_of(self.u8()?)?,
             },
+            3 => {
+                let id = self.text(CloudProvider::MAX_ID)?;
+                match CloudProvider::new(&id) {
+                    // The five with codes are only ever written by code: one written by its ID
+                    // is not how this app writes it.
+                    Some(provider) if provider_code(provider).is_none() => {
+                        Storage::Cloud { provider }
+                    }
+                    _ => return Err(bad("a cloud service ID that breaks the rules")),
+                }
+            }
             _ => return Err(bad("an unknown kind of place")),
         };
         Ok(Place { role, storage })
@@ -1128,19 +1148,30 @@ codes!(
         FolderRole::Other = 9,
     ]
 );
-codes!(
-    provider_code,
-    provider_of,
-    CloudProvider,
-    "an unknown cloud service",
-    [
-        CloudProvider::OneDrive = 0,
-        CloudProvider::ICloud = 1,
-        CloudProvider::Dropbox = 2,
-        CloudProvider::GoogleDrive = 3,
-        CloudProvider::Other = 4,
-    ]
-);
+/// The five providers every inventory could carry, by their one-byte codes. Any other provider
+/// is written by its ID (place kind 3).
+const PROVIDER_CODES: [(CloudProvider, u8); 5] = [
+    (CloudProvider::OneDrive, 0),
+    (CloudProvider::ICloud, 1),
+    (CloudProvider::Dropbox, 2),
+    (CloudProvider::GoogleDrive, 3),
+    (CloudProvider::Other, 4),
+];
+
+fn provider_code(p: CloudProvider) -> Option<u8> {
+    PROVIDER_CODES
+        .iter()
+        .find(|(known, _)| *known == p)
+        .map(|(_, n)| *n)
+}
+
+fn provider_of(n: u8) -> Result<CloudProvider, RecordError> {
+    PROVIDER_CODES
+        .iter()
+        .find(|(_, code)| *code == n)
+        .map(|(p, _)| *p)
+        .ok_or_else(|| bad("an unknown cloud service"))
+}
 codes!(
     portability_code,
     portability_of,
@@ -1204,6 +1235,8 @@ mod tests {
     /// with its key.
     #[test]
     fn the_fixed_costs_cover_the_real_sizes() {
+        // An open cloud provider ID is kept inside the place, as small as the closed list was.
+        assert!(size_of::<Storage>() <= 24, "{}", size_of::<Storage>());
         assert!(
             3 * size_of::<Item>() + 2 * size_of::<ItemId>() <= (ITEM_COST - PLAN_ROOM) as usize
         );

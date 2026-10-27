@@ -80,15 +80,10 @@ pub enum Whose<'a> {
     Other { name: &'a str },
 }
 
-/// The provider's own name, or `None` for one PCTwin does not know.
+/// The provider's own name from the `cloud-providers` catalogue, or `None` for one no row names
+/// yet (found on the laptop all the same; the words then say "your cloud storage").
 pub fn provider_name(provider: CloudProvider) -> Option<&'static str> {
-    match provider {
-        CloudProvider::OneDrive => Some("OneDrive"),
-        CloudProvider::ICloud => Some("iCloud Drive"),
-        CloudProvider::Dropbox => Some("Dropbox"),
-        CloudProvider::GoogleDrive => Some("Google Drive"),
-        CloudProvider::Other => None,
-    }
+    pctwin_scan::clouds::provider_name(provider)
 }
 
 fn named(provider: CloudProvider) -> Option<CloudProvider> {

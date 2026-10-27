@@ -536,3 +536,89 @@ fn a_record_without_a_personal_order_is_written_exactly_as_before() {
     let json = String::from_utf8(record.to_json()).unwrap();
     assert!(json.contains("\"personal\":"), "{json}");
 }
+
+/// Phase 2 adoption, changes 7 and 8: a cloud service's ID is open and checked; the first five
+/// are written exactly as every earlier record wrote them.
+#[test]
+fn cloud_service_ids_are_open_and_checked() {
+    for (p, id) in [
+        (CloudProvider::OneDrive, "one-drive"),
+        (CloudProvider::ICloud, "i-cloud"),
+        (CloudProvider::Dropbox, "dropbox"),
+        (CloudProvider::GoogleDrive, "google-drive"),
+        (CloudProvider::Other, "other"),
+    ] {
+        assert_eq!(p.as_str(), id);
+        assert_eq!(serde_json::to_string(&p).unwrap(), format!("\"{id}\""));
+        assert_eq!(CloudProvider::new(id), Some(p));
+    }
+    for ok in ["box", "a", "mega-2", "x23456789012345"] {
+        assert_eq!(CloudProvider::new(ok).unwrap().as_str(), ok);
+        let json = format!("\"{ok}\"");
+        let back: CloudProvider = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.as_str(), ok);
+    }
+    for bad in [
+        "",
+        "-box",
+        "box-",
+        "Box",
+        "b x",
+        "b_x",
+        "x234567890123456",
+        "b.x",
+        "b\u{e9}",
+    ] {
+        assert_eq!(CloudProvider::new(bad), None, "{bad:?}");
+        let json = serde_json::to_string(bad).unwrap();
+        assert!(
+            serde_json::from_str::<CloudProvider>(&json).is_err(),
+            "{bad:?}"
+        );
+    }
+    assert_ne!(CloudProvider::new("box"), Some(CloudProvider::Other));
+    assert_eq!(
+        format!("{:?}", CloudProvider::new("box").unwrap()),
+        "CloudProvider(box)"
+    );
+}
+
+#[test]
+fn a_found_name_becomes_an_id() {
+    for (name, id) in [
+        ("Box", "box"),
+        ("GoogleDrive", "googledrive"),
+        ("iCloudDrive", "iclouddrive"),
+        ("Sync.com  Vault!", "sync-com-vault"),
+        ("--Mega--", "mega"),
+        ("A Very Long Provider Name Indeed", "a-very-long-pro"),
+        ("Long name ending in a-", "long-name-endin"),
+        ("abcdefghijklmn x", "abcdefghijklmn"),
+        ("\u{e9}t\u{e9}", "t"),
+    ] {
+        assert_eq!(CloudProvider::from_found_name(name).as_str(), id, "{name}");
+    }
+    for nothing in ["", "---", "\u{e9}\u{e9}"] {
+        assert_eq!(
+            CloudProvider::from_found_name(nothing),
+            CloudProvider::Other
+        );
+    }
+}
+
+/// A record holding a found cloud service's ID reads back exactly, and a broken ID is refused.
+#[test]
+fn a_record_keeps_a_found_cloud_service() {
+    let mut item = ada_file("a.pdf");
+    item.place.storage = Storage::Cloud {
+        provider: CloudProvider::new("pcloud").unwrap(),
+    };
+    item.id = ItemId::derive(&laptop(), &item.owner, &item.place, &item.path);
+    let record = record_with(vec![item]);
+    let json = record.to_json();
+    assert_eq!(Record::from_json(&json).unwrap(), record);
+    let text = String::from_utf8(json).unwrap();
+    assert!(text.contains("\"pcloud\""));
+    let broken = text.replace("\"pcloud\"", "\"P Cloud\"");
+    assert!(Record::from_json(broken.as_bytes()).is_err());
+}

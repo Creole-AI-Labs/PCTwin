@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 blake3 = "1.8"
+# Known names, places and routes as data: they only add to what is found.
+pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-types = { path = "../pctwin-types" }
 cfb = "0.15"
 dirs = "7.0.0"
@@ -35,6 +37,7 @@ thread-priority = "3.1.1"
 rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
+pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 proptest = "1.11.0"
 
 [lints]

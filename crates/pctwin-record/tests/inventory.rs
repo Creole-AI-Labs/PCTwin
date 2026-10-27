@@ -933,3 +933,50 @@ fn a_personal_order_naming_what_is_not_there_is_refused() {
     let too_many = vec![first; pctwin_record::MAX_PERSONAL + 1];
     assert!(pctwin_record::encode_inventory_ordered(&laptop(), &items, &too_many).is_err());
 }
+
+/// Phase 2 adoption, changes 7 and 8: a cloud service found on the laptop beyond the first five
+/// crosses by its own ID, exactly; the first five keep their one-byte codes.
+#[test]
+fn a_found_cloud_service_crosses_by_its_id() {
+    let found = |id: &str| {
+        place(
+            FolderRole::Documents,
+            Storage::Cloud {
+                provider: CloudProvider::new(id).unwrap(),
+            },
+        )
+    };
+    let items = vec![
+        item(person("S-1"), found("zzzzzzz"), text(&["a.txt"]), 1),
+        item(person("S-1"), found("pcloud"), text(&["b.txt"]), 2),
+        item(
+            person("S-1"),
+            place(
+                FolderRole::Pictures,
+                Storage::Cloud {
+                    provider: CloudProvider::Dropbox,
+                },
+            ),
+            text(&["c.jpg"]),
+            3,
+        ),
+    ];
+    let enc = encode_inventory(&laptop(), &items).unwrap();
+    let (_, back, _) = decode_inventory(&enc).unwrap();
+    assert_eq!(back, items);
+    assert_eq!(encode_inventory(&laptop(), &back).unwrap(), enc);
+
+    // One of the first five written by its ID is not how any PCTwin writes it: refused.
+    let at = enc
+        .manifest
+        .windows(7)
+        .position(|w| w == b"zzzzzzz")
+        .unwrap();
+    let mut forged = enc.clone();
+    forged.manifest[at..at + 7].copy_from_slice(b"dropbox");
+    assert!(decode_inventory(&forged).is_err());
+    // Nor an ID that breaks the rules.
+    let mut bad = enc.clone();
+    bad.manifest[at..at + 7].copy_from_slice(b"ZZZZZZZ");
+    assert!(decode_inventory(&bad).is_err());
+}

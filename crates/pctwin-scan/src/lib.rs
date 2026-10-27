@@ -35,6 +35,7 @@
 mod access;
 mod acl;
 mod census;
+pub mod clouds;
 mod drives;
 mod folders;
 mod health;
@@ -64,7 +65,8 @@ pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
 };
 pub use folders::{
-    Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders, managed_by,
+    Facts, FolderLookup, FoundFolder, classify, facts_from_clouds, facts_from_system,
+    find_special_folders, managed_by,
 };
 pub use health::{
     Health, ReadPlan, health_from_diskutil, health_from_get_physical_disk, health_from_udisks,
@@ -74,8 +76,9 @@ pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
 };
 pub use mail::{
-    MailAccounts, apple_mail_accounts_in, mail_accounts, outlook_accounts_in,
-    thunderbird_accounts_in,
+    MailAccounts, MailClientRow, MailStore, StoreKind, Walk, mac_mail_accounts_in, mail_accounts,
+    mapi_accounts_in, name_stores, names_mail_servers, office_version_keys,
+    profile_mail_accounts_in, profile_paths_in, shape_of, shipped_mail_clients, worth_a_look,
 };
 pub use marks::{MarkSample, has_download_mark, sample_folder};
 pub use measure::{
