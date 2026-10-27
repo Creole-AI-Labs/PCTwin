@@ -1,0 +1,23 @@
+[package]
+name = "pctwin-special"
+description = "Phase 2.5 special categories: finds app data by general rules, tells what each file is by its content, decides per component who holds the key (portable, service-held, own export, machine-bound), captures live databases consistently and lands them through the safety gate with honest results"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-types = { path = "../pctwin-types" }
+pctwin-record = { path = "../pctwin-record" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+blake3 = "1.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

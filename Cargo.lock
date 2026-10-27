@@ -4119,6 +4119,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-special"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pctwin-record",
+ "pctwin-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pctwin-staged-seal"
 version = "0.1.0"
 
