@@ -55,7 +55,9 @@
 //!   and `os_session_on_screen` (whether the helper's session is still on the screen: switching
 //!   person ends the broker's grants); and, added 27 October 2026 after the second review
 //!   (awaiting the user's approval), `os_win_verify_trust` (Windows' own signature check on a
-//!   held file, replacing PowerShell, whose answer code in the person's folders could replace).
+//!   held file, replacing PowerShell, whose answer code in the person's folders could replace)
+//!   and `os_disk_hotplug` (whether a disk can be unplugged: an NVMe disk in a Thunderbolt or USB4
+//!   case reports a bus inside the laptop).
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`, `os_authorization_holds`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -78,8 +80,9 @@ pub mod signin;
 mod win;
 #[cfg(windows)]
 pub use win::{
-    FileTrust, PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder, caller_of,
-    clean_command, defender_scanner, minimal_env, program_folder, system_folder, verify_file_trust,
+    DiskHotplug, FileTrust, PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder,
+    caller_of, clean_command, defender_scanner, disk_hotplug, minimal_env, program_folder,
+    system_folder, verify_file_trust,
 };
 
 #[cfg(unix)]

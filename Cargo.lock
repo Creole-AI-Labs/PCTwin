@@ -3769,6 +3769,7 @@ dependencies = [
  "getrandom 0.4.3",
  "keyring-core",
  "pctwin-grant",
+ "pctwin-helper-os",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",

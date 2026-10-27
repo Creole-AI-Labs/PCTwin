@@ -17,6 +17,13 @@
 //! Each ends the session's grants through the broker's [`Revoker`]: nothing new starts in this
 //! session, ever (an installer already running finishes and reports what really happened).
 //!
+//! What does not end the grants, by design (second review, 27 October 2026): **locking the
+//! screen**. A locked session is still the active one on the screen and keyboard (nobody else is
+//! using the laptop), so grants given before the lock stay until the lease or the session's
+//! deadline runs out, sleep, sign-out or a switch of user. And with the administrator prompt
+//! turned off (UAC off), an administrator's programs run with full rights: the app then reads as
+//! elevated and refuses to start apps (T22-020), which fails safe rather than open.
+//!
 //! Not yet proven: switching user on Mac and Linux (fast user switching keeps the helper's
 //! session alive there, and no safe system call for it is wired yet); the sleep check on a real
 //! laptop going to sleep (proven here with the clocks given to the watcher).

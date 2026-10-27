@@ -39,6 +39,8 @@ use windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW,
     GetVolumePathNameW, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
 };
+use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::Ioctl::{IOCTL_STORAGE_GET_HOTPLUG_INFO, STORAGE_HOTPLUG_INFO};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
     ImpersonateNamedPipeClient, NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
@@ -941,7 +943,65 @@ fn os_win_verify_trust(file: BorrowedHandle<'_>, path: &[u16]) -> (i32, Option<V
     r
 }
 
+/// Whether a disk (opened for no access, only to be asked) says it can be removed: its hotplug
+/// information (`IOCTL_STORAGE_GET_HOTPLUG_INFO`), which needs no administrator. Added
+/// 27 October 2026 (second review, low finding: an NVMe disk in a Thunderbolt or USB4 case reads
+/// as a bus inside the laptop), awaiting the user's approval.
+fn os_disk_hotplug(disk: BorrowedHandle<'_>) -> Result<STORAGE_HOTPLUG_INFO, HRESULT> {
+    let mut info = STORAGE_HOTPLUG_INFO {
+        Size: std::mem::size_of::<STORAGE_HOTPLUG_INFO>() as u32,
+        ..Default::default()
+    };
+    let mut returned = 0u32;
+    // SAFETY: the handle is borrowed for the call; no input is passed; the output is `info`,
+    // whose true size is passed, so the system cannot write past it; the call is synchronous
+    // (no overlapped structure), so nothing is written after it returns.
+    #[expect(unsafe_code, reason = "DeviceIoControl has no safe binding")]
+    let r = unsafe {
+        DeviceIoControl(
+            raw(disk),
+            IOCTL_STORAGE_GET_HOTPLUG_INFO,
+            None,
+            0,
+            Some((&raw mut info).cast()),
+            std::mem::size_of::<STORAGE_HOTPLUG_INFO>() as u32,
+            Some(&mut returned),
+            None,
+        )
+    };
+    r.map_err(|e| e.code())?;
+    if returned as usize != std::mem::size_of::<STORAGE_HOTPLUG_INFO>() {
+        return Err(HRESULT::from_win32(ERROR_ACCESS_DENIED.0));
+    }
+    Ok(info)
+}
+
 // ---- Safe code from here on. ----
+
+/// What a disk says about being removed ([`disk_hotplug`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiskHotplug {
+    /// Its medium can be taken out (a card reader).
+    pub media_removable: bool,
+    /// The disk itself can be unplugged while running (USB, Thunderbolt, USB4, ExpressCard).
+    pub device_hotplug: bool,
+}
+
+/// Asks disk number `n` (as Windows numbers its disks) whether it can be removed. Needs no
+/// administrator: the disk is opened for no access, only to be asked.
+pub fn disk_hotplug(n: u32) -> Result<DiskHotplug, Error> {
+    let disk = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(0x1 | 0x2)
+        .open(format!(r"\\.\PhysicalDrive{n}"))
+        .map_err(Error::Io)?;
+    let info = os_disk_hotplug(disk.as_handle())
+        .map_err(|c| os_err("IOCTL_STORAGE_GET_HOTPLUG_INFO", c))?;
+    Ok(DiskHotplug {
+        media_removable: info.MediaRemovable,
+        device_hotplug: info.DeviceHotplug,
+    })
+}
 
 /// Windows' own answer about the signature inside one open file ([`verify_file_trust`]).
 #[derive(Clone, Debug, PartialEq, Eq)]

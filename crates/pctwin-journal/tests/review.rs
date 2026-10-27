@@ -295,12 +295,75 @@ fn windows_placement_needs_a_disk_positively_inside_the_laptop() {
         (Some(15), Some(false), Unknown), // a disk file mounted as a drive
         (Some(0), Some(false), Unknown),
     ] {
-        assert_eq!(judge(c, bus, listed), want, "{bus:?} {listed:?}");
+        assert_eq!(
+            judge(c, bus, listed, Some(false)),
+            want,
+            "{bus:?} {listed:?}"
+        );
     }
     assert_eq!(
-        judge(r"\\?\UNC\server\share\x", Some(17), Some(false)),
+        judge(
+            r"\\?\UNC\server\share\x",
+            Some(17),
+            Some(false),
+            Some(false)
+        ),
         Network
     );
+    // Second review, low finding: an NVMe disk in a Thunderbolt or USB4 case reports the NVMe
+    // bus but can be unplugged; a disk that will not say is not trusted to stay.
+    assert_eq!(judge(c, Some(17), Some(false), Some(true)), Removable);
+    assert_eq!(judge(c, Some(11), Some(false), Some(true)), Removable);
+    assert_eq!(judge(c, Some(17), Some(false), None), Unknown);
+    assert_eq!(judge(c, Some(9), Some(false), Some(true)), Network);
+}
+
+/// Second review, low finding, on Linux's device tree: a removable bus device anywhere above the
+/// disk makes it removable; the block device's own flag alone is not the whole answer.
+#[test]
+fn linux_a_disk_behind_a_removable_bus_device_is_removable() {
+    use pctwin_journal::place::linux_removable_chain as chain;
+    use std::collections::HashMap;
+    use std::path::Path;
+    let tb = "/sys/devices/pci0000:00/0000:00:07.0/0000:05:00.0/nvme/nvme1/nvme1n1";
+    let files = |entries: &[(&str, &str)]| -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let read_from = |m: HashMap<String, String>| {
+        move |p: &Path| m.get(&p.to_string_lossy().replace('\\', "/")).cloned()
+    };
+    // A Thunderbolt case: the PCI device behind the external port says "removable".
+    let r = read_from(files(&[
+        (&format!("{tb}/removable"), "0\n"),
+        (
+            "/sys/devices/pci0000:00/0000:00:07.0/0000:05:00.0/removable",
+            "removable\n",
+        ),
+    ]));
+    assert!(chain(Path::new(tb), &r));
+    // The laptop's own NVMe disk: "fixed" all the way up.
+    let r = read_from(files(&[
+        (&format!("{tb}/removable"), "0\n"),
+        (
+            "/sys/devices/pci0000:00/0000:00:07.0/0000:05:00.0/removable",
+            "fixed\n",
+        ),
+        (
+            "/sys/devices/pci0000:00/0000:00:07.0/removable",
+            "unknown\n",
+        ),
+    ]));
+    assert!(!chain(Path::new(tb), &r));
+    // A card reader's own block flag.
+    let r = read_from(files(&[(&format!("{tb}/removable"), "1")]));
+    assert!(chain(Path::new(tb), &r));
+    // Nothing outside the device tree is read.
+    let r = read_from(files(&[("/sys/removable", "1"), ("/removable", "1")]));
+    assert!(!chain(Path::new(tb), &r));
+    assert!(!chain(Path::new("/tmp/x"), &|_| Some("1".into())));
 }
 
 /// Finding 4, on this very laptop: its own temporary folder is judged local through the real
