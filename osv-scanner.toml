@@ -30,3 +30,8 @@ reason = "zbus_names unmaintained, merged into zbus 6; zbus 5 comes via keepawak
 id = "RUSTSEC-2026-0372"
 ignoreUntil = 2027-01-06
 reason = "zvariant_derive unmaintained, merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener"
+
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+ignoreUntil = 2027-01-27
+reason = "block-buffer 0.10 (fixed only in 0.12.1, which needs the digest 0.11 line) via sha2, hmac, hkdf and blake2. The bug needs the compress callback to panic and the panic to be caught; RustCrypto's own compress functions do not panic, and PCTwin implements no digest core of its own"
