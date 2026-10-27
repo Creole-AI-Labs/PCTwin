@@ -16,6 +16,9 @@
 //!   one laptop, never by equal names or numbers; clashing names from two laptops land in their
 //!   own "From <laptop>" folders; each laptop keeps its own record, journal, undo and session
 //!   number; a change after approval holds only the affected items.
+//! - [`rescue`]: a dead laptop's drive, read only: the drive known by its own identity, its people
+//!   found from the drive itself, locked drives explained, a weak drive read carefully, and the
+//!   result an ordinary plan.
 //!
 //! Nothing here changes a file on the old laptop's drives: the crate's clippy fence bans every
 //! way to make, write, rename or remove one. The one effect on the old laptop is the cloud app's
@@ -27,4 +30,5 @@
 pub mod capacity;
 pub mod cloud;
 pub mod local_copy;
+pub mod rescue;
 pub mod topology;

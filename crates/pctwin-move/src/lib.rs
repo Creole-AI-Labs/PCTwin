@@ -41,6 +41,7 @@ use pctwin_journal::Ledger;
 use pctwin_record::{
     Inclusion, Item, ItemId, ItemKind, LeftOutReason, Owner, PersonTarget, Record, RecordError,
 };
+pub use pctwin_scan::ReadPlan;
 use pctwin_transfer::{
     Allowance, Cause, Channel, Failure, Fit, FsOpener, LandingPlace, MOVE_PROTOCOL, MoveControl,
     MoveMeter, Opener, PlaceFit, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
@@ -93,6 +94,10 @@ pub struct NotSent {
 pub struct SendPlan {
     pub jobs: Vec<SendJob>,
     pub not_sent: Vec<NotSent>,
+    /// How carefully the old drive is read: [`ReadPlan::Normal`] unless set with
+    /// [`read_with`](Self::read_with) (a weak drive, or a rescued one: each file once, the most
+    /// important first, a clean stop after repeated read errors).
+    pub read_plan: ReadPlan,
 }
 
 impl SendPlan {
@@ -107,7 +112,14 @@ impl SendPlan {
                 .filter(|j| items.contains(&j.item))
                 .collect(),
             not_sent: Vec::new(),
+            read_plan: self.read_plan,
         }
+    }
+
+    /// Reads the old drive as `plan` says.
+    pub fn read_with(mut self, plan: ReadPlan) -> SendPlan {
+        self.read_plan = plan;
+        self
     }
 }
 
@@ -200,7 +212,11 @@ pub fn send_plan_where(
         }
     }
     jobs.extend(by_item.into_values());
-    SendPlan { jobs, not_sent }
+    SendPlan {
+        jobs,
+        not_sent,
+        read_plan: ReadPlan::Normal,
+    }
 }
 
 /// Why a move did not go ahead or did not finish.
@@ -461,6 +477,7 @@ async fn run_sender<C: Channel, B: Comeback>(
 ) -> Result<Sent, MoveError> {
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
+        .with_read_plan(plan.read_plan)
         .with_opener(opener)
         .with_protocol(version)
         .with_meter(live.meter.clone())
