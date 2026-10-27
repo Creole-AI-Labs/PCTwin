@@ -301,6 +301,21 @@ pub fn apply(
     conflict: Conflict,
     now: Now,
 ) -> Applied {
+    // A capture whose consistency was not established, or that is partial, is kept in PCTwin's
+    // own folder of things brought over, never where the app would open it.
+    let kept_aside;
+    let p = if matches!(
+        capture.preservation,
+        Preservation::PreservedOnly | Preservation::Partial
+    ) {
+        kept_aside = Planned {
+            placement: Placement::PreservedOnly,
+            ..p.clone()
+        };
+        &kept_aside
+    } else {
+        p
+    };
     let Some(target) = target_of(p, n) else {
         return finished(
             p,

@@ -409,3 +409,92 @@ fn undo_keeps_what_the_person_changed_since() {
         assert!(matches!(undone, Undone::NotDone(_)));
     }
 }
+
+struct CannotTell;
+impl Holders for CannotTell {
+    fn holding(&self, _: &[PathBuf]) -> Holding {
+        Holding::CannotTell
+    }
+}
+
+#[test]
+fn a_store_kept_only_as_found_never_lands_where_the_app_opens_it() {
+    let t = temp();
+    let old = t.path().join("old");
+    let d = old.join("AppData/Roaming/Store App/db");
+    put(&d.join("CURRENT"), b"MANIFEST-000003\n");
+    put(&d.join("MANIFEST-000003"), b"manifest");
+    let owner = Owner::Person {
+        account_id: "1001".into(),
+    };
+    let cat = Catalogue::<SpecialRow>::shipped(SHIPPED);
+    let plan = plan(&owner, &old, &[], System::Windows, System::Windows, &cat);
+    let p = &plan.components[0];
+    let new = t.path().join("new");
+    std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
+    let home = Destination::open(&new).unwrap();
+    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let rec = j.imports(&keys().capture);
+    let stop = Stop::new();
+    let made = MadeFolders::default();
+    let n = NewLaptop {
+        rec: &rec,
+        home: &home,
+        home_path: &new,
+        root: RootRef::new(20),
+        seal: seal(),
+        system: System::Windows,
+        owner_only: &AppOwnerOnly,
+        stop: &stop,
+        made: &made,
+    };
+    let k = &keys().capture;
+    let approved = approve(p, seal(), RootRef::new(10), 1);
+    let work = t.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let cap = capture_planned(
+        p,
+        Grant::Ordinary(
+            k.grant(
+                seal(),
+                vec![RootRef::new(10)],
+                CaptureEffect::ReadPrivate,
+                MIN,
+                Now::real(),
+            )
+            .unwrap(),
+        ),
+        &approved,
+        &work,
+        &CannotTell,
+        &stop,
+        Now::real(),
+    )
+    .unwrap();
+    let applied = apply(
+        &n,
+        Grant::Ordinary(
+            k.grant(
+                seal(),
+                vec![RootRef::new(20)],
+                CaptureEffect::Import,
+                MIN,
+                Now::real(),
+            )
+            .unwrap(),
+        ),
+        &approved,
+        &effect(0),
+        p,
+        &cap,
+        &work,
+        Conflict::KeepBoth,
+        Now::real(),
+    );
+    assert_eq!(applied.result.status(), ItemStatus::NeedsAction);
+    assert!(!new.join("AppData/Roaming/Store App").exists());
+    assert!(
+        new.join("PCTwin brought over/Store App/db/CURRENT")
+            .is_file()
+    );
+}
