@@ -1295,6 +1295,87 @@ mod tests {
     }
 
     #[test]
+    fn a_gguf_header_is_read_through_every_value_type() {
+        let s = |t: &str| {
+            let mut b = (t.len() as u64).to_le_bytes().to_vec();
+            b.extend_from_slice(t.as_bytes());
+            b
+        };
+        let split = [
+            kv("split.no", 2, &4u16.to_le_bytes()),
+            kv("split.count", 2, &9u16.to_le_bytes()),
+        ];
+        let mut arr_u32 = 4u32.to_le_bytes().to_vec();
+        arr_u32.extend_from_slice(&3u64.to_le_bytes());
+        for v in [1u32, 2, 3] {
+            arr_u32.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut nested = 9u32.to_le_bytes().to_vec();
+        nested.extend_from_slice(&1u64.to_le_bytes());
+        nested.extend_from_slice(&arr_u32);
+        let mut kvs = vec![
+            kv("u8", 0, &[7]),
+            kv("i8", 1, &[7]),
+            kv("u16", 2, &7u16.to_le_bytes()),
+            kv("i16", 3, &7i16.to_le_bytes()),
+            kv("u32", 4, &7u32.to_le_bytes()),
+            kv("i32", 5, &7i32.to_le_bytes()),
+            kv("f32", 6, &7f32.to_le_bytes()),
+            kv("bool", 7, &[1]),
+            kv("name", 8, &s("a much longer name than eight bytes")),
+            kv("arr", 9, &arr_u32),
+            kv("nested", 9, &nested),
+            kv("u64", 10, &7u64.to_le_bytes()),
+            kv("i64", 11, &7i64.to_le_bytes()),
+            kv("f64", 12, &7f64.to_le_bytes()),
+        ];
+        kvs.extend(split.clone());
+        assert_eq!(gguf_split_in(&gguf(&kvs)), Some((4, 9)));
+        // Each value cut short: nothing is read past the end.
+        let whole = gguf(&kvs);
+        for cut in [30, 60, 120, whole.len() - 1] {
+            assert_eq!(gguf_split_in(&whole[..cut]), None, "{cut}");
+        }
+        // A string longer than what is there.
+        let mut lie = 1000u64.to_le_bytes().to_vec();
+        lie.extend_from_slice(b"short");
+        assert_eq!(gguf_split_in(&gguf(&[kv("name", 8, &lie)])), None);
+        // Arrays nested three deep are refused.
+        let mut deep = 9u32.to_le_bytes().to_vec();
+        deep.extend_from_slice(&1u64.to_le_bytes());
+        deep.extend_from_slice(&nested);
+        let mut d = vec![kv("deep", 9, &deep)];
+        d.extend(split.clone());
+        assert_eq!(gguf_split_in(&gguf(&d)), None);
+        // Only versions 2 and 3.
+        for v in [1u32, 4] {
+            let mut b = gguf(&split);
+            b[4..8].copy_from_slice(&v.to_le_bytes());
+            assert_eq!(gguf_split_in(&b), None, "version {v}");
+        }
+        let mut b = gguf(&split);
+        b[4..8].copy_from_slice(&2u32.to_le_bytes());
+        assert_eq!(gguf_split_in(&b), Some((4, 9)));
+        let mut b = gguf(&split);
+        b[0] = b'X';
+        assert_eq!(gguf_split_in(&b), None);
+        // The split facts in either order; one alone is not enough.
+        assert_eq!(
+            gguf_split_in(&gguf(&[split[1].clone(), split[0].clone()])),
+            Some((4, 9))
+        );
+        assert_eq!(gguf_split_in(&gguf(&[split[0].clone()])), None);
+        // Split facts of another type are not read as the split.
+        assert_eq!(
+            gguf_split_in(&gguf(&[
+                kv("split.no", 4, &4u32.to_le_bytes()),
+                split[1].clone()
+            ])),
+            None
+        );
+    }
+
+    #[test]
     fn hash_names_are_recognised() {
         let h = "A".repeat(64);
         assert_eq!(hash_name(&h), Some("a".repeat(64)));
