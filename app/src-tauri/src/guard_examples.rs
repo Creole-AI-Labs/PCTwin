@@ -46,12 +46,13 @@ fn budget(fits: Option<bool>) -> DriveBudget {
     }
 }
 
-const PROMISES: [UndoPromise; 5] = [
+const PROMISES: [UndoPromise; 6] = [
     UndoPromise::CanReverse,
     UndoPromise::CanRemoveApp,
     UndoPromise::MustKeep,
     UndoPromise::NeedsYouService,
     UndoPromise::NeedsYouMaker,
+    UndoPromise::RemoveYourself,
 ];
 const ACTIONS: [ChangeAction; 4] = [
     ChangeAction::Install,
@@ -118,6 +119,11 @@ fn screens() -> Vec<ScreenView> {
                     name: "Dark mode".into(),
                     action: ChangeAction::Replace,
                     undo: UndoPromise::NeedsYouMaker,
+                }))
+                .chain(std::iter::once(ChangeLine {
+                    name: "Writer".into(),
+                    action: ChangeAction::Install,
+                    undo: UndoPromise::RemoveYourself,
                 }))
                 .collect(),
             more: 2,
@@ -243,6 +249,7 @@ fn screens() -> Vec<ScreenView> {
                 UndoPlan::KeepChanged,
                 UndoPlan::Elsewhere,
                 UndoPlan::LeaveAlone,
+                UndoPlan::RemoveYourself,
             ]
             .iter()
             .map(|plan| UndoPlanLine {
@@ -295,6 +302,11 @@ fn screens() -> Vec<ScreenView> {
                     name: "h".into(),
                     result: UndoResult::NotDoneYet,
                     detail: Some("locked".into()),
+                },
+                UndoLine {
+                    name: "i".into(),
+                    result: UndoResult::RemoveYourself,
+                    detail: None,
                 },
             ],
             more: 0,

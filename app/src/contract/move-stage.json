@@ -26,5 +26,8 @@
   {
     "kind": "others-not-moved",
     "why": "allow-in-settings"
+  },
+  {
+    "kind": "rebuilding"
   }
 ]

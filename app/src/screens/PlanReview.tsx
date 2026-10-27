@@ -5,6 +5,7 @@ import { ArrowForward, Info } from "../icons";
 import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
 import { pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
+import { RebuildPlanSection } from "./FullMoveParts";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
@@ -273,6 +274,8 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
           </ul>
         </PlanBox>
       </div>
+
+      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} />}
 
       {!blocked && (
         <div className="plan-approve">

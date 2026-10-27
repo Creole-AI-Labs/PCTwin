@@ -415,7 +415,7 @@ pub fn packages_from(json: &str, owner: &Owner) -> Result<Vec<FoundApp>, String>
 }
 
 #[cfg(windows)]
-pub use real::read_windows_apps;
+pub use real::{machine_entries, read_windows_apps};
 
 #[cfg(windows)]
 mod real {
@@ -478,6 +478,22 @@ mod real {
     }
 
     use winreg::types::FromRegValue;
+
+    /// Every entry of Windows' list of apps installed for everyone, both views, as read now (what
+    /// is really there after an install; 2.1 step 5). A list that cannot be read adds nothing.
+    pub fn machine_entries() -> Vec<RawEntry> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let mut out = Vec::new();
+        for (flags, view) in [
+            (KEY_WOW64_64KEY, RegistryView::Machine),
+            (KEY_WOW64_32KEY, RegistryView::Machine32),
+        ] {
+            if let Ok(list) = entries(&hklm, UNINSTALL, flags, view) {
+                out.extend(list);
+            }
+        }
+        out
+    }
 
     /// The installer package Windows keeps for a Windows Installer product, for `sid` ("S-1-5-18"
     /// for products installed for everyone).

@@ -152,7 +152,130 @@ fn stages() -> Vec<Stage> {
         Stage::OthersNotMoved {
             why: OthersWhy::AllowInSettings,
         },
+        Stage::Rebuilding,
     ]
+}
+
+/// The full move's plan section: an app installed, one needing the person, a group of settings,
+/// a special category's step, and PCTwin's own "not moved yet" line.
+fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
+    use crate::fullmove::ChangeView;
+    use crate::guard_views::{ChangeAction, UndoPromise};
+    use pctwin_fullmove::extras::{NotMovedCount, NotMovedGroup, SpecialStep};
+    use pctwin_fullmove::plan::{Kind, Title};
+    let change = |title, kind, action, undo, count, needs, special, files| ChangeView {
+        title,
+        kind,
+        action,
+        undo,
+        count,
+        needs,
+        special,
+        files,
+    };
+    crate::fullmove::RebuildPlanView {
+        changes: vec![
+            change(
+                Title::Name("Writer".into()),
+                Kind::App,
+                ChangeAction::Install,
+                UndoPromise::RemoveYourself,
+                0,
+                None,
+                None,
+                0,
+            ),
+            change(
+                Title::Name("Sketch Tool".into()),
+                Kind::App,
+                ChangeAction::LeaveAlone,
+                UndoPromise::MustKeep,
+                0,
+                Some(Reason::ManualInstall),
+                None,
+                0,
+            ),
+            change(
+                Title::Name("Writer settings".into()),
+                Kind::Settings,
+                ChangeAction::Replace,
+                UndoPromise::CanReverse,
+                12,
+                None,
+                None,
+                0,
+            ),
+            change(
+                Title::Name("Mail".into()),
+                Kind::Special,
+                ChangeAction::LeaveAlone,
+                UndoPromise::MustKeep,
+                0,
+                Some(Reason::SignIn),
+                Some(SpecialStep::SignIn),
+                3,
+            ),
+            change(
+                Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
+                Kind::Special,
+                ChangeAction::LeaveAlone,
+                UndoPromise::MustKeep,
+                0,
+                Some(Reason::FinishByHand),
+                Some(SpecialStep::NotYet),
+                0,
+            ),
+        ],
+        more: 0,
+        not_moved: vec![
+            NotMovedCount {
+                group: NotMovedGroup::Private,
+                count: 40,
+            },
+            NotMovedCount {
+                group: NotMovedGroup::CouldRun,
+                count: 3,
+            },
+        ],
+        special_not_moved: 7,
+        prompt: false,
+        restore_point: false,
+    }
+}
+
+/// The full move's outcome section.
+fn rebuilt() -> crate::fullmove::RebuiltView {
+    use crate::fullmove::{RebuiltLine, RestoreWord};
+    use pctwin_fullmove::plan::{Kind, Title};
+    crate::fullmove::RebuiltView {
+        lines: vec![
+            RebuiltLine {
+                title: Title::Name("Sketch Tool".into()),
+                kind: Kind::App,
+                count: 0,
+                status: ItemStatus::NeedsAction,
+                reason: Some(Reason::ManualInstall),
+            },
+            RebuiltLine {
+                title: Title::Name("Writer settings".into()),
+                kind: Kind::Settings,
+                count: 12,
+                status: ItemStatus::Converted,
+                reason: None,
+            },
+            RebuiltLine {
+                title: Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
+                kind: Kind::Special,
+                count: 0,
+                status: ItemStatus::NeedsAction,
+                reason: Some(Reason::FinishByHand),
+            },
+        ],
+        more: 0,
+        restore_point: RestoreWord::NotAsked,
+        stopped: false,
+        can_undo: true,
+    }
 }
 
 fn endings() -> Vec<EndedEarly> {
@@ -254,7 +377,7 @@ fn peers() -> Vec<crate::moving::Peer> {
 }
 
 fn plans() -> Vec<PlanView> {
-    vec![PlanView {
+    let files_only = PlanView {
         first: vec![FolderRole::Documents],
         revision: 2,
         fingerprint: "9f".repeat(32),
@@ -282,7 +405,13 @@ fn plans() -> Vec<PlanView> {
             refused: 0,
             runs_at_sign_in: 1,
         },
-    }]
+        rebuild: None,
+    };
+    let full = PlanView {
+        rebuild: Some(rebuild_plan()),
+        ..files_only.clone()
+    };
+    vec![files_only, full]
 }
 
 fn quiet(state: RunState, old: Option<LabelView>) -> MoveProgress {
@@ -364,7 +493,7 @@ fn progress() -> Vec<MoveProgress> {
 }
 
 fn outcomes() -> Vec<MoveOutcome> {
-    vec![MoveOutcome {
+    let files_only = MoveOutcome {
         people: vec![crate::moving::PersonOutcome {
             name: "Bea".into(),
             copied: 120,
@@ -396,7 +525,13 @@ fn outcomes() -> Vec<MoveOutcome> {
             },
             ..Default::default()
         },
-    }]
+        rebuilt: None,
+    };
+    let full = MoveOutcome {
+        rebuilt: Some(rebuilt()),
+        ..files_only.clone()
+    };
+    vec![files_only, full]
 }
 
 fn report_items() -> Vec<ReportItem> {
@@ -581,6 +716,17 @@ fn families() -> Vec<(&'static str, Value)> {
         ("plan-view", json(plans())),
         ("move-progress", json(progress())),
         ("move-outcome", json(outcomes())),
+        (
+            "move-rebuild",
+            json([
+                pctwin_fullmove::run::Progress::Permission,
+                pctwin_fullmove::run::Progress::Apps { done: 1, total: 3 },
+                pctwin_fullmove::run::Progress::Settings {
+                    done: 40,
+                    total: 120,
+                },
+            ]),
+        ),
         ("report-item", json(report_items())),
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
         ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
@@ -917,6 +1063,7 @@ fn calls() -> Value {
             { "name": "laptop_name_type", "args": [["name", "Ezzy Laptop"]] },
             { "name": "guard_view", "args": [] },
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
+            { "name": "fullmove_undo", "args": [] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -931,6 +1078,8 @@ fn calls() -> Value {
             "moveFound": crate::moving::FOUND_EVENT,
             "movePeer": crate::moving::PEER_EVENT,
             "moveLink": crate::moving::LINK_EVENT,
+            "moveRebuild": crate::fullmove::REBUILD_EVENT,
+            "moveUndoClosed": crate::fullmove::UNDO_CLOSED_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

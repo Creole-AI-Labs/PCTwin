@@ -66,6 +66,11 @@
             "action": "replace",
             "name": "Dark mode",
             "undo": "needs-you-maker"
+          },
+          {
+            "action": "install",
+            "name": "Writer",
+            "undo": "remove-yourself"
           }
         ],
         "downloadBytes": 1000,
@@ -482,6 +487,10 @@
           {
             "name": "a.txt",
             "plan": "leave-alone"
+          },
+          {
+            "name": "a.txt",
+            "plan": "remove-yourself"
           }
         ],
         "more": 0
@@ -563,6 +572,13 @@
             "name": "h",
             "result": {
               "kind": "not-done-yet"
+            }
+          },
+          {
+            "detail": null,
+            "name": "i",
+            "result": {
+              "kind": "remove-yourself"
             }
           }
         ],

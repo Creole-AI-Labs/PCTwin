@@ -50,10 +50,15 @@ impl AppResult {
 /// Installs apps. The real one asks for the administrator once (with the restore point), the
 /// test lab's is a fake.
 pub trait Installer {
-    /// Asks for the restore point (once: later calls give the same answer) before the move's
-    /// first change. Starting the administrator helper for installs asks for it as well.
+    /// The restore point's answer: asked once (later calls give the same answer). Installing asks
+    /// for it before the first install; otherwise it is asked here, before the first setting.
     fn restore_point(&mut self) -> RestorePoint;
-    /// Installs `apps`, in order, calling `done` after each; one result per app, in order.
+    /// The restore point's answer if it was asked already (by an install), without asking.
+    fn asked(&self) -> Option<RestorePoint> {
+        None
+    }
+    /// Installs `apps`, in order, calling `done` after each; one result per app, in order. The
+    /// restore point is asked for before the first install.
     fn install(&mut self, apps: &[&AppEntry], done: &mut dyn FnMut()) -> Vec<AppResult>;
 }
 
@@ -372,12 +377,11 @@ pub fn rebuild(
     laptop: LaptopId,
     progress: &mut dyn FnMut(Progress),
 ) -> Rebuilt {
-    let mut point = None;
     if plan.changes_anything() {
         progress(Progress::Permission);
-        point = Some(installer.restore_point());
     }
-    // Apps: PCTwin installs only what it can check; the rest need the person.
+    // Apps: PCTwin installs only what it can check; the rest need the person. The installer asks
+    // for the administrator once, with the restore point first, before its first install.
     let to_install = plan.to_install();
     let total = to_install.len() as u64;
     let mut done = 0u64;
@@ -389,6 +393,13 @@ pub fn rebuild(
             done += 1;
             progress(Progress::Apps { done, total });
         })
+    };
+    // The restore point's answer: asked now, before the first setting, if no install asked for it
+    // already; with no setting to change and nothing installed, nobody is asked for anything.
+    let point = if plan.settings.moves.is_empty() {
+        installer.asked()
+    } else {
+        Some(installer.restore_point())
     };
     let mut by_name: Vec<(&str, AppResult)> = to_install
         .iter()

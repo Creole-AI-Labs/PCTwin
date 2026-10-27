@@ -8,6 +8,8 @@ import {
   HELP_STEPS,
   HELP_TOPICS,
   helpCode,
+  fullmoveUndo,
+  listenUndoClosed,
   listenMove,
   recoveryCheck,
   recoveryRun,
@@ -264,6 +266,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await thingsReady();
       await guardView();
       await guardIntent({ job: "job-1", epoch: 2, generation: 3, press: "p-1", intent: { kind: "try-again", line: 0 } });
+      await fullmoveUndo();
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -284,6 +287,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenMove(() => undefined);
     await listenQuickSend(() => undefined);
     await listenGuard(() => undefined);
+    await listenUndoClosed(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

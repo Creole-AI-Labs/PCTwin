@@ -31,6 +31,7 @@
  * (src/contract/evidence.json, parsed by bridge.ts `parseEvidence`).
  */
 
+import type { Rebuilt } from "./fullmove";
 import type { Label } from "./pairing";
 import type { FolderRole } from "./plan";
 
@@ -272,6 +273,8 @@ export type MoveOutcome = {
   checkedFromMemory: number;
   /** The after-move check (absent in the screens' own samples that predate it). */
   afterMove?: AfterMove;
+  /** The full move's apps, settings and special categories, each with its result. */
+  rebuilt?: Rebuilt;
 };
 
 /** One kind of file after the move: how many the plan held, and how many are copied and checked. */

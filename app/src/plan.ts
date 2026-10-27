@@ -39,6 +39,7 @@
  * - A plan revision's list of things the person must do by hand: derived here from the left-out reasons.
  * - The window size: the host calls `setWindowMode` (see [`windowModeFor`]); the screens never do.
  */
+import type { RebuildPlan } from "./fullmove";
 import type { WindowMode } from "./native";
 
 /* ---------- Names shared with the engine ---------- */
@@ -393,6 +394,8 @@ export interface PlanView {
    * in the screens' own samples.
    */
   first?: FolderRole[];
+  /** The full move: every app, setting and special category, with what undo can do for each. */
+  rebuild?: RebuildPlan;
 }
 
 /** The groups that move first and are still in the plan (one the person left out moves nothing). */

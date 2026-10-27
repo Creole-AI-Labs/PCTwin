@@ -81,6 +81,9 @@ pctwin_types::listed_enum! {
         NeedsYouService,
         /// A sign-in, licence or activation: the app's maker governs it.
         NeedsYouMaker,
+        /// An app PCTwin installed: PCTwin does not remove apps yet; the person removes it in the
+        /// system's settings if they do not want it.
+        RemoveYourself,
     }
 }
 
@@ -591,6 +594,8 @@ pctwin_types::listed_enum! {
         Elsewhere,
         /// It was there before: left alone.
         LeaveAlone,
+        /// An app PCTwin installed: the person removes it in the system's settings if they want.
+        RemoveYourself,
     }
 }
 
@@ -623,6 +628,8 @@ pctwin_types::listed_enum! {
         DoneElsewhere,
         /// Not done this time; undo tries again next time.
         NotDoneYet,
+        /// An app PCTwin installed, left for the person to remove in the system's settings.
+        RemoveYourself,
     }
 }
 

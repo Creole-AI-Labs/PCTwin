@@ -25,6 +25,11 @@ pctwin-settings = { path = "../pctwin-settings" }
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-special = { path = "../pctwin-special" }
 pctwin-types = { path = "../pctwin-types" }
+# The install chain (src/install.rs): the helper's broker actions, winget run as the person, and
+# each download's SHA-256 (what the helper checks the bytes against).
+pctwin-helper = { path = "../pctwin-helper" }
+pctwin-maker = { path = "../pctwin-maker" }
+sha2 = "0.10.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"

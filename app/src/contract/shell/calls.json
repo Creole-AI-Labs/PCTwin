@@ -391,6 +391,10 @@
         ]
       ],
       "name": "guard_intent"
+    },
+    {
+      "args": [],
+      "name": "fullmove_undo"
     }
   ],
   "events": {
@@ -404,7 +408,9 @@
     "movePrivacy": "move-privacy",
     "moveProblem": "move-problem",
     "moveProgress": "move-progress",
+    "moveRebuild": "move-rebuild",
     "moveStage": "move-stage",
+    "moveUndoClosed": "move-undo-closed",
     "new": "pairing-new",
     "old": "pairing-old",
     "qsDragging": "quicksend-dragging",

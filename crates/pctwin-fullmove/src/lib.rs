@@ -19,6 +19,7 @@
 //! read-back, the helper's receipt and the laptop's own list after an install.
 
 pub mod extras;
+pub mod install;
 pub mod plan;
 pub mod run;
 pub mod undo;

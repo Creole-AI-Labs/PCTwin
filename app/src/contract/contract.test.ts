@@ -42,6 +42,7 @@ import {
   parseTidied,
 } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
+import { parseRebuildStep } from "../fullmove";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
 
@@ -61,6 +62,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "plan-view": parsePlanView,
   "move-progress": parseMoveProgress,
   "move-outcome": parseMoveOutcome,
+  "move-rebuild": parseRebuildStep,
   "report-item": parseReportItem,
   interrupted: parseInterrupted,
   "ready-note": parseReadyNote,

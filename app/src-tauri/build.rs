@@ -57,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "laptop_name_type",
     "guard_view",
     "guard_intent",
+    "fullmove_undo",
 ];
 
 fn main() {
