@@ -68,6 +68,17 @@ impl OwnerOnly for UnixOwnerOnly {
 pub struct Target {
     pub root: SettingsRoot,
     pub folder: String,
+    /// The folder this move already made for the same target (an earlier component of the same
+    /// app landed there): later components join it instead of landing beside it.
+    pub made: Option<Made>,
+}
+
+/// A folder this move made for a target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Made {
+    pub folder: String,
+    /// It was made beside a folder that was already there.
+    pub beside: bool,
 }
 
 /// What to do when the target folder is already there.
@@ -141,6 +152,9 @@ fn choose(
     target: &Target,
     conflict: Conflict,
 ) -> Result<(String, bool), LandError> {
+    if let Some(m) = &target.made {
+        return Ok((m.folder.clone(), m.beside));
+    }
     let (parent, top) = match target.folder.rsplit_once('/') {
         Some((p, t)) => (format!("{p}/"), t.to_string()),
         None => (String::new(), target.folder.clone()),
@@ -232,7 +246,13 @@ pub fn land_secret(
     if capture.component != approved.component {
         return Err(LandError::Denied("the capture is of another component"));
     }
-    let (folder, beside) = choose(dest, target, Conflict::KeepBoth)?;
+    // A secret never joins a folder made earlier (it may not be owner-only): its own private
+    // folder, beside one that is already there.
+    let fresh = Target {
+        made: None,
+        ..target.clone()
+    };
+    let (folder, beside) = choose(dest, &fresh, Conflict::KeepBoth)?;
     // The folder exists before any file: only the person can open it from its first moment.
     let mut parent = dest_path.to_path_buf();
     let parts: Vec<&str> = folder.split('/').collect();
@@ -297,7 +317,9 @@ fn write(
     )?;
     let depth = folder.split('/').count();
     // A secret's owner-only folder was made by this landing just before: it is this move's own.
-    let mut top: Option<String> = owner_only_files.map(|_| folder.to_string());
+    // (A folder this move made for an earlier component of the same app is its own too.)
+    let mut top: Option<String> =
+        (owner_only_files.is_some() || target.made.is_some()).then(|| folder.to_string());
     let mut files = capture.files.clone();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
     for (i, f) in files.iter().enumerate() {

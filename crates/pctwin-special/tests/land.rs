@@ -159,6 +159,7 @@ fn target() -> Target {
     Target {
         root: SettingsRoot::Config,
         folder: "Journal App".into(),
+        made: None,
     }
 }
 
@@ -509,6 +510,7 @@ fn a_chosen_secret_lands_owner_only() {
     let target = Target {
         root: SettingsRoot::Home,
         folder: ".ssh".into(),
+        made: None,
     };
     // A read grant does not land it.
     let wrong = keys()

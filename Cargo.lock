@@ -4165,6 +4165,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-maker",
+ "pctwin-readiness",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-settings",
