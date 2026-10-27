@@ -12,6 +12,9 @@ publish.workspace = true
 pctwin-types = { path = "../pctwin-types" }
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-grant = { path = "../pctwin-grant" }
+pctwin-gate = { path = "../pctwin-gate" }
+pctwin-journal = { path = "../pctwin-journal" }
+pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-record = { path = "../pctwin-record" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,6 +33,11 @@ sha2 = "0.10.9"
 
 [dev-dependencies]
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The tests make owner-only folders as the app does, and read their access lists back; the crate
+# itself never links the helper library (it takes the owner-only folder as an interface).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
 
 [lints]
 workspace = true
