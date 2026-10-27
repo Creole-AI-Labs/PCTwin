@@ -12,6 +12,7 @@
  * - Progress comes only from measured work; with no total the bar is indeterminate and still, with
  *   what is known in words. A screen reader hears the quarter marks, not every byte.
  */
+import { shownName } from "../names";
 import { Localized, useLocalization } from "@fluent/react";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/kit";
@@ -44,7 +45,7 @@ export function useGuard(): GuardApi {
 
 /** A name from a laptop, as plain text, isolated so a right-to-left name cannot reorder the line. */
 export function Name({ children }: { children: string }) {
-  return <bdi className="g-name">{children}</bdi>;
+  return <bdi className="g-name">{shownName(children)}</bdi>;
 }
 
 /**

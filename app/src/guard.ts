@@ -16,6 +16,8 @@
 
 /* ---------- Shapes ---------- */
 
+import { shownNames } from "./names";
+
 export const DISPLAY_STATES = [
   "not-started", "preparing", "awaiting-person", "awaiting-system", "awaiting-maker", "working", "checking", "applying",
   "pause-requested", "paused", "source-unavailable", "blocked", "partial", "retrying", "reconciling", "failed", "complete", "cancelled",
@@ -384,7 +386,8 @@ export function parseProjection(v: unknown): Projection | null {
   const progress = f.progress === null ? null : parseMeasured(f.progress);
   if (f.progress !== null && progress === null) return null;
   const screen = parseScreenView(f.screen);
-  return display && allowed && screen ? { job: f.job, epoch: f.epoch, generation: f.generation, version: f.version, display, allowed, progress, screen } : null;
+  // Names from the laptops are shown with any direction character visibly marked (names.ts).
+  return display && allowed && screen ? { job: f.job, epoch: f.epoch, generation: f.generation, version: f.version, display, allowed, progress, screen: shownNames(screen) } : null;
 }
 
 /** The engine's answer to "what is shown now" (`Snapshot`), or null. */
@@ -437,14 +440,29 @@ export function arrive(shown: Shown, event: Projection): Arrival {
   return { shown: { kind: "ready", view: event }, askAgain: gap || event.epoch > now.epoch };
 }
 
-/** What the engine's snapshot makes the screens show. */
-export function fromSnapshot(s: Snapshot): Shown {
-  return s.kind === "ready" ? { kind: "ready", view: s.view } : { kind: "unavailable" };
+/**
+ * What the engine's answer to "what is shown now" makes the screens show, against what they show
+ * already (third review, finding 7): an answer can arrive after a newer event, so a view older than
+ * the one shown (an older session, or the same session at an older version) is dropped like a late
+ * event. "No job" counts only if no event came after it was asked for (`eventSince`).
+ */
+export function settle(shown: Shown, s: Snapshot, eventSince: boolean): Shown {
+  if (s.kind === "unavailable") return eventSince && shown.kind === "ready" ? shown : { kind: "unavailable" };
+  if (shown.kind !== "ready") return { kind: "ready", view: s.view };
+  const now = shown.view;
+  if (s.view.epoch < now.epoch) return shown;
+  if (s.view.epoch === now.epoch && s.view.job === now.job && s.view.version < now.version) return shown;
+  return { kind: "ready", view: s.view };
 }
 
-/** The intent a button sends, bound to what was shown. */
-export function bind(view: Projection, intent: IntentKind) {
-  return { job: view.job, epoch: view.epoch, generation: view.generation, intent };
+/** A new mark for one press of a button: the engine takes each press once, and only once. */
+export function newPress(): string {
+  return crypto.randomUUID();
+}
+
+/** The intent a button sends, bound to what was shown, with its press's own mark. */
+export function bind(view: Projection, intent: IntentKind, press: string = newPress()) {
+  return { job: view.job, epoch: view.epoch, generation: view.generation, press, intent };
 }
 
 /** One key per intent and generation: the same key while one is on its way is not sent again. */

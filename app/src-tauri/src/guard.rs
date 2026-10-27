@@ -14,8 +14,12 @@
 //!   cannot approve changed work);
 //! - an intent not allowed in this state, or naming a line or drive the screen does not show:
 //!   refused;
-//! - the same intent twice for one generation (a double-click): taken once, answered "already
-//!   taken" the second time, and handed to the engine once.
+//! - every press carries its own mark ([`Press`]), and each press is taken once: the same press
+//!   sent again (a retry) is answered "already taken". Pause, Resume, Pause are three presses and
+//!   all three reach the engine (third review, finding 6); the very intent just taken pressed
+//!   again (a double-click) is answered "already taken" too, and handed to the engine once;
+//! - a session number only grows: a "begin" for an older or the same session is refused, and a
+//!   job that ended hands nothing more to the engine.
 //!
 //! There is no "approve everything", no "mark complete", no path, no URL and no command among the
 //! intents. Nothing here decides anything: an accepted intent is queued for the engine part that
@@ -195,6 +199,30 @@ pctwin_types::listed_enum! {
     }
 }
 
+/// The mark one press of a button carries: made by the screen for each press, sent again
+/// unchanged only when the same press is retried. Letters, digits and dashes, 1 to 64 of them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Press(String);
+
+impl TryFrom<String> for Press {
+    type Error = &'static str;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        let ok = (1..=MAX_PRESS).contains(&s.len())
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if ok {
+            Ok(Press(s))
+        } else {
+            Err("not a press mark")
+        }
+    }
+}
+
+/// The longest press mark (a UUID is 36).
+const MAX_PRESS: usize = 64;
+/// The most presses kept for one plan generation; any more are refused.
+const MAX_PRESSES: usize = 4096;
+
 /// An intent from the screens.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -202,6 +230,7 @@ pub struct Intent {
     pub job: String,
     pub epoch: u64,
     pub generation: u64,
+    pub press: Press,
     pub intent: IntentKind,
 }
 
@@ -265,19 +294,28 @@ pub enum Stale {
 #[derive(Debug, Default)]
 pub struct Guard {
     shown: Option<Projection>,
-    /// Intents taken for the generation shown.
-    taken: Vec<IntentKind>,
+    /// The presses taken for the generation shown.
+    presses: Vec<Press>,
+    /// The intent last taken for the generation shown (a double-click repeats it).
+    last: Option<IntentKind>,
     /// Intents taken and not yet collected by the engine.
     queue: Vec<Intent>,
     version: u64,
+    /// The newest session begun: a session number only grows.
+    newest_epoch: Option<u64>,
 }
 
 impl Guard {
     /// A new job, or a new session of one (after a restart or a new pairing): replaces whatever
     /// was shown, and starts with the engine checking where things got to. Nothing is allowed
     /// until the engine has looked.
-    pub fn begin(&mut self, job: &str, epoch: u64) -> Projection {
-        self.taken.clear();
+    pub fn begin(&mut self, job: &str, epoch: u64) -> Result<Projection, Stale> {
+        if self.newest_epoch.is_some_and(|n| epoch <= n) {
+            return Err(Stale::OldSession);
+        }
+        self.newest_epoch = Some(epoch);
+        self.presses.clear();
+        self.last = None;
         self.queue.clear();
         self.version += 1;
         let view = Projection {
@@ -291,7 +329,7 @@ impl Guard {
             screen: ScreenView::Reconciling,
         };
         self.shown = Some(view.clone());
-        view
+        Ok(view)
     }
 
     /// The engine's update. One from another job, an older session or an older plan generation
@@ -311,7 +349,8 @@ impl Guard {
             return Err(Stale::OldGeneration);
         }
         if update.generation != shown.generation {
-            self.taken.clear();
+            self.presses.clear();
+            self.last = None;
         }
         self.version += 1;
         let view = Projection {
@@ -331,7 +370,9 @@ impl Guard {
     /// The job ended: the screens show "status unavailable" until another begins.
     pub fn end(&mut self) {
         self.shown = None;
-        self.taken.clear();
+        self.presses.clear();
+        self.last = None;
+        self.queue.clear();
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -372,10 +413,17 @@ impl Guard {
             }
             _ => {}
         }
-        if self.taken.contains(&intent.intent) {
+        if self.presses.contains(&intent.press) {
             return Ok(Answer::AlreadyTaken);
         }
-        self.taken.push(intent.intent);
+        if self.presses.len() >= MAX_PRESSES {
+            return Err(Refused::NotNow);
+        }
+        self.presses.push(intent.press.clone());
+        if self.last == Some(intent.intent) {
+            return Ok(Answer::AlreadyTaken);
+        }
+        self.last = Some(intent.intent);
         self.queue.push(intent);
         Ok(Answer::Taken)
     }
@@ -454,7 +502,7 @@ mod tests {
 
     fn ready(generation: u64) -> Guard {
         let mut g = Guard::default();
-        g.begin("job-1", 4);
+        g.begin("job-1", 4).unwrap();
         g.publish(update(
             generation,
             vec![IntentName::Approve, IntentName::Pause],
@@ -464,11 +512,19 @@ mod tests {
         g
     }
 
+    /// A new press mark each time.
+    fn press() -> Press {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        Press(format!("p-{}", N.fetch_add(1, Ordering::Relaxed)))
+    }
+
     fn ask(generation: u64, intent: IntentKind) -> Intent {
         Intent {
             job: "job-1".into(),
             epoch: 4,
             generation,
+            press: press(),
             intent,
         }
     }
@@ -489,7 +545,7 @@ mod tests {
     #[test]
     fn a_new_session_shows_reconciling_and_allows_nothing_until_the_engine_looks() {
         let mut g = ready(2);
-        let view = g.begin("job-1", 5);
+        let view = g.begin("job-1", 5).unwrap();
         assert_eq!(view.display, DisplayState::Reconciling);
         assert_eq!(view.screen, ScreenView::Reconciling);
         assert!(view.allowed.is_empty());
@@ -551,6 +607,110 @@ mod tests {
         assert!(g.take().is_empty());
     }
 
+    // Third review, finding 6: a press sent again (a retry) is taken once, even after other
+    // presses; a new press of an earlier intent is a new press.
+    #[test]
+    fn a_retried_press_is_taken_once() {
+        let mut g = ready(2);
+        let first = ask(2, IntentKind::Pause {});
+        assert_eq!(g.intent(first.clone()), Ok(Answer::Taken));
+        assert_eq!(g.intent(first.clone()), Ok(Answer::AlreadyTaken));
+        assert_eq!(g.intent(ask(2, IntentKind::Approve {})), Ok(Answer::Taken));
+        assert_eq!(g.intent(first), Ok(Answer::AlreadyTaken));
+        assert_eq!(g.intent(ask(2, IntentKind::Pause {})), Ok(Answer::Taken));
+        assert_eq!(g.take().len(), 3);
+    }
+
+    #[test]
+    fn a_press_mark_is_short_plain_text() {
+        let json = |p: &str| {
+            format!(
+                r#"{{"job":"j","epoch":1,"generation":1,"press":"{p}","intent":{{"kind":"pause"}}}}"#
+            )
+        };
+        assert!(serde_json::from_str::<Intent>(&json("0b9e-AF")).is_ok());
+        assert!(serde_json::from_str::<Intent>(&json(&"a".repeat(MAX_PRESS))).is_ok());
+        for bad in ["", "a b", "a/b", "\\u0000", &"a".repeat(MAX_PRESS + 1)] {
+            assert!(serde_json::from_str::<Intent>(&json(bad)).is_err(), "{bad}");
+        }
+        let none = r#"{"job":"j","epoch":1,"generation":1,"intent":{"kind":"pause"}}"#;
+        assert!(serde_json::from_str::<Intent>(none).is_err());
+    }
+
+    #[test]
+    fn presses_are_bounded_per_generation() {
+        let mut g = ready(2);
+        for n in 0..MAX_PRESSES {
+            let kind = if n % 2 == 0 {
+                IntentKind::Pause {}
+            } else {
+                IntentKind::Approve {}
+            };
+            assert_eq!(g.intent(ask(2, kind)), Ok(Answer::Taken));
+        }
+        assert_eq!(
+            g.intent(ask(2, IntentKind::Approve {})),
+            Err(Refused::NotNow)
+        );
+        // A new generation starts afresh.
+        g.publish(update(3, vec![IntentName::Approve], changes()))
+            .unwrap();
+        assert_eq!(g.intent(ask(3, IntentKind::Approve {})), Ok(Answer::Taken));
+    }
+
+    // Third review, finding 6: Pause, Resume, Pause are three presses, and each reaches the
+    // engine; the second Pause is not swallowed as a repeat of the first.
+    #[test]
+    fn pause_resume_pause_each_reach_the_engine() {
+        let mut g = Guard::default();
+        g.begin("job-1", 4).unwrap();
+        g.publish(update(
+            1,
+            vec![IntentName::Pause, IntentName::Resume],
+            changes(),
+        ))
+        .unwrap();
+        for kind in [
+            IntentKind::Pause {},
+            IntentKind::Resume {},
+            IntentKind::Pause {},
+        ] {
+            assert_eq!(g.intent(ask(1, kind)), Ok(Answer::Taken));
+        }
+        let kinds: Vec<_> = g.take().into_iter().map(|i| i.intent).collect();
+        assert_eq!(
+            kinds,
+            [
+                IntentKind::Pause {},
+                IntentKind::Resume {},
+                IntentKind::Pause {}
+            ]
+        );
+    }
+
+    // Third review, finding 6: a job that ended hands nothing more to the engine.
+    #[test]
+    fn an_ended_job_hands_nothing_to_the_engine() {
+        let mut g = ready(2);
+        assert_eq!(g.intent(ask(2, IntentKind::Pause {})), Ok(Answer::Taken));
+        g.end();
+        assert!(g.take().is_empty());
+    }
+
+    // Third review, finding 6: a session number only ever grows; an older or the same one is
+    // refused, so a late "begin" cannot bring back a session that was replaced.
+    #[test]
+    fn a_session_that_is_not_newer_is_refused() {
+        let mut g = Guard::default();
+        assert!(g.begin("job-1", 5).is_ok());
+        assert_eq!(g.begin("job-1", 2), Err(Stale::OldSession));
+        assert_eq!(g.begin("job-1", 5), Err(Stale::OldSession));
+        // Not after the job ended either, and not for another job.
+        g.end();
+        assert_eq!(g.begin("job-2", 4), Err(Stale::OldSession));
+        assert!(g.begin("job-2", 6).is_ok());
+    }
+
     #[test]
     fn an_intent_not_allowed_now_is_refused() {
         let mut g = ready(2);
@@ -564,7 +724,7 @@ mod tests {
     #[test]
     fn try_again_and_choose_drive_must_name_what_the_screen_shows() {
         let mut g = Guard::default();
-        g.begin("job-1", 4);
+        g.begin("job-1", 4).unwrap();
         let drives = vec![
             RescueDrive {
                 drive: "Old disk".into(),

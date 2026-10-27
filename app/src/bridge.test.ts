@@ -263,7 +263,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await recoveryRun();
       await thingsReady();
       await guardView();
-      await guardIntent({ job: "job-1", epoch: 2, generation: 3, intent: { kind: "try-again", line: 0 } });
+      await guardIntent({ job: "job-1", epoch: 2, generation: 3, press: "p-1", intent: { kind: "try-again", line: 0 } });
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }

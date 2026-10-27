@@ -1051,7 +1051,7 @@ export async function guardView(): Promise<Snapshot> {
  * Sends one intent, bound to the job, session and plan generation shown; the engine checks it again.
  * A refusal comes back as its key only; anything unexpected is "status unavailable". Nothing is logged.
  */
-export async function guardIntent(intent: { job: string; epoch: number; generation: number; intent: IntentKind }): Promise<{ ok: true; answer: Answer } | { ok: false; refusal: Refusal }> {
+export async function guardIntent(intent: { job: string; epoch: number; generation: number; press: string; intent: IntentKind }): Promise<{ ok: true; answer: Answer } | { ok: false; refusal: Refusal }> {
   try {
     const answer = parseAnswer(await send("guard_intent", { intent }));
     return answer ? { ok: true, answer } : { ok: false, refusal: "unavailable" };

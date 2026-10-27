@@ -16,7 +16,7 @@ import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../components/kit";
 import { guardIntent as sendIntent, guardView as fetchView, listenGuard } from "../bridge";
-import { arrive, bind, fromSnapshot, intentKey, type IntentKind, type Projection, type ScreenView, type Shown } from "../guard";
+import { arrive, bind, intentKey, settle, type IntentKind, type Projection, type ScreenView, type Shown } from "../guard";
 import { ChangedItems, ChangesPreview } from "./ChangesPreview";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
@@ -110,10 +110,18 @@ export default function GuardHost({ bridge = REAL }: { bridge?: GuardBridge }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const pending = useRef(new Set<string>());
   const alive = useRef(true);
+  // How many times the view was asked for, and how many events came: an answer to an older ask is
+  // dropped, and every answer goes through the same version check as an event (third review,
+  // finding 7).
+  const asked = useRef(0);
+  const events = useRef(0);
 
   const reload = useCallback(() => {
+    const ask = ++asked.current;
+    const eventsAtAsk = events.current;
     void bridge.view().then((snap) => {
-      if (alive.current) setShown(fromSnapshot(snap));
+      if (!alive.current || ask !== asked.current) return;
+      setShown((now) => settle(now, snap, events.current !== eventsAtAsk));
     });
   }, [bridge]);
 
@@ -124,6 +132,7 @@ export default function GuardHost({ bridge = REAL }: { bridge?: GuardBridge }) {
     void bridge
       .listen((event) => {
         if (!alive.current) return;
+        events.current += 1;
         if (event === null) {
           reload();
           return;
