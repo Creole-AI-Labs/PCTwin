@@ -16,6 +16,9 @@
 //! - [`goodbye`]: the before-wipe list: what is only on the old laptop, keys, licences, steps not
 //!   finished, places not searched; each resolved by evidence or accepted as a specific loss;
 //!   saved on the new laptop.
+//! - [`handover`]: three separate requests (PCTwin's temporary files, the mover's account,
+//!   erasing the old laptop), each through one gate: exact device, undo closed for good, the list
+//!   clear and current, no other writer, and a fresh confirmation. None is run here.
 //!
 //! Nothing here changes a file on either laptop or starts a program: the crate's clippy fence
 //! bans every way to write, rename or remove a file, to start a program and to open a network
@@ -25,6 +28,7 @@
 
 pub mod checks;
 pub mod goodbye;
+pub mod handover;
 pub mod ledger;
 pub mod repair;
 mod store;
