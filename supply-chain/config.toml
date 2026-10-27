@@ -1563,8 +1563,9 @@ version = "0.8.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio]]
-version = "1.53.3"
+version = "1.54.1"
 criteria = "safe-to-deploy"
+notes = "Not reviewed line by line. Moved from 1.53.3 to 1.54.1 on 27 Oct 2026: the delta is about 8,800 added lines across 141 non-test files, with 44 new lines containing unsafe, too large to read honestly in a dependency bump. Mozilla and the Bytecode Alliance trust its publisher (Alice Ryhl, Darksonn), but no imported audit set covers this version yet. Replace with an import or an audit when one appears."
 
 [[exemptions.tokio-macros]]
 version = "2.7.2"

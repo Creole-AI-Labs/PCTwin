@@ -37,6 +37,18 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on a std File opened by PCTwin with DELETE access. Read every unsafe block in src/win.rs and src/win/sugar.rs (22 + 4): SetFileInformationByHandle with FileDispositionInfoEx (DELETE|POSIX_SEMANTICS|IGNORE_READONLY), FileDispositionInfo and FileBasicInfo, each with a correctly sized, initialised struct and a live owned handle; NtCreateFile with zeroed OBJECT_ATTRIBUTES and a NUL-terminated UNICODE_STRING bounded by UNICODE_STRING_MAX_CHARS; the symlink-creation reparse buffer (an align_to_mut with a checked head; its own TODO notes alignment) and the read_dir entry parsing (trusts the kernel's offsets) are not used by PCTwin and were read, not exercised. No build script, no network, no file access beyond the caller's handles and paths. Unix code (nix/libc) not used by PCTwin."
 
+[[audits.ico]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.6.0"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff (src/, tests/, examples/, Cargo.toml). In PCTwin it runs only at build time, inside tauri-codegen, on our own app icons. Changes: png dependency raised from 0.17 to 0.18 (already in the tree, so one png instead of two); read_png and read_png_info now take BufRead + Seek, as png 0.18 requires; IconDir::read seeks to the end to learn the file length and rejects an entry whose offset plus size runs past it; BMP decoding rejects images over 8192 x 8192 pixels before allocating, and a missing PNG output size is an error instead of a panic; the BMP colour table now honours biClrUsed (colours actually stored) when it is non-zero and not above the depth's maximum. Residual: with a short colour table, a pixel index past its end now panics on the table lookup instead of reading a colour; harmless for us, since only our own icons are read. No new dependencies besides the png version, no unsafe, no build script, no process or network use."
+
+[[audits.mdns-sd]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.21.5 -> 0.21.6"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff: Cargo.toml (version only), CHANGELOG and src/service_daemon.rs, the only source file changed (about 300 lines of code plus about 450 lines of new tests). Changes: event channels for browse, browse_cache and resolve_hostname grow from 10 to 1000 slots, and the daemon now delivers events with try_send instead of a blocking send, so a slow or dropped receiver can no longer stall the daemon thread; when a channel is full or disconnected, the subscription and its pending retransmissions are removed and the receiver sees a disconnect with no SearchStopped. New helper add_intf_addr records an interface address only after the multicast join succeeds (or the interface already holds that IP version's membership), so a failed join is retried on the next IP check. Hostname resolver timeouts and stop commands now go through the same removal path, and the hostname key is lower-cased consistently. pctwin-discovery and pctwin-doctor read their browse receiver in a loop with recv_timeout, so they keep up; an early disconnect just ends that search with what was found. No new dependencies, no unsafe, no process spawning; network use is unchanged (the same multicast sockets)."
+
 [[audits.nix]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -60,6 +72,12 @@ who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 version = "3.15.0"
 notes = "Reviewed 25 Oct 2026. Reached only through auto-launch, which calls os_info::get() solely in its SMAppService mode on macOS; PCTwin uses the LaunchAgent mode, so the code is compiled but not run. Built with default features off (no serde, no schemars). Read in full the code for PCTwin's three systems: src/windows/winapi.rs, src/macos/mod.rs, src/linux (file_release.rs, lsb_release.rs, mod.rs), lib.rs, info.rs, version.rs, matcher.rs, bitness.rs, uname.rs, architecture.rs; scanned the other OS modules (aix, the BSDs, illumos, android, ios, redox, cygwin) for unsafe, process and network use only. No build script, no network. It reads OS files (/etc/os-release and friends, /System/Library/CoreServices/SystemVersion.plist) and runs local tools by bare name through PATH (sw_vers, lsb_release, uname, getconf, sysctl) to read version strings; output is only parsed into strings. Unsafe on Windows: GetNativeSystemInfo into a zeroed MaybeUninit, RtlGetVersion resolved with GetModuleHandleA/GetProcAddress and called with a correctly sized OSVERSIONINFOEX, RegOpenKeyExW/RegQueryValueExW on HKLM CurrentVersion with the type, even size and second-read size checked before the buffer is used, key closed by a drop guard. macOS: one NSPropertyListSerialization call with the result downcast-checked. Residual: GetProcAddress returns FARPROC (an Option of a function pointer) and the crate transmutes it to a plain function pointer without a null check, which would be undefined behaviour if ntdll lacked RtlGetVersion (it never does on supported Windows); the tools it runs are found through PATH."
+
+[[audits.plist]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "1.10.1 -> 1.10.3"
+notes = '''Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff of src/ (de.rs, lib.rs, value.rs, stream/ascii_reader.rs, stream/binary_reader.rs) and Cargo.toml (version only). pctwin-scan reads untrusted plists from the old laptop, so the readers were read closely. ASCII reader: quoted strings are now collected as bytes and decoded as UTF-8 at the closing quote (invalid UTF-8 is an error, not a panic), and the \' escape is accepted; from_reader_ascii now wraps the reader in a BufReader. Binary reader: the per-object offset and on-stack tables become a tag byte and a u64 per object, so scalars of up to 8 bytes (booleans, integers, reals, UIDs, short data and short UTF-8 strings) are cached after the first read instead of being re-read when referenced again; containers and dates are never cached, the recursion check still uses the on-stack bit, object indexes are bounds-checked before use, and offsets are still checked against the trailer start before any seek. A cached string is only ever one already validated as UTF-8, so its expect cannot fail. The removed u64_to_usize helper is inlined as usize::try_from. The rest is new tests. No new dependencies, no unsafe, no build script, no process or network use.'''
 
 [[audits.proptest]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -90,6 +108,12 @@ who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 version = "0.15.4"
 notes = "Reviewed 25 Oct 2026 for PCTwin's use in pctwin-app (default features off, gtk3 only): FileDialog::new().pick_folder() run on a blocking thread (history.rs, moving.rs) and MessageDialog with OkCancel and Ok buttons, no parent window (others.rs). With gtk3 the zenity and xdg-portal backends (the only places that run a process or talk over D-Bus) are not compiled; the wasm backend is not built. build.rs only links AppKit on macOS and checks the Linux feature choice: no downloads, no file writes, no compiled code. No network anywhere. Read in full: src/backend.rs, the Windows backend (win_cid: utils.rs, file_dialog.rs, file_dialog/com.rs, dialog_ffi.rs, message_dialog.rs without common-controls-v6, thread_future.rs), the macOS backend (utils.rs, focus and policy managers, user_alert.rs, message_dialog.rs, file_dialog.rs, file_dialog/panel_ffi.rs, modal_future.rs) and the gtk3 backend (utils.rs, file_dialog.rs, dialog_ffi.rs, message_dialog.rs, gtk_future.rs); scanned lib.rs, file_dialog.rs, message_dialog.rs, oneshot.rs and file_handle for unsafe only. Unsafe is COM vtable calls on IFileOpenDialog/IShellItem with CoInitializeEx around each sync dialog and Release on drop, MessageBoxW with NUL-terminated UTF-16 owned for the call, objc2 AppKit calls (NSOpenPanel, NSAlert, CFUserNotificationDisplayAlert) dispatched to the main thread, and GTK calls queued with g_idle_add_full onto the default GLib context (so they run on the thread that owns it, Tauri's GTK main thread) with the caller blocking on a condvar; GTK message text goes through a %s format, never as the format. Residuals, none reachable from untrusted input (the person drives the dialogs; PCTwin supplies the words): Windows read_to_string unwraps String::from_utf16, so a picked path with an unpaired surrogate panics the blocking task; gtk3 get_result calls CStr::from_ptr on gtk_file_chooser_get_filename without a null check (a chosen location with no local path) and leaks the returned string; GTK titles and descriptions with an interior NUL panic (CString::new().unwrap()); on Windows an interior NUL silently truncates the message text; macOS run_on_main makes a MainThreadMarker unchecked off the main thread to read NSApplication isRunning."
+
+[[audits.roxmltree]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.21.1 -> 0.21.2"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff (src/lib.rs, src/parse.rs, src/tokenizer.rs, tests/api.rs, Cargo.toml version only). pctwin-scan parses untrusted XML with it. The tokenizer no longer recurses once per nested element: parse_content now walks nested elements in a loop with an explicit depth counter (overflow past u32::MAX returns NodesLimitReached), so a deeply nested document can no longer overflow the stack; a new test parses 200,000 levels. last_element_child uses rfind (same result). The rest is doc comments. No new dependencies, no unsafe, no build script, no process or network use."
 
 [[audits.security-framework]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -133,11 +157,23 @@ criteria = "safe-to-deploy"
 delta = "2.12.2 -> 2.12.4"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff of src/, build.rs (unchanged), mobile/ and scripts/bundle.global.js. Changes: Cargo.toml version and internal requirements raised (tauri-macros ~2.7.3, tauri-runtime and tauri-runtime-wry ~2.12.2, tauri-utils ~2.10.2, tauri-build 2.7.3, swift-rs 1.0.9 on Apple mobile only). ipc/protocol.rs and protocol/asset.rs: the leading-slash strip now uses strip_prefix instead of slicing [1..], fixing a panic on an empty path (ipc:foo, asset:foo), with new tests. plugin/mobile.rs: a late or duplicate native response is dropped instead of unwrap-panicking inside the extern C handler. protocol/tauri.rs: only the text of an iOS dev-server error message changed. iOS Swift entry points made public. Injected bundle.global.js (minified): the Channel class now calls its onmessage handler inside a try/catch that rethrows via queueMicrotask; no new or removed string literals, only one new property (.add for a WeakSet), the only URL string is unchanged, and there is still no fetch, eval, WebSocket, XMLHttpRequest or Function constructor. No new dependencies, no new unsafe, no process spawning, no network access."
 
+[[audits.tauri]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.4 -> 2.12.5"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff. Only two files changed: Cargo.toml (version; tauri-macros ~2.7.4, tauri-runtime-wry ~2.12.3, build dependency tauri-build 2.7.4) and a doc comment in src/path/desktop.rs describing where the Linux resource directory resolves. No code change; build.rs and scripts/bundle.global.js unchanged."
+
 [[audits.tauri-build]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "2.7.1 -> 2.7.2"
 notes = "Reviewed 15 Oct 2026. The only change is Cargo.toml: version number and the tauri-codegen requirement raised to ~2.7.2. No source change."
+
+[[audits.tauri-build]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.3 -> 2.7.4"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff. Cargo.toml raises tauri-codegen to ~2.7.4. src/acl.rs: the build script skips printing cargo:rerun-if-changed for the capabilities directory when that directory does not exist and the config lists capabilities explicitly. No other change, no new dependencies, no unsafe, no process or network use."
 
 [[audits.tauri-codegen]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -145,11 +181,23 @@ criteria = "safe-to-deploy"
 delta = "2.7.1 -> 2.7.3"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, base64 requirement raised from 0.22 to 0.23 and tauri-utils to ~2.10.2. No source change, no build script."
 
+[[audits.tauri-codegen]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.3 -> 2.7.4"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff (Cargo.toml, src/lib.rs, src/embedded_assets.rs). ico requirement raised from 0.5 to 0.6. New backdate() helper sets the modification time of each file it writes to OUT_DIR (cached data and compressed assets) to 1 January 2000, so Cargo does not rebuild on every run; errors are ignored. It only opens files it has just written under OUT_DIR. A new test sets OUT_DIR to its own temp folder. No new unsafe in library code (the test uses set_var and remove_var, which need unsafe on edition 2024), no process or network use."
+
 [[audits.tauri-macros]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "2.7.1 -> 2.7.3"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-codegen raised to ~2.7.3 and tauri-utils to ~2.10.2. No source change."
+
+[[audits.tauri-macros]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.3 -> 2.7.4"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version and tauri-codegen raised to ~2.7.4. No source change."
 
 [[audits.tauri-plugin-autostart]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -174,6 +222,12 @@ who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "2.12.1 -> 2.12.2"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-runtime raised to ~2.12.2 and tauri-utils to ~2.10.2. No source change; build.rs unchanged."
+
+[[audits.tauri-runtime-wry]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.2 -> 2.12.3"
+notes = "Reviewed 27 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff (Cargo.toml, src/util.rs, src/undecorated_resizing.rs). Windows: the once_cell dependency is dropped and the three lazily loaded DPI function pointers (GetDpiForWindow, GetDpiForMonitor, GetSystemMetricsForDpi from user32 and shcore) use std::sync::LazyLock instead, with the same loading code. Linux GTK: resizing an undecorated window now finds the window with toplevel() instead of parent().parent(), and the motion handler hit-tests against root coordinates and sets the cursor on the webview's own GDK window. No new dependencies, no new unsafe, build.rs unchanged, no process or network use."
 
 [[audits.thread-priority]]
 who = "PCTwin maintainers"
