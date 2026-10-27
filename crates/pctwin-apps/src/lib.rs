@@ -20,4 +20,5 @@
 //! no permission ([`after`]).
 
 pub mod found;
+pub mod routes;
 pub mod version;

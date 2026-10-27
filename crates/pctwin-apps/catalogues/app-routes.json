@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "catalogue": "app-routes",
+  "version": 1,
+  "rows": [
+    {"id": "putty-msi", "system": "windows", "match": {"product-code": "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}"}, "route": {"kind": "winget", "id": "PuTTY.PuTTY"}}
+  ]
+}

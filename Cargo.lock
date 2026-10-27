@@ -3653,10 +3653,12 @@ version = "0.1.0"
 dependencies = [
  "pctwin-catalogue",
  "pctwin-grant",
+ "pctwin-helper-os",
  "pctwin-maker",
  "pctwin-record",
  "pctwin-types",
  "plist",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2 0.10.9",
