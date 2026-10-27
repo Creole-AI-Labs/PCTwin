@@ -253,23 +253,7 @@ fn xml(b: &[u8], d: &mut Depth) {
         } else if rest.starts_with(b"<?") {
             i = skip_past(b, i + 2, b"?>");
         } else if rest.starts_with(b"<!") {
-            // A declaration, with its internal subset in brackets.
-            let mut j = i + 2;
-            let mut brackets = 0usize;
-            while j < b.len() {
-                match b[j] {
-                    b'"' | b'\'' => {
-                        j = skip_quoted(b, j, b[j], false);
-                        continue;
-                    }
-                    b'[' => brackets += 1,
-                    b']' => brackets = brackets.saturating_sub(1),
-                    b'>' if brackets == 0 => break,
-                    _ => {}
-                }
-                j += 1;
-            }
-            i = j + 1;
+            i = skip_declaration(b, i);
         } else if rest.starts_with(b"</") {
             d.close();
             i = skip_past(b, i + 2, b">");
@@ -297,6 +281,51 @@ fn xml(b: &[u8], d: &mut Depth) {
             i = j + 1;
         }
     }
+}
+
+/// The index just past a declaration (`<!DOCTYPE ...>`) that opens at `i`, read as XML reads
+/// it: quoted literals whole; an internal subset in brackets, inside which comments, processing
+/// instructions and each markup declaration (its own quoted literals whole) are skipped. A quote
+/// inside a comment in the subset never hides what follows.
+fn skip_declaration(b: &[u8], i: usize) -> usize {
+    let mut j = i + 2;
+    let mut subset = false;
+    while j < b.len() {
+        let rest = &b[j..];
+        if subset && rest.starts_with(b"<!--") {
+            j = skip_past(b, j + 4, b"-->");
+            continue;
+        }
+        if subset && rest.starts_with(b"<?") {
+            j = skip_past(b, j + 2, b"?>");
+            continue;
+        }
+        if subset && rest.starts_with(b"<!") {
+            // One markup declaration inside the subset, to its `>`.
+            let mut k = j + 2;
+            while k < b.len() && b[k] != b'>' {
+                k = if matches!(b[k], b'"' | b'\'') {
+                    skip_quoted(b, k, b[k], false)
+                } else {
+                    k + 1
+                };
+            }
+            j = k + 1;
+            continue;
+        }
+        match b[j] {
+            b'"' | b'\'' => {
+                j = skip_quoted(b, j, b[j], false);
+                continue;
+            }
+            b'[' if !subset => subset = true,
+            b']' if subset => subset = false,
+            b'>' if !subset => return j + 1,
+            _ => {}
+        }
+        j += 1;
+    }
+    b.len()
 }
 
 fn gvariant(b: &[u8], d: &mut Depth) {
@@ -415,6 +444,9 @@ mod tests {
             "\"abc",
             "/* x",
             "<!-- x",
+            "\"\"\"",
+            "<!DOCTYPE [<!x",
+            "<!DOCTYPE [<!-- ",
             "<![CDATA[",
             "<a b=\"",
             "'''",
@@ -430,6 +462,103 @@ mod tests {
             ] {
                 let _ = depth(s, syn, 10);
             }
+        }
+    }
+
+    /// What comes after every construct the gate skips is still counted: a string, a comment, a
+    /// declaration can never hide the nesting behind it (the mutation tests of the fourth-review
+    /// fix: each skip that stopped the count early survived before these).
+    #[test]
+    fn nothing_skipped_hides_the_nesting_after_it() {
+        let deep = |o: &str, c: &str| format!("{}1{}", o.repeat(300), c.repeat(300));
+        let json_deep = deep("[", "]");
+        for (syn, before) in [
+            (Syntax::Json, r#"{"a":"x\"]]\\","b":"#),
+            (Syntax::Json, r#"["\\", "#),
+            (Syntax::Jsonc, "// ]]]\n["),
+            (Syntax::Jsonc, "/* ]]] */ ["),
+            (Syntax::Jsonc, r#"["a\"b", "#),
+        ] {
+            let t = format!("{before}{json_deep}");
+            assert_eq!(check(&t, syn), Err(TooDeep), "{syn:?} {before}");
+        }
+        let toml_deep = deep("[", "]");
+        for before in [
+            r#"a = "x\"]]" # ]]]
+b = "#,
+            "a = 'x' # c\nb = ",
+            "# c\nb = ",
+            "a = \"\"\"\n]]]\n\"\"\"\nb = ",
+            "a = '''\n]]]\n'''\nb = ",
+            r"a = 'a\'
+b = ",
+            r"s = '''a\'''
+t = ",
+            "[t]\nk = ",
+            "x = 1\ny = ",
+        ] {
+            let t = format!("{before}{toml_deep}\n");
+            assert_eq!(check(&t, Syntax::Toml), Err(TooDeep), "{before:?}");
+        }
+        let keys = vec!["k"; 300].join(".");
+        for t in [
+            format!("x = 1\n{keys} = 1\n"),
+            format!("# c\n{keys} = 1\n"),
+            format!("x = {{a = 1, {keys} = 1}}\n"),
+            format!("x = {{{keys} = 1}}\n"),
+            format!("[{keys}]\n"),
+            format!(
+                "{} = {}1{}\n",
+                vec!["k"; 200].join("."),
+                "[".repeat(100),
+                "]".repeat(100)
+            ),
+        ] {
+            assert_eq!(check(&t, Syntax::Toml), Err(TooDeep), "{t:.40}");
+        }
+        let xml_deep = deep("<a>", "</a>");
+        for before in [
+            "text",
+            "<!-- </a></a> -->",
+            "<![CDATA[</a></a>]]>",
+            "<?pi </a> ?>",
+            r#"<!DOCTYPE r [<!-- " --><!ENTITY e "]>"><?p ]> ?>]>"#,
+            r#"<!DOCTYPE r PUBLIC "a>b" 'c>d'>"#,
+            r#"<r x="/>" y='</a>'/>"#,
+        ] {
+            let t = format!("{before}{xml_deep}");
+            assert_eq!(check(&t, Syntax::Xml), Err(TooDeep), "{before}");
+        }
+        for before in [r"'x\'[' ", r#""y" "#, "('a', "] {
+            let t = format!("{before}{}", deep("[", "]"));
+            assert_eq!(check(&t, Syntax::GVariant), Err(TooDeep), "{before}");
+        }
+    }
+
+    /// And legitimate text whose strings and comments hold brackets is never refused.
+    #[test]
+    fn brackets_inside_strings_and_comments_never_count() {
+        let open = "[".repeat(300);
+        let tags = "<a>".repeat(300);
+        let floats = vec!["1.5"; 300].join(", ");
+        for (syn, t) in [
+            (Syntax::Json, format!(r#"{{"a":"{open}\"{open}"}}"#)),
+            (Syntax::Jsonc, format!("// {open}\n/* {open} */ [1]")),
+            (Syntax::Toml, format!(r#"a = "{open}\"{open}""#)),
+            (Syntax::Toml, format!(r#"a = """{open}\"""{open}""""#)),
+            (
+                Syntax::Toml,
+                format!("a = '''{open}'''\nb = '{open}' # {open}\n"),
+            ),
+            (Syntax::Toml, format!("a = [[1], {floats}]\n")),
+            (Syntax::Toml, format!("[a]\nb = {{c = [{floats}]}}\n")),
+            (
+                Syntax::Xml,
+                format!("<r a=\"{tags}\"><!-- {tags} --><![CDATA[{tags}]]></r>"),
+            ),
+            (Syntax::GVariant, format!(r#"['{open}', "{open}\"{open}"]"#)),
+        ] {
+            assert_eq!(check(&t, syn), Ok(()), "{syn:?} {t:.60}");
         }
     }
 }

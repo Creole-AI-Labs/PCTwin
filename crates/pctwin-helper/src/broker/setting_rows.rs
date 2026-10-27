@@ -75,8 +75,12 @@ impl Row for SettingRow {
     const FIELDS: &'static [&'static str] = &["mechanism", "name", "min-helper"];
     const TRUST: Trust = Trust::Privileged;
     fn check(&self) -> Result<(), String> {
-        if parse_version(&self.min_helper).is_none() {
+        let Some(min) = parse_version(&self.min_helper) else {
             return Err("a minimum helper version is major.minor.patch".into());
+        };
+        // Part of loading (fourth review): a row this helper is too old for is never loaded.
+        if min > this_helper() {
+            return Err("this row needs a newer helper".into());
         }
         if self.name.trim().is_empty()
             || self.name.len() > 64
@@ -174,21 +178,54 @@ mod tests {
         ]}"#;
         let ordinary = test_key::sign(bytes, "privileged-settings", 2);
         assert_eq!(
-            Catalogue::<SettingRow>::signed(bytes, &ordinary, &test_key::keys(), 1).unwrap_err(),
+            Catalogue::<SettingRow>::signed(
+                bytes,
+                &ordinary,
+                &test_key::keys(),
+                &pctwin_catalogue::MemoryMarks::at(1)
+            )
+            .unwrap_err(),
             CatalogueError::NeedsPrivilegedKey
         );
         let sig = test_key::sign_privileged(bytes, "privileged-settings", 2);
-        let rows =
-            Catalogue::<SettingRow>::signed(bytes, &sig, &test_key::privileged_keys(), 1).unwrap();
-        assert_eq!(rows.rows().len(), 1);
-        assert_eq!(rows.report().skipped.len(), 4);
+        let rows = Catalogue::<SettingRow>::signed(
+            bytes,
+            &sig,
+            &test_key::privileged_keys(),
+            &pctwin_catalogue::MemoryMarks::at(1),
+        )
+        .unwrap();
+        // The row needing helper 9.0.0 is not loaded by this helper at all (fourth review: the
+        // minimum helper version is part of loading); the other four are not rows.
+        assert_eq!(rows.rows().len(), 0);
+        assert_eq!(rows.report().skipped.len(), 5);
+        assert!(
+            rows.report()
+                .skipped
+                .iter()
+                .any(|s| s.row == 0 && s.why == "this row needs a newer helper")
+        );
         let hib = NamedSetting::Hibernate(false);
+        assert_eq!(allowed(&rows, &hib, (9, 0, 0)), Err(NotAllowed::NoRow));
+        // A row this helper is new enough for loads, and `allowed` still checks the version.
+        let ok = br#"{"format":1,"catalogue":"privileged-settings","version":3,"rows":[
+            {"mechanism":"hibernate","name":"Hibernate","min-helper":"0.0.1"}
+        ]}"#;
+        let sig = test_key::sign_privileged(ok, "privileged-settings", 3);
+        let rows = Catalogue::<SettingRow>::signed(
+            ok,
+            &sig,
+            &test_key::privileged_keys(),
+            &pctwin_catalogue::MemoryMarks::at(2),
+        )
+        .unwrap();
+        assert_eq!(rows.rows().len(), 1);
+        assert!(allowed(&rows, &hib, this_helper()).is_ok());
         assert_eq!(
-            allowed(&rows, &hib, (8, 9, 9)),
+            allowed(&rows, &hib, (0, 0, 0)),
             Err(NotAllowed::HelperTooOld)
         );
-        assert!(allowed(&rows, &hib, (9, 0, 0)).is_ok());
         let tz = NamedSetting::TimeZone(TimeZoneName::parse("UTC").unwrap());
-        assert_eq!(allowed(&rows, &tz, (9, 0, 0)), Err(NotAllowed::NoRow));
+        assert_eq!(allowed(&rows, &tz, this_helper()), Err(NotAllowed::NoRow));
     }
 }

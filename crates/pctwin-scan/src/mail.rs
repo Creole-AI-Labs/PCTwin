@@ -64,7 +64,13 @@ pub struct MailStore {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MailAccounts {
     pub stores: Vec<MailStore>,
+    /// Folders not looked through for mail because the walk had looked at all it may
+    /// ([`MAX_LOOKED_AT`]): "found, not read: too many files to look through". Never silent.
+    pub not_looked_at: Vec<PathBuf>,
 }
+
+/// The words for a folder the mail walk did not look through.
+pub const NOT_LOOKED_AT: &str = "found, not read: too many files here to look through for mail";
 
 impl MailAccounts {
     /// All accounts the stores record. MAPI profiles of several Office versions are copies made
@@ -312,11 +318,15 @@ pub fn name_stores(
         }
         stores.push(s);
     }
-    MailAccounts { stores }
+    MailAccounts {
+        stores,
+        not_looked_at: Vec::new(),
+    }
 }
 
-/// Most folders and files looked at while finding mail by its shape (the rest are not).
-pub const MAX_LOOKED_AT: usize = 50_000;
+/// Most folders and files looked at while finding mail by its shape (the rest are reported, not
+/// looked through: [`pctwin_types::limits`]).
+pub use pctwin_types::limits::MAIL_WALK_ENTRIES as MAX_LOOKED_AT;
 /// How far below each app data folder mail is looked for by its shape.
 const SHAPE_DEPTH: usize = 4;
 
@@ -338,15 +348,14 @@ pub fn mail_accounts(home: &Path) -> MailAccounts {
     }
     // A store already found is not looked through again for its mail files.
     let skip: Vec<PathBuf> = found.iter().map(|(s, _)| s.at.clone()).collect();
-    let mut walk = Walk {
-        looked: 0,
-        found: Vec::new(),
-    };
+    let mut walk = Walk::new();
     for base in &bases {
         walk.below(base, 0, &skip);
     }
     found.extend(walk.found.into_iter().map(|s| (s, None)));
-    name_stores(shipped_mail_clients(), found)
+    let mut accounts = name_stores(shipped_mail_clients(), found);
+    accounts.not_looked_at = walk.not_looked_at;
+    accounts
 }
 
 /// The person's app data folders, where programs keep their stores.
@@ -488,12 +497,33 @@ fn mac_mail_store(home: &Path) -> Option<MailStore> {
 pub struct Walk {
     pub looked: usize,
     pub found: Vec<MailStore>,
+    /// Folders left unlooked-through once the walk had looked at all it may: reported.
+    pub not_looked_at: Vec<PathBuf>,
+}
+
+impl Default for Walk {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Walk {
-    /// Mail by its shape in and below `dir` (never through a link, never inside `skip`).
+    pub fn new() -> Self {
+        Walk {
+            looked: 0,
+            found: Vec::new(),
+            not_looked_at: Vec::new(),
+        }
+    }
+
+    /// Mail by its shape in and below `dir` (never through a link, never inside `skip`). Past
+    /// the cap, the folder it stopped in and every folder after it are reported, not dropped.
     pub fn below(&mut self, dir: &Path, depth: usize, skip: &[PathBuf]) {
         if skip.iter().any(|s| dir.starts_with(s)) {
+            return;
+        }
+        if self.looked >= MAX_LOOKED_AT {
+            self.not_looked_at.push(dir.to_path_buf());
             return;
         }
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -521,10 +551,13 @@ impl Walk {
             }
         }
         for (e, name) in entries.iter().zip(&names) {
-            self.looked += 1;
-            if self.looked > MAX_LOOKED_AT {
+            if self.looked >= MAX_LOOKED_AT {
+                if self.not_looked_at.last().map(PathBuf::as_path) != Some(dir) {
+                    self.not_looked_at.push(dir.to_path_buf());
+                }
                 return;
             }
+            self.looked += 1;
             let Ok(t) = e.file_type() else { continue };
             if t.is_symlink() {
                 continue;

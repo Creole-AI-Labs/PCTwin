@@ -440,12 +440,13 @@ fn homes_are_found_wherever_the_drive_keeps_them() {
         "{:?}",
         shipped_layouts().report()
     );
-    let (people, not_people) = people_on_drive_with(
+    let found = people_on_drive_with(
         shipped_layouts(),
         &opened(d.path()),
         OtherSystem::Windows,
         &mut Owners(vec![]),
     );
+    let (people, not_people) = (found.people, found.not_people);
     let labels: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();
     assert_eq!(labels, ["Ada", "Leftover", "Tunde", "Zara", "bisi"]);
     let zara = people.iter().find(|p| p.label == "Zara").unwrap();
@@ -517,7 +518,13 @@ fn a_new_signed_layout_row_works_with_no_code_change() {
         {"system":"beos"}
     ]}"#;
     let sig = test_key::sign(bytes, "rescue-layouts", 2);
-    let rows = Catalogue::<LayoutRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<LayoutRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 2);
     assert_eq!(rows.report().skipped.len(), 4);
     let r =
@@ -568,12 +575,13 @@ fn a_home_reached_twice_is_one_person() {
         r#"{"format":1,"catalogue":"rescue-layouts","version":1,"rows":[
         {"system":"windows","homes":[["USERS"]]}]}"#,
     );
-    let (people, _) = people_on_drive_with(
+    let people = people_on_drive_with(
         &rows,
         &opened(d.path()),
         OtherSystem::Windows,
         &mut Owners(vec![]),
-    );
+    )
+    .people;
     let labels: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();
     assert_eq!(
         labels,
@@ -606,13 +614,9 @@ fn a_linux_drives_homes_come_from_its_account_list() {
             .iter()
             .find(|row| row.homes == [["home"]]),
     );
-    assert_eq!(
-        places,
-        [
-            vec![std::ffi::OsString::from("srv"), "people".into()],
-            vec!["home".into()]
-        ]
-    );
+    // One account's home alone does not make the folder beside it a folder of homes (fourth
+    // review, finding F6): Ada is her own home, found on its own.
+    assert_eq!(places, [vec![std::ffi::OsString::from("home")]]);
     let scan = scan_rescued_drive(r, &real_id(r), &mut Owners(vec![])).unwrap();
     let labels: Vec<&str> = scan.people.iter().map(|p| p.label.as_str()).collect();
     assert_eq!(labels, ["ada", "bo", "cy"]);

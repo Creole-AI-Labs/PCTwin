@@ -232,15 +232,27 @@ impl KeyStore for SystemStore {
     }
 
     fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
-        match Self::named(&mark_name(journal_id))?.get_secret() {
+        Self::get_named(&mark_name(journal_id))
+    }
+
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        Self::put_named(&mark_name(journal_id), mark)
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+impl SystemStore {
+    /// A counter kept under `name` in the system's key store.
+    fn get_named(name: &str) -> Result<Option<u64>, KeyError> {
+        match Self::named(name)?.get_secret() {
             Ok(bytes) => mark_bytes(&bytes).map(Some),
             Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(_) => Err(KeyError::Unavailable),
         }
     }
 
-    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
-        Self::named(&mark_name(journal_id))?
+    fn put_named(name: &str, mark: u64) -> Result<(), KeyError> {
+        Self::named(name)?
             .set_secret(&mark.to_be_bytes())
             .map_err(|_| KeyError::Unavailable)
     }
@@ -308,17 +320,34 @@ impl SystemStore {
 #[cfg(target_os = "linux")]
 impl KeyStore for SystemStore {
     fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
-        Self::read_own(&mark_name(journal_id))?
-            .map(|b| mark_bytes(&b))
-            .transpose()
+        Self::get_named(&mark_name(journal_id))
+    }
+
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        Self::put_named(&mark_name(journal_id), mark)
+    }
+
+    fn get(&self, journal_id: u64) -> Result<Option<TagKey>, KeyError> {
+        Self::get_key(journal_id)
+    }
+
+    fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError> {
+        Self::put_key(journal_id, key)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl SystemStore {
+    /// A counter kept in the person's own file `name` in the key folder.
+    fn get_named(name: &str) -> Result<Option<u64>, KeyError> {
+        Self::read_own(name)?.map(|b| mark_bytes(&b)).transpose()
     }
 
     /// Written to a new file beside it, flushed, then moved over it in one step.
-    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+    fn put_named(name: &str, mark: u64) -> Result<(), KeyError> {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         let dir = Self::folder()?;
-        let name = mark_name(journal_id);
         let part = dir.join(format!("{name}.part"));
         let _ = std::fs::remove_file(&part);
         let mut file = std::fs::OpenOptions::new()
@@ -331,13 +360,13 @@ impl KeyStore for SystemStore {
         file.write_all(&mark.to_be_bytes())
             .and_then(|()| file.sync_all())
             .map_err(|_| KeyError::Unavailable)?;
-        std::fs::rename(&part, dir.join(&name)).map_err(|_| KeyError::Unavailable)?;
+        std::fs::rename(&part, dir.join(name)).map_err(|_| KeyError::Unavailable)?;
         std::fs::File::open(&dir)
             .and_then(|d| d.sync_all())
             .map_err(|_| KeyError::Unavailable)
     }
 
-    fn get(&self, journal_id: u64) -> Result<Option<TagKey>, KeyError> {
+    fn get_key(journal_id: u64) -> Result<Option<TagKey>, KeyError> {
         use std::io::Read;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let path = Self::folder()?.join(entry_name(journal_id));
@@ -365,7 +394,7 @@ impl KeyStore for SystemStore {
             .map_err(|_| KeyError::Missing)
     }
 
-    fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError> {
+    fn put_key(journal_id: u64, key: &TagKey) -> Result<(), KeyError> {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         let path = Self::folder()?.join(entry_name(journal_id));
@@ -378,6 +407,59 @@ impl KeyStore for SystemStore {
         file.write_all(&key.0)
             .and_then(|()| file.sync_all())
             .map_err(|_| KeyError::Unavailable)
+    }
+}
+
+/// The highest version of each delivered catalogue PCTwin accepted (its rollback mark), kept in
+/// the system's key store beside the journal's key and counter (fourth review: never a number a
+/// caller passes in). A catalogue older than its mark is refused
+/// ([`pctwin_catalogue::Catalogue::signed`]).
+pub struct CatalogueMarks;
+
+fn catalogue_mark_name(catalogue: &str) -> String {
+    let safe: String = catalogue
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("catalogue-{safe}-mark")
+}
+
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+impl pctwin_catalogue::RollbackMarks for CatalogueMarks {
+    fn highest(&self, catalogue: &str) -> Result<Option<u32>, pctwin_catalogue::MarkUnavailable> {
+        SystemStore::get_named(&catalogue_mark_name(catalogue))
+            .map_err(|_| pctwin_catalogue::MarkUnavailable)?
+            .map(|v| u32::try_from(v).map_err(|_| pctwin_catalogue::MarkUnavailable))
+            .transpose()
+    }
+
+    fn raise(
+        &self,
+        catalogue: &str,
+        version: u32,
+    ) -> Result<(), pctwin_catalogue::MarkUnavailable> {
+        if self.highest(catalogue)?.is_some_and(|v| v >= version) {
+            return Ok(());
+        }
+        SystemStore::put_named(&catalogue_mark_name(catalogue), u64::from(version))
+            .map_err(|_| pctwin_catalogue::MarkUnavailable)
+    }
+}
+
+/// Other systems keep no marks: no delivered catalogue is accepted there.
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+impl pctwin_catalogue::RollbackMarks for CatalogueMarks {
+    fn highest(&self, _: &str) -> Result<Option<u32>, pctwin_catalogue::MarkUnavailable> {
+        Err(pctwin_catalogue::MarkUnavailable)
+    }
+    fn raise(&self, _: &str, _: u32) -> Result<(), pctwin_catalogue::MarkUnavailable> {
+        Err(pctwin_catalogue::MarkUnavailable)
     }
 }
 

@@ -12,8 +12,13 @@
 //!   does not know are reported and ignored.
 //! - A catalogue compiled into the app ([`Catalogue::shipped`]) is covered by the app's own
 //!   signature. One delivered later ([`Catalogue::signed`]) must carry a minisign (Ed25519)
-//!   signature by a trusted key, bound to its name and version, and is never older than the one
-//!   in use. Rows that reach the admin helper ([`Trust::Privileged`]) need a privileged key.
+//!   signature by a trusted key, bound to its name and version, and is never older than the
+//!   highest version of it PCTwin ever accepted: that rollback mark is kept by PCTwin itself
+//!   ([`RollbackMarks`]; the system's key store, beside the journal's key), never passed in by a
+//!   caller. Rows that reach the admin helper ([`Trust::Privileged`]) need a privileged key.
+//! - A file that gives one key twice in any object (which reader's value would win?) is refused
+//!   whole; a row given twice, or two rows naming the same thing ([`Row::identity`]), are
+//!   skipped and reported.
 //! - Every file carries a format number under the shared format rule ([`CATALOGUE_FORMAT`]).
 //!
 //! **The production key is not here.** Catalogues delivered after release go through TUF
@@ -63,6 +68,65 @@ pub trait Row: DeserializeOwned {
     fn check(&self) -> Result<(), String> {
         Ok(())
     }
+    /// What the row names, when two rows naming the same thing would contradict each other
+    /// (the same catalog ID with two adapters): such rows are all skipped and reported, never
+    /// the first silently winning.
+    fn identity(&self) -> Option<String> {
+        None
+    }
+}
+
+/// The record of the highest version of each catalogue PCTwin has accepted (its rollback mark).
+/// Kept by PCTwin where an older copy of the app's files cannot put it back (the system's key
+/// store), and read and raised by [`Catalogue::signed`] itself.
+pub trait RollbackMarks {
+    /// The highest version of `catalogue` accepted so far (`None`: never one).
+    fn highest(&self, catalogue: &str) -> Result<Option<u32>, MarkUnavailable>;
+    /// Records that `version` of `catalogue` was accepted.
+    fn raise(&self, catalogue: &str, version: u32) -> Result<(), MarkUnavailable>;
+}
+
+/// The rollback marks could not be read or written now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarkUnavailable;
+
+/// Rollback marks in this process's memory (tests, and a run that keeps no delivered catalogue).
+#[derive(Debug, Default)]
+pub struct MemoryMarks {
+    floor: u32,
+    marks: std::sync::Mutex<std::collections::BTreeMap<String, u32>>,
+}
+
+impl MemoryMarks {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Marks where every catalogue has already been accepted at `version`.
+    pub fn at(version: u32) -> Self {
+        Self {
+            floor: version,
+            ..Self::default()
+        }
+    }
+}
+
+impl RollbackMarks for MemoryMarks {
+    fn highest(&self, catalogue: &str) -> Result<Option<u32>, MarkUnavailable> {
+        let m = self.marks.lock().map_err(|_| MarkUnavailable)?;
+        let kept = m.get(catalogue).copied();
+        Ok(match (kept, self.floor) {
+            (Some(k), f) => Some(k.max(f)),
+            (None, 0) => None,
+            (None, f) => Some(f),
+        })
+    }
+    fn raise(&self, catalogue: &str, version: u32) -> Result<(), MarkUnavailable> {
+        let mut m = self.marks.lock().map_err(|_| MarkUnavailable)?;
+        let e = m.entry(catalogue.to_string()).or_insert(version);
+        *e = (*e).max(version);
+        Ok(())
+    }
 }
 
 /// Why a whole catalogue file was refused (a row's problem never refuses the file).
@@ -84,6 +148,8 @@ pub enum CatalogueError {
     Older { found: u32, in_use: u32 },
     #[error("these rows need a privileged key")]
     NeedsPrivilegedKey,
+    #[error("the record of catalogue versions already accepted could not be read or written")]
+    MarkUnavailable,
 }
 
 /// A row that could not be used, and why.
@@ -200,11 +266,68 @@ impl TrustedKeys {
     }
 }
 
+/// A JSON value read only to refuse one that gives a key twice in an object (a plain reader keeps
+/// the last one silently; another reader might keep the first). The depth gate has run first.
+struct NoKeyTwice;
+
+impl<'de> serde::Deserialize<'de> for NoKeyTwice {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(NoKeyTwiceVisitor)
+    }
+}
+
+struct NoKeyTwiceVisitor;
+
+impl<'de> serde::de::Visitor<'de> for NoKeyTwiceVisitor {
+    type Value = NoKeyTwice;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JSON")
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_str<E>(self, _: &str) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_unit<E>(self) -> Result<NoKeyTwice, E> {
+        Ok(NoKeyTwice)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut a: A) -> Result<NoKeyTwice, A::Error> {
+        while a.next_element::<NoKeyTwice>()?.is_some() {}
+        Ok(NoKeyTwice)
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut a: A) -> Result<NoKeyTwice, A::Error> {
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(k) = a.next_key::<String>()? {
+            if !seen.insert(k.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "the key {k:?} is given twice"
+                )));
+            }
+            a.next_value::<NoKeyTwice>()?;
+        }
+        Ok(NoKeyTwice)
+    }
+}
+
 fn parse<R: Row>(bytes: &[u8]) -> Result<(u32, Vec<R>, Report), CatalogueError> {
     if bytes.len() > MAX_BYTES {
         return Err(CatalogueError::TooLarge);
     }
+    pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json)
+        .map_err(|e| CatalogueError::Damaged(e.to_string()))?;
     CATALOGUE_FORMAT.check_json(bytes)?;
+    serde_json::from_slice::<NoKeyTwice>(bytes)
+        .map_err(|e| CatalogueError::Damaged(e.to_string()))?;
     let file: Value =
         serde_json::from_slice(bytes).map_err(|e| CatalogueError::Damaged(e.to_string()))?;
     let Some(top) = file.as_object() else {
@@ -235,8 +358,17 @@ fn parse<R: Row>(bytes: &[u8]) -> Result<(u32, Vec<R>, Report), CatalogueError> 
             report.note(|r| r.unknown_fields.push((None, key.clone())));
         }
     }
-    let mut out = Vec::with_capacity(rows.len());
+    let mut out: Vec<(usize, R)> = Vec::with_capacity(rows.len());
     for (i, value) in rows.iter().enumerate() {
+        if rows[..i].contains(value) {
+            report.note(|r| {
+                r.skipped.push(Skipped {
+                    row: i,
+                    why: "this row repeats one before it".into(),
+                })
+            });
+            continue;
+        }
         let Some(obj) = value.as_object() else {
             report.note(|r| {
                 r.skipped.push(Skipped {
@@ -253,7 +385,7 @@ fn parse<R: Row>(bytes: &[u8]) -> Result<(u32, Vec<R>, Report), CatalogueError> 
         }
         match R::deserialize(value) {
             Ok(row) => match row.check() {
-                Ok(()) => out.push(row),
+                Ok(()) => out.push((i, row)),
                 Err(why) => report.note(|r| r.skipped.push(Skipped { row: i, why })),
             },
             Err(e) => report.note(|r| {
@@ -264,7 +396,25 @@ fn parse<R: Row>(bytes: &[u8]) -> Result<(u32, Vec<R>, Report), CatalogueError> 
             }),
         }
     }
-    Ok((version, out, report))
+    // Two rows naming the same thing contradict each other: neither is used, both are reported.
+    let ids: Vec<Option<String>> = out.iter().map(|(_, r)| r.identity()).collect();
+    let mut kept = Vec::with_capacity(out.len());
+    for (n, (i, row)) in out.into_iter().enumerate() {
+        let twice = ids[n]
+            .as_ref()
+            .is_some_and(|id| ids.iter().filter(|x| x.as_ref() == Some(id)).count() > 1);
+        if twice {
+            report.note(|r| {
+                r.skipped.push(Skipped {
+                    row: i,
+                    why: "another row names the same thing".into(),
+                })
+            });
+        } else {
+            kept.push(row);
+        }
+    }
+    Ok((version, kept, report))
 }
 
 impl<R: Row> Catalogue<R> {
@@ -292,13 +442,15 @@ impl<R: Row> Catalogue<R> {
     }
 
     /// A delivered catalogue: its signature is checked first, before anything in it is read,
-    /// against `keys`; the signature must name this catalogue and the version the file holds,
-    /// and the version must be at least `in_use` (the one already in use: never rolled back).
+    /// against `keys`; the signature must name this catalogue and the version the file holds;
+    /// the version must be at least the highest of this catalogue PCTwin ever accepted, read from
+    /// `marks` (never rolled back), and once accepted that mark is raised to it. A mark that
+    /// cannot be read or raised refuses the catalogue.
     pub fn signed(
         bytes: &[u8],
         signature: &str,
         keys: &TrustedKeys,
-        in_use: u32,
+        marks: &dyn RollbackMarks,
     ) -> Result<Self, CatalogueError> {
         if R::TRUST > keys.trust {
             return Err(CatalogueError::NeedsPrivilegedKey);
@@ -311,12 +463,19 @@ impl<R: Row> Catalogue<R> {
         if comment != trusted_comment(R::CATALOGUE, version) {
             return Err(CatalogueError::SignedForSomethingElse);
         }
+        let in_use = marks
+            .highest(R::CATALOGUE)
+            .map_err(|_| CatalogueError::MarkUnavailable)?
+            .unwrap_or(0);
         if version < in_use {
             return Err(CatalogueError::Older {
                 found: version,
                 in_use,
             });
         }
+        marks
+            .raise(R::CATALOGUE, version)
+            .map_err(|_| CatalogueError::MarkUnavailable)?;
         Ok(Self {
             version,
             source: Source::Signed,

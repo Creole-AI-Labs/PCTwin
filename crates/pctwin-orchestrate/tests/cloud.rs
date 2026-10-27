@@ -358,9 +358,13 @@ fn sign_in_places_are_catalogue_rows() {
         {"system":"beos","place":["x"]}
     ]}"#;
     let sig = test_key::sign(bytes, "sign-in-places", 2);
-    let delivered =
-        Catalogue::<SignInPlace>::signed(bytes, &sig, &test_key::keys(), shipped.version())
-            .unwrap();
+    let delivered = Catalogue::<SignInPlace>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(shipped.version()),
+    )
+    .unwrap();
     assert_eq!(delivered.rows().len(), 1);
     assert_eq!(delivered.report().skipped.len(), 2);
     assert_eq!(

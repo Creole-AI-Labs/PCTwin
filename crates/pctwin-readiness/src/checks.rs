@@ -408,8 +408,10 @@ fn plain_name(name: &str) -> String {
         .collect()
 }
 
-/// One row of the `font-files` catalogue: a kind of font file PCTwin cannot read the names of
-/// (yet), by its name ending, so the report can say what was found and not checked.
+/// One row of the `font-files` catalogue: a kind of font file by its name ending, so the report
+/// can say what was found and not checked. `readable` kinds are ones PCTwin reads the names of
+/// (by their first bytes, never their names): one of those it could not read is a damaged font
+/// file, found and not checked, never silently passed over (fourth review, finding F5).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FontFileRow {
@@ -417,11 +419,13 @@ pub struct FontFileRow {
     pub extension: String,
     /// What it is, to show.
     pub name: String,
+    #[serde(default)]
+    pub readable: bool,
 }
 
 impl Row for FontFileRow {
     const CATALOGUE: &'static str = "font-files";
-    const FIELDS: &'static [&'static str] = &["extension", "name"];
+    const FIELDS: &'static [&'static str] = &["extension", "name", "readable"];
     fn check(&self) -> Result<(), String> {
         let ext_ok = !self.extension.is_empty()
             && self.extension.len() <= 16
@@ -433,6 +437,9 @@ impl Row for FontFileRow {
             return Err("a row is a lower-case name ending and a name".into());
         }
         Ok(())
+    }
+    fn identity(&self) -> Option<String> {
+        Some(self.extension.clone())
     }
 }
 
@@ -457,8 +464,9 @@ fn font(family: &str, folders: &[PathBuf]) -> Outcome {
 
 /// The font check with these rows. Every file in the folders is listed (names only); the first
 /// [`MAX_FONT_FILES`] are looked at by their first bytes, and the names inside each readable
-/// font are read. A font file of a kind PCTwin cannot read (a row names its kind) is found, not
-/// checked, and said so; a family not found among only some of them is a sample, never "not
+/// font are read. A font file of a kind PCTwin cannot read (a row names its kind), a font file
+/// whose names could not be read, and a file of a kind PCTwin reads that is not whole, are found,
+/// not checked, and said so; a family not found among only some of them is a sample, never "not
 /// installed" for certain.
 pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf]) -> Outcome {
     let want = plain_name(family);
@@ -479,24 +487,44 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
     let mut unread = 0u64;
     let mut kinds: Vec<String> = Vec::new();
     let mut other: Vec<String> = Vec::new();
+    let mut add_kind = |kind: String| {
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    };
+    let ext_of = |p: &Path| {
+        p.extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default()
+    };
     for p in &files[..looked] {
         if is_readable_font(p) {
+            let names = font_families(p);
+            if names.is_empty() {
+                // A font by its first bytes whose names could not be read: not checked.
+                unread += 1;
+                add_kind(format!("{UNREADABLE_FONT} (.{})", ext_of(p)));
+                continue;
+            }
             readable += 1;
-            if font_families(p).iter().any(|f| plain_name(f) == want) {
+            if names.iter().any(|f| plain_name(f) == want) {
                 return Outcome::MachineChecked {
                     coverage: Coverage::Whole,
                 };
             }
-        } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
-            other.push(ext.to_ascii_lowercase());
+        } else if p.extension().is_some() {
+            other.push(ext_of(p));
         }
     }
     let reading = rows.read(other, |ext, row| row.extension == *ext);
     for (ext, row) in reading.known {
         unread += 1;
-        let kind = format!("{} (.{ext})", row.name);
-        if !kinds.contains(&kind) {
-            kinds.push(kind);
+        if row.readable {
+            // A kind PCTwin reads, but this one is not whole.
+            add_kind(format!("{} {DAMAGED_FONT} (.{ext})", row.name));
+        } else {
+            add_kind(format!("{} (.{ext})", row.name));
         }
     }
     // Files no row names are not fonts PCTwin knows of (a settings file, a note): not counted.
@@ -519,6 +547,11 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
         },
     }
 }
+
+/// The kind shown for a font file whose names could not be read.
+pub const UNREADABLE_FONT: &str = "Font file PCTwin could not read";
+/// Shown after a kind PCTwin reads, for a file of it that is not whole.
+pub const DAMAGED_FONT: &str = "that is damaged";
 
 fn read_at(f: &mut File, at: u64, buf: &mut [u8]) -> std::io::Result<()> {
     f.seek(SeekFrom::Start(at))?;

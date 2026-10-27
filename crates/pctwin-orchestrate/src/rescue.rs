@@ -51,6 +51,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::Deserialize;
 
+use cap_fs_ext::OpenOptionsFollowExt;
 use cap_primitives::fs as cap;
 use pctwin_record::{
     FolderRole, Inclusion, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
@@ -411,9 +412,7 @@ impl RescueDrive {
         let (last, folders) = names.split_last().ok_or_else(|| refused("no name"))?;
         let (dir, _) = self.folders(folders)?;
         let mut options = cap::OpenOptions::new();
-        options
-            .read(true)
-            ._cap_fs_ext_follow(cap::FollowSymlinks::No);
+        options.read(true).follow(cap::FollowSymlinks::No);
         let file = cap::open(&dir, Self::one_name(last)?, &options)?;
         self.check(&file)?;
         if !file.metadata()?.is_file() {
@@ -603,6 +602,9 @@ impl Row for LayoutRow {
             Err("a row's names are plain folder names".into())
         }
     }
+    fn identity(&self) -> Option<String> {
+        Some(format!("{:?}", self.system))
+    }
 }
 
 /// The layouts compiled into this build.
@@ -652,10 +654,52 @@ fn small_text(drive: &RescueDrive, names: &[&str]) -> Option<String> {
     Some(text)
 }
 
+/// The homes the drive's own account list (`etc/passwd`) names for people, each its names from
+/// the drive's top, and the ones that cannot be a place on this drive (a home at the top, one
+/// that climbs out with `..`, a relative one) with the path the list gave.
+///
+/// A person is an account that can sign in (not a `nologin` or `false` shell), with a user ID in
+/// the drive's normal range (`etc/login.defs`, 1000 to 60000 if it says nothing), and never the
+/// system's own account 0, whatever the drive says (fourth review, finding F6).
+fn passwd_homes(drive: &RescueDrive) -> (Vec<Vec<OsString>>, Vec<PathBuf>) {
+    let mut homes = Vec::new();
+    let mut odd = Vec::new();
+    let Some(passwd) = small_text(drive, &["etc", "passwd"]) else {
+        return (homes, odd);
+    };
+    let range = pctwin_scan::uid_range_from_login_defs(
+        small_text(drive, &["etc", "login.defs"]).as_deref(),
+    );
+    for person in pctwin_scan::people_from_passwd(&passwd, range, Path::new("")) {
+        if person.account_id == "0" {
+            continue;
+        }
+        let mut parts = person.home.components();
+        let rooted = parts.next() == Some(Component::RootDir);
+        let names: Option<Vec<OsString>> = parts
+            .map(|c| match c {
+                Component::Normal(n) => Some(n.to_os_string()),
+                _ => None,
+            })
+            .collect();
+        match names {
+            Some(names) if rooted && !names.is_empty() => {
+                if !homes.contains(&names) {
+                    homes.push(names);
+                }
+            }
+            _ => odd.push(person.home),
+        }
+    }
+    (homes, odd)
+}
+
 /// Where homes live on `drive`, found from the drive itself, then the catalogue's usual places:
-/// each a folder's names from the top. Windows: every folder at the top holding a folder with a
-/// settings file (`NTUSER.DAT`, which every Windows profile has). Linux: the folders holding the
-/// homes the drive's own account list (`etc/passwd`) names for people. A Mac: the usual places.
+/// each a folder's names from the top, every folder in it a person's. Windows: every folder at
+/// the top holding a folder with a settings file (`NTUSER.DAT`, which every Windows profile
+/// has). Linux: a folder holding the homes of more than one account in the drive's own account
+/// list (`etc/passwd`): a folder of homes, shown by the drive itself. One account's home alone
+/// says nothing about the folders beside it ([`single_homes`]). A Mac: the usual places.
 pub fn home_places(
     drive: &RescueDrive,
     system: OtherSystem,
@@ -685,25 +729,19 @@ pub fn home_places(
             }
         }
         OtherSystem::Linux => {
-            if let Some(passwd) = small_text(drive, &["etc", "passwd"]) {
-                let range = pctwin_scan::uid_range_from_login_defs(
-                    small_text(drive, &["etc", "login.defs"]).as_deref(),
-                );
-                for person in pctwin_scan::people_from_passwd(&passwd, range, Path::new("")) {
-                    let names: Option<Vec<OsString>> = person
-                        .home
-                        .components()
-                        .filter(|c| !matches!(c, Component::RootDir))
-                        .map(|c| match c {
-                            Component::Normal(n) => Some(n.to_os_string()),
-                            _ => None,
-                        })
-                        .collect();
-                    // The folder holding the home (a home at the top holds nothing: left out).
-                    if let Some(mut names) = names {
-                        names.pop();
-                        add(names);
-                    }
+            // Only homes that are folders on this drive count as living somewhere.
+            let (homes, _) = passwd_homes(drive);
+            let parents: Vec<Vec<OsString>> = homes
+                .iter()
+                .filter(|h| {
+                    let names: Vec<&OsStr> = h.iter().map(OsString::as_os_str).collect();
+                    drive.folders(&names).is_ok()
+                })
+                .map(|h| h[..h.len() - 1].to_vec())
+                .collect();
+            for p in &parents {
+                if parents.iter().filter(|q| *q == p).count() > 1 {
+                    add(p.clone());
                 }
             }
         }
@@ -715,56 +753,139 @@ pub fn home_places(
     out
 }
 
+/// The homes of single accounts in the drive's account list that are not inside a folder of
+/// homes ([`home_places`]): each is one person at exactly that place, and nothing beside it is
+/// anyone's. Linux only.
+pub fn single_homes(
+    drive: &RescueDrive,
+    system: OtherSystem,
+    row: Option<&LayoutRow>,
+) -> Vec<Vec<OsString>> {
+    if system != OtherSystem::Linux {
+        return Vec::new();
+    }
+    let places = home_places(drive, system, row);
+    passwd_homes(drive)
+        .0
+        .into_iter()
+        .filter(|h| !places.iter().any(|p| p.as_slice() == &h[..h.len() - 1]))
+        .collect()
+}
+
 /// Everyone with a home folder on `drive`, in name order, from the shipped layouts.
 pub fn people_on_drive(
     drive: &RescueDrive,
     system: OtherSystem,
     reader: &mut dyn AccessReader,
 ) -> Vec<RescuedPerson> {
-    people_on_drive_with(shipped_layouts(), drive, system, reader).0
+    people_on_drive_with(shipped_layouts(), drive, system, reader).people
 }
 
-/// Everyone with a home folder on `drive` ([`home_places`]), in name order, and the folders
-/// beside them that a layout row says are the system's (found, not a person: reported, never
-/// read as someone's). A folder there that no row explains is a person, known by their folder
-/// if their account cannot be read: nothing found is dropped. A home folder that is a link, or
-/// is on another volume, is not a person on this drive and is left out.
+/// What [`people_on_drive_with`] found on a drive.
+#[derive(Debug, Default)]
+pub struct OnDrive {
+    /// Everyone with a home, in name order.
+    pub people: Vec<RescuedPerson>,
+    /// Folders beside the homes a layout row says are the system's (found, not a person).
+    pub not_people: Vec<PathBuf>,
+    /// Places found but not read, with the reason in plain words (a home that is a link or on
+    /// another drive, a folder of homes that could not be listed, a home the account list gives
+    /// that cannot be a place on this drive). Never dropped silently.
+    pub not_read: Vec<(PathBuf, &'static str)>,
+}
+
+/// A folder of homes that could not be listed.
+pub const NOT_LISTED: &str = "found, not read: this folder of homes could not be opened";
+/// A home that is a link, on another drive, or not a folder.
+pub const NOT_A_HOME_HERE: &str =
+    "found, not read: this home is missing, a link, on another drive, or not a folder";
+/// A home the account list gives that is not a place on this drive.
+pub const NOT_A_PLACE: &str =
+    "found, not read: the account list gives this home a place that is not on this drive";
+
+/// Everyone with a home folder on `drive`, in name order: every folder in a folder of homes
+/// ([`home_places`]), and each single account's own home ([`single_homes`]); the folders beside
+/// them that a layout row says are the system's (found, not a person: reported, never read as
+/// someone's); and what was found but could not be read, with why. A folder in a folder of
+/// homes that no row explains is a person, known by their folder if their account cannot be
+/// read: nothing found is dropped. A home folder that is a link, or is on another volume, is
+/// not a person on this drive: it is reported, never read.
 pub fn people_on_drive_with(
     layouts: &Catalogue<LayoutRow>,
     drive: &RescueDrive,
     system: OtherSystem,
     reader: &mut dyn AccessReader,
-) -> (Vec<RescuedPerson>, Vec<PathBuf>) {
+) -> OnDrive {
     let row = layout(layouts, system);
     let shared: Option<Vec<OsString>> = row
         .and_then(|r| r.shared.as_ref())
         .map(|s| s.iter().map(OsString::from).collect());
     let mut people = Vec::new();
     let mut not_people = Vec::new();
+    let mut not_read: Vec<(PathBuf, &'static str)> = Vec::new();
+    let full = |names: &[OsString]| {
+        names
+            .iter()
+            .fold(drive.root().to_path_buf(), |p, n| p.join(n))
+    };
+    // Each candidate home: its folder's names, and whether it sits in a folder of homes (where
+    // a layout row may say a folder is the system's).
+    let mut candidates: Vec<(Vec<OsString>, bool)> = Vec::new();
     for parent in home_places(drive, system, row) {
         let parent_names: Vec<&OsStr> = parent.iter().map(OsString::as_os_str).collect();
-        let Ok(names) = drive.list(&parent_names) else {
-            continue;
+        let names = match drive.list(&parent_names) {
+            Ok(names) => names,
+            // A usual place this drive does not have is not a finding.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                not_read.push((full(&parent), NOT_LISTED));
+                continue;
+            }
         };
         for name in names {
+            let mut at = parent.clone();
+            at.push(name);
+            candidates.push((at, true));
+        }
+    }
+    for at in single_homes(drive, system, row) {
+        candidates.push((at, false));
+    }
+    if system == OtherSystem::Linux {
+        for odd in passwd_homes(drive).1 {
+            not_read.push((odd, NOT_A_PLACE));
+        }
+    }
+    for (at, in_folder_of_homes) in candidates {
+        {
+            let Some(name) = at.last().cloned() else {
+                continue;
+            };
             let label = name.to_string_lossy().into_owned();
             if never_a_person(&label) {
                 continue;
             }
-            let mut at = parent.clone();
-            at.push(name.clone());
-            let home = at.iter().fold(drive.root().to_path_buf(), |p, n| p.join(n));
+            let home = full(&at);
             if shared.as_ref() == Some(&at) {
                 continue;
             }
-            let known_not = row.is_some_and(|r| {
-                r.not_people
-                    .iter()
-                    .any(|n| n.to_lowercase() == label.to_lowercase())
-            });
+            let known_not = in_folder_of_homes
+                && row.is_some_and(|r| {
+                    r.not_people
+                        .iter()
+                        .any(|n| n.to_lowercase() == label.to_lowercase())
+                });
             let at_names: Vec<&OsStr> = at.iter().map(OsString::as_os_str).collect();
-            let Ok((home_dir, keys)) = drive.folders(&at_names) else {
-                continue;
+            let (home_dir, keys) = match drive.folders(&at_names) {
+                Ok(opened) => opened,
+                Err(_) => {
+                    // A plain file beside the homes is not anyone's home: not a finding.
+                    if in_folder_of_homes && drive.open_file(&at_names).is_ok() {
+                        continue;
+                    }
+                    not_read.push((home, NOT_A_HOME_HERE));
+                    continue;
+                }
             };
             if known_not {
                 not_people.push(home);
@@ -809,7 +930,13 @@ pub fn people_on_drive_with(
     });
     people.dedup_by(|a, b| a.folder == b.folder);
     not_people.sort();
-    (people, not_people)
+    not_read.sort();
+    not_read.dedup();
+    OnDrive {
+        people,
+        not_people,
+        not_read,
+    }
 }
 
 #[cfg(unix)]
@@ -880,6 +1007,9 @@ pub struct RescueScan {
     /// Folders beside the homes that a layout row says are the system's, not a person's:
     /// found, not moved, and reported.
     pub not_people: Vec<PathBuf>,
+    /// Places found but not read, with why (a home that is a link, a folder of homes that could
+    /// not be opened, a home the account list gives that is not on this drive).
+    pub not_read: Vec<(PathBuf, &'static str)>,
     roots: BTreeMap<(String, FolderRole), PathBuf>,
     drive: Arc<RescueDrive>,
 }
@@ -963,7 +1093,11 @@ pub fn scan_rescued_drive_with(
     let system = pctwin_scan::other_system(root).ok_or(RescueError::NoSystemFound)?;
     let laptop = identity.laptop_id();
     let row = layout(layouts, system);
-    let (people, not_people) = people_on_drive_with(layouts, &drive, system, reader);
+    let OnDrive {
+        people,
+        not_people,
+        not_read,
+    } = people_on_drive_with(layouts, &drive, system, reader);
     let mut record = Record::new(laptop);
     let mut unreadable = Vec::new();
     let mut roots = BTreeMap::new();
@@ -1135,6 +1269,7 @@ pub fn scan_rescued_drive_with(
         read_plan: RESCUE_READ,
         unreadable,
         not_people,
+        not_read,
         roots,
         drive,
     })

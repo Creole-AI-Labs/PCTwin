@@ -657,6 +657,9 @@ impl Recipe {
         }
         let mut value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| RecipeError::Damaged(e.to_string()))?;
+        // The whole recipe is checked before an unknown catalog ID is reported, so a damaged
+        // recipe is never called "not yet supported" (fourth review).
+        let mut unknown: Option<String> = None;
         if let Some(steps) = value.get_mut("steps").and_then(|s| s.as_array_mut()) {
             for step in steps {
                 let at = if step.get("install").is_some() {
@@ -673,7 +676,16 @@ impl Recipe {
                             ));
                         }
                     };
-                    *catalog = serde_json::Value::String(adapter_for(catalogs, &id)?.to_string());
+                    let adapter = match adapter_for(catalogs, &id) {
+                        Ok(a) => a,
+                        Err(RecipeError::NotYetSupported(id)) => {
+                            unknown.get_or_insert(id);
+                            // Stands in while the rest is checked; never used.
+                            Catalog::Winget
+                        }
+                        Err(e) => return Err(e),
+                    };
+                    *catalog = serde_json::Value::String(adapter.to_string());
                 }
             }
         }
@@ -681,7 +693,10 @@ impl Recipe {
             serde_json::from_value(value).map_err(|e| RecipeError::Damaged(e.to_string()))?;
         r.format = FORMAT;
         r.validate()?;
-        Ok(r)
+        match unknown {
+            Some(id) => Err(RecipeError::NotYetSupported(id)),
+            None => Ok(r),
+        }
     }
 }
 
@@ -740,6 +755,9 @@ impl Row for CatalogRow {
             return Err("a name is 1 to 64 plain characters".into());
         }
         Ok(())
+    }
+    fn identity(&self) -> Option<String> {
+        Some(self.id.clone())
     }
 }
 
