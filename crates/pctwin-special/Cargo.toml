@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 pctwin-types = { path = "../pctwin-types" }
 pctwin-catalogue = { path = "../pctwin-catalogue" }
+pctwin-grant = { path = "../pctwin-grant" }
 pctwin-record = { path = "../pctwin-record" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
