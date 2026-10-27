@@ -14,6 +14,8 @@ workspace = true
 [dependencies]
 # Each found setting's executor key is a digest of its exact place.
 blake3 = "1.8"
+# Names of the Wi-Fi tool's temporary folders.
+getrandom = "0.4.3"
 pctwin-executor = { path = "../pctwin-executor" }
 pctwin-grant = { path = "../pctwin-grant" }
 pctwin-journal = { path = "../pctwin-journal" }
@@ -37,6 +39,8 @@ winreg = "0.55"
 tempfile = "3"
 
 [dev-dependencies]
+roxmltree = "0.21.1"
+zeroize = "1.9.0"
 pctwin-record = { path = "../pctwin-record" }
 tempfile = "3"
 

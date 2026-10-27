@@ -24,9 +24,12 @@ pub mod apps;
 pub mod catalogue;
 pub mod classify;
 pub mod codec;
+pub mod confirm;
+pub mod files;
 pub mod found;
 pub mod generic;
 pub mod gvariant;
+pub mod handoff;
 pub mod map;
 pub mod mechanism;
 pub mod ownership;
@@ -35,6 +38,7 @@ pub mod registry;
 pub mod runner;
 pub mod store;
 pub mod value;
+pub mod wifi;
 
 pub use catalogue::{Catalogue, Route, SettingId, System};
 pub use map::{

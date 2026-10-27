@@ -586,6 +586,7 @@ pub enum FileFormat {
     /// JSON with comments and trailing commas (VS Code).
     Jsonc,
     Json,
+    Toml,
     Ini,
     Xml,
     /// Not read by 2.4 (a database, a binary): only its writer handles it.

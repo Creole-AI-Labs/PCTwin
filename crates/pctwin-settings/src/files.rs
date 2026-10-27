@@ -1,0 +1,784 @@
+//! App settings files, found by their shape (Task List 2.4: same-OS app settings, cross-OS
+//! translations, workspace and recent files).
+//!
+//! Every settings-shaped file (JSON, JSON with comments, TOML, INI, XML) under the person's app
+//! settings folders is found, whether or not the catalogue knows the app. Each one is read
+//! structurally (never by string replacement across an unknown format) and every field passes
+//! the same generic rules as any setting ([`crate::classify`]): credentials, machine and account
+//! identities, caches, window places, programs to start and paths to things not moved are left
+//! out and reported; paths into moved folders are rewritten; recent-file entries whose file did
+//! not move are dropped. Never a whole-folder copy.
+//!
+//! A catalogue app entry enriches: its files' writer (2.4, 2.5, 2.1 or nobody: T24-017), field
+//! rules (drop, hold back, rewrite a path, switch a start-up hook off: T24-003), rules that apply
+//! only between a Mac and another system (keyboard shortcuts: an equivalent the person confirms),
+//! path placeholders such as JetBrains' `$USER_HOME$`, and the oldest app version the rules were
+//! checked with (an older app on the new laptop is a guided step: T24-005). A running app's files
+//! wait until it is closed (T24-018).
+//!
+//! Between different systems, only files a catalogue entry describes move.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use pctwin_recipe::{SettingValue, SettingsRoot};
+use serde_json::Value;
+
+use crate::apps::{parse_version, path_matches};
+use crate::catalogue::{AppEntry, AppFile, Catalogue, FileFormat, MacroRoot, Rule, System, Writer};
+use crate::classify::{Ctx, Fate, Why, classify};
+
+/// The largest settings file read.
+pub const MAX_FILE: u64 = 1024 * 1024;
+const MAX_DEPTH: usize = 8;
+const MAX_FILES: usize = 20_000;
+
+/// Folder names that hold caches, logs and browser-engine data, never settings.
+const SKIP_DIRS: &[&str] = &[
+    "cache",
+    "caches",
+    "cacheddata",
+    "gpucache",
+    "code cache",
+    "dawncache",
+    "shadercache",
+    "crashpad",
+    "crashes",
+    "logs",
+    "log",
+    "tmp",
+    "temp",
+    "blob_storage",
+    "indexeddb",
+    "local storage",
+    "session storage",
+    "service worker",
+    "webstorage",
+    "node_modules",
+    "extensions",
+    "plugins",
+    "backups",
+];
+
+/// One settings-shaped file found on the old laptop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundFile {
+    pub root: SettingsRoot,
+    /// Its path inside the root, `/`-separated.
+    pub rel: String,
+    /// The app or vendor it belongs to (its first folder).
+    pub label: String,
+    pub format: Option<FileFormat>,
+}
+
+/// The format a file's name says.
+pub fn format_of(name: &str) -> Option<FileFormat> {
+    let l = name.to_ascii_lowercase();
+    let ext = l.rsplit_once('.').map(|(_, e)| e)?;
+    Some(match ext {
+        "json" | "jsonc" | "code-workspace" => FileFormat::Jsonc,
+        "toml" => FileFormat::Toml,
+        "ini" | "conf" | "cfg" | "properties" => FileFormat::Ini,
+        "xml" | "icls" => FileFormat::Xml,
+        _ => return None,
+    })
+}
+
+/// Finds every settings-shaped file in the roots (the old laptop's app settings folders). Never
+/// follows a link; skips cache-like folders; bounded in depth, count and size.
+pub fn discover_files(roots: &[(SettingsRoot, PathBuf)]) -> Vec<FoundFile> {
+    let mut out = Vec::new();
+    for (root, dir) in roots {
+        walk(*root, dir, "", 0, &mut out);
+    }
+    out
+}
+
+fn walk(root: SettingsRoot, dir: &Path, rel: &str, depth: usize, out: &mut Vec<FoundFile>) {
+    if depth > MAX_DEPTH || out.len() >= MAX_FILES {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let Ok(name) = e.file_name().into_string() else {
+            continue;
+        };
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
+            continue;
+        };
+        let child = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            if !SKIP_DIRS.contains(&name.to_lowercase().as_str()) {
+                walk(root, &e.path(), &child, depth + 1, out);
+            }
+        } else if meta.is_file() && meta.len() <= MAX_FILE && depth > 0 {
+            let format = format_of(&name);
+            if format.is_some() {
+                let label = child.split('/').next().unwrap_or_default().to_string();
+                out.push(FoundFile {
+                    root,
+                    rel: child,
+                    label,
+                    format,
+                });
+            }
+        }
+    }
+}
+
+/// What the move knows when filtering files.
+pub struct FileCtx<'a> {
+    pub classify: Ctx<'a>,
+    pub from: System,
+    pub to: System,
+    /// The person's home folder on each laptop (for `$USER_HOME$`-style placeholders).
+    pub home_old: &'a str,
+    pub home_new: &'a str,
+    /// Apps running on the new laptop now (catalogue app names).
+    pub running: &'a BTreeSet<String>,
+    /// Each app's version on the old and new laptop, where known.
+    pub versions: &'a BTreeMap<String, (String, String)>,
+    /// A versioned settings folder's new name (`IntelliJIdea2025.2` to `IntelliJIdea2025.3`).
+    pub folder_renames: &'a BTreeMap<String, String>,
+}
+
+/// One field left out of a file, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Left {
+    pub field: String,
+    pub why: Why,
+}
+
+/// What happens to one found file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileOutcome {
+    /// Written on the new laptop at `rel` with these bytes (through the executor's settings
+    /// copy, journaled with undo).
+    Move {
+        rel: String,
+        bytes: Vec<u8>,
+        rewritten: usize,
+        left: Vec<Left>,
+        /// Translated between systems in a way the person confirms (keyboard shortcuts).
+        equivalent: bool,
+    },
+    /// Another part of PCTwin writes it (or nobody: sign-ins, machine state).
+    OtherWriter(Writer),
+    /// The app is running on the new laptop: waits until it is closed.
+    WaitForClose,
+    /// The person's step, and why.
+    Guided(&'static str),
+    NotMoved(Why),
+}
+
+pub const OLDER_APP: &str =
+    "the new laptop has an older version of this app; open it and bring settings over there";
+
+/// The entry and file rule that describe a file, if any.
+pub fn entry_for<'a>(cat: &'a Catalogue, f: &FoundFile) -> Option<(&'a AppEntry, &'a AppFile)> {
+    cat.apps.iter().find_map(|a| {
+        a.files
+            .iter()
+            .find(|af| af.root == f.root && path_matches(&af.path, &f.rel))
+            .map(|af| (a, af))
+    })
+}
+
+/// Plans one found file from its bytes on the old laptop.
+pub fn plan_file(cat: &Catalogue, f: &FoundFile, bytes: &[u8], ctx: &FileCtx<'_>) -> FileOutcome {
+    let entry = entry_for(cat, f);
+    if let Some((_, af)) = entry
+        && af.writer != Writer::Settings
+    {
+        return FileOutcome::OtherWriter(af.writer);
+    }
+    if entry.is_none() && ctx.from != ctx.to {
+        return FileOutcome::NotMoved(Why::OtherSystem);
+    }
+    let mut rel = f.rel.clone();
+    if let Some((app, _)) = entry {
+        if ctx.running.contains(&app.app) {
+            return FileOutcome::WaitForClose;
+        }
+        if let Some(why) = version_gate(app, f, ctx) {
+            return FileOutcome::Guided(why);
+        }
+        if app.versioned_folder.is_some()
+            && let Some(old) = rel.split('/').nth(1).map(str::to_string)
+            && let Some(new) = ctx.folder_renames.get(&old)
+        {
+            rel = rel.replacen(&format!("/{old}/"), &format!("/{new}/"), 1);
+        }
+    }
+    let format = entry.map(|(_, af)| af.format).or(f.format);
+    let rules: Vec<(String, Rule)> = entry
+        .map(|(_, af)| {
+            let cross = (ctx.from == System::Mac) != (ctx.to == System::Mac);
+            af.rules
+                .iter()
+                .chain(af.cross_os.iter().filter(|_| cross))
+                .map(|r| (r.at.clone(), r.rule.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let default = entry
+        .map(|(_, af)| af.default.clone())
+        .unwrap_or(Rule::Copy);
+    let macros = entry.map(|(_, af)| af.macros.clone()).unwrap_or_default();
+    let mut w = Walker {
+        ctx,
+        store: f.rel.clone(),
+        rules,
+        default,
+        macros,
+        rewritten: 0,
+        left: Vec::new(),
+        equivalent: false,
+    };
+    let out = match format {
+        Some(FileFormat::Jsonc | FileFormat::Json) => w.json(bytes),
+        Some(FileFormat::Toml) => w.toml(bytes),
+        Some(FileFormat::Ini) => w.ini(bytes),
+        Some(FileFormat::Xml) => w.xml(bytes),
+        Some(FileFormat::Opaque) | None => Err(Why::Kind),
+    };
+    match out {
+        Ok(bytes) => FileOutcome::Move {
+            rel,
+            bytes,
+            rewritten: w.rewritten,
+            left: w.left,
+            equivalent: w.equivalent,
+        },
+        Err(why) => FileOutcome::NotMoved(why),
+    }
+}
+
+fn version_gate(app: &AppEntry, f: &FoundFile, ctx: &FileCtx<'_>) -> Option<&'static str> {
+    let min = parse_version(&app.min_version)?;
+    let (old, new) = match ctx.versions.get(&app.app) {
+        Some((o, n)) => (parse_version(o), parse_version(n)),
+        None if app.versioned_folder.is_some() => {
+            // The version is in the folder name (`IntelliJIdea2025.2`).
+            let folder = f.rel.split('/').nth(1)?;
+            let digits = folder.trim_start_matches(|c: char| !c.is_ascii_digit());
+            let new_folder = ctx
+                .folder_renames
+                .get(folder)
+                .map(String::as_str)
+                .unwrap_or(folder);
+            let new_digits = new_folder.trim_start_matches(|c: char| !c.is_ascii_digit());
+            (parse_version(digits), parse_version(new_digits))
+        }
+        None => return None,
+    };
+    match (old, new) {
+        (Some(o), _) if o < min => Some(OLDER_APP),
+        (Some(o), Some(n)) if n < o => Some(OLDER_APP),
+        _ => None,
+    }
+}
+
+struct Walker<'a, 'b> {
+    ctx: &'a FileCtx<'b>,
+    store: String,
+    rules: Vec<(String, Rule)>,
+    default: Rule,
+    macros: BTreeMap<String, MacroRoot>,
+    rewritten: usize,
+    left: Vec<Left>,
+    equivalent: bool,
+}
+
+/// What a walker does to one leaf.
+enum Leaf {
+    Keep,
+    Replace(Value),
+    Remove(Why),
+}
+
+impl Walker<'_, '_> {
+    fn rule_for(&self, path: &str) -> Option<Rule> {
+        self.rules
+            .iter()
+            .find(|(at, _)| path_matches(at, path))
+            .map(|(_, r)| r.clone())
+    }
+
+    fn leave(&mut self, field: &str, why: Why) {
+        self.left.push(Left {
+            field: field.to_string(),
+            why,
+        });
+    }
+
+    /// Expands placeholders (`$USER_HOME$/x` to the old home) before a path is judged.
+    fn expand(&self, s: &str) -> Option<String> {
+        self.macros.iter().find_map(|(m, root)| match root {
+            MacroRoot::Home => s.strip_prefix(m.as_str()).map(|rest| {
+                format!(
+                    "{}{}",
+                    self.ctx.home_old.trim_end_matches(['/', '\\']),
+                    rest
+                )
+            }),
+        })
+    }
+
+    /// Puts the placeholder back in front of a new path inside the new home.
+    fn collapse(&self, s: &str) -> String {
+        for (m, root) in &self.macros {
+            let MacroRoot::Home = root;
+            let home = self.ctx.home_new.trim_end_matches(['/', '\\']);
+            if let Some(rest) = s.strip_prefix(home)
+                && (rest.is_empty() || rest.starts_with(['/', '\\']))
+            {
+                return format!("{m}{}", rest.replace('\\', "/"));
+            }
+        }
+        s.to_string()
+    }
+
+    /// One leaf: the rule for its path first, then the generic rules.
+    fn leaf(&mut self, path: &str, name: &str, v: &Value) -> Leaf {
+        let rule = self.rule_for(path).unwrap_or_else(|| self.default.clone());
+        match rule {
+            Rule::Drop => return Leaf::Remove(Why::Exception("left out for this app".into())),
+            Rule::HoldBack => return Leaf::Remove(Why::StartsProgram),
+            Rule::Disable(off) => {
+                self.leave(path, Why::StartsProgram);
+                return Leaf::Replace(off);
+            }
+            Rule::SwapModifiers => {
+                if let Value::String(s) = v {
+                    self.equivalent = true;
+                    return Leaf::Replace(Value::String(swap_modifiers(
+                        s,
+                        self.ctx.to == System::Mac,
+                    )));
+                }
+            }
+            Rule::Copy | Rule::RewritePath => {}
+        }
+        let sv = match v {
+            Value::String(s) => SettingValue::Text(s.clone()),
+            Value::Bool(b) => SettingValue::Bool(*b),
+            Value::Number(n) => match n.as_i64() {
+                Some(i) => SettingValue::Int(i),
+                None => SettingValue::Text(n.to_string()),
+            },
+            _ => return Leaf::Keep,
+        };
+        // A placeholder path is judged as the full path it stands for.
+        let expanded = match &sv {
+            SettingValue::Text(t) => self.expand(t),
+            _ => None,
+        };
+        let judged = expanded.clone().map(SettingValue::Text).unwrap_or(sv);
+        match classify(&self.store, name, &judged, &self.ctx.classify) {
+            Fate::Copy(_) => Leaf::Keep,
+            Fate::Rewritten(SettingValue::Text(n)) => {
+                self.rewritten += 1;
+                let n = if expanded.is_some() {
+                    self.collapse(&n)
+                } else {
+                    n
+                };
+                Leaf::Replace(Value::String(n))
+            }
+            Fate::Rewritten(_) => Leaf::Remove(Why::Kind),
+            Fate::NotMoved(why) => Leaf::Remove(why),
+        }
+    }
+
+    fn json(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
+        let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        let clean = strip_jsonc(text.trim_start_matches('\u{feff}')).ok_or(Why::Kind)?;
+        let v: Value = serde_json::from_str(&clean).map_err(|_| Why::Kind)?;
+        let v = self.value(v, "", "", 0).ok_or(Why::Kind)?;
+        let mut out = Vec::new();
+        let fmt = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+        let mut ser = serde_json::Serializer::with_formatter(&mut out, fmt);
+        serde::Serialize::serialize(&v, &mut ser).map_err(|_| Why::Kind)?;
+        out.push(b'\n');
+        Ok(out)
+    }
+
+    fn toml(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
+        let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        let v: Value = toml::from_str(text).map_err(|_| Why::Kind)?;
+        let v = self.value(v, "", "", 0).ok_or(Why::Kind)?;
+        toml::to_string(&v)
+            .map(String::into_bytes)
+            .map_err(|_| Why::Kind)
+    }
+
+    /// Walks a JSON value: `None` when it is removed. In a list, an entry that lost a path (a
+    /// recent file that did not move) is removed whole.
+    fn value(&mut self, v: Value, path: &str, name: &str, depth: usize) -> Option<Value> {
+        if depth > 64 {
+            return None;
+        }
+        let join = |p: &str, k: &str| {
+            if p.is_empty() {
+                k.to_string()
+            } else {
+                format!("{p}/{k}")
+            }
+        };
+        match v {
+            Value::Object(map) => {
+                if let Some(rule) = self.rule_for(path).filter(|_| !path.is_empty()) {
+                    match rule {
+                        Rule::Drop => {
+                            self.leave(path, Why::Exception("left out for this app".into()));
+                            return None;
+                        }
+                        Rule::HoldBack => {
+                            self.leave(path, Why::StartsProgram);
+                            return None;
+                        }
+                        _ => {}
+                    }
+                }
+                let mut out = serde_json::Map::new();
+                for (k, child) in map {
+                    let p = join(path, &k);
+                    if let Some(c) = self.value(child, &p, &k, depth + 1) {
+                        out.insert(k, c);
+                    }
+                }
+                Some(Value::Object(out))
+            }
+            Value::Array(items) => {
+                if let Some(Rule::Drop | Rule::HoldBack) =
+                    self.rule_for(path).filter(|_| !path.is_empty())
+                {
+                    self.leave(path, Why::StartsProgram);
+                    return None;
+                }
+                let mut out = Vec::new();
+                for (i, child) in items.into_iter().enumerate() {
+                    let p = join(path, &i.to_string());
+                    let before = self.left.len();
+                    let kept = self.value(child, &p, name, depth + 1);
+                    let lost_path = self.left[before..]
+                        .iter()
+                        .any(|l| matches!(l.why, Why::PathNotMoved | Why::RecentMissing));
+                    match kept {
+                        Some(c) if !lost_path => out.push(c),
+                        _ => {}
+                    }
+                }
+                Some(Value::Array(out))
+            }
+            leaf => match self.leaf(path, &context_name(path, name), &leaf) {
+                Leaf::Keep => Some(leaf),
+                Leaf::Replace(n) => Some(n),
+                Leaf::Remove(why) => {
+                    self.leave(path, why);
+                    None
+                }
+            },
+        }
+    }
+
+    /// INI: line by line, comments and layout kept; a left-out key's line is removed.
+    fn ini(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
+        let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        let mut section = String::new();
+        let mut out = String::with_capacity(text.len());
+        for line in text.split_inclusive('\n') {
+            let body = line.trim_end_matches(['\r', '\n']);
+            let ending = &line[body.len()..];
+            let t = body.trim();
+            if t.starts_with('[') && t.ends_with(']') {
+                section = t[1..t.len() - 1].trim().to_string();
+                out.push_str(line);
+                continue;
+            }
+            if t.is_empty() || t.starts_with([';', '#']) {
+                out.push_str(line);
+                continue;
+            }
+            let Some((k, v)) = body.split_once('=') else {
+                out.push_str(line);
+                continue;
+            };
+            let key = k.trim();
+            let path = if section.is_empty() {
+                key.to_string()
+            } else {
+                format!("{section}/{key}")
+            };
+            let raw = v.trim();
+            let unq = raw
+                .strip_prefix('"')
+                .and_then(|r| r.strip_suffix('"'))
+                .unwrap_or(raw);
+            match self.leaf(&path, key, &Value::String(unq.to_string())) {
+                Leaf::Keep => out.push_str(line),
+                Leaf::Replace(Value::String(n)) => {
+                    let n = if raw.starts_with('"') {
+                        format!("\"{n}\"")
+                    } else {
+                        n
+                    };
+                    out.push_str(&format!("{}={}{}", k, n, ending));
+                }
+                Leaf::Replace(other) => out.push_str(&format!("{k}={other}{ending}")),
+                Leaf::Remove(why) => self.leave(&path, why),
+            }
+        }
+        Ok(out.into_bytes())
+    }
+
+    /// XML: every attribute and text is judged; a rewritten value is replaced in place (exactly
+    /// its bytes); an element holding a value that may not move is removed whole. A root that
+    /// would be removed means the file does not move.
+    fn xml(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
+        let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        let opts = roxmltree::ParsingOptions {
+            allow_dtd: false,
+            nodes_limit: 200_000,
+            ..Default::default()
+        };
+        let doc = roxmltree::Document::parse_with_options(text, opts).map_err(|_| Why::Kind)?;
+        let root = doc.root_element();
+        let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+        let mut removed: Vec<std::ops::Range<usize>> = Vec::new();
+        for node in doc.descendants().filter(|n| n.is_element()) {
+            let path: Vec<&str> = node
+                .ancestors()
+                .filter(|a| a.is_element())
+                .map(|a| a.tag_name().name())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let epath = path.join("/");
+            let own_name = node.attribute("name").unwrap_or(node.tag_name().name());
+            let mut drop_it: Option<Why> = None;
+            for a in node.attributes() {
+                if a.name() == "name" {
+                    continue;
+                }
+                let apath = format!("{epath}/@{}", a.name());
+                // `<option name="x" value="y"/>`: the value is named by its element's name.
+                let name = if a.name() == "value" {
+                    own_name
+                } else {
+                    a.name()
+                };
+                match self.leaf(&apath, name, &Value::String(a.value().to_string())) {
+                    Leaf::Keep => {}
+                    Leaf::Replace(Value::String(n)) => {
+                        edits.push((a.range_value(), xml_escape(&n)))
+                    }
+                    Leaf::Replace(_) => drop_it = Some(Why::Kind),
+                    Leaf::Remove(why) => drop_it = Some(why),
+                }
+            }
+            if drop_it.is_none()
+                && let Some(t) = node.children().find(|c| c.is_text())
+                && node.children().all(|c| c.is_text())
+                && !t.text().unwrap_or("").trim().is_empty()
+            {
+                let raw = t.text().unwrap_or("");
+                match self.leaf(&epath, own_name, &Value::String(raw.trim().to_string())) {
+                    Leaf::Keep => {}
+                    Leaf::Replace(Value::String(n)) => edits.push((t.range(), xml_escape(&n))),
+                    Leaf::Replace(_) => drop_it = Some(Why::Kind),
+                    Leaf::Remove(why) => drop_it = Some(why),
+                }
+            }
+            if let Some(why) = drop_it {
+                if node == root {
+                    return Err(why);
+                }
+                self.leave(&epath, why);
+                removed.push(node.range());
+            }
+        }
+        // Edits inside a removed element are dropped with it.
+        removed.sort_by_key(|r| (r.start, std::cmp::Reverse(r.end)));
+        let mut outer: Vec<std::ops::Range<usize>> = Vec::new();
+        for r in removed {
+            if !outer.iter().any(|o| o.start <= r.start && r.end <= o.end) {
+                outer.push(r);
+            }
+        }
+        let mut all: Vec<(std::ops::Range<usize>, String)> =
+            outer.iter().map(|r| (r.clone(), String::new())).collect();
+        for (r, s) in edits {
+            if !outer.iter().any(|o| o.start <= r.start && r.end <= o.end) {
+                all.push((r, s));
+            }
+        }
+        all.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+        let mut out = text.to_string();
+        for (r, s) in all {
+            out.replace_range(r, &s);
+        }
+        Ok(out.into_bytes())
+    }
+}
+
+/// A leaf's name with its parent's (`window.width`), skipping list positions.
+fn context_name(path: &str, name: &str) -> String {
+    let parts: Vec<&str> = path
+        .split('/')
+        .filter(|p| !p.bytes().all(|b| b.is_ascii_digit()))
+        .collect();
+    match parts.len() {
+        0 | 1 => name.to_string(),
+        n => format!("{}.{}", parts[n - 2], parts[n - 1]),
+    }
+}
+
+fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Keyboard shortcuts between a Mac and another system: `ctrl` and `cmd` swap.
+pub fn swap_modifiers(keys: &str, to_mac: bool) -> String {
+    keys.split(' ')
+        .map(|chord| {
+            chord
+                .split('+')
+                .map(|k| match (k.to_ascii_lowercase().as_str(), to_mac) {
+                    ("ctrl", true) => "cmd".to_string(),
+                    ("cmd", false) => "ctrl".to_string(),
+                    _ => k.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("+")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// JSON with comments and trailing commas, as plain JSON. `None` for an unclosed string or
+/// comment.
+pub fn strip_jsonc(s: &str) -> Option<String> {
+    let no_comments = strip_comments(s)?;
+    // A comma before `}` or `]` (after blanks) is dropped; strings are left alone.
+    let b: Vec<char> = no_comments.chars().collect();
+    let mut out = String::with_capacity(no_comments.len());
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == '"' {
+            i = copy_string(&b, i, &mut out)?;
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            while j < b.len() && b[j].is_whitespace() {
+                j += 1;
+            }
+            if matches!(b.get(j), Some('}' | ']')) {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    Some(out)
+}
+
+/// Copies the string starting at `i` (its opening quote) into `out`; the index after it.
+fn copy_string(b: &[char], mut i: usize, out: &mut String) -> Option<usize> {
+    out.push(b[i]);
+    i += 1;
+    loop {
+        let d = *b.get(i)?;
+        out.push(d);
+        i += 1;
+        if d == '\\' {
+            out.push(*b.get(i)?);
+            i += 1;
+        } else if d == '"' {
+            return Some(i);
+        }
+    }
+}
+
+fn strip_comments(s: &str) -> Option<String> {
+    let b: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == '"' {
+            i = copy_string(&b, i, &mut out)?;
+            continue;
+        }
+        if c == '/' && b.get(i + 1) == Some(&'/') {
+            while i < b.len() && b[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && b.get(i + 1) == Some(&'*') {
+            i += 2;
+            loop {
+                if i + 1 >= b.len() {
+                    return None;
+                }
+                if b[i] == '*' && b[i + 1] == '/' {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            out.push(' ');
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    Some(out)
+}
+
+/// VS Code's recent list (`history.recentlyOpenedPathsList`, kept in `state.vscdb`, which the
+/// private-data role writes): the same list with entries pointed at the moved files, and those
+/// whose files did not move left out. 2.4 gives 2.5 this value; it never opens the database.
+pub fn rewrite_recent_list(json: &str, ctx: &FileCtx<'_>) -> Result<(String, Vec<Left>), Why> {
+    let mut w = Walker {
+        ctx,
+        store: "recent".into(),
+        rules: Vec::new(),
+        default: Rule::Copy,
+        macros: BTreeMap::new(),
+        rewritten: 0,
+        left: Vec::new(),
+        equivalent: false,
+    };
+    let v: Value = serde_json::from_str(json).map_err(|_| Why::Kind)?;
+    let v = w.value(v, "", "recent", 0).ok_or(Why::Kind)?;
+    Ok((serde_json::to_string(&v).map_err(|_| Why::Kind)?, w.left))
+}

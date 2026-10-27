@@ -72,8 +72,24 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn run(&mut self, tool: Tool, args: &[&str]) -> Result<Output, String> {
-        let mut child = Command::new(tool.path())
-            .args(args)
+        let mut cmd = Command::new(tool.path());
+        // `netsh` reads `name="value"` itself; Rust's own quoting would wrap the whole argument.
+        // Every netsh argument PCTwin builds is fixed text or a checked path without quotes.
+        #[cfg(windows)]
+        if tool == Tool::Netsh {
+            use std::os::windows::process::CommandExt;
+            for a in args {
+                if a.contains(['\n', '\r', '\0']) {
+                    return Err("an argument that cannot be passed safely".into());
+                }
+                cmd.raw_arg(a);
+            }
+        } else {
+            cmd.args(args);
+        }
+        #[cfg(not(windows))]
+        cmd.args(args);
+        let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
