@@ -7,6 +7,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import "./connection.css";
+import { shownName } from "../names";
 
 /**
  * C09 Waiting for your other laptop. Three states: reconnecting by itself, the pairing has expired
@@ -55,7 +56,7 @@ export default function WaitingForLaptop({
       <RowList>
         <Row
           icon={<Laptop />}
-          title={<bdi>{waiting.otherLaptop}</bdi>}
+          title={<bdi>{shownName(waiting.otherLaptop)}</bdi>}
           detail={
             waiting.lastSeenSeconds === null ? undefined : (
               <Localized id="reconnect-last-seen" vars={{ ago: ago(waiting.lastSeenSeconds) }}>

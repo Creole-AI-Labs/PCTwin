@@ -6,6 +6,7 @@ import { ArrowForward, Check, Info, Laptop, Lock } from "../icons";
 import { labelText } from "../pairing";
 import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Range, type Reason } from "../move";
 import "./progress.css";
+import { shownName } from "../names";
 
 export { Eyebrow, Heading } from "./PairParts";
 
@@ -99,7 +100,7 @@ export function ProgressPanel({ title, progress, note }: { title: string; progre
 /** A group's name: its role in words, or the folder's own name in its own direction. */
 export function GroupLabel({ name }: { name: GroupName }) {
   const { l10n } = useLocalization();
-  return name.kind === "role" ? <>{l10n.getString(`plan-role-${name.role}`)}</> : <bdi dir="auto">{name.name}</bdi>;
+  return name.kind === "role" ? <>{l10n.getString(`plan-role-${name.role}`)}</> : <bdi dir="auto">{shownName(name.name)}</bdi>;
 }
 
 /** A group's state as an icon and a word. "Verified" only for a group whose every item is copied and checked. */

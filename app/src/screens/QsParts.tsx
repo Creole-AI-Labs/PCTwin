@@ -10,6 +10,7 @@ import { Laptop } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { TopStrip } from "./FrameParts";
 import "./quicksend.css";
+import { shownName } from "../names";
 
 export { Heading } from "./PairParts";
 
@@ -104,5 +105,5 @@ export function QsActions({ children }: { children: ReactNode }) {
 
 /** Text that may be in any script or direction (file names, laptop names): isolated so it cannot scramble the words around it. */
 export function Name({ children }: { children: string }) {
-  return <bdi dir="auto">{children}</bdi>;
+  return <bdi dir="auto">{shownName(children)}</bdi>;
 }

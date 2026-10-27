@@ -8,6 +8,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import "./connection.css";
+import { shownName } from "../names";
 
 /**
  * C06 Meet your other laptop, laid out as in the mockup: the sending and receiving laptops side by
@@ -84,7 +85,7 @@ function VersionRows({ readiness }: { readiness: Extract<PeerReadiness, { state:
             detail={
               <>
                 <span className="connect-line">
-                  <bdi>{laptop.label}</bdi>
+                  <bdi>{shownName(laptop.label)}</bdi>
                 </span>
                 <span className="connect-line">{side === updateOn ? <Word id="peer-version-old-body" vars={{ version: laptop.version }} /> : <Word id="peer-version-new-body" />}</span>
               </>
@@ -120,7 +121,7 @@ function LaptopCard({ heading, role, laptop }: { heading: string; role: string; 
       </Localized>
       <dl className="connect-facts">
         <Fact label={<Word id={role} />}>
-          <bdi>{laptop.label}</bdi> · <bdi>{laptop.system}</bdi>
+          <bdi>{shownName(laptop.label)}</bdi> · <bdi>{laptop.system}</bdi>
         </Fact>
         <Fact label={<Word id="peer-version-label" />}>
           <Localized id="peer-version" vars={{ version: laptop.version }}>

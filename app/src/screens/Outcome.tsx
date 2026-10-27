@@ -6,6 +6,7 @@ import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
+import { shownName } from "../names";
 
 const DONE = ["copied", "reinstalled", "converted"] as const;
 
@@ -79,7 +80,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           {(outcome.people ?? []).map((p) => (
             <Row
               key={p.name}
-              title={<bdi dir="auto">{p.name}</bdi>}
+              title={<bdi dir="auto">{shownName(p.name)}</bdi>}
               detail={[
                 l10n.getString("outcome-person-copied", { count: p.copied }),
                 p.failed + p.needsAction > 0 ? l10n.getString("outcome-person-not-done", { count: p.failed + p.needsAction }) : "",
