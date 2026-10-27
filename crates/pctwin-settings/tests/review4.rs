@@ -275,6 +275,9 @@ fn f1_writing_is_scoped_to_what_discovery_reads() {
         (r"Software\Vendor\.\x", "a"),
         (r"Software\Vendor\App", ""),
         (r"Environment", "PATH"),
+        (r"Keyboard Layout\Preload", "1"),
+        (r"AppEvents\Schemes", "a"),
+        (r"Software", "a"),
         (r"Software\Vendor\App\shell\open\command", "a"),
     ] {
         assert!(!w(k, n), "{k} {n}");
