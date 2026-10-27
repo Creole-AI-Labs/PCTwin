@@ -697,6 +697,39 @@ mod tests {
         assert!(SystemStore.get(id).unwrap().is_none());
     }
 
+    /// Fourth review, catalogue delivery gates: a catalogue's rollback mark is kept in the
+    /// system's own store beside the journal's key, raised only upwards, and read back by a new
+    /// reader (this test leaves nothing behind).
+    #[test]
+    fn the_system_store_keeps_a_catalogue_rollback_mark() {
+        use pctwin_catalogue::RollbackMarks;
+        let name = format!("pctwin-test-{}", std::process::id());
+        assert_eq!(CatalogueMarks.highest(&name), Ok(None));
+        CatalogueMarks.raise(&name, 3).unwrap();
+        assert_eq!(CatalogueMarks.highest(&name), Ok(Some(3)));
+        // Never lowered.
+        CatalogueMarks.raise(&name, 2).unwrap();
+        assert_eq!(CatalogueMarks.highest(&name), Ok(Some(3)));
+        CatalogueMarks.raise(&name, 7).unwrap();
+        assert_eq!(CatalogueMarks.highest(&name), Ok(Some(7)));
+        // Another catalogue's mark is its own; odd characters in a name stay inside its entry.
+        assert_eq!(CatalogueMarks.highest(&format!("{name}-other")), Ok(None));
+        assert_eq!(catalogue_mark_name("a/b..c"), "catalogue-a_b__c-mark");
+        #[cfg(any(windows, target_os = "macos"))]
+        SystemStore::named(&catalogue_mark_name(&name))
+            .unwrap()
+            .delete_credential()
+            .unwrap();
+        #[cfg(target_os = "linux")]
+        std::fs::remove_file(
+            SystemStore::folder()
+                .unwrap()
+                .join(catalogue_mark_name(&name)),
+        )
+        .unwrap();
+        assert_eq!(CatalogueMarks.highest(&name), Ok(None));
+    }
+
     /// Removes a test key (tests only: PCTwin never removes a journal's key).
     fn forget(id: u64) {
         #[cfg(any(windows, target_os = "macos"))]
