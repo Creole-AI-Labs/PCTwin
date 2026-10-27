@@ -45,6 +45,7 @@ impl Env {
             classify: Ctx {
                 paths: &self.map,
                 same_screens: false,
+                hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
             },
             from,
             to,
@@ -376,16 +377,14 @@ fn vs_codes_recent_list_is_rewritten_for_the_data_role() {
         rewrite_recent_list(list, &env.ctx(System::Windows, System::Windows)).unwrap();
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     let entries = v["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 2, "{out}");
+    assert_eq!(entries.len(), 1, "{out}");
     assert_eq!(
         entries[0]["folderUri"],
         "file:///C%3A/Users/ada/Documents/proj"
     );
-    assert_eq!(
-        entries[1]["folderUri"],
-        "vscode-remote://ssh-remote%2Bbox/home/x"
-    );
-    assert!(!left.is_empty());
+    // A remote address is kept back (opening it connects to another computer), and said so.
+    assert!(left.iter().any(|l| l.why == Why::Fetches), "{left:?}");
+    assert!(left.iter().any(|l| l.why == Why::PathNotMoved), "{left:?}");
 }
 
 #[test]

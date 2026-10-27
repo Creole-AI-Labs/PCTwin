@@ -122,8 +122,7 @@ pub fn offer(mover_is_admin: bool) -> Offer {
 }
 
 const NS: &str = "http://www.microsoft.com/networking/WLAN/profile/v1";
-const MAX_PROFILE: u64 = 64 * 1024;
-const MAX_PROFILES: usize = 1000;
+use pctwin_types::limits::{WIFI_PROFILE_BYTES as MAX_PROFILE, WIFI_PROFILES as MAX_PROFILES};
 
 fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
     n.children()
@@ -136,6 +135,8 @@ fn text_of(n: Option<roxmltree::Node<'_, '_>>) -> Option<String> {
 
 /// Reads one Windows WLAN profile (as `netsh` exports it).
 pub fn parse_profile(xml: &str) -> Result<Network, WifiError> {
+    pctwin_types::nesting::check(xml, pctwin_types::nesting::Syntax::Xml)
+        .map_err(|_| WifiError::Unreadable)?;
     let doc = roxmltree::Document::parse(xml).map_err(|_| WifiError::Unreadable)?;
     let root = doc.root_element();
     if root.tag_name().name() != "WLANProfile" || root.tag_name().namespace() != Some(NS) {

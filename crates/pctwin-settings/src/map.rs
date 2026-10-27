@@ -98,6 +98,8 @@ impl Capture {
     /// Reads a saved capture: a newer format is refused; every value is checked against `cat`
     /// again, and a setting it does not know is refused.
     pub fn from_json(bytes: &[u8], cat: &Catalogue) -> Result<Self, PlanError> {
+        pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json)
+            .map_err(|e| PlanError::Damaged(e.to_string()))?;
         let c: Capture =
             serde_json::from_slice(bytes).map_err(|e| PlanError::Damaged(e.to_string()))?;
         if c.format == 0 || c.format > CAPTURE_FORMAT {

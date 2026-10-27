@@ -3,12 +3,16 @@
 //! - [`ItemStatus`]: how each selected item ended (the honest-results rule).
 //! - [`ItemResult`]: a status with the [`Reason`] the person sees whenever an item did not finish.
 //! - [`format`]: the one rule every saved format follows (engineering notes 9.11).
+//! - [`limits`]: every safety bound, in one place, each with what it protects.
+//! - [`nesting`]: the one depth gate in front of every structured-text parser.
 //! - [`listed_enum!`]: an enum and the names of all its variants, declared together, so a list of
 //!   them (the screens' example files, translation checks) cannot leave one out.
 
 use serde::{Deserialize, Serialize};
 
 pub mod format;
+pub mod limits;
+pub mod nesting;
 mod result;
 mod variants;
 

@@ -71,10 +71,10 @@ pub enum Address {
     Dconf { path: String, key: String },
 }
 
-/// The limits of one discovery, so a huge store cannot exhaust the laptop.
-pub const MAX_FOUND: usize = 50_000;
-const MAX_DEPTH: usize = 12;
-const MAX_BINARY: usize = 1024;
+/// The limits of one discovery, so a huge store cannot exhaust the laptop
+/// ([`pctwin_types::limits`]).
+pub use pctwin_types::limits::FOUND_SETTINGS as MAX_FOUND;
+use pctwin_types::limits::{REGISTRY_BINARY_BYTES as MAX_BINARY, REGISTRY_DEPTH as MAX_DEPTH};
 
 impl Address {
     /// The executor key: `found.` and a digest of the address.
@@ -101,20 +101,21 @@ impl Address {
         }
     }
 
-    /// Whether PCTwin may write here at all: inside the person's own stores that discovery
-    /// reads, not a security, policy or program store, plain names.
+    /// Whether PCTwin may write here at all: the one allow-list of the person's own stores, by
+    /// kind, that discovery reads and writing shares (fourth review, finding F1). A place
+    /// discovery never reads (the system's own vendors, a registry key deeper than discovery
+    /// walks, an unnamed value) is never written. Every value is checked again when it is
+    /// written ([`crate::classify::may_write_text`]).
     pub fn writable(&self) -> bool {
         let plain = |s: &str| !s.is_empty() && s.len() <= 255 && text_ok(s);
         match self {
             Address::Registry { key, name, .. } => {
-                let k = key.to_lowercase();
-                let scoped = (k.starts_with("software\\") && !k.starts_with("software\\microsoft"))
-                    || k == "control panel"
-                    || k.starts_with("control panel\\");
-                scoped
-                    && plain(key)
+                plain(key)
                     && plain(name)
-                    && !key.split('\\').any(|p| p.is_empty() || p == "..")
+                    && registry_scope(key)
+                    && !key
+                        .split('\\')
+                        .any(|p| p.is_empty() || p == ".." || p == ".")
                     && store_kind(key).is_none()
             }
             Address::MacPref { domain, key, .. } => {
@@ -144,6 +145,27 @@ impl Address {
             }
         }
     }
+}
+
+/// The registry trees discovery reads: `Software\<vendor>\...` for every vendor that is not the
+/// system's own, and `Control Panel\...`, no deeper than discovery walks.
+pub fn registry_scope(key: &str) -> bool {
+    let parts: Vec<&str> = key.split('\\').collect();
+    let base = match parts.as_slice() {
+        [s, vendor, ..] if s.eq_ignore_ascii_case("software") => {
+            if system_vendor(vendor) {
+                return false;
+            }
+            2
+        }
+        [c, ..] if c.eq_ignore_ascii_case("control panel") => 1,
+        _ => return false,
+    };
+    parts.len() - base <= MAX_DEPTH
+}
+
+fn system_vendor(v: &str) -> bool {
+    SYSTEM_VENDORS.contains(&v.to_lowercase().as_str())
 }
 
 /// One found setting.
@@ -237,7 +259,11 @@ pub fn discover_registry(hive: &dyn Hive) -> Discovery {
     let vendors = hive.subkeys("Software").unwrap_or_default();
     for v in vendors {
         let key = format!("Software\\{v}");
-        if SYSTEM_VENDORS.contains(&v.to_lowercase().as_str()) {
+        if d.found.len() >= MAX_FOUND {
+            d.not_moved.push(too_many(&v, &key));
+            continue;
+        }
+        if system_vendor(&v) {
             let why = store_kind(&key).unwrap_or(Why::SystemStore);
             d.not_moved.push(NotMoved {
                 label: v.clone(),
@@ -250,13 +276,37 @@ pub fn discover_registry(hive: &dyn Hive) -> Discovery {
         walk(hive, &key, &v, 0, &mut d);
     }
     if hive.key_exists("Control Panel").unwrap_or(false) {
-        walk(hive, "Control Panel", "Control Panel", 0, &mut d);
+        if d.found.len() >= MAX_FOUND {
+            d.not_moved.push(too_many("Control Panel", "Control Panel"));
+        } else {
+            walk(hive, "Control Panel", "Control Panel", 0, &mut d);
+        }
     }
     d
 }
 
+/// The note for a registry key left unread because discovery had read all it may.
+fn too_many(label: &str, key: &str) -> NotMoved {
+    NotMoved {
+        label: label.into(),
+        store: format!("HKCU\\{key}"),
+        name: "*".into(),
+        why: Why::TooMany,
+    }
+}
+
 fn walk(hive: &dyn Hive, key: &str, label: &str, depth: usize, d: &mut Discovery) {
-    if depth > MAX_DEPTH || d.found.len() >= MAX_FOUND {
+    if d.found.len() >= MAX_FOUND {
+        d.not_moved.push(too_many(label, key));
+        return;
+    }
+    if depth > MAX_DEPTH {
+        d.not_moved.push(NotMoved {
+            label: label.into(),
+            store: format!("HKCU\\{key}"),
+            name: "*".into(),
+            why: Why::TooDeep,
+        });
         return;
     }
     if let Some(why) = store_kind(key) {
@@ -269,15 +319,21 @@ fn walk(hive: &dyn Hive, key: &str, label: &str, depth: usize, d: &mut Discovery
         return;
     }
     for name in hive.names(key).unwrap_or_default() {
-        if name.is_empty() {
-            continue;
-        }
         let not = |why| NotMoved {
             label: label.into(),
             store: format!("HKCU\\{key}"),
             name: name.clone(),
             why,
         };
+        // The cap is per value: the rest of this key, and everything after it, is reported.
+        if d.found.len() >= MAX_FOUND {
+            d.not_moved.push(too_many(label, key));
+            return;
+        }
+        if name.is_empty() {
+            d.not_moved.push(not(Why::Unnamed));
+            continue;
+        }
         match hive.get(key, &name) {
             Ok(Some(v)) => match reg_to_setting(&v) {
                 Ok((kind, value)) => d.found.push(FoundSetting {
@@ -349,24 +405,51 @@ pub fn discover_mac(m: &mut Mechanisms) -> Discovery {
             });
             continue;
         }
+        if d.found.len() >= MAX_FOUND {
+            d.not_moved.push(NotMoved {
+                label: domain.clone(),
+                store: format!("defaults:{domain}"),
+                name: "*".into(),
+                why: Why::TooMany,
+            });
+            continue;
+        }
         let Some(r) = m.runner.as_mut() else { break };
         let exported = r
             .run(Tool::Defaults, &["export", &domain, "-"])
             .ok()
             .filter(|o| o.ok)
-            .and_then(|o| plist::parse(&o.stdout).ok());
-        let Some(Plist::Dict(items)) = exported else {
-            d.not_moved.push(NotMoved {
-                label: domain.clone(),
-                store: format!("defaults:{domain}"),
-                name: "*".into(),
-                why: Why::Unreadable("these preferences could not be read".into()),
-            });
-            continue;
+            .map(|o| plist::parse(&o.stdout));
+        let items = match exported {
+            Some(Ok(Plist::Dict(items))) => items,
+            Some(Err(e)) if e == pctwin_types::nesting::TOO_DEEP => {
+                d.not_moved.push(NotMoved {
+                    label: domain.clone(),
+                    store: format!("defaults:{domain}"),
+                    name: "*".into(),
+                    why: Why::TooDeep,
+                });
+                continue;
+            }
+            _ => {
+                d.not_moved.push(NotMoved {
+                    label: domain.clone(),
+                    store: format!("defaults:{domain}"),
+                    name: "*".into(),
+                    why: Why::Unreadable("these preferences could not be read".into()),
+                });
+                continue;
+            }
         };
         for (key, v) in items {
             if d.found.len() >= MAX_FOUND {
-                return d;
+                d.not_moved.push(NotMoved {
+                    label: domain.clone(),
+                    store: format!("defaults:{domain}"),
+                    name: "*".into(),
+                    why: Why::TooMany,
+                });
+                break;
             }
             match pref_to_setting(&v) {
                 Ok((kind, value)) => d.found.push(FoundSetting {
@@ -394,6 +477,8 @@ pub fn discover_mac(m: &mut Mechanisms) -> Discovery {
 pub fn parse_dconf_dump(text: &str) -> Discovery {
     let mut d = Discovery::default();
     let mut path: Option<String> = None;
+    // The section already reported as past the cap.
+    let mut capped: Option<String> = None;
     for line in text.lines() {
         let line = line.trim_end();
         if let Some(p) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
@@ -404,11 +489,32 @@ pub fn parse_dconf_dump(text: &str) -> Discovery {
             });
             continue;
         }
-        let (Some(p), Some((key, value))) = (&path, line.split_once('=')) else {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some(p) = &path else {
+            d.not_moved.push(dconf_note(
+                "/",
+                "*",
+                Why::Unreadable(UNREADABLE_LINE.into()),
+            ));
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            d.not_moved
+                .push(dconf_note(p, "*", Why::Unreadable(UNREADABLE_LINE.into())));
             continue;
         };
         if d.found.len() >= MAX_FOUND {
-            break;
+            if capped.as_ref() != Some(p) {
+                d.not_moved.push(dconf_note(p, "*", Why::TooMany));
+                capped = Some(p.clone());
+            }
+            continue;
+        }
+        if pctwin_types::nesting::check(value, pctwin_types::nesting::Syntax::GVariant).is_err() {
+            d.not_moved.push(dconf_note(p, key, Why::TooDeep));
+            continue;
         }
         let label = p.trim_matches('/').replace('/', " ");
         d.found.push(FoundSetting {
@@ -421,6 +527,17 @@ pub fn parse_dconf_dump(text: &str) -> Discovery {
         });
     }
     d
+}
+
+const UNREADABLE_LINE: &str = "found, not read: a line PCTwin could not read as a setting";
+
+fn dconf_note(path: &str, name: &str, why: Why) -> NotMoved {
+    NotMoved {
+        label: path.trim_matches('/').replace('/', " "),
+        store: path.into(),
+        name: name.into(),
+        why,
+    }
 }
 
 pub fn discover_dconf(m: &mut Mechanisms) -> Discovery {

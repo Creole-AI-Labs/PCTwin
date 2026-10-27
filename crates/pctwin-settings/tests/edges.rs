@@ -40,6 +40,7 @@ fn ctx(m: &FolderMap) -> Ctx<'_> {
     Ctx {
         paths: m,
         same_screens: false,
+        hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
     }
 }
 

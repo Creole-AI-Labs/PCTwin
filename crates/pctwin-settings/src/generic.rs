@@ -8,11 +8,12 @@ use std::collections::BTreeMap;
 use pctwin_recipe::{Arch, Os, Platform, Recipe, RecipeId, SettingValue, Step};
 
 use crate::apps::glob;
+use crate::catalogue::ActionHint;
 use crate::catalogue::{Catalogue, Place, System};
-use crate::classify::{Ctx, Fate, Why, classify_kind};
-use crate::found::{Address, Discovery, FoundSetting, NotMoved, RegKind, dconf_string};
-use crate::gvariant;
+use crate::classify::{Ctx, Fate, Why, action_kind, classify_kind, may_write_text};
+use crate::found::{Address, Discovery, FoundSetting, NotMoved, PrefKind, RegKind, dconf_string};
 use crate::map::PlanError;
+use crate::{gvariant, plist};
 
 /// The most steps one recipe holds (the recipe format's own limit).
 pub const STEPS_PER_RECIPE: usize = 200;
@@ -72,9 +73,11 @@ pub fn plan_found(
             continue;
         }
         if !f.address.writable() {
-            p.not_moved.push(not(
-                crate::classify::store_kind(&store).unwrap_or(Why::SystemStore)
-            ));
+            let why = match &f.address {
+                Address::Registry { name, .. } if name.is_empty() => Why::Unnamed,
+                _ => crate::classify::store_kind(&store).unwrap_or(Why::SystemStore),
+            };
+            p.not_moved.push(not(why));
             continue;
         }
         match fate(f, ctx) {
@@ -105,6 +108,18 @@ fn fate(f: &FoundSetting, ctx: &Ctx<'_>) -> Fate {
         Address::Registry { kind, .. } => {
             classify_kind(store, name, &f.value, *kind == RegKind::Binary, ctx)
         }
+        Address::MacPref {
+            kind: PrefKind::Xml,
+            ..
+        } => {
+            let SettingValue::Text(t) = &f.value else {
+                return Fate::NotMoved(Why::Kind);
+            };
+            match plist::from_xml(t) {
+                Ok(v) => composite(store, name, &plist::strings(&v), &f.value, ctx),
+                Err(_) => Fate::NotMoved(Why::Kind),
+            }
+        }
         Address::MacPref { .. } => classify_kind(store, name, &f.value, false, ctx),
         Address::Dconf { .. } => {
             let SettingValue::Text(t) = &f.value else {
@@ -122,10 +137,91 @@ fn fate(f: &FoundSetting, ctx: &Ctx<'_>) -> Fate {
                         Fate::NotMoved(why) => Fate::NotMoved(why),
                     }
                 }
-                None => classify_kind(store, name, &f.value, false, ctx),
+                // A list, tuple or dictionary: every string in it is judged on its own.
+                None => match gvariant::strings(t) {
+                    Some(leaves) => composite(store, name, &leaves, &f.value, ctx),
+                    None => Fate::NotMoved(Why::Kind),
+                },
             }
         }
     }
+}
+
+/// A value made of several texts (a list, a dictionary): copied whole only when every text in
+/// it would be copied as it is. A path inside one is never rewritten in place.
+fn composite(
+    store: &str,
+    name: &str,
+    leaves: &[String],
+    whole: &SettingValue,
+    ctx: &Ctx<'_>,
+) -> Fate {
+    // The name's own rules (credentials, identities, caches, window places) first.
+    if let Fate::NotMoved(why) = classify_kind(store, name, &SettingValue::Int(0), false, ctx) {
+        return Fate::NotMoved(why);
+    }
+    for leaf in leaves {
+        match classify_kind(store, name, &SettingValue::Text(leaf.clone()), false, ctx) {
+            Fate::Copy(_) => {}
+            Fate::Rewritten(_) => return Fate::NotMoved(Why::PathNotMoved),
+            Fate::NotMoved(why) => return Fate::NotMoved(why),
+        }
+    }
+    Fate::Copy(whole.clone())
+}
+
+/// The texts inside a value at `a`, as the new laptop's store would hold them.
+fn texts(a: &Address, v: &SettingValue) -> Result<Vec<String>, Why> {
+    let SettingValue::Text(t) = v else {
+        return Ok(Vec::new());
+    };
+    Ok(match a {
+        Address::Registry {
+            kind: RegKind::MultiSz,
+            ..
+        } => serde_json::from_str::<Vec<String>>(t).map_err(|_| Why::Kind)?,
+        Address::Registry {
+            kind: RegKind::Binary,
+            ..
+        } => Vec::new(),
+        Address::MacPref {
+            kind: PrefKind::Xml,
+            ..
+        } => plist::strings(&plist::from_xml(t).map_err(|_| Why::Kind)?),
+        Address::Dconf { .. } => match dconf_string(t) {
+            Some(inner) => vec![inner],
+            None => {
+                pctwin_types::nesting::check(t, pctwin_types::nesting::Syntax::GVariant)
+                    .map_err(|_| Why::TooDeep)?;
+                gvariant::strings(t).ok_or(Why::Kind)?
+            }
+        },
+        _ => vec![t.clone()],
+    })
+}
+
+/// The check at the moment of writing on the new laptop (fourth review, finding F1): the place
+/// must be in discovery's scope, and nothing in the value may be something to run or fetch, by
+/// the same rule planning used ([`crate::classify::run_or_fetch`]) and the catalogue's hints.
+pub fn may_write(hints: &[ActionHint], a: &Address, v: &SettingValue) -> Result<(), Why> {
+    if !a.writable() {
+        return Err(Why::SystemStore);
+    }
+    let (store, name) = (a.store(), a.name());
+    if matches!(
+        a,
+        Address::Registry {
+            kind: RegKind::Binary,
+            ..
+        }
+    ) && action_kind(hints, store, name).is_some()
+    {
+        return Err(Why::StartsProgram);
+    }
+    for t in texts(a, v)? {
+        may_write_text(hints, store, name, &t)?;
+    }
+    Ok(())
 }
 
 /// Whether a catalogue row reads this address on `system` (it then moves through the row).
