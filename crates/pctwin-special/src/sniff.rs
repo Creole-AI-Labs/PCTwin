@@ -63,6 +63,8 @@ pub enum Shape {
     },
     /// A Windows DPAPI blob: protected by this laptop's account.
     DpapiBlob,
+    /// A file holding a live sign-in session, by its format mark.
+    SessionData,
     /// An Outlook data file; `server_cache`: an offline copy of a server mailbox.
     OutlookData {
         server_cache: bool,
@@ -148,6 +150,10 @@ fn binary_shape(head: &[u8], tail: &[u8]) -> Option<Shape> {
     // The shared-memory index: version 3007000 in the machine's own byte order, written twice.
     if head.len() >= 96 && u32_le(head, 0) == Some(3_007_000) && head[..48] == head[48..96] {
         return Some(Shape::SqliteShm);
+    }
+    // Session files that hold a live sign-in, by their own format mark ("TDF$").
+    if head.starts_with(b"TDF$") {
+        return Some(Shape::SessionData);
     }
     if head.starts_with(&DPAPI) {
         return Some(Shape::DpapiBlob);

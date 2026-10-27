@@ -124,6 +124,31 @@ struct Found {
     path: PathBuf,
     len: u64,
     shape: Shape,
+    /// For bytes of no known format: whether they look encrypted (near-random).
+    random: bool,
+}
+
+/// Whether bytes look encrypted: near-random (Shannon entropy at least 7.5 bits per byte) over
+/// at least 1 KiB. Compressed data looks the same; this is used only where a key bound to this
+/// laptop sits beside them.
+fn near_random(b: &[u8]) -> bool {
+    if b.len() < 1024 {
+        return false;
+    }
+    let mut counts = [0u32; 256];
+    for x in b {
+        counts[usize::from(*x)] += 1;
+    }
+    let n = b.len() as f64;
+    let e: f64 = counts
+        .iter()
+        .filter(|c| **c > 0)
+        .map(|c| {
+            let p = f64::from(*c) / n;
+            -p * p.log2()
+        })
+        .sum();
+    e >= 7.5
 }
 
 fn read_ends(path: &Path, len: u64) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
@@ -248,12 +273,17 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
         }
         let len = meta.len();
         match read_ends(&path, len) {
-            Ok((head, tail)) => w.files.push(Found {
-                rel: child,
-                path,
-                len,
-                shape: sniff::shape(&head, &tail, len),
-            }),
+            Ok((head, tail)) => {
+                let shape = sniff::shape(&head, &tail, len);
+                let random = shape == Shape::Binary && near_random(&head);
+                w.files.push(Found {
+                    rel: child,
+                    path,
+                    len,
+                    shape,
+                    random,
+                })
+            }
             Err(e) => w.unreadable.push((child, e.kind().to_string())),
         }
     }
@@ -485,6 +515,7 @@ pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> Fold
                     path: base.clone(),
                     len: m.len(),
                     shape: sniff::shape(&h, &t, m.len()),
+                    random: false,
                 });
             } else {
                 w.unreadable
@@ -502,6 +533,17 @@ pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> Fold
     };
     let mut not_moved = std::mem::take(&mut w.not_moved);
     let mut sessions = false;
+    // A key bound to this laptop sits here (a protected blob, or a value wrapped by the system):
+    // near-random files of no known format beside it are taken to be encrypted under it.
+    let bound_key_here = w.files.iter().any(|f| f.shape == Shape::DpapiBlob)
+        || w.files.iter().any(|f| {
+            f.shape == Shape::Json
+                && f.len as usize <= content::MAX_JSON
+                && std::fs::read(&f.path)
+                    .ok()
+                    .and_then(|b| content::json_facts(&b).ok())
+                    .is_some_and(|j| j.machine_bound_key)
+        });
 
     for (rel, why) in std::mem::take(&mut w.unreadable) {
         b.push(
@@ -904,6 +946,21 @@ pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> Fold
                     vec![Evidence::CredentialValues],
                 )
             }
+            Shape::SessionData => {
+                sessions = true;
+                b.push(
+                    one,
+                    Custody::MachineBound,
+                    false,
+                    vec![Evidence::SessionStore],
+                )
+            }
+            Shape::Binary if f.random && bound_key_here => b.push(
+                one,
+                Custody::MachineBound,
+                false,
+                vec![Evidence::MachineBoundProtection],
+            ),
             _ => plain.push(f.rel.clone()),
         }
     }

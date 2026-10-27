@@ -391,3 +391,55 @@ fn a_new_app_works_by_adding_one_catalogue_row() {
         }
     );
 }
+
+#[test]
+fn an_encrypted_store_beside_a_key_bound_to_this_laptop_is_never_copied() {
+    // A chat app's database encrypted with no SQLite header, its key wrapped by the system and
+    // written in hex (`v10...`), and a session file by its own format mark. Invented bytes.
+    let t = temp();
+    let home = home_of(&t);
+    let d = home.join("AppData/Roaming/Chatty");
+    let wrapped: String = b"v10 invented wrapped key bytes 0123456789"
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    put(
+        &d.join("config.json"),
+        format!(r#"{{"encryptedKey":"{wrapped}"}}"#).as_bytes(),
+    );
+    let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+    let noise: Vec<u8> = (0..8192)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect();
+    put(&d.join("sql/db.sqlite"), &noise);
+    put(&d.join("attachments/ab/cdef"), &noise[..4096]);
+    put(&d.join("tdata/key_datas"), b"TDF$\x01\x00\x00\x00 invented");
+    put(&d.join("prefs.txt"), b"theme=dark\n");
+    // The same near-random bytes with no bound key beside them stay ordinary data.
+    put(&home.join("AppData/Roaming/Plain App/blob.bin"), &noise);
+    let r = discover(&home, &Catalogue::shipped(SHIPPED));
+    let chat = folder(&r, "Chatty");
+    for m in [
+        "config.json",
+        "sql/db.sqlite",
+        "attachments/ab/cdef",
+        "tdata/key_datas",
+    ] {
+        assert_eq!(holding(chat, m).custody, Custody::MachineBound, "{m}");
+    }
+    assert_eq!(holding(chat, "prefs.txt").custody, Custody::Portable);
+    assert!(
+        chat.components
+            .iter()
+            .any(|c| c.custody == Custody::ServiceHeld)
+    );
+    assert_eq!(
+        holding(folder(&r, "Plain App"), "blob.bin").custody,
+        Custody::Portable
+    );
+}

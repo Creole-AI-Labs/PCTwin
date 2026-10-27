@@ -162,12 +162,29 @@ fn string_facts(s: &str, f: &mut JsonFacts) {
             return;
         }
     }
+    // A key the system wrapped for this laptop and app, written in hex (Electron's safe storage
+    // writes `v10`/`v11` and Chromium-style app-bound keys `v20`, as their first bytes).
+    if t.len() >= 32 && t.len() % 2 == 0 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let first: Vec<u8> = (0..6)
+            .step_by(2)
+            .filter_map(|i| u8::from_str_radix(&t[i..i + 2], 16).ok())
+            .collect();
+        if matches!(first.as_slice(), b"v10" | b"v11" | b"v20") {
+            f.machine_bound_key = true;
+            return;
+        }
+    }
     if t.len() >= 24
         && t.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
         && let Ok(bin) = STANDARD.decode(t)
     {
-        if bin.starts_with(b"DPAPI") || bin.starts_with(b"APPB") {
+        if bin.starts_with(b"DPAPI")
+            || bin.starts_with(b"APPB")
+            || bin.starts_with(b"v10")
+            || bin.starts_with(b"v11")
+            || bin.starts_with(b"v20")
+        {
             f.machine_bound_key = true;
             return;
         }
