@@ -90,6 +90,9 @@ pub enum Evidence {
     HashMismatch,
     /// Model weights (GGUF, safetensors) or a manifest that lists them.
     ModelData,
+    /// It uses files kept in other folders, which were not chosen (a catalog's originals, a
+    /// library's attachments): the person is asked whether to add them.
+    LinksOutside { folders: Vec<String> },
     /// A file another file of this component names is not there.
     MissingPart { what: String },
     /// A program, library or script: never moved as data or activated; 2.1 reacquires code.
@@ -157,6 +160,10 @@ impl Evidence {
             }
             Evidence::ModelData => "AI model files".into(),
             Evidence::MissingPart { what } => format!("a part it needs is missing: {what}"),
+            Evidence::LinksOutside { folders } => format!(
+                "it uses files kept in {} other folder(s); add them to the move?",
+                folders.len()
+            ),
             Evidence::ExecutableCode => {
                 "a program or add-on; programs are installed again, never copied".into()
             }
@@ -674,6 +681,9 @@ mod tests {
             Evidence::HashMismatch,
             Evidence::ModelData,
             Evidence::MissingPart { what: "x".into() },
+            Evidence::LinksOutside {
+                folders: vec!["f".into()],
+            },
             Evidence::ExecutableCode,
             Evidence::EnablesCommands,
             Evidence::ServiceAccount,

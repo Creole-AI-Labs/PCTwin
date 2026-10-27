@@ -634,14 +634,20 @@ struct WakesUp {
 impl Holders for WakesUp {
     fn holding(&self, _: &[PathBuf]) -> Holding {
         let (file, done) = (self.file.clone(), self.done.clone());
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
         *self.writer.lock().unwrap() = Some(std::thread::spawn(move || {
-            let mut n = 0usize;
+            use std::io::Write;
+            let mut h = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&file)
+                .unwrap();
+            let _ = started_tx.send(());
+            // Appends without pause, each write growing the file, until capture is over.
             while !done.load(std::sync::atomic::Ordering::SeqCst) {
-                let _ = std::fs::write(&file, "x".repeat(1 + n % 7));
-                n += 1;
+                h.write_all(b"x").unwrap();
             }
         }));
-        std::thread::sleep(Duration::from_millis(5));
+        started_rx.recv().unwrap();
         Holding::Free
     }
 }
@@ -651,7 +657,8 @@ fn a_file_that_keeps_changing_is_not_captured() {
     let t = temp();
     let home = home_of(&t);
     let file = home.join("AppData/Roaming/Busy/log.txt");
-    put(&file, b"start\n");
+    // Large enough that copying it takes long while the app keeps appending.
+    put(&file, &vec![b'a'; 32 * 1024 * 1024]);
     let r = found(&home);
     let (f, c) = component(&r, "log.txt");
     let approved = approve(f, c);

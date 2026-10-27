@@ -38,6 +38,25 @@ pub struct JsonFacts {
     pub digests: Vec<String>,
     /// Plain file names the values mention (no folder parts).
     pub file_names: Vec<String>,
+    /// Full local paths the values name (files the data links to).
+    pub paths: Vec<String>,
+}
+
+/// The most linked paths kept per file.
+pub const MAX_PATHS: usize = 2000;
+/// The most text values read from one database while looking for linked paths.
+const MAX_VALUES: usize = 200_000;
+
+/// Whether a text is one full local path (`C:\...`, `C:/...`, or `/a/b...`): not an address,
+/// not another computer's share, not a relative place.
+pub fn local_path(t: &str) -> bool {
+    let b = t.as_bytes();
+    if t.len() < 4 || t.len() > 1024 || t.contains(['\n', '\r', '\0']) {
+        return false;
+    }
+    let windows = b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/');
+    let unix = b[0] == b'/' && b[1] != b'/' && t[1..].contains('/') && !t.contains("://");
+    windows || unix
 }
 
 /// Why a file's facts could not be read.
@@ -104,6 +123,8 @@ pub fn json_facts(bytes: &[u8]) -> Result<JsonFacts, ContentError> {
     f.digests.dedup();
     f.file_names.sort();
     f.file_names.dedup();
+    f.paths.sort();
+    f.paths.dedup();
     Ok(f)
 }
 
@@ -157,6 +178,12 @@ fn string_facts(s: &str, f: &mut JsonFacts) {
     }
     if pctwin_settings::classify::looks_secret(t).is_some() {
         f.credential_values = true;
+        return;
+    }
+    if local_path(t) {
+        if f.paths.len() < MAX_PATHS {
+            f.paths.push(t.to_string());
+        }
         return;
     }
     if f.file_names.len() < MAX_NAMES
@@ -251,30 +278,50 @@ pub fn wal_of(path: &Path) -> std::path::PathBuf {
 /// its tables too, that an immutable read would not see), the file and its log are first copied
 /// to a private folder, and the copy is read.
 pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
+    let (db, _snapshot) = open_read(path)?;
+    Ok(tables_as_named(&db)?
+        .into_iter()
+        .map(|t| Table {
+            name: t.name.to_ascii_lowercase(),
+            columns: t.columns.iter().map(|c| c.to_ascii_lowercase()).collect(),
+        })
+        .collect())
+}
+
+/// Opens a database for reading without writing anything beside it (see [`sqlite_tables`]); the
+/// private snapshot folder, when one was needed, lives as long as the second value.
+fn open_read(
+    path: &Path,
+) -> Result<(rusqlite::Connection, Option<tempfile::TempDir>), ContentError> {
     use rusqlite::OpenFlags;
     let wal = wal_of(path);
     let has_log = std::fs::symlink_metadata(&wal).is_ok_and(|m| m.is_file() && m.len() > 0);
-    let _snapshot;
-    let db = if has_log {
-        let dir = tempfile::tempdir().map_err(|e| ContentError::Damaged(e.to_string()))?;
+    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
+    if has_log {
+        let dir = tempfile::tempdir().map_err(|e| damaged(&e))?;
         let copy = dir.path().join("db");
-        std::fs::copy(path, &copy).map_err(|e| ContentError::Damaged(e.to_string()))?;
-        std::fs::copy(&wal, wal_of(&copy)).map_err(|e| ContentError::Damaged(e.to_string()))?;
+        std::fs::copy(path, &copy).map_err(|e| damaged(&e))?;
+        std::fs::copy(&wal, wal_of(&copy)).map_err(|e| damaged(&e))?;
         let db = rusqlite::Connection::open_with_flags(
             &copy,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        );
-        _snapshot = dir;
-        db
+        )
+        .map_err(|e| damaged(&e))?;
+        Ok((db, Some(dir)))
     } else {
-        rusqlite::Connection::open_with_flags(
+        let db = rusqlite::Connection::open_with_flags(
             immutable_uri(path),
             OpenFlags::SQLITE_OPEN_READ_ONLY
                 | OpenFlags::SQLITE_OPEN_URI
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
+        .map_err(|e| damaged(&e))?;
+        Ok((db, None))
     }
-    .map_err(|e| ContentError::Damaged(e.to_string()))?;
+}
+
+/// The tables and columns as the database names them.
+fn tables_as_named(db: &rusqlite::Connection) -> Result<Vec<Table>, ContentError> {
     let bad = |e: rusqlite::Error| ContentError::Damaged(e.to_string());
     let mut names = Vec::new();
     {
@@ -297,10 +344,49 @@ pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
             .collect::<Result<Vec<_>, _>>()
             .map_err(bad)?;
         out.push(Table {
-            name: name.to_ascii_lowercase(),
-            columns: cols.into_iter().map(|c| c.to_ascii_lowercase()).collect(),
+            name,
+            columns: cols,
         });
     }
+    Ok(out)
+}
+
+/// A name written as an SQL identifier.
+fn ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// The full local paths a database's text values name (files it links to), read without
+/// writing anything on the old laptop; bounded in values read and paths kept.
+pub fn sqlite_paths(path: &Path) -> Result<Vec<String>, ContentError> {
+    let (db, _snapshot) = open_read(path)?;
+    let bad = |e: rusqlite::Error| ContentError::Damaged(e.to_string());
+    let mut out = Vec::new();
+    let mut read = 0usize;
+    'tables: for t in tables_as_named(&db)? {
+        for c in &t.columns {
+            let sql = format!(
+                "SELECT {col} FROM {table} WHERE typeof({col}) = 'text' LIMIT {limit}",
+                col = ident(c),
+                table = ident(&t.name),
+                limit = MAX_VALUES.saturating_sub(read)
+            );
+            let mut st = db.prepare(&sql).map_err(bad)?;
+            let mut rows = st.query([]).map_err(bad)?;
+            while let Some(r) = rows.next().map_err(bad)? {
+                read += 1;
+                let v: String = r.get(0).map_err(bad)?;
+                if local_path(&v) && out.len() < MAX_PATHS {
+                    out.push(v);
+                }
+                if read >= MAX_VALUES {
+                    break 'tables;
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
     Ok(out)
 }
 

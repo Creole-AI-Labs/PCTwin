@@ -329,6 +329,72 @@ fn gguf_split_in(b: &[u8]) -> Option<(u16, u16)> {
     None
 }
 
+/// A path as compared: `/` between parts, and on Windows one case.
+fn comparable(p: &str) -> String {
+    let p = p.replace('\\', "/");
+    if cfg!(windows) { p.to_lowercase() } else { p }
+}
+
+/// What the full local `paths` a component's data names say about what it needs: files inside
+/// its own folder move with it; files elsewhere that exist are offered for the person to add
+/// (never added silently); files that are not on this laptop are a missing part, and files on a
+/// drive that is not connected now are said to be there. A text shaped like a path whose first
+/// folder this laptop does not have (`/api/v1`) is not taken for a path.
+fn link_evidence(base: &Path, paths: &[String]) -> Vec<Evidence> {
+    let inside = format!(
+        "{}/",
+        comparable(&base.to_string_lossy()).trim_end_matches('/')
+    );
+    let mut outside: BTreeSet<String> = BTreeSet::new();
+    let mut missing = 0usize;
+    let mut offline = 0usize;
+    for p in paths {
+        if comparable(p).starts_with(&inside) {
+            continue;
+        }
+        let path = Path::new(p);
+        let b = p.as_bytes();
+        if b.get(1) == Some(&b':') {
+            // A drive letter: is that drive here at all?
+            if std::fs::metadata(&p[..3]).is_err() {
+                offline += 1;
+                continue;
+            }
+        } else {
+            let first = p[1..].split('/').next().unwrap_or("");
+            if first.is_empty() || std::fs::metadata(Path::new("/").join(first)).is_err() {
+                continue;
+            }
+        }
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {
+                let folder = path
+                    .parent()
+                    .map_or(p.clone(), |d| d.to_string_lossy().into_owned());
+                outside.insert(folder);
+            }
+            Err(_) => missing += 1,
+        }
+    }
+    let mut ev = Vec::new();
+    if missing > 0 {
+        ev.push(Evidence::MissingPart {
+            what: format!("{missing} file(s) it links to are not on this laptop"),
+        });
+    }
+    if offline > 0 {
+        ev.push(Evidence::MissingPart {
+            what: format!("{offline} file(s) it links to are on a drive that is not connected"),
+        });
+    }
+    if !outside.is_empty() {
+        ev.push(Evidence::LinksOutside {
+            folders: outside.into_iter().take(20).collect(),
+        });
+    }
+    ev
+}
+
 /// Builds the components of one folder.
 struct Build<'a> {
     folder: &'a AppDataFolder,
@@ -507,7 +573,12 @@ pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> Fold
             ev.push(Evidence::SqliteCompanion);
         }
         match content::sqlite_tables(&f.path).map(|t| content::db_kind(&t)) {
-            Ok(DbKind::Ordinary) => b.push(members, Custody::Portable, false, ev),
+            Ok(DbKind::Ordinary) => {
+                if let Ok(paths) = content::sqlite_paths(&f.path) {
+                    ev.extend(link_evidence(&base, &paths));
+                }
+                b.push(members, Custody::Portable, false, ev)
+            }
             Ok(DbKind::KeyDatabase) => {
                 key_dbs.insert(f.rel.clone(), members);
             }
@@ -774,7 +845,16 @@ pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> Fold
                     false,
                     vec![Evidence::StructuredData, Evidence::EnablesCommands],
                 ),
-                Some(Ok(_)) => plain.push(f.rel.clone()),
+                Some(Ok(j)) => {
+                    let links = link_evidence(&base, &j.paths);
+                    if links.is_empty() {
+                        plain.push(f.rel.clone())
+                    } else {
+                        let mut ev = vec![Evidence::StructuredData];
+                        ev.extend(links);
+                        b.push(one, Custody::Portable, false, ev)
+                    }
+                }
                 Some(Err(why)) => b.push(
                     one,
                     Custody::Unresolved,
