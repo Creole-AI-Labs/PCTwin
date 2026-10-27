@@ -537,6 +537,13 @@ fn subject_names_are_read_whatever_their_order() {
     assert_eq!(s.organization.as_deref(), Some("Example Ltd"));
     assert_eq!(s.common_name.as_deref(), Some("Example Ltd"));
     assert_eq!(s.country.as_deref(), Some("NG"));
+    // Two names in one part (a department and the common name together).
+    let c = with_subject(
+        &leaf,
+        vec![("OU", "Tools+CN=Example Ltd"), ("O", "Example Ltd")],
+    );
+    let s = signer_from_certificate(&c).unwrap().subject;
+    assert_eq!(s.common_name.as_deref(), Some("Example Ltd"));
     // The same name twice is fine; two different ones are refused.
     let c = with_subject(
         &leaf,

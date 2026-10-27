@@ -188,9 +188,27 @@ mod tests {
             assert!(matches!(s.signature, Signature::NotChecked { .. }));
             assert!(matches!(m, Malware::Unavailable { .. }));
         }
-        let mac = n.signature(Path::new(P), Format::MacInstaller, &Limits::default());
-        if !cfg!(target_os = "macos") {
-            assert!(matches!(mac.signature, Signature::NotChecked { .. }));
+    }
+
+    #[test]
+    fn mac_packages_are_asked_of_a_mac_only_on_a_mac() {
+        // Output that pkgutil and spctl would both read as signed, notarised and accepted.
+        let yes = "/x.pkg: accepted\nsource=Notarized Developer ID\n   Status: signed by a developer certificate issued by Apple for distribution\n    1. Developer ID Installer: Example Ltd (ABCDE12345)\n";
+        let n = native(yes);
+        let s = n.signature(Path::new(P), Format::MacInstaller, &Limits::default());
+        let m = n.malware(
+            Path::new(P),
+            Format::MacInstaller,
+            &s.signature,
+            &Limits::default(),
+        );
+        if cfg!(target_os = "macos") {
+            assert_eq!(s.signature, Signature::Trusted);
+            assert!(s.embedded);
+            assert!(matches!(m, Malware::CoveredBySystemTrust { .. }));
+        } else {
+            assert!(matches!(s.signature, Signature::NotChecked { .. }));
+            assert!(matches!(m, Malware::Unavailable { .. }));
         }
     }
 

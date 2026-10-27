@@ -412,6 +412,11 @@ mod tests {
         assert_eq!(ours.after_header, theirs.after_header as u64);
         assert_eq!(ours.table, Some((0x400, 16)));
         assert_eq!(layout(&tiny_pe32(false), 0x400).unwrap().table, None);
+        // Four directories in a 32-bit program: no certificate table either.
+        let mut four = tiny_pe32(true);
+        let opt = 0x84 + 20;
+        four[opt + 92..opt + 96].copy_from_slice(&4u32.to_le_bytes());
+        assert_eq!(layout(&four, four.len() as u64).unwrap().table, None);
     }
 
     #[test]
