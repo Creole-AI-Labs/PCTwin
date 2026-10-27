@@ -100,6 +100,10 @@ pub enum LinuxSource {
 /// The maker of an app, taken from the old laptop's own copy.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "system")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a handful of makers per move; boxing would only add noise"
+)]
 pub enum Maker {
     Windows(WindowsSigner),
     Mac(MacTeam),
