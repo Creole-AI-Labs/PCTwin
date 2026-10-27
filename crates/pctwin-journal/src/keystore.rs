@@ -70,6 +70,8 @@ pub(crate) struct Held {
     /// Where the key is kept when none was given: the system's store (a test's in memory).
     pub(crate) store: std::sync::Arc<dyn KeyStore + Send + Sync>,
     pub(crate) held: std::sync::Mutex<Option<TagKey>>,
+    /// The key store's counter of sealed writes, as last read or written ([`crate::mark`]).
+    pub(crate) mark: std::sync::Mutex<Option<u64>>,
 }
 
 impl Held {
@@ -78,12 +80,16 @@ impl Held {
             given: None,
             store: std::sync::Arc::new(SystemStore),
             held: std::sync::Mutex::new(None),
+            mark: std::sync::Mutex::new(None),
         }
     }
 
+    /// A key given by the caller (tests, tools that keep it elsewhere): its counter of sealed
+    /// writes is kept in this process's memory, never in the system's store.
     pub(crate) fn given(key: TagKey) -> Self {
         Self {
             given: Some(key),
+            store: std::sync::Arc::new(ProcessMarks),
             ..Self::system()
         }
     }
@@ -98,10 +104,48 @@ pub enum KeyError {
     Unavailable,
 }
 
-/// Where the system keeps a journal's key, by the journal's own number.
+/// Where the system keeps a journal's key, by the journal's own number, and beside it the
+/// journal's counter of sealed writes ([`crate::mark`]).
 pub(crate) trait KeyStore {
     fn get(&self, journal_id: u64) -> Result<Option<TagKey>, KeyError>;
     fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError>;
+    fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError>;
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError>;
+}
+
+/// Counters for journals opened with a given key, in this process's memory.
+struct ProcessMarks;
+
+static PROCESS_MARKS: std::sync::Mutex<Vec<(u64, u64)>> = std::sync::Mutex::new(Vec::new());
+
+impl KeyStore for ProcessMarks {
+    fn get(&self, _: u64) -> Result<Option<TagKey>, KeyError> {
+        Ok(None)
+    }
+    fn put(&self, _: u64, _: &TagKey) -> Result<(), KeyError> {
+        Err(KeyError::Unavailable)
+    }
+    fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
+        let marks = PROCESS_MARKS.lock().map_err(|_| KeyError::Unavailable)?;
+        Ok(marks
+            .iter()
+            .find(|(id, _)| *id == journal_id)
+            .map(|(_, m)| *m))
+    }
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        let mut marks = PROCESS_MARKS.lock().map_err(|_| KeyError::Unavailable)?;
+        match marks.iter_mut().find(|(id, _)| *id == journal_id) {
+            Some(m) => m.1 = mark,
+            None => marks.push((journal_id, mark)),
+        }
+        Ok(())
+    }
+}
+
+fn mark_bytes(bytes: &[u8]) -> Result<u64, KeyError> {
+    <[u8; 8]>::try_from(bytes)
+        .map(u64::from_be_bytes)
+        .map_err(|_| KeyError::Missing)
 }
 
 /// The key of journal `journal_id` from `store`: the one kept, or, only when `may_make` (the
@@ -118,6 +162,9 @@ pub(crate) fn key_for(
         return Err(KeyError::Missing);
     }
     let key = TagKey::random().ok_or(KeyError::Unavailable)?;
+    // The counter is made with the key, so a key with no counter beside it means the counter was
+    // removed ([`crate::mark`]).
+    store.put_mark(journal_id, 0)?;
     store.put(journal_id, &key)?;
     match store.get(journal_id)? {
         Some(back) if back.0 == key.0 => Ok(key),
@@ -127,6 +174,10 @@ pub(crate) fn key_for(
 
 fn entry_name(journal_id: u64) -> String {
     format!("journal-{journal_id:016x}")
+}
+
+fn mark_name(journal_id: u64) -> String {
+    format!("journal-{journal_id:016x}-mark")
 }
 
 /// The system's own key store for this person.
@@ -139,6 +190,10 @@ const SERVICE: &str = "PCTwin record key";
 #[cfg(any(windows, target_os = "macos"))]
 impl SystemStore {
     fn entry(journal_id: u64) -> Result<keyring_core::Entry, KeyError> {
+        Self::named(&entry_name(journal_id))
+    }
+
+    fn named(name: &str) -> Result<keyring_core::Entry, KeyError> {
         #[cfg(windows)]
         let store =
             windows_native_keyring_store::Store::new().map_err(|_| KeyError::Unavailable)?;
@@ -151,7 +206,7 @@ impl SystemStore {
         keyring_core::api::CredentialStoreApi::build(
             store.as_ref(),
             SERVICE,
-            &entry_name(journal_id),
+            name,
             Some(&modifiers),
         )
         .map_err(|_| KeyError::Unavailable)
@@ -173,6 +228,20 @@ impl KeyStore for SystemStore {
     fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError> {
         Self::entry(journal_id)?
             .set_secret(&key.0)
+            .map_err(|_| KeyError::Unavailable)
+    }
+
+    fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
+        match Self::named(&mark_name(journal_id))?.get_secret() {
+            Ok(bytes) => mark_bytes(&bytes).map(Some),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(_) => Err(KeyError::Unavailable),
+        }
+    }
+
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        Self::named(&mark_name(journal_id))?
+            .set_secret(&mark.to_be_bytes())
             .map_err(|_| KeyError::Unavailable)
     }
 }
@@ -207,7 +276,67 @@ impl SystemStore {
 }
 
 #[cfg(target_os = "linux")]
+impl SystemStore {
+    /// The bytes of the person's own file `name` in the key folder, if it is there.
+    fn read_own(name: &str) -> Result<Option<Vec<u8>>, KeyError> {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let path = Self::folder()?.join(name);
+        let mut file = match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(&path)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(KeyError::Unavailable),
+        };
+        let meta = file.metadata().map_err(|_| KeyError::Unavailable)?;
+        if !meta.is_file()
+            || meta.uid() != rustix::process::geteuid().as_raw()
+            || meta.mode() & 0o077 != 0
+        {
+            return Err(KeyError::Unavailable);
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|_| KeyError::Unavailable)?;
+        Ok(Some(bytes))
+    }
+}
+
+#[cfg(target_os = "linux")]
 impl KeyStore for SystemStore {
+    fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
+        Self::read_own(&mark_name(journal_id))?
+            .map(|b| mark_bytes(&b))
+            .transpose()
+    }
+
+    /// Written to a new file beside it, flushed, then moved over it in one step.
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = Self::folder()?;
+        let name = mark_name(journal_id);
+        let part = dir.join(format!("{name}.part"));
+        let _ = std::fs::remove_file(&part);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(&part)
+            .map_err(|_| KeyError::Unavailable)?;
+        file.write_all(&mark.to_be_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|_| KeyError::Unavailable)?;
+        std::fs::rename(&part, dir.join(&name)).map_err(|_| KeyError::Unavailable)?;
+        std::fs::File::open(&dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|_| KeyError::Unavailable)
+    }
+
     fn get(&self, journal_id: u64) -> Result<Option<TagKey>, KeyError> {
         use std::io::Read;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -261,6 +390,12 @@ impl KeyStore for SystemStore {
     fn put(&self, _: u64, _: &TagKey) -> Result<(), KeyError> {
         Err(KeyError::Unavailable)
     }
+    fn get_mark(&self, _: u64) -> Result<Option<u64>, KeyError> {
+        Err(KeyError::Unavailable)
+    }
+    fn put_mark(&self, _: u64, _: u64) -> Result<(), KeyError> {
+        Err(KeyError::Unavailable)
+    }
 }
 
 #[cfg(test)]
@@ -269,8 +404,18 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    /// The role keys, minted once for this test process (minting is once per process).
+    fn role_keys() -> &'static pctwin_grant::RoleKeys {
+        static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+        KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().unwrap())
+    }
+
     #[derive(Default)]
-    struct Memory(Mutex<HashMap<u64, TagKey>>, Mutex<usize>);
+    struct Memory(
+        Mutex<HashMap<u64, TagKey>>,
+        Mutex<usize>,
+        Mutex<HashMap<u64, u64>>,
+    );
 
     impl KeyStore for Memory {
         fn get(&self, id: u64) -> Result<Option<TagKey>, KeyError> {
@@ -279,6 +424,13 @@ mod tests {
         fn put(&self, id: u64, key: &TagKey) -> Result<(), KeyError> {
             *self.1.lock().unwrap() += 1;
             self.0.lock().unwrap().insert(id, key.clone());
+            Ok(())
+        }
+        fn get_mark(&self, id: u64) -> Result<Option<u64>, KeyError> {
+            Ok(self.2.lock().unwrap().get(&id).copied())
+        }
+        fn put_mark(&self, id: u64, mark: u64) -> Result<(), KeyError> {
+            self.2.lock().unwrap().insert(id, mark);
             Ok(())
         }
     }
@@ -298,10 +450,11 @@ mod tests {
                 given: None,
                 store: store.clone(),
                 held: Mutex::new(None),
+                mark: Mutex::new(None),
             };
             j
         };
-        let keys = pctwin_grant::RoleKeys::mint().unwrap();
+        let keys = role_keys();
         let j = open(&store);
         let planned = crate::PlannedEffect {
             scope: crate::Scope([1; 16]),
@@ -336,6 +489,83 @@ mod tests {
         store.0.lock().unwrap().insert(id, key);
         let j = open(&store);
         assert_eq!(j.effects().unwrap().len(), 1, "nothing was erased");
+    }
+
+    /// Second review, finding S2, through the journal with a store in memory: a copy put back
+    /// is refused; a journal ahead of the store (a crash between the two writes) is accepted and
+    /// the store caught up; a store whose counter was removed is refused.
+    #[test]
+    fn a_journal_older_than_its_counter_is_refused() {
+        use crate::{Journal, JournalError};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("j.redb");
+        let store = Arc::new(Memory::default());
+        let open = |store: &Arc<Memory>| {
+            let mut j = Journal::open(&path).unwrap();
+            j.record_key = Held {
+                given: None,
+                store: store.clone(),
+                held: Mutex::new(None),
+                mark: Mutex::new(None),
+            };
+            j
+        };
+        let keys = role_keys();
+        let planned = |n: u8| crate::PlannedEffect {
+            scope: crate::Scope([1; 16]),
+            item: pctwin_record::ItemId::from_hex(&format!("{n:02x}").repeat(16)).unwrap(),
+            recipe: pctwin_recipe::RecipeRef {
+                id: pctwin_recipe::RecipeId::new("x").unwrap(),
+                version: 1,
+            },
+            step: 0,
+            actor: crate::Actor {
+                acting_account: "1".into(),
+                for_account: "1".into(),
+                permission: crate::Permission::OwnFolders,
+            },
+        };
+        let intent = crate::InstallIntent::Licence {
+            identity: "a licence".into(),
+        };
+        let j = open(&store);
+        j.installs(&keys.install)
+            .intend(&planned(1), &intent)
+            .unwrap();
+        drop(j);
+        let id = *store.0.lock().unwrap().keys().next().unwrap();
+        assert_eq!(store.2.lock().unwrap().get(&id), Some(&1));
+        let old = dir.path().join("old.redb");
+        std::fs::copy(&path, &old).unwrap();
+        let j = open(&store);
+        j.installs(&keys.install)
+            .intend(&planned(2), &intent)
+            .unwrap();
+        drop(j);
+        assert_eq!(store.2.lock().unwrap().get(&id), Some(&2));
+        // The older copy put back: refused, for reading and for writing.
+        let newest = dir.path().join("newest.redb");
+        std::fs::copy(&path, &newest).unwrap();
+        std::fs::copy(&old, &path).unwrap();
+        let j = open(&store);
+        assert!(matches!(j.effects(), Err(JournalError::RolledBack)));
+        assert!(matches!(
+            j.installs(&keys.install).intend(&planned(3), &intent),
+            Err(JournalError::RolledBack)
+        ));
+        drop(j);
+        // The newest copy back, but the store's counter behind it (written before a crash):
+        // accepted, and the store caught up.
+        std::fs::copy(&newest, &path).unwrap();
+        store.2.lock().unwrap().insert(id, 1);
+        let j = open(&store);
+        assert_eq!(j.effects().unwrap().len(), 2);
+        assert_eq!(store.2.lock().unwrap().get(&id), Some(&2));
+        drop(j);
+        // The store's counter removed beside a journal that has counted: refused.
+        store.2.lock().unwrap().remove(&id);
+        let j = open(&store);
+        assert!(matches!(j.effects(), Err(JournalError::RolledBack)));
     }
 
     #[test]
@@ -376,6 +606,11 @@ mod tests {
         let made = key_for(&SystemStore, id, true).expect("the system's key store works here");
         let back = SystemStore.get(id).unwrap().unwrap();
         assert_eq!(made.0, back.0);
+        // The counter beside it is made with it, and kept (second review, S2).
+        assert_eq!(SystemStore.get_mark(id).unwrap(), Some(0));
+        SystemStore.put_mark(id, 41).unwrap();
+        SystemStore.put_mark(id, 42).unwrap();
+        assert_eq!(SystemStore.get_mark(id).unwrap(), Some(42));
         forget(id);
         assert!(SystemStore.get(id).unwrap().is_none());
     }
@@ -383,8 +618,18 @@ mod tests {
     /// Removes a test key (tests only: PCTwin never removes a journal's key).
     fn forget(id: u64) {
         #[cfg(any(windows, target_os = "macos"))]
-        SystemStore::entry(id).unwrap().delete_credential().unwrap();
+        {
+            SystemStore::entry(id).unwrap().delete_credential().unwrap();
+            SystemStore::named(&mark_name(id))
+                .unwrap()
+                .delete_credential()
+                .unwrap();
+        }
         #[cfg(target_os = "linux")]
-        std::fs::remove_file(SystemStore::folder().unwrap().join(entry_name(id))).unwrap();
+        {
+            let dir = SystemStore::folder().unwrap();
+            std::fs::remove_file(dir.join(entry_name(id))).unwrap();
+            std::fs::remove_file(dir.join(mark_name(id))).unwrap();
+        }
     }
 }

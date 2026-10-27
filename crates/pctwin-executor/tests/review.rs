@@ -441,12 +441,13 @@ fn a_missing_key_is_waited_for_never_replaced() {
         &mut laptop,
         SCOPE,
         &common::book(),
-    )
-    .unwrap();
-    assert!(got.iter().all(|u| u.outcome
-        == EffectUndoOutcome::Kept {
-            why: pctwin_executor::DAMAGED_RECORD.into()
-        }));
+    );
+    // With another key nothing in it reads as PCTwin's, its counter included (second review,
+    // S2): the whole record is refused as damaged, and nothing is done.
+    assert!(
+        matches!(got, Err(pctwin_journal::JournalError::Damaged(_))),
+        "{got:?}"
+    );
     assert!(laptop.installed.contains_key("A.B"));
     drop(permit);
     drop(wrong);
@@ -843,4 +844,63 @@ fn a_hidden_file_comes_back_even_when_undo_may_not_put_it_back() {
         assert_eq!(names_in(dir.path()), vec!["vlcrc".to_string()], "{at:?}");
         assert!(j.effects_part_way().unwrap().is_empty());
     }
+}
+
+/// Second review, finding S2: an app's undo finished (removed), the person installed it again
+/// themselves, and then an older copy of the whole journal file was put back (a backup restored).
+/// Every record in it is sealed right, but it is older than the last change PCTwin recorded:
+/// it is refused, so undo never removes the person's own reinstall.
+#[test]
+fn a_journal_put_back_from_an_older_copy_is_refused() {
+    let (d, path, j) = journal();
+    let mut laptop = Laptop::ok();
+    moved(
+        &j,
+        &mut laptop,
+        vec![common::removable(vec![install("A.B")])],
+    );
+    drop(j);
+    let snap = d.path().join("snapshot.redb");
+    std::fs::copy(&path, &snap).unwrap();
+    let j = common::open(&path).unwrap();
+    {
+        let permit = j.begin_undo().unwrap();
+        let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
+        assert_eq!(got[0].outcome, EffectUndoOutcome::Uninstalled);
+    }
+    drop(j);
+    laptop.installed.insert("A.B".into(), "2.0".into());
+    laptop.done.clear();
+    let newest = d.path().join("newest.redb");
+    std::fs::copy(&path, &newest).unwrap();
+    std::fs::copy(&snap, &path).unwrap();
+    let j = common::open(&path).unwrap();
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book());
+    assert!(
+        matches!(got, Err(pctwin_journal::JournalError::RolledBack)),
+        "{got:?}"
+    );
+    assert!(laptop.done.is_empty(), "{:?}", laptop.done);
+    assert!(laptop.installed.contains_key("A.B"));
+    // Nothing is trusted from it, not even what is part way, and it closes nothing.
+    assert!(matches!(
+        j.effects_part_way(),
+        Err(pctwin_journal::JournalError::RolledBack)
+    ));
+    drop(permit);
+    assert!(matches!(
+        j.close_undo(&mut |_, _| unreachable!()),
+        Err(pctwin_journal::CloseError::Journal(
+            pctwin_journal::JournalError::RolledBack
+        ))
+    ));
+    drop(j);
+    // The newest copy put back is trusted again, and says the app's undo is finished.
+    std::fs::copy(&newest, &path).unwrap();
+    let j = common::open(&path).unwrap();
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
+    assert_eq!(got[0].outcome, EffectUndoOutcome::Uninstalled);
+    assert!(laptop.done.is_empty(), "{:?}", laptop.done);
 }

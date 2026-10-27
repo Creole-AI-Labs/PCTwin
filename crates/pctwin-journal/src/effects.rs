@@ -1258,7 +1258,15 @@ impl Journal {
 
     /// The key that seals this journal's effect records: given when it was opened, or kept by
     /// the system ([`crate::keystore`]), found once and held.
+    /// Refused ([`JournalError::RolledBack`]) when the journal is older than the last sealed write
+    /// PCTwin made to it ([`crate::mark`]).
     pub(crate) fn record_key(&self) -> Result<TagKey, JournalError> {
+        let key = self.record_key_only()?;
+        self.check_mark(&key)?;
+        Ok(key)
+    }
+
+    fn record_key_only(&self) -> Result<TagKey, JournalError> {
         let mut held = self
             .record_key
             .held
@@ -1329,7 +1337,7 @@ impl Journal {
             unfinished.insert(id, ()).map_err(storage)?;
             id
         };
-        tx.commit().map_err(storage)?;
+        self.commit_sealed(tx, &key)?;
         Ok(id)
     }
 
@@ -1400,7 +1408,7 @@ impl Journal {
                 unfinished.remove(id).map_err(storage)?;
             }
         }
-        tx.commit().map_err(storage)
+        self.commit_sealed(tx, &key)
     }
 
     /// One effect, if there is one with this number.
@@ -1543,7 +1551,7 @@ impl Journal {
             }
             write_undo(&mut table, id, undo, &key)?;
         }
-        tx.commit().map_err(storage)
+        self.commit_sealed(tx, &key)
     }
 
     /// How far undoing effect `id` got, if it was started.
@@ -1559,6 +1567,8 @@ impl Journal {
     /// Effects whose undo is part way, in order (closing undo refuses while there are any). One
     /// whose record cannot be checked counts as part way.
     pub fn effects_part_way(&self) -> Result<Vec<u64>, JournalError> {
+        // A journal put back from an older copy says nothing about what is part way.
+        self.refuse_if_rolled_back()?;
         let tx = self.db.begin_read().map_err(storage)?;
         let table = tx.open_table(EFFECT_UNDO).map_err(storage)?;
         let key = self.key_if_any(&table);

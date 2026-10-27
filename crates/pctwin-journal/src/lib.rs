@@ -32,6 +32,7 @@ mod broker;
 mod checked;
 mod effects;
 pub mod keystore;
+mod mark;
 pub mod place;
 pub mod recovery;
 
@@ -200,6 +201,12 @@ pub enum JournalError {
     /// The system's key store could not be read or written now.
     #[error("PCTwin could not reach this laptop's key store, so it changed nothing; try again")]
     RecordKeyUnavailable,
+    /// The journal is older than the last change PCTwin recorded in it (an older copy of the file
+    /// was put back): it is not trusted and drives nothing (second review, finding S2).
+    #[error(
+        "PCTwin's record of the move on this laptop is older than the last change PCTwin made (it may have been put back from a copy), so PCTwin did not trust it and changed nothing"
+    )]
+    RolledBack,
     /// The journal's folder is not on a drive that is part of this laptop (or it could not be
     /// told): nothing was opened or made there.
     #[error("{}", .0.why_not().unwrap_or("this place cannot hold the move's record"))]
@@ -2115,6 +2122,11 @@ impl Journal {
         if !stuck.is_empty() {
             return Err(CloseError::Unresolved { items: stuck });
         }
+        let key = {
+            let effects = self.db.begin_read().map_err(storage)?;
+            let effects = effects.open_table(effects::EFFECTS).map_err(storage)?;
+            self.key_if_any(&effects)
+        };
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let entries = tx.open_table(ENTRIES).map_err(storage)?;
@@ -2140,8 +2152,8 @@ impl Journal {
             }
             // Nor beside an app or setting part way put back.
             let effect_undo = tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
-            let key = self.key_if_any(&effect_undo);
-            let part_way = effects::part_way_in(&effect_undo, key.as_ref())?;
+            let part_way =
+                effects::part_way_in(&effect_undo, self.key_if_any(&effect_undo).as_ref())?;
             if !part_way.is_empty() {
                 return Err(CloseError::EffectsPartWay { ids: part_way });
             }
@@ -2149,10 +2161,19 @@ impl Journal {
             let mut gate = tx.open_table(GATE).map_err(storage)?;
             gate.insert(UNDO_GATE, CLOSED).map_err(storage)?;
         }
+        // The close is counted with the sealed records (when there are any), so a copy of the
+        // journal from before it is refused rather than reopening undo (second review, S2).
+        let counted = match &key {
+            Some(key) => Some(mark::bump(&tx, key)?),
+            None => None,
+        };
         // If the commit fails, it is not known whether the close reached the disk: undo stays
         // shut in this PCTwin, and the disk decides at the next start.
         reopen.closing_stays = true;
         tx.commit().map_err(storage)?;
+        if let Some(n) = counted {
+            self.note_mark(n);
+        }
         Ok(token)
     }
 

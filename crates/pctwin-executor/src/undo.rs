@@ -32,6 +32,16 @@
 //! again (the same rule gives the same answer, so it is safe to repeat); an interrupted app
 //! removal is never run again by itself: it ends "not done this time", and asking for undo again
 //! starts it afresh.
+//!
+//! A settings file is moved aside to a private name while it is put back. Until putting it back
+//! says the file is settled ([`EffectUndo::PutBack`]), nothing else is recorded over it (the
+//! journal refuses it): an error leaves undo part way, so closing undo and the old laptop's wipe
+//! wait, the person is told the hidden name where their file is, and the next undo finishes it
+//! with that same name (second review, finding S1).
+//!
+//! A journal put back from an older copy of its file is refused as a whole
+//! ([`pctwin_journal::JournalError::RolledBack`]), so a finished undo is never run again from it
+//! (second review, finding S2).
 
 use std::collections::{BTreeMap, BTreeSet};
 
