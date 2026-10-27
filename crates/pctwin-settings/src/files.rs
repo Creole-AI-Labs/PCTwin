@@ -654,8 +654,9 @@ fn json_why(e: serde_json::Error) -> Why {
     }
 }
 
-/// One `key = value ; comment` line of an INI file, in its parts, so a new value is written
-/// back between the line's own text: its spacing, its quotes and its comment kept exactly.
+/// One `key = value` line of an INI file, in its parts, so a new value is written back between
+/// the line's own text: its spacing and its quotes kept exactly. The value is everything after
+/// `=` (a `;` later in the line included), as Windows and Python read it.
 struct IniLine<'a> {
     /// Everything before the value (the key, the `=`, the spaces after it).
     before: &'a str,
@@ -663,7 +664,7 @@ struct IniLine<'a> {
     /// The value, without its quotes.
     value: &'a str,
     quoted: bool,
-    /// Everything after the value (a closing quote is not part of it; spaces and a comment are).
+    /// Everything after the value (a closing quote is not part of it; trailing spaces are).
     after: &'a str,
 }
 
@@ -674,29 +675,31 @@ impl<'a> IniLine<'a> {
         let rest = &body[eq + 1..];
         let start = eq + 1 + (rest.len() - rest.trim_start().len());
         let tail = &body[start..];
-        if let Some(inner) = tail.strip_prefix('"')
-            && let Some(end) = inner.find('"')
+        // The whole text after `=`, as the systems' own readers return it (Windows'
+        // `GetPrivateProfileString`, Python's `configparser`): a `;` or `#` later in the line is
+        // part of the value, never a comment that hides what follows (fifth review, finding 4).
+        // Quotes are taken off only when they hold the whole value.
+        let whole = tail.trim_end();
+        let after = &tail[whole.len()..];
+        if whole.len() >= 2
+            && whole.starts_with('"')
+            && whole.ends_with('"')
+            && !whole[1..whole.len() - 1].contains('"')
         {
             return Some(IniLine {
                 before: &body[..start],
                 key,
-                value: &inner[..end],
+                value: &whole[1..whole.len() - 1],
                 quoted: true,
-                after: &inner[end + 1..],
+                after,
             });
         }
-        // Unquoted: a `;` or `#` after a space starts a comment.
-        let b = tail.as_bytes();
-        let comment = (0..b.len())
-            .find(|&i| matches!(b[i], b';' | b'#') && (i == 0 || b[i - 1].is_ascii_whitespace()))
-            .unwrap_or(b.len());
-        let value = tail[..comment].trim_end();
         Some(IniLine {
             before: &body[..start],
             key,
-            value,
+            value: whole,
             quoted: false,
-            after: &tail[value.len()..],
+            after,
         })
     }
 

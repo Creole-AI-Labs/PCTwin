@@ -3,9 +3,10 @@
 //! kind, before planning and again at the moment of writing. The settings, paths and addresses
 //! here are made up.
 
-use pctwin_recipe::SettingValue;
+use pctwin_recipe::{SettingValue, SettingsRoot};
 use pctwin_settings::catalogue::{Catalogue, System};
 use pctwin_settings::classify::{Ctx, Fate, FolderMap, Why, classify_as, classify_kind, danger};
+use pctwin_settings::files::{FileCtx, FileOutcome, FoundFile, format_of, plan_file};
 use pctwin_settings::found::{Address, Discovery, FoundSetting, PrefKind, RegKind};
 use pctwin_settings::generic::{may_write_with, plan_found};
 use pctwin_settings::judge::{Facts, Kind, runs, texts};
@@ -368,6 +369,59 @@ fn f3_preference_data_and_byte_arrays_are_judged() {
                 .iter()
                 .any(|t| t.contains("smb://"))
         );
+    }
+}
+
+fn file_plan(name: &str, bytes: &[u8]) -> FileOutcome {
+    let cat = Catalogue::starter().unwrap();
+    let map = FolderMap(vec![]);
+    let running = Default::default();
+    let versions = Default::default();
+    let renames = Default::default();
+    let c = FileCtx {
+        classify: Ctx {
+            paths: &map,
+            same_screens: false,
+            hints: &cat.action_hints,
+            facts: Facts::system(),
+        },
+        from: System::Windows,
+        to: System::Windows,
+        home_old: r"C:\Users\ada",
+        home_new: r"C:\Users\ada",
+        running: &running,
+        versions: &versions,
+        folder_renames: &renames,
+    };
+    let f = FoundFile {
+        root: SettingsRoot::Config,
+        rel: format!("R5Vendor/{name}"),
+        label: "R5Vendor".into(),
+        format: format_of(name),
+    };
+    plan_file(&cat, &f, bytes, &c)
+}
+
+/// Finding 4: an INI value is the whole text after `=`, as the systems' own readers return it;
+/// what follows a `;` or a quoted part is judged too.
+#[test]
+fn f4_an_ini_value_is_judged_as_its_readers_return_it() {
+    for (line, why) in [
+        (r"Page=start ;\\attacker.example\share\a", Why::Fetches),
+        (r#"Page="start" \\attacker.example\share\a"#, Why::Fetches),
+        (
+            r#"Page="C:\Users\ada\Documents\x.txt" https://attacker.example/x"#,
+            Why::Fetches,
+        ),
+        ("Page=start # https:attacker.example", Why::Fetches),
+    ] {
+        let ini = format!("[s]\n{line}\nkeep=1\n");
+        let FileOutcome::Move { bytes, left, .. } = file_plan("app.ini", ini.as_bytes()) else {
+            panic!("{line}");
+        };
+        assert_eq!(String::from_utf8(bytes).unwrap(), "[s]\nkeep=1\n", "{line}");
+        assert_eq!(left.len(), 1, "{line}");
+        assert_eq!(left[0].why, why, "{line}");
     }
 }
 

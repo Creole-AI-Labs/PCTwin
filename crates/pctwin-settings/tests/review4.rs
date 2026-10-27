@@ -542,9 +542,12 @@ fn f4_a_quoted_value_with_a_comment_keeps_its_quotes_and_comment() {
     let out = String::from_utf8(bytes).unwrap();
     assert_eq!(
         out,
-        "[s]\r\nk1=D:\\New\\Docs\\a\r\nk2=\"D:\\New\\Docs\\b\" ; x\r\n k5 = \"D:\\New\\Docs\\d\"\r\nk6=D:\\New\\Docs\\e # note\n"
+        "[s]\r\nk1=D:\\New\\Docs\\a\r\n k5 = \"D:\\New\\Docs\\d\"\r\nk6=D:\\New\\Docs\\e # note\n"
     );
-    assert_eq!(rewritten, 4);
+    // `k2`'s value is the whole text after `=`, as the systems' readers return it (`; x`
+    // included): not one path, so it is never rewritten in part, and a place PCTwin cannot
+    // check is kept back (fifth review, finding 4).
+    assert_eq!(rewritten, 3);
 }
 
 #[test]
