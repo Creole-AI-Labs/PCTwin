@@ -496,6 +496,8 @@ b = ",
 t = ",
             "[t]\nk = ",
             "x = 1\ny = ",
+            r#"a = """x\y"""
+b = "#,
         ] {
             let t = format!("{before}{toml_deep}\n");
             assert_eq!(check(&t, Syntax::Toml), Err(TooDeep), "{before:?}");
@@ -525,8 +527,21 @@ t = ",
             r#"<!DOCTYPE r [<!-- " --><!ENTITY e "]>"><?p ]> ?>]>"#,
             r#"<!DOCTYPE r PUBLIC "a>b" 'c>d'>"#,
             r#"<r x="/>" y='</a>'/>"#,
+            // XML has no escapes in a quoted value: a backslash never hides its closing quote.
+            r#"<r a="\"/>"#,
         ] {
             let t = format!("{before}{xml_deep}");
+            assert_eq!(check(&t, Syntax::Xml), Err(TooDeep), "{before}");
+        }
+        // A quote inside the internal subset's comments, instructions and declarations, or in an
+        // external ID, never runs on to a quote in the text after the nesting.
+        for before in [
+            r#"<!DOCTYPE r [<!-- " -->]>"#,
+            r#"<!DOCTYPE r [<?p " ?>]>"#,
+            r#"<!DOCTYPE r [<!ENTITY e "\">]>"#,
+            r#"<!DOCTYPE r SYSTEM "\">"#,
+        ] {
+            let t = format!("{before}{xml_deep}\"");
             assert_eq!(check(&t, Syntax::Xml), Err(TooDeep), "{before}");
         }
         for before in [r"'x\'[' ", r#""y" "#, "('a', "] {
@@ -557,8 +572,16 @@ t = ",
                 format!("<r a=\"{tags}\"><!-- {tags} --><![CDATA[{tags}]]></r>"),
             ),
             (Syntax::GVariant, format!(r#"['{open}', "{open}\"{open}"]"#)),
+            // Many empty elements with attributes side by side are no nesting at all.
+            (
+                Syntax::Xml,
+                format!("<r>{}</r>", r#"<e x="1" y='2'/>"#.repeat(300)),
+            ),
         ] {
             assert_eq!(check(&t, syn), Ok(()), "{syn:?} {t:.60}");
         }
+        // A start tag the text ends inside still counts as a level.
+        assert_eq!(depth("<a><a", Syntax::Xml, 10), 2);
+        assert_eq!(depth("<a><a x='1'", Syntax::Xml, 10), 2);
     }
 }

@@ -126,6 +126,7 @@ fn a_place_written_so_it_cannot_be_checked_is_kept_back() {
         "../x",
         r"bin\x",
         "C:x",
+        "C:",
         r"C:..\x",
     ] {
         assert_eq!(bare(t), Some(Why::PlaceUnknown), "{t:?}");
@@ -193,6 +194,18 @@ fn the_catalogue_hints_only_add_caution() {
         Some(Why::StartsProgram)
     );
     assert_eq!(run_or_fetch(h, STORE, "ProxyEnable", "1"), None);
+    assert_eq!(run_or_fetch(h, STORE, "ProxyPort", "8080"), None);
+    assert_eq!(run_or_fetch(h, STORE, "EditorZoom", "-1.5"), None);
+    // Not a number: two dots, a leading dot, a lone sign.
+    for t in ["1.2.3", ".5", "-", "1e3"] {
+        assert_eq!(
+            run_or_fetch(h, STORE, "Editor", t),
+            Some(Why::StartsProgram),
+            "{t}"
+        );
+    }
+    // An ending alone is not a program's file.
+    assert_eq!(run_or_fetch(h, STORE, "Value", ".exe"), None);
     assert_eq!(
         run_or_fetch(h, "/org/vendor/app/", "command", "id"),
         Some(Why::StartsProgram)
