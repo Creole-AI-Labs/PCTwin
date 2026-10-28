@@ -314,7 +314,7 @@ mod tests {
 
         fn mkfifo(path: &Path) {
             // The mkfifo tool is on every Unix.
-            let status = std::process::Command::new("mkfifo")
+            let status = pctwin_types::process::quiet("mkfifo")
                 .arg(path)
                 .status()
                 .unwrap();

@@ -401,7 +401,7 @@ mod open_tests {
     /// A junction (a folder link anyone can make, no rights needed) made with the system's own
     /// `mklink`.
     fn junction(link: &std::path::Path, target: &std::path::Path) {
-        let ok = std::process::Command::new("cmd")
+        let ok = pctwin_types::process::quiet("cmd")
             .args(["/c", "mklink", "/J"])
             .arg(link)
             .arg(target)

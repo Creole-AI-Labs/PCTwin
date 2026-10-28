@@ -260,7 +260,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               />
             )}
             {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
-            {screen.id === "qs" && <QuickHost mode={screen.mode} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "qs" && <QuickHost mode={screen.mode} onWindow={onWindow} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
             {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}

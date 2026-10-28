@@ -112,7 +112,13 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The old laptop: the extras for the person `mover`, read only: their settings, their folders
 /// here, their special categories as `special` found them (`None`: not in time), and how many
 /// links and junctions the scan found among their files (`links`: never followed, never moved).
-pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>, links: u64) -> Vec<u8> {
+/// `settings`: whether the person chose to bring their apps, settings and app data (when not, none
+/// of the settings found are sent).
+pub fn extras_here(
+    special: Option<&pctwin_fullmove::extras::SpecialFound>,
+    links: u64,
+    settings: bool,
+) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -126,6 +132,10 @@ pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>, link
     let mut x = pctwin_fullmove::extras::here(folders);
     x.with_special(special);
     x.links = links;
+    if !settings {
+        x.settings.clear();
+        x.left_out_by_person = true;
+    }
     x.encode()
 }
 

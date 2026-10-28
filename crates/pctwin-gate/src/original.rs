@@ -86,7 +86,7 @@ mod tests {
 
         fn mkfifo(path: &Path) {
             // rustix has no mknod on macOS; the mkfifo tool is on every Unix.
-            let status = std::process::Command::new("mkfifo")
+            let status = pctwin_types::process::quiet("mkfifo")
                 .arg(path)
                 .status()
                 .unwrap();

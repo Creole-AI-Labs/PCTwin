@@ -69,6 +69,19 @@ pub enum Power {
     Unknown,
 }
 
+/// The name a laptop's person gave it, as it travels in the greeting: a colour and an animal by
+/// their numbers, or a typed name (first real test, 28 October 2026: each laptop showed the other
+/// as "New laptop"). The receiving laptop checks it as it checks a name found on the network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Called {
+    Picked { colour: u8, animal: u8 },
+    Named { name: String },
+}
+
+/// The longest typed name the greeting carries, in bytes.
+const MAX_CALLED: usize = 240;
+
 /// What a laptop says it is (C06).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -81,6 +94,9 @@ pub struct About {
     pub power: Power,
     /// Free space where this laptop keeps people's files, in bytes, when it could be read.
     pub free_bytes: Option<u64>,
+    /// The name its person gave this laptop, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<Called>,
 }
 
 impl About {
@@ -92,6 +108,7 @@ impl About {
             app: env!("CARGO_PKG_VERSION").to_string(),
             power,
             free_bytes,
+            label: None,
         }
     }
 
@@ -106,6 +123,14 @@ impl About {
             && word(&self.app)
             && !matches!(self.power, Power::Battery { percent } if percent > 100)
             && self.free_bytes.is_none_or(|b| b <= MAX_SHOWN)
+            && match &self.label {
+                Some(Called::Named { name }) => {
+                    !name.is_empty()
+                        && name.len() <= MAX_CALLED
+                        && !name.chars().any(char::is_control)
+                }
+                _ => true,
+            }
     }
 }
 
@@ -131,7 +156,7 @@ pub enum Side {
 /// that far (so a version gap can still name both laptops).
 #[derive(Debug)]
 pub struct NotGreeted {
-    pub theirs: Option<About>,
+    pub theirs: Option<Box<About>>,
     pub error: TransferError,
 }
 
@@ -185,7 +210,7 @@ pub async fn greet<'l, C: Channel>(
             },
         }),
         Err(error) => Err(NotGreeted {
-            theirs: Some(theirs),
+            theirs: Some(Box::new(theirs)),
             error,
         }),
     }
@@ -249,9 +274,12 @@ async fn about(ch: &mut impl Channel, mine: &About) -> Result<About, TransferErr
     ch.send(&msg)
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
-    let got = tokio::time::timeout(VERSION_WAIT, ch.recv())
+    // No time limit: the old laptop may first ask its person who is moving (M06), and that is
+    // the person's time. A laptop that went away is noticed by the link itself, and Stop ends
+    // the wait at once.
+    let got = ch
+        .recv()
         .await
-        .map_err(|_| TransferError::NoAnswer("it did not say what it is".into()))?
         .map_err(|_| TransferError::ConnectionDropped)?;
     parse_about(&got)
 }
@@ -327,7 +355,35 @@ mod tests {
             app: "0.1.0".into(),
             power,
             free_bytes: Some(400_000_000_000),
+            label: None,
         }
+    }
+
+    /// Each laptop hears the name the other's person gave it, picked or typed; a name with
+    /// control characters is refused (first real test, 28 October 2026).
+    #[tokio::test]
+    async fn each_laptop_hears_the_others_name() {
+        let (mut old, mut new) = pair();
+        let mut windows = about(System::Windows, Power::Plugged);
+        windows.label = Some(Called::Picked {
+            colour: 3,
+            animal: 7,
+        });
+        let mut mac = about(System::Mac, Power::Plugged);
+        mac.label = Some(Called::Named {
+            name: "Ada's laptop".into(),
+        });
+        let (a, b) = tokio::join!(
+            greet(&mut old, &windows, Side::Old),
+            greet(&mut new, &mac, Side::New)
+        );
+        assert_eq!(a.unwrap().greeting().theirs.label, mac.label);
+        assert_eq!(b.unwrap().greeting().theirs.label, windows.label);
+        let mut bad = about(System::Mac, Power::Plugged);
+        bad.label = Some(Called::Named {
+            name: "Ada\nlaptop".into(),
+        });
+        assert!(!bad.fine());
     }
 
     #[tokio::test]
@@ -446,6 +502,34 @@ mod tests {
         };
         let (got, _old) = tokio::join!(wait_for_list(&mut new), late);
         got.unwrap();
+    }
+
+    /// The old laptop may ask its person who is moving before it starts (M06), so its first words
+    /// can come long after the new laptop's: the new laptop waits for them as long as that takes,
+    /// and both still greet (found by the first real test, 28 October 2026).
+    #[tokio::test(start_paused = true)]
+    async fn the_new_laptop_waits_for_the_old_laptops_first_words_as_long_as_it_takes() {
+        let (mut old, mut new) = pair();
+        let windows = about(System::Windows, Power::Plugged);
+        let late = async {
+            tokio::time::sleep(VERSION_WAIT * 120).await;
+            greet(&mut old, &windows, Side::Old).await.map(|_| ())
+        };
+        let (got, late) = tokio::join!(greet(&mut new, &windows, Side::New), late);
+        assert!(got.is_ok(), "{:?}", got.err().map(|n| n.error));
+        late.unwrap();
+    }
+
+    /// Waiting with no time limit still ends at once when the other laptop's link goes.
+    #[tokio::test]
+    async fn a_laptop_that_goes_before_its_first_words_ends_the_greeting() {
+        let (old, mut new) = pair();
+        drop(old);
+        let got = greet(&mut new, &about(System::Windows, Power::Plugged), Side::New).await;
+        assert!(matches!(
+            got.err().map(|n| n.error),
+            Some(TransferError::ConnectionDropped)
+        ));
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -87,7 +87,7 @@ fn drain(mut r: impl Read + Send + 'static) -> Drained {
 
 impl Runner for SystemRunner {
     fn run(&self, call: &Call) -> Result<Ran, RunError> {
-        let mut cmd = Command::new(&call.program);
+        let mut cmd = pctwin_types::process::quiet(&call.program);
         cmd.args(&call.args)
             .env_clear()
             .envs(call.env.iter().map(|(k, v)| (k, v)))

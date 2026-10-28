@@ -29,6 +29,9 @@ pub struct Entry {
     pub when: String,
     /// The old laptop's label as pairing showed it (the screens' label shape), when known.
     pub other: Option<serde_json::Value>,
+    /// The new laptop's name, when known (entries before 28 October 2026 have none).
+    #[serde(default)]
+    pub new_name: Option<serde_json::Value>,
     /// "finished", "steps-left" or "stopped".
     pub state: String,
     /// A move with steps left: how many things still need the person.
@@ -115,6 +118,7 @@ pub fn add<R: Runtime>(
     app: &AppHandle<R>,
     kind: &str,
     other: Option<&LabelView>,
+    new: Option<&LabelView>,
     state: &str,
     steps_left: u64,
     kept: &Kept,
@@ -143,6 +147,7 @@ pub fn add<R: Runtime>(
         kind: kind.to_string(),
         when: now(),
         other: other.and_then(|l| serde_json::to_value(l).ok()),
+        new_name: new.and_then(|l| serde_json::to_value(l).ok()),
         state: state.to_string(),
         steps_left,
     });
@@ -292,6 +297,7 @@ mod tests {
             kind: kind.into(),
             when: "2026-10-25T00:00:00Z".into(),
             other: None,
+            new_name: None,
             state: "finished".into(),
             steps_left: 0,
         };
@@ -333,6 +339,7 @@ mod tests {
             kind: "send".into(),
             when: "2026-10-25T00:00:00Z".into(),
             other: None,
+            new_name: None,
             state: "finished".into(),
             steps_left: 0,
         };
@@ -368,6 +375,7 @@ mod tests {
             kind: "move".into(),
             when: "2026-10-22T00:00:00Z".into(),
             other: None,
+            new_name: None,
             state: "finished".into(),
             steps_left: 0,
         };

@@ -10,6 +10,7 @@ import {
   helpCode,
   fullmoveUndo,
   moveAppdataAnswer,
+  moveChooseWhat,
   listenUndoClosed,
   listenMove,
   recoveryCheck,
@@ -67,6 +68,7 @@ import {
   pairingStop,
   setTrayLabels,
   setWindowMode,
+  windowDrag,
   toProblem,
   guardIntent,
   guardView,
@@ -213,6 +215,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
       await setWindowMode("mini");
+      await windowDrag();
       await setTrayLabels("Show", "Quit");
       await pairingOldStart(null);
       await pairingOldPick(1, 42);
@@ -269,6 +272,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await guardIntent({ job: "job-1", epoch: 2, generation: 3, press: "p-1", intent: { kind: "try-again", line: 0 } });
       await fullmoveUndo("01010101010101010101010101010101");
       await moveAppdataAnswer(true);
+      await moveChooseWhat({ groups: ["documents"], apps: true });
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }

@@ -40,11 +40,15 @@ export function pickLanguage(requested: readonly string[]): LanguageCode {
   return best as LanguageCode;
 }
 
-/** Bundles for a language with English behind it. Every variable is isolated (bidi-safe). */
+/**
+ * Bundles for a language with English behind it. No direction marks are put around variables:
+ * they were stored and sent inside laptop names and history lines, and drawn as "�" (first real
+ * test, 28 October 2026). A name's direction is set where it is shown (bdi), never in its text.
+ */
 export function localization(code: LanguageCode): ReactLocalization {
   const order = code === SOURCE ? [SOURCE] : [code, SOURCE];
   const bundles = order.map((locale) => {
-    const bundle = new FluentBundle(locale, { useIsolating: true });
+    const bundle = new FluentBundle(locale, { useIsolating: false });
     const errors = bundle.addResource(new FluentResource(fileFor(locale)));
     if (errors.length > 0) throw new Error(`Translation file for ${locale} has errors: ${errors.map(String).join("; ")}`);
     return bundle;

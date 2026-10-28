@@ -70,6 +70,8 @@ pub const SPECIAL_NOT_YET: &str = "fullmove-special-not-yet";
 
 /// The old laptop's settings and app data could not be read here, as one line.
 pub const EXTRAS_REFUSED: &str = "fullmove-extras-refused";
+/// The person chose on the old laptop to leave their apps, settings and app data behind.
+pub const LEFT_BY_PERSON: &str = "fullmove-left-by-person";
 
 /// App data places 2.5 could not fully check, as one line.
 pub const SPECIAL_NOT_CHECKED: &str = "fullmove-special-not-checked";
@@ -210,6 +212,8 @@ pub struct FullPlan {
     /// The old laptop sent extras this laptop refused (broken, or past a limit): its settings and
     /// app data are not moved, and the plan says so, never silently.
     pub extras_refused: bool,
+    /// The person chose on the old laptop to leave apps, settings and app data behind.
+    pub left_out_by_person: bool,
     /// Links and junctions among the person's files on the old laptop: never followed, never
     /// moved, and said.
     pub links: u64,
@@ -440,6 +444,7 @@ impl FullPlan {
             extras_digest: Some(digest),
             settings,
             extras_refused: false,
+            left_out_by_person: x.left_out_by_person,
             links: x.links,
             old_folders: x.folders.iter().map(|f| (f.role, f.path.clone())).collect(),
         }
@@ -545,7 +550,21 @@ impl FullPlan {
                 note: None,
             });
         }
-        if self.from.is_some() && !self.special_searched {
+        if self.left_out_by_person {
+            out.push(Change {
+                title: Title::Key(LEFT_BY_PERSON),
+                kind: Kind::Special,
+                action: Action::LeaveAlone,
+                undo: Promise::MustKeep,
+                count: 0,
+                needs: None,
+                special: None,
+                files: 0,
+                secret: None,
+                source: None,
+                note: None,
+            });
+        } else if self.from.is_some() && !self.special_searched {
             out.push(Change {
                 title: Title::Key(SPECIAL_NOT_YET),
                 kind: Kind::Special,
@@ -631,6 +650,36 @@ impl FullPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Apps, settings and app data the person chose on the old laptop to leave behind are said as
+    /// their choice, never as something left to do (first real test, 28 October 2026).
+    #[test]
+    fn what_the_person_left_behind_is_their_choice_not_a_task() {
+        let plan = FullPlan {
+            from: Some(System::Windows),
+            left_out_by_person: true,
+            ..FullPlan::default()
+        };
+        let changes = plan.changes();
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.title == Title::Key(LEFT_BY_PERSON) && c.needs.is_none())
+        );
+        assert!(
+            changes
+                .iter()
+                .all(|c| c.title != Title::Key(SPECIAL_NOT_YET)),
+            "never also 'PCTwin did not move this'"
+        );
+        let x = Extras::decode(&{
+            let mut x = crate::extras::here(Vec::new());
+            x.left_out_by_person = true;
+            x.encode()
+        })
+        .unwrap();
+        assert!(x.left_out_by_person, "the choice crosses with the extras");
+    }
     use crate::extras::{OldFolder, from_discovery};
     use pctwin_record::{AppArch, AppMaker, AppSystem, LaptopId, RegistryView, SignerId};
     use pctwin_settings::found::{Address, FoundSetting, RegKind};

@@ -198,7 +198,8 @@ export function groupState(c: Counts): GroupState {
 export type MoveProgress = {
   state: RunState;
   /** The old laptop's label as pairing showed it (the new laptop has none of its own); null when not known. */
-  laptops: { old: Label | null };
+  /** The two laptops by their names; `new` is filled by the screens from the greeting, when known. */
+  laptops: { old: Label | null; new?: Label | null };
   /** The groups of the plan, each with its own measured counts. */
   groups: MoveGroup[];
   counts: Counts;
@@ -276,6 +277,8 @@ export type MoveOutcome = {
   afterMove?: AfterMove;
   /** The full move's apps, settings and special categories, each with its result. */
   rebuilt?: Rebuilt;
+  /** The new laptop: where each group of the person's things is now (the folder as the person reads it). */
+  landed?: { name: GroupName; folder: string }[];
 };
 
 /** One kind of file after the move: how many the plan held, and how many are copied and checked. */

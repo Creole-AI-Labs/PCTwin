@@ -386,7 +386,7 @@ fn app_data_bases(home: &Path) -> Vec<PathBuf> {
 
 fn reg(args: &[&str]) -> Option<String> {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    let out = std::process::Command::new(Path::new(&root).join(r"System32\reg.exe"))
+    let out = pctwin_types::process::quiet(Path::new(&root).join(r"System32\reg.exe"))
         .args(args)
         .stdin(std::process::Stdio::null())
         .output()

@@ -3,7 +3,7 @@
 //! a catalogue or a peer.
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// The tools. Nothing else is ever run.
@@ -72,7 +72,7 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn run(&mut self, tool: Tool, args: &[&str]) -> Result<Output, String> {
-        let mut cmd = Command::new(tool.path());
+        let mut cmd = pctwin_types::process::quiet(tool.path());
         // `netsh` reads `name="value"` itself; Rust's own quoting would wrap the whole argument.
         // Every netsh argument PCTwin builds is fixed text or a checked path without quotes.
         #[cfg(windows)]

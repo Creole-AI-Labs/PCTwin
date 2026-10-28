@@ -153,7 +153,14 @@ export function RouteStrip({ laptops }: { laptops: MoveProgress["laptops"] }) {
       <ArrowForward className="mv-icon mv-arrow" />
       <span className="mv-laptop">
         <Laptop className="mv-icon" />
-        <span>{l10n.getString("progress-route-new")}</span>
+        {laptops.new ? (
+          <span>
+            <bdi dir="auto">{labelText(l10n, laptops.new)}</bdi>
+            <small>{l10n.getString("progress-route-new")}</small>
+          </span>
+        ) : (
+          <span>{l10n.getString("progress-route-new")}</span>
+        )}
       </span>
       <Badge tone="good" icon={<Lock className="mv-icon" />}>
         {l10n.getString("progress-paired")}

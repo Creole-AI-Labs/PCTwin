@@ -6,6 +6,10 @@
     "failed": 0,
     "filesDone": 3,
     "filesTotal": 10,
+    "minutesLeft": {
+      "high": 4,
+      "low": 4
+    },
     "phase": "copying",
     "speed": {
       "high": 2000000,

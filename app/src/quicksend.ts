@@ -81,6 +81,8 @@ export type SendProgress = {
   failed: number;
   /** Observed speed as a range in bytes per second, or null when not measured yet. */
   speed: { low: number; high: number } | null;
+  /** The measured time left in whole minutes, as a range, or null while it is still being worked out. */
+  minutesLeft: { low: number; high: number } | null;
 };
 
 export type MoveHistoryState = "finished" | "steps-left" | "paused" | "stopped";

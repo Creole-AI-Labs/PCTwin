@@ -5,6 +5,7 @@ import { fileName, formatRate, fraction, useBytes, type SendProgress } from "../
 import { Steps, type StepItem, type StepState } from "./FrameParts";
 import { Heading, QsActions, QsStrip, Route, useAttribute } from "./QsParts";
 import { labelText } from "../pairing";
+import { minutesText } from "./ProgressParts";
 
 /** The two stages and which one a phase is in. "lost" stops short: the copying has not finished. */
 function stages(p: SendProgress, receiving: boolean, say: (id: string, vars?: Record<string, number>) => string): StepItem[] {
@@ -68,6 +69,8 @@ export default function QuickProgress({
   const detail = [
     live && p.current ? l10n.getString(say("qs-sending-current", "qs-receiving-current"), { name: fileName(p.current) }) : null,
     live && p.speed ? l10n.getString("qs-sending-speed", { speed: formatRate(p.speed.low, p.speed.high, language) }) : null,
+    // Time left, measured on both laptops the same way; never a guess before there is a measure.
+    live ? (p.minutesLeft ? l10n.getString("progress-time-left", { range: minutesText(l10n, p.minutesLeft) }) : l10n.getString("progress-time-measuring")) : null,
   ].filter(Boolean);
   return (
     <>
