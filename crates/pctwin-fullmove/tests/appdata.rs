@@ -312,7 +312,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     };
 
     // The old laptop: the 2.5 scan beside the files', then its extras.
-    let found = SpecialScan::start(&mover, &old)
+    let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
         .unwrap()
         .wait(&|| false)
         .expect("the scan finishes");
@@ -455,6 +455,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             owner_only: &AppOwnerOnly,
             scope,
             actor: actor.clone(),
+            system: pctwin_special::roots::System::Windows,
         },
         &apps_by_id,
     );
@@ -584,8 +585,10 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     .unwrap();
     assert!(!lines.is_empty());
     let after = files_under(&new.join("AppData"));
+    // Undoing brought-in app data is built for Windows first (pctwin-special's land.rs);
+    // elsewhere it says so and removes nothing.
     assert!(
-        !after.iter().any(|f| f.ends_with("places.sqlite")),
+        cfg!(not(windows)) || !after.iter().any(|f| f.ends_with("places.sqlite")),
         "undo removed what landed: {after:#?}"
     );
     if let Some(prefs) = prefs {

@@ -720,6 +720,9 @@ mod tests {
         assert!(packed_guid("{nope}").is_none());
     }
 
+    // Windows' own path rules (a drive letter makes a path absolute, `\` separates its parts):
+    // these values come from Windows' Uninstall lists, read only on Windows.
+    #[cfg(windows)]
     #[test]
     fn programs_named_in_the_list_are_read_only_outside_windows() {
         let win = Path::new(r"C:\Windows");
@@ -809,7 +812,9 @@ mod tests {
                 arch: Some(pctwin_maker::Arch::X64),
             }
         };
-        let p = |n: &str| PathBuf::from(format!(r"C:\App\{n}"));
+        // The choice is the same whatever the paths look like: built with this system's own
+        // separator so the test holds on every system it is built on.
+        let p = |n: &str| Path::new("App").join(n);
         let agreed = maker_of(
             &[],
             &[p("a.exe"), p("b.exe"), p("plain.exe"), p("x.exe")],

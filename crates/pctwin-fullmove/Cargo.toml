@@ -38,6 +38,8 @@ serde_json = "1"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # Synthetic browser databases for the app data test, and reading them back.
 rusqlite = { version = "0.41.0", features = ["bundled", "backup"] }
 pctwin-transfer = { path = "../pctwin-transfer" }

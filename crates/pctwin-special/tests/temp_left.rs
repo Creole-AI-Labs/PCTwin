@@ -43,8 +43,10 @@ fn child(test: &str, var: (&str, &Path), temp: &Path) -> String {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
         .args([test, "--exact", "--nocapture", "--test-threads", "1"])
         .env(var.0, var.1)
+        // The system's temporary folder: TMP / TEMP on Windows, TMPDIR on Mac and Linux.
         .env("TMP", temp)
         .env("TEMP", temp)
+        .env("TMPDIR", temp)
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");

@@ -273,10 +273,18 @@ fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
     for cmd in every_known_command() {
         if matches!(
             cmd.as_str(),
-            "pairing_new_search" | "set_window_mode" | "quicksend_choose_folder" | "history_export"
+            "pairing_new_search"
+                | "set_window_mode"
+                | "quicksend_choose_folder"
+                | "history_export"
+                | "update_check"
+                | "update_install"
         ) {
             // Checked below, and in the resolved-permissions test (the folder picker would open
-            // the system's window and wait for a person).
+            // the system's window and wait for a person). A command with no arguments runs
+            // whatever it is given, so the updater's two are never called: they would ask the
+            // real update address and install what it offers (on macOS over the build folder,
+            // three folders above the test program; on Windows by running the installer).
             let_through.insert(cmd);
             continue;
         }
@@ -656,8 +664,10 @@ fn the_screens_argument_names_are_the_commands_own() {
             given.insert(key.to_owned(), arg[1].clone());
         }
         // These would pair, search the network, build a native menu (which macOS allows only
-        // on the main thread) or open the system's file picker and wait for a person; their
-        // names are proven above all the same.
+        // on the main thread), open the system's file picker and wait for a person, or ask the
+        // real update address and install what it offers: on macOS the updater replaces the
+        // program's bundle, which for a test program is three folders up (the build folder);
+        // on Windows it would run the installer. Their names are proven above all the same.
         if matches!(
             cmd,
             "pairing_old_start"
@@ -667,6 +677,8 @@ fn the_screens_argument_names_are_the_commands_own() {
                 | "quicksend_choose_folder"
                 | "move_choose_place"
                 | "history_export"
+                | "update_check"
+                | "update_install"
         ) {
             continue;
         }

@@ -113,11 +113,15 @@ impl LabHive {
     }
 }
 
-#[cfg(windows)]
+/// A guard on every system (so the tests hold it the same way everywhere); only Windows' has a
+/// key to remove.
 impl Drop for LabHive {
     fn drop(&mut self) {
-        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-        let _ = hkcu.delete_subkey_all(&self.path);
+        #[cfg(windows)]
+        {
+            let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+            let _ = hkcu.delete_subkey_all(&self.path);
+        }
     }
 }
 
@@ -372,7 +376,12 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         }],
     );
     // The 2.5 scan runs beside the files' scan, with its own budget.
-    let scan = pctwin_fullmove::extras::SpecialScan::start(&mover(), old.path()).unwrap();
+    let scan = pctwin_fullmove::extras::SpecialScan::start_for(
+        pctwin_special::roots::System::Windows,
+        &mover(),
+        old.path(),
+    )
+    .unwrap();
     let found = scan.wait(&|| false);
     assert!(
         found

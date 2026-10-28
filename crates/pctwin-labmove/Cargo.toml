@@ -24,6 +24,8 @@ serde_json = "1"
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 tempfile = "3"
 
 [lints]

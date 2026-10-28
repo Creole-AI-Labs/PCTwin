@@ -1575,7 +1575,10 @@ fn an_install_needs_the_helpers_own_maker_check() {
 #[cfg(windows)]
 #[test]
 fn the_helpers_own_maker_check_of_a_real_package() {
-    use super::maker::{MakerCheck, check_package};
+    use super::maker::{MakerCheck, check_package, laptop_arch};
+    // A package built for this laptop's own chip: the check approves only those (an x64 package
+    // on an Arm laptop, as on GitHub's Windows Arm runner, is refused for its architecture).
+    let chip = laptop_arch().expect("this laptop's chip");
     let Some(msi) = std::fs::read_dir(r"C:\Windows\Installer")
         .ok()
         .and_then(|list| {
@@ -1583,10 +1586,15 @@ fn the_helpers_own_maker_check_of_a_real_package() {
                 .map(|e| e.path())
                 .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("msi")))
                 .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() < 64 * 1024 * 1024))
+                .filter(|p| {
+                    pctwin_maker::windows_old_copy(p)
+                        .arch
+                        .is_some_and(|a| a.runs_on(chip))
+                })
                 .find(|p| pctwin_maker::windows_maker_of(p).is_ok())
         })
     else {
-        eprintln!("no signed Windows Installer package here");
+        eprintln!("no signed Windows Installer package for this chip here");
         return;
     };
     let ready = matches!(

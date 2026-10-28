@@ -24,6 +24,8 @@ tokio = { version = "1.53.2", features = ["macros", "rt", "sync", "time"] }
 zstd = { version = "0.14", default-features = false }
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # The gate's test faults (a byte stored wrong), to prove a move never names a file that reads back wrong.
 pctwin-gate = { path = "../pctwin-gate", features = ["fault-plan"] }
 pctwin-pairing = { path = "../pctwin-pairing" }

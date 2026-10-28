@@ -485,6 +485,27 @@ fn f3_an_inherited_or_shared_access_list_is_not_private() {
             assert!(!private_sddl(&s, me), "{s}");
         }
     }
+    // Windows writes the built-in Administrator (500) and Guest (501) by short name: the folder
+    // made for such a person reads back naming `LA` / `LG` (GitHub's runners run as `LA`).
+    let admin = "S-1-5-21-1-2-3-500";
+    assert!(private_sddl("D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", admin));
+    assert!(private_sddl(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LG)",
+        "S-1-5-21-1-2-3-501"
+    ));
+    // ... and never for anyone else: not for a person with another number, not twice, not as a
+    // group's short name.
+    assert!(!private_sddl("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", me));
+    assert!(!private_sddl("D:P(A;OICI;FA;;;LG)(A;OICI;FA;;;SY)", admin));
+    assert!(!private_sddl(
+        "D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)",
+        "S-1-5-32-500"
+    ));
+    assert!(!private_sddl(
+        &format!("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;{admin})(A;OICI;FA;;;SY)"),
+        admin
+    ));
+    assert!(!private_sddl("D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)", admin));
     // Less than full access for the person is not what the folder is made with either.
     assert!(!private_sddl(
         &format!("D:P(A;OICI;FR;;;{me})(A;OICI;FA;;;SY)"),
