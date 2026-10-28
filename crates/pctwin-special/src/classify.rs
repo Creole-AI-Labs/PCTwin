@@ -670,15 +670,8 @@ fn classify_within(
     let mut sessions = false;
     // A key bound to this laptop sits here (a protected blob, or a value wrapped by the system):
     // near-random files of no known format beside it are taken to be encrypted under it.
-    let bound_key_here = w.files.iter().any(|f| f.shape == Shape::DpapiBlob)
-        || w.files.iter().any(|f| {
-            f.shape == Shape::Json
-                && f.len as usize <= content::MAX_JSON
-                && whole(&f.path, content::MAX_JSON as u64)
-                    .ok()
-                    .and_then(|b| content::json_facts(&b).ok())
-                    .is_some_and(|j| j.machine_bound_key)
-        });
+    // (The JSON half is decided once the JSON files are read, below: each is read once.)
+    let protected_blob_here = w.files.iter().any(|f| f.shape == Shape::DpapiBlob);
 
     for (rel, why) in std::mem::take(&mut w.unreadable) {
         b.push(
@@ -765,6 +758,16 @@ fn classify_within(
         })
         .collect();
 
+    let bound_key_here = protected_blob_here
+        || json
+            .values()
+            .any(|j| j.as_ref().is_ok_and(|j| j.machine_bound_key));
+    // The linked paths of one component, checked within what is left of the folder's time.
+    let links = |paths: &[String]| {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        link_evidence_within(&base, paths, LINK_ASK, LINK_TIME.min(left))
+    };
+
     // SQLite databases with their log or journal, and what kind of store each is.
     let mut key_dbs: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for f in by_rel.values() {
@@ -803,7 +806,7 @@ fn classify_within(
                 );
                 match within(&f.path, move |p| content::sqlite_paths(p, until)) {
                     Some(Ok((paths, complete))) => {
-                        ev.extend(link_evidence(&base, &paths));
+                        ev.extend(links(&paths));
                         if !complete {
                             ev.push(Evidence::MissingPart {
                                 what: "the files it links to were not all checked in time".into(),
@@ -1084,7 +1087,7 @@ fn classify_within(
                     vec![Evidence::StructuredData, Evidence::EnablesCommands],
                 ),
                 Some(Ok(j)) => {
-                    let links = link_evidence(&base, &j.paths);
+                    let links = links(&j.paths);
                     if links.is_empty() {
                         plain.push(f.rel.clone())
                     } else {
@@ -1101,6 +1104,15 @@ fn classify_within(
                 ),
                 None => plain.push(f.rel.clone()),
             },
+            // Not looked into in time: it may hold sign-ins, so it is never simply copied.
+            Shape::Ini | Shape::Text if late() => b.push(
+                one,
+                Custody::Unresolved,
+                false,
+                vec![Evidence::Unreadable {
+                    why: OUT_OF_TIME.into(),
+                }],
+            ),
             Shape::Ini | Shape::Text if text_has_credentials(&f.path, f.len) => {
                 sessions = true;
                 b.push(
