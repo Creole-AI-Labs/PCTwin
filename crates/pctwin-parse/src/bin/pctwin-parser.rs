@@ -9,6 +9,10 @@ fn main() -> ExitCode {
         // Started by hand or with something to do: it takes no commands.
         return ExitCode::from(2);
     }
-    let code = pctwin_parse::child::serve(std::io::stdin().lock(), std::io::stdout().lock());
+    let code = pctwin_parse::child::serve(
+        pctwin_parse_seal::in_child(),
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+    );
     ExitCode::from(code)
 }

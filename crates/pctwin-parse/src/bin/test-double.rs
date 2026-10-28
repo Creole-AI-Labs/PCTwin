@@ -7,6 +7,7 @@
 //! - 4: asks for the whole file again and again, past its bound;
 //! - 5: answers another question;
 //! - 6: says something that is not a frame of the protocol;
+//! - 7: answers as the real parser does, then says more after its answer;
 //! - anything else: answers as the real parser does.
 
 use std::io::Write;
@@ -65,8 +66,23 @@ fn main() -> ExitCode {
                 let _ = output.write_all(b"\xff\xff\xff\xff\xff not a frame");
                 let _ = output.flush();
             }
+            7 => {
+                let answer = pctwin_parse::child::answer(
+                    pctwin_parse_seal::in_child(),
+                    request,
+                    &mut input,
+                    &mut output,
+                );
+                let _ = write_json(&mut output, TAG_ANSWER, &answer);
+                let _ = write_json(&mut output, TAG_READ_AT, &ReadAt { offset: 0, len: 1 });
+            }
             _ => {
-                let answer = pctwin_parse::child::answer(request, &mut input, &mut output);
+                let answer = pctwin_parse::child::answer(
+                    pctwin_parse_seal::in_child(),
+                    request,
+                    &mut input,
+                    &mut output,
+                );
                 if write_json(&mut output, TAG_ANSWER, &answer).is_err() {
                     return ExitCode::from(2);
                 }

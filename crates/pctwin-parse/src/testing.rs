@@ -53,7 +53,11 @@ pub fn parser() -> &'static Parser {
 /// Answers `request` about `bytes` through the parser process's own code path ([`crate::child`],
 /// piece by piece as over the pipes), with an app made of memory: for fuzzing and property tests
 /// on the stable compiler, without starting a process.
-pub fn answer_in_memory(request: crate::wire::Request, bytes: &[u8]) -> crate::wire::Answer {
+pub fn answer_in_memory(
+    seal: pctwin_parse_seal::InChild,
+    request: crate::wire::Request,
+    bytes: &[u8],
+) -> crate::wire::Answer {
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::io::{self, Read, Write};
@@ -80,6 +84,10 @@ pub fn answer_in_memory(request: crate::wire::Request, bytes: &[u8]) -> crate::w
             let mut reader = io::Cursor::new(std::mem::take(&mut app.written));
             while let Ok(Some((tag, body))) = read_frame(&mut reader, MAX_FRAME) {
                 let mut reply = Vec::new();
+                if tag == crate::wire::TAG_PIECE {
+                    // What the parser hands back: kept by the real app, not needed here.
+                    continue;
+                }
                 match (tag, json::<ReadAt>(&body)) {
                     (TAG_READ_AT, Ok(ask)) => {
                         let start = usize::try_from(ask.offset).unwrap_or(usize::MAX);
@@ -115,7 +123,7 @@ pub fn answer_in_memory(request: crate::wire::Request, bytes: &[u8]) -> crate::w
         written: Vec::new(),
         replies: VecDeque::new(),
     });
-    crate::child::answer(request, &mut FromApp(&app), &mut ToApp(&app))
+    crate::child::answer(seal, request, &mut FromApp(&app), &mut ToApp(&app))
 }
 
 /// Installs the real parser process as this test program's reader of files' contents

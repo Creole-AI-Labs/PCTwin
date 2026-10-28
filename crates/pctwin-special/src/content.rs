@@ -337,6 +337,11 @@ pub trait ContentReader: Sync {
         log: Option<&[u8]>,
         time: Duration,
     ) -> Result<DbFacts, ContentError>;
+    /// One complete database from a database and its log (the capture's consistent copy), only
+    /// if it passes SQLite's own `quick_check` ([`db_snapshot`]).
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError>;
+    /// Whether a `manifest.json` is a WebExtension's: JSON with a numeric `manifest_version`.
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError>;
 }
 
 static READER: OnceLock<&'static dyn ContentReader> = OnceLock::new();
@@ -390,6 +395,38 @@ impl ContentReader for InThisProcess {
     ) -> Result<DbFacts, ContentError> {
         db_facts(self.0, db, log, Instant::now() + time)
     }
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+        db_snapshot(self.0, db, log)
+    }
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
+        Ok(add_on_manifest(self.0, bytes))
+    }
+}
+
+/// The capture's consistent copy of a database, made in the parser process from the bytes of
+/// its steady snapshot and log ([`ContentReader::snapshot`]).
+pub fn snapshot_of(db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+    reader()?.snapshot(db, log)
+}
+
+/// Whether a `manifest.json`'s bytes are a WebExtension's, read in the parser process.
+pub fn is_add_on_manifest(bytes: &[u8]) -> Result<bool, ContentError> {
+    reader()?.add_on_manifest(bytes)
+}
+
+/// Whether `bytes` are JSON with a numeric `manifest_version` (the WebExtension format), in the
+/// parser process (it takes an [`InChild`]).
+pub fn add_on_manifest(_: InChild, bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    if bytes.len() > 1024 * 1024
+        || pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json).is_err()
+    {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|v| v.get("manifest_version").map(serde_json::Value::is_u64))
+        .unwrap_or(false)
 }
 
 /// Copies a database and its non-empty log beside it, bounded, and has the parser read them.
@@ -452,6 +489,8 @@ pub fn sweep_snapshots() -> usize {
 const WAL_MAGIC_LE: u32 = 0x377f_0682;
 const WAL_MAGIC_BE: u32 = 0x377f_0683;
 const WAL_HEADER: usize = 32;
+/// The only log format version SQLite writes (3.7.0).
+const WAL_VERSION: u32 = 3_007_000;
 const FRAME_HEADER: usize = 24;
 
 fn be32(b: &[u8], at: usize) -> u32 {
@@ -479,9 +518,11 @@ fn wal_checksum(big_endian: bool, s: (u32, u32), data: &[u8]) -> (u32, u32) {
 /// Lays the committed frames of a write-ahead log over a database's pages, as SQLite reads them:
 /// only frames whose salts match the log's header and whose running checksum holds, up to the
 /// last frame that ends a transaction; anything after it (an unfinished write) is left out. A
-/// log whose header is not sound is no log (SQLite ignores it too).
+/// log whose header is not sound is no log (SQLite ignores it too), and so is any log beside an
+/// empty database (SQLite opens an empty database as empty and drops its log). A frame naming a
+/// page past [`MAX_DB`] makes the database too large to read; nothing is grown for it.
 pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), ContentError> {
-    if log.len() < WAL_HEADER {
+    if log.len() < WAL_HEADER || db.is_empty() {
         return Ok(());
     }
     let big_endian = match be32(log, 0) {
@@ -489,10 +530,15 @@ pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), Content
         WAL_MAGIC_LE => false,
         _ => return Ok(()),
     };
+    if be32(log, 4) != WAL_VERSION {
+        return Ok(());
+    }
     let page = be32(log, 8) as usize;
     if !(512..=65_536).contains(&page) || !page.is_power_of_two() {
         return Ok(());
     }
+    // The most pages a database PCTwin reads may have.
+    let most_pages = (MAX_DB / page as u64) as usize;
     let salts = (be32(log, 16), be32(log, 20));
     let mut sum = wal_checksum(big_endian, (0, 0), &log[..24]);
     if sum != (be32(log, 24), be32(log, 28)) {
@@ -511,10 +557,16 @@ pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), Content
     }
     let mut pending: Vec<(usize, usize)> = Vec::new();
     let mut at = WAL_HEADER;
-    while let Some(frame) = log.get(at..at + FRAME_HEADER + page) {
+    while let Some(frame) = at
+        .checked_add(FRAME_HEADER + page)
+        .and_then(|end| log.get(at..end))
+    {
         let (number, commit) = (be32(frame, 0) as usize, be32(frame, 4) as usize);
         if (be32(frame, 8), be32(frame, 12)) != salts || number == 0 {
             break;
+        }
+        if number > most_pages || commit > most_pages {
+            return Err(ContentError::TooLarge);
         }
         sum = wal_checksum(big_endian, sum, &frame[..8]);
         sum = wal_checksum(big_endian, sum, &frame[FRAME_HEADER..]);
@@ -523,10 +575,8 @@ pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), Content
         }
         pending.push((number, at + FRAME_HEADER));
         if commit != 0 {
-            let end = commit
-                .checked_mul(page)
-                .filter(|&n| n as u64 <= MAX_DB)
-                .ok_or(ContentError::TooLarge)?;
+            // Both at most `most_pages`, so neither product passes MAX_DB.
+            let end = commit * page;
             for (number, from) in pending.drain(..) {
                 let start = (number - 1) * page;
                 if start + page > db.len() {
@@ -541,15 +591,9 @@ pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), Content
     Ok(())
 }
 
-/// A database's facts from its bytes (and its log's), read by SQLite from memory, read-only, in
-/// the parser process (it takes an [`InChild`]); a scan of linked paths stops at `until`.
-pub fn db_facts(
-    seal: InChild,
-    db: &[u8],
-    log: Option<&[u8]>,
-    until: Instant,
-) -> Result<DbFacts, ContentError> {
-    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
+/// The database's pages with its log laid over, ready for SQLite to read from memory (legacy
+/// mode: the log is in already), or why not.
+fn image_of(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
     if db.len() as u64 > MAX_DB || log.is_some_and(|l| l.len() as u64 > MAX_LOG) {
         return Err(ContentError::TooLarge);
     }
@@ -561,17 +605,51 @@ pub fn db_facts(
         if &image[..16] != b"SQLite format 3\0" {
             return Err(ContentError::Damaged("file is not a database".into()));
         }
-        // The log is laid over already: read the pages as they are (legacy mode, no log).
         image[18] = 1;
         image[19] = 1;
     } else if !image.is_empty() {
         return Err(ContentError::Damaged("file is not a database".into()));
     }
+    Ok(image)
+}
+
+/// SQLite reading `image` from memory, read-only.
+fn memory_db(image: &[u8]) -> Result<rusqlite::Connection, ContentError> {
+    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
     let mut c = rusqlite::Connection::open_in_memory().map_err(|e| damaged(&e))?;
     if !image.is_empty() {
-        c.deserialize_read_exact(rusqlite::MAIN_DB, image.as_slice(), image.len(), true)
+        c.deserialize_read_exact(rusqlite::MAIN_DB, image, image.len(), true)
             .map_err(|e| damaged(&e))?;
     }
+    Ok(c)
+}
+
+/// One complete database from a database's bytes and its log's: the log's committed changes
+/// laid over its pages, kept only if SQLite's own `quick_check` says "ok". In the parser process
+/// (it takes an [`InChild`]).
+pub fn db_snapshot(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+    let image = image_of(seal, db, log)?;
+    let c = memory_db(&image)?;
+    let verdict: String = c
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|e| ContentError::Damaged(e.to_string()))?;
+    if verdict != "ok" {
+        return Err(ContentError::Damaged(verdict));
+    }
+    drop(c);
+    Ok(image)
+}
+
+/// A database's facts from its bytes (and its log's), read by SQLite from memory, read-only, in
+/// the parser process (it takes an [`InChild`]); a scan of linked paths stops at `until`.
+pub fn db_facts(
+    seal: InChild,
+    db: &[u8],
+    log: Option<&[u8]>,
+    until: Instant,
+) -> Result<DbFacts, ContentError> {
+    let image = image_of(seal, db, log)?;
+    let mut c = memory_db(&image)?;
     let tables: Vec<Table> = tables_as_named(&c)?
         .into_iter()
         .map(|t| Table {

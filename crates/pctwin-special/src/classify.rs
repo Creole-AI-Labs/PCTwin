@@ -228,14 +228,8 @@ fn is_add_on(dir: &Path) -> bool {
     let Ok(bytes) = whole(&m, 1024 * 1024) else {
         return false;
     };
-    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
-    if pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json).is_err() {
-        return false;
-    }
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|v| v.get("manifest_version").map(serde_json::Value::is_u64))
-        .unwrap_or(false)
+    // Read in the parser process; one it could not read is not an add-on.
+    content::is_add_on_manifest(&bytes).unwrap_or(false)
 }
 
 fn is_cache_folder(name: &str, path: &Path) -> bool {

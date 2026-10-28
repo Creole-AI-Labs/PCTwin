@@ -396,7 +396,8 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
         .into_iter()
         .map(|p| (p.account_id, Some(p.home)))
         .collect();
-    let installed = pctwin_apps::found::read_here(&people, me, crate::parser());
+    let installed =
+        pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere));
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {

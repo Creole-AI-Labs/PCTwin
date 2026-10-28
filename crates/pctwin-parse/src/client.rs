@@ -24,7 +24,7 @@ use pctwin_special::content::{ContentError, DbFacts, JsonFacts};
 use crate::lockdown::Confinement;
 use crate::wire::{
     Answer, Hello, MAX_FRAME, MAX_JSON, MAX_READ, PROTOCOL, ReadAt, Request, TAG_ANSWER, TAG_BYTES,
-    TAG_HELLO, TAG_READ_AT, TAG_READ_FAILED, TAG_REQUEST, json, read_frame, write_frame,
+    TAG_HELLO, TAG_PIECE, TAG_READ_AT, TAG_READ_FAILED, TAG_REQUEST, json, read_frame, write_frame,
 };
 
 /// The parser program's name beside the app (and beside the administrator helper).
@@ -102,6 +102,13 @@ struct Running {
 }
 
 impl Running {
+    /// Whether nothing has come from it since its last answer (anything is discarded).
+    fn quiet(&self) -> bool {
+        self.from_child
+            .try_recv()
+            .is_err_and(|e| e == mpsc::TryRecvError::Empty)
+    }
+
     fn end(mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -114,6 +121,7 @@ pub struct Parser {
     program: Result<PathBuf, String>,
     limits: Limits,
     running: Mutex<Option<Running>>,
+    started: std::sync::atomic::AtomicUsize,
 }
 
 impl std::fmt::Debug for Parser {
@@ -150,6 +158,7 @@ impl Parser {
             program,
             limits: Limits::default(),
             running: Mutex::new(None),
+            started: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -159,7 +168,13 @@ impl Parser {
             program: Ok(program),
             limits: Limits::default(),
             running: Mutex::new(None),
+            started: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// How many parser processes this one has started so far.
+    pub fn started(&self) -> usize {
+        self.started.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn with_limits(mut self, limits: Limits) -> Self {
@@ -191,16 +206,32 @@ impl Parser {
         request: Request,
         sources: &[Source<'_>],
     ) -> Result<Answer, NotChecked> {
+        self.ask_with_back(request, sources)
+            .map(|(answer, _)| answer)
+    }
+
+    /// [`Parser::ask_about`], with the bytes the parser hands back ([`Request::most_back`]).
+    pub fn ask_with_back(
+        &self,
+        request: Request,
+        sources: &[Source<'_>],
+    ) -> Result<(Answer, Vec<u8>), NotChecked> {
         let mut slot = self.running.lock().unwrap_or_else(|p| p.into_inner());
+        // A process that said anything between requests spoke out of turn: it is ended, and a
+        // fresh one answers.
         let running = match slot.take() {
-            Some(r) => r,
+            Some(r) if r.quiet() => r,
+            Some(r) => {
+                r.end();
+                self.start()?
+            }
             None => self.start()?,
         };
         match self.exchange(&running, request, sources) {
             Ok(answer) => {
                 *slot = Some(running);
                 match answer {
-                    Answer::Failed(why) => Err(NotChecked::Unreadable(why)),
+                    (Answer::Failed(why), _) => Err(NotChecked::Unreadable(why)),
                     answer => Ok(answer),
                 }
             }
@@ -228,6 +259,8 @@ impl Parser {
         if let Some(dir) = program.parent() {
             command.current_dir(dir);
         }
+        self.started
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut child = command
             .spawn()
             .map_err(|e| NotChecked::CouldNotStart(e.to_string()))?;
@@ -266,11 +299,12 @@ impl Parser {
         running: &Running,
         request: Request,
         sources: &[Source<'_>],
-    ) -> Result<Answer, NotChecked> {
+    ) -> Result<(Answer, Vec<u8>), NotChecked> {
         let size = request.size();
         let deadline = Instant::now() + self.limits.time_for(size) + request.own_time();
         let budget = self.limits.bytes_for(size);
         let mut served: u64 = 0;
+        let mut back: Vec<u8> = Vec::new();
         let body =
             serde_json::to_vec(&request).map_err(|e| NotChecked::Unreadable(e.to_string()))?;
         running
@@ -317,6 +351,16 @@ impl Parser {
                         .send(reply)
                         .map_err(|_| NotChecked::Stopped)?;
                 }
+                TAG_PIECE => {
+                    if back.len() as u64 + body.len() as u64 > request.most_back()
+                        || body.len() > MAX_READ as usize
+                    {
+                        return Err(NotChecked::BrokeTheRules(
+                            "it handed back more than it may".into(),
+                        ));
+                    }
+                    back.extend_from_slice(&body);
+                }
                 TAG_ANSWER => {
                     let answer: Answer =
                         json(&body).map_err(|e| NotChecked::BrokeTheRules(e.to_string()))?;
@@ -325,7 +369,7 @@ impl Parser {
                             "it answered another question".into(),
                         ));
                     }
-                    return Ok(answer);
+                    return Ok((answer, back));
                 }
                 _ => {
                     return Err(NotChecked::BrokeTheRules(
@@ -516,6 +560,34 @@ impl pctwin_special::content::ContentReader for Parser {
             Err(e) => Err(ContentError::Damaged(e.to_string())),
         }
     }
+
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+        let log = log.unwrap_or_default();
+        let request = Request::DatabaseSnapshot {
+            size: db.len() as u64,
+            log: log.len() as u64,
+        };
+        match self.ask_with_back(request, &[Source::Bytes(db), Source::Bytes(log)]) {
+            Ok((Answer::DatabaseSnapshot(Ok(len)), back)) if len == back.len() as u64 => Ok(back),
+            Ok((Answer::DatabaseSnapshot(Ok(_)), _)) => Err(ContentError::Damaged(
+                "it handed back another length than it said".into(),
+            )),
+            Ok((Answer::DatabaseSnapshot(Err(e)), _)) => Err(e),
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
+        let request = Request::AddOn {
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::AddOn(yes)) => Ok(yes),
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
 }
 
 /// Several parser processes taking requests in turn, for readers that work on several threads
@@ -563,5 +635,13 @@ impl pctwin_special::content::ContentReader for Pool {
         time: Duration,
     ) -> Result<DbFacts, ContentError> {
         self.one().sqlite(db, log, time)
+    }
+
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+        self.one().snapshot(db, log)
+    }
+
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
+        self.one().add_on_manifest(bytes)
     }
 }

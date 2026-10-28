@@ -43,6 +43,8 @@ pub const TAG_HELLO: u8 = 10;
 pub const TAG_READ_AT: u8 = 11;
 /// Parser to app: an [`Answer`].
 pub const TAG_ANSWER: u8 = 12;
+/// Parser to app: a piece of what it hands back (at most [`MAX_READ`] bytes), before its answer.
+pub const TAG_PIECE: u8 = 13;
 
 /// What the parser says first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +75,12 @@ pub enum Request {
     /// A database's tables, kind and linked paths (2.5): `size` bytes of the database, then
     /// `log` bytes of its write-ahead log; the scan of linked paths stops after `millis`.
     DatabaseFacts { size: u64, log: u64, millis: u64 },
+    /// One complete database from `size` bytes of a database and `log` bytes of its log, kept
+    /// only if SQLite's `quick_check` passes (2.5's capture). Its bytes come back in
+    /// [`TAG_PIECE`] frames before the answer.
+    DatabaseSnapshot { size: u64, log: u64 },
+    /// Whether a `manifest.json` is a WebExtension's.
+    AddOn { size: u64 },
 }
 
 impl Request {
@@ -83,8 +91,19 @@ impl Request {
             | Request::Font { size }
             | Request::Archive { size }
             | Request::Database { size }
-            | Request::Json { size } => size,
-            Request::DatabaseFacts { size, log, .. } => size.saturating_add(log),
+            | Request::Json { size }
+            | Request::AddOn { size } => size,
+            Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
+                size.saturating_add(log)
+            }
+        }
+    }
+
+    /// The most bytes the parser may hand back in [`TAG_PIECE`] frames.
+    pub fn most_back(&self) -> u64 {
+        match *self {
+            Request::DatabaseSnapshot { .. } => pctwin_special::content::MAX_DB,
+            _ => 0,
         }
     }
 
@@ -118,6 +137,9 @@ pub enum Answer {
     Database(Shape),
     Json(Result<JsonFacts, ContentError>),
     DatabaseFacts(Result<DbFacts, ContentError>),
+    /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
+    DatabaseSnapshot(Result<u64, ContentError>),
+    AddOn(bool),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -134,6 +156,11 @@ impl Answer {
                 | (Answer::Database(_), Request::Database { .. })
                 | (Answer::Json(_), Request::Json { .. })
                 | (Answer::DatabaseFacts(_), Request::DatabaseFacts { .. })
+                | (
+                    Answer::DatabaseSnapshot(_),
+                    Request::DatabaseSnapshot { .. }
+                )
+                | (Answer::AddOn(_), Request::AddOn { .. })
                 | (Answer::Failed(_), _)
         )
     }

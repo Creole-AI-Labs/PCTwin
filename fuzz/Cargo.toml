@@ -17,6 +17,8 @@ pctwin-gate = { path = "../crates/pctwin-gate" }
 pctwin-move = { path = "../crates/pctwin-move" }
 pctwin-pairing = { path = "../crates/pctwin-pairing" }
 pctwin-parse = { path = "../crates/pctwin-parse", features = ["test-support"] }
+# The fuzz targets run the parser's readers in their own process, as the parser does.
+pctwin-parse-seal = { path = "../crates/pctwin-parse-seal" }
 pctwin-record = { path = "../crates/pctwin-record" }
 pctwin-transfer = { path = "../crates/pctwin-transfer" }
 pctwin-recipe = { path = "../crates/pctwin-recipe" }

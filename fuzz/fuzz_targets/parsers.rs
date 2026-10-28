@@ -30,6 +30,6 @@ fuzz_target!(|data: &[u8]| {
             }
         }
     };
-    let answer = answer_in_memory(request, bytes);
+    let answer = answer_in_memory(pctwin_parse_seal::in_child(), request, bytes);
     assert!(answer.answers(&request));
 });

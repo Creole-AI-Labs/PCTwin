@@ -51,11 +51,26 @@ fn install_content_readers() {
     }));
 }
 
-/// PCTwin's locked-down parser process (adoption change 1), beside the app: the insides of
-/// untrusted files (installers' signatures, the old laptop's own copies) are read only there.
-pub(crate) fn parser() -> &'static pctwin_parse::Parser {
-    static PARSER: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
-    PARSER.get_or_init(pctwin_parse::Parser::beside_this_program)
+/// Where the files a parser process reads come from: each source has its own process, so a file
+/// that took over one process can never answer for files of another.
+#[derive(Clone, Copy)]
+pub(crate) enum Files {
+    /// The apps installed on this laptop (their programs' and installers' signatures).
+    InstalledHere,
+    /// Installers found among the person's files on the old laptop.
+    FoundInstallers,
+}
+
+/// PCTwin's locked-down parser process (adoption change 1) for files from `from`, beside the
+/// app: the insides of untrusted files are read only there.
+pub(crate) fn parser(from: Files) -> &'static pctwin_parse::Parser {
+    static HERE: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    static FOUND: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    let slot = match from {
+        Files::InstalledHere => &HERE,
+        Files::FoundInstallers => &FOUND,
+    };
+    slot.get_or_init(pctwin_parse::Parser::beside_this_program)
 }
 
 use serde::Deserialize;

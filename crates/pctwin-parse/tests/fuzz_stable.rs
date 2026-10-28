@@ -239,7 +239,9 @@ fn every_reader_survives_mutated_files() {
             let input = mutate(&mut rng, base);
             let request = make(input.len() as u64);
             runs += 1;
-            let got = catch_unwind(AssertUnwindSafe(|| answer_in_memory(request, &input)));
+            let got = catch_unwind(AssertUnwindSafe(|| {
+                answer_in_memory(pctwin_parse_seal::in_child(), request, &input)
+            }));
             match got {
                 Ok(answer) => assert!(answer.answers(&request)),
                 Err(_) => found.push(keep(&input, &request)),

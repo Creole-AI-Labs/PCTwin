@@ -57,16 +57,19 @@ fn in_process(request: Request, f: &File) -> Answer {
         Request::Database { .. } => {
             Answer::Database(pctwin_readiness::checks::database_shape(seal, &mut r, size))
         }
-        Request::Json { .. } | Request::DatabaseFacts { .. } => {
+        Request::Json { .. }
+        | Request::DatabaseFacts { .. }
+        | Request::DatabaseSnapshot { .. }
+        | Request::AddOn { .. } => {
             let mut bytes = Vec::new();
             std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
             std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
-            pctwin_parse::testing::answer_in_memory(request, &bytes)
+            pctwin_parse::testing::answer_in_memory(pctwin_parse_seal::in_child(), request, &bytes)
         }
     }
 }
 
-fn every_request(size: u64) -> [Request; 7] {
+fn every_request(size: u64) -> [Request; 9] {
     [
         Request::Installer { size },
         Request::OldCopy { size },
@@ -79,6 +82,8 @@ fn every_request(size: u64) -> [Request; 7] {
             log: 0,
             millis: 5000,
         },
+        Request::DatabaseSnapshot { size, log: 0 },
+        Request::AddOn { size },
     ]
 }
 
@@ -272,6 +277,7 @@ fn every_failure_is_could_not_be_checked_and_the_next_request_works() {
     let good = sqlite_header(1);
     let (_, ok) = file_of(&dir, "ok.db", &good);
     type Expect = fn(&NotChecked) -> bool;
+    // (7, below: answers, then says more after its answer.)
     let cases: [(u64, Expect); 6] = [
         (1, |e| *e == NotChecked::Stopped),
         (2, |e| *e == NotChecked::TimedOut),
@@ -646,4 +652,60 @@ mod contents {
         assert_eq!(names, ["live.sqlite", "live.sqlite-shm", "live.sqlite-wal"]);
         drop(c);
     }
+}
+
+/// Review finding F4: a process that says anything after its answer is never asked again; the
+/// next request gets a fresh process (and nothing said out of turn is taken as an answer).
+#[test]
+fn a_process_that_speaks_out_of_turn_is_replaced_before_the_next_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, chatty) = file_of(&dir, "seven", &[0u8; 7]);
+    let (_, ok) = file_of(&dir, "ok.db", &sqlite_header(1));
+    let p = double().with_limits(quick());
+    let first = p.ask(Request::Font { size: 7 }, &chatty).unwrap();
+    assert!(matches!(first, Answer::Font(_)));
+    assert_eq!(p.started(), 1);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        p.ask(Request::Database { size: 4096 }, &ok).unwrap(),
+        Answer::Database(Shape::Sound)
+    );
+    assert_eq!(
+        p.started(),
+        2,
+        "the chatty process was ended, a fresh one answered"
+    );
+}
+
+/// Review finding F3: `test-support` (a parser for tests, readers through the parser's own code
+/// path) is only ever a dev-dependency: no crate the app ships links it.
+#[test]
+fn test_support_is_for_tests_only() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut manifests = vec![root.join("app/src-tauri/Cargo.toml")];
+    for e in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
+        manifests.push(e.path().join("Cargo.toml"));
+    }
+    let mut seen = 0;
+    for m in manifests {
+        let Ok(text) = std::fs::read_to_string(&m) else {
+            continue;
+        };
+        let mut section = String::new();
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with('[') {
+                section = t.to_string();
+            }
+            if t.starts_with("pctwin-parse ") && t.contains("test-support") {
+                seen += 1;
+                assert!(
+                    section.ends_with("dev-dependencies]"),
+                    "{}: test-support outside dev-dependencies ({section})",
+                    m.display()
+                );
+            }
+        }
+    }
+    assert!(seen >= 4, "the crates whose tests use it: {seen}");
 }

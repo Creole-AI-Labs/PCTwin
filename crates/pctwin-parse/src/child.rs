@@ -1,13 +1,38 @@
 //! The parser process's side: say hello, then answer one request at a time, reading the file
 //! only through the app ([`Remote`]).
+//!
+//! Only the parser process runs the readers: [`answer`], [`serve`] and [`Remote::new`] each take
+//! a `pctwin_parse_seal::InChild`, which `deny.toml` lets only the parser crates make (review
+//! finding F3). Without one, code does not build:
+//!
+//! ```compile_fail
+//! use pctwin_parse::wire::{Request, TAG_BYTES, write_frame};
+//! let mut from_app = std::io::Cursor::new(Vec::new());
+//! let mut to_app = Vec::new();
+//! let _ = pctwin_parse::child::answer(Request::Json { size: 2 }, &mut from_app, &mut to_app);
+//! ```
+//!
+//! With one (here, in this crate's own doctest, which may hold it), the same call builds:
+//!
+//! ```
+//! use pctwin_parse::wire::{Answer, Request, TAG_BYTES, write_frame};
+//! let mut from_app = Vec::new();
+//! write_frame(&mut from_app, TAG_BYTES, b"{}").unwrap();
+//! let mut from_app = std::io::Cursor::new(from_app);
+//! let mut to_app = Vec::new();
+//! let seal = pctwin_parse_seal::in_child();
+//! let a = pctwin_parse::child::answer(seal, Request::Json { size: 2 }, &mut from_app, &mut to_app);
+//! assert!(matches!(a, Answer::Json(Ok(_))));
+//! ```
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use pctwin_parse_seal::in_child;
+use pctwin_parse_seal::InChild;
 
 use crate::wire::{
     Answer, Hello, MAX_FRAME, MAX_JSON, MAX_READ, PROTOCOL, ReadAt, Request, TAG_ANSWER, TAG_BYTES,
-    TAG_HELLO, TAG_READ_AT, TAG_READ_FAILED, TAG_REQUEST, json, read_frame, write_json,
+    TAG_HELLO, TAG_PIECE, TAG_READ_AT, TAG_READ_FAILED, TAG_REQUEST, json, read_frame, write_frame,
+    write_json,
 };
 
 /// The smallest piece asked for at once: small reads (a font's table records) are served from it.
@@ -26,7 +51,8 @@ pub struct Remote<'a, R: Read, W: Write> {
 }
 
 impl<'a, R: Read, W: Write> Remote<'a, R, W> {
-    pub fn new(from_app: &'a mut R, to_app: &'a mut W, size: u64) -> Self {
+    /// Only for the parser process (it takes an [`InChild`]).
+    pub fn new(_: InChild, from_app: &'a mut R, to_app: &'a mut W, size: u64) -> Self {
         Self {
             from_app,
             to_app,
@@ -107,10 +133,15 @@ impl<R: Read, W: Write> Seek for Remote<'_, R, W> {
     }
 }
 
-/// Answers one request, reading through `from_app` and `to_app`.
-pub fn answer<R: Read, W: Write>(request: Request, from_app: &mut R, to_app: &mut W) -> Answer {
-    let seal = in_child();
-    let mut file = Remote::new(from_app, to_app, request.size());
+/// Answers one request, reading through `from_app` and `to_app`. Only the parser process runs
+/// readers (it takes an [`InChild`]).
+pub fn answer<R: Read, W: Write>(
+    seal: InChild,
+    request: Request,
+    from_app: &mut R,
+    to_app: &mut W,
+) -> Answer {
+    let mut file = Remote::new(seal, from_app, to_app, request.size());
     let size = request.size();
     match request {
         Request::Installer { .. } => {
@@ -134,6 +165,31 @@ pub fn answer<R: Read, W: Write>(request: Request, from_app: &mut R, to_app: &mu
         Request::Json { size } => Answer::Json(
             whole(&mut file, size, pctwin_special::content::MAX_JSON as u64)
                 .and_then(|b| pctwin_special::content::json_facts(seal, &b)),
+        ),
+        Request::DatabaseSnapshot { size, log } => {
+            let read = whole(&mut file, size, pctwin_special::content::MAX_DB).and_then(|db| {
+                let log = whole(&mut file, log, pctwin_special::content::MAX_LOG)?;
+                Ok((db, log))
+            });
+            drop(file);
+            match read.and_then(|(db, log)| {
+                let log = (!log.is_empty()).then_some(log);
+                pctwin_special::content::db_snapshot(seal, &db, log.as_deref())
+            }) {
+                Err(e) => Answer::DatabaseSnapshot(Err(e)),
+                Ok(image) => {
+                    for piece in image.chunks(MAX_READ as usize) {
+                        if write_frame(to_app, TAG_PIECE, piece).is_err() {
+                            return Answer::Failed("the app stopped listening".into());
+                        }
+                    }
+                    Answer::DatabaseSnapshot(Ok(image.len() as u64))
+                }
+            }
+        }
+        Request::AddOn { size } => Answer::AddOn(
+            whole(&mut file, size, 1024 * 1024)
+                .is_ok_and(|b| pctwin_special::content::add_on_manifest(seal, &b)),
         ),
         Request::DatabaseFacts { size, log, millis } => {
             let until = std::time::Instant::now() + request.own_time();
@@ -167,7 +223,7 @@ fn whole(
 
 /// The parser process: hello, then one request at a time until the app closes the pipe. Returns
 /// the exit code: 0 when the app closed it, 2 when the app said something out of turn.
-pub fn serve(mut from_app: impl Read, mut to_app: impl Write) -> u8 {
+pub fn serve(seal: InChild, mut from_app: impl Read, mut to_app: impl Write) -> u8 {
     let hello = Hello {
         protocol: PROTOCOL,
         confinement: crate::lockdown::confine_self(),
@@ -184,7 +240,7 @@ pub fn serve(mut from_app: impl Read, mut to_app: impl Write) -> u8 {
             },
             _ => return 2,
         };
-        let answer = answer(request, &mut from_app, &mut to_app);
+        let answer = answer(seal, request, &mut from_app, &mut to_app);
         if write_json(&mut to_app, TAG_ANSWER, &answer).is_err() {
             return 2;
         }
