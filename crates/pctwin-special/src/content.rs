@@ -295,7 +295,7 @@ pub fn wal_of(path: &Path) -> std::path::PathBuf {
 /// its tables too, that an immutable read would not see), the file and its log are first copied
 /// to a private folder, and the copy is read.
 pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
-    let (db, _snapshot) = open_read(path)?;
+    let db = open_read(path)?;
     Ok(tables_as_named(&db)?
         .into_iter()
         .map(|t| Table {
@@ -305,26 +305,98 @@ pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
         .collect())
 }
 
-/// Opens a database for reading without writing anything beside it (see [`sqlite_tables`]); the
-/// private snapshot folder, when one was needed, lives as long as the second value.
-fn open_read(
-    path: &Path,
-) -> Result<(rusqlite::Connection, Option<tempfile::TempDir>), ContentError> {
+/// The name every private database snapshot folder starts with, in the system's temporary
+/// folder, so ones left by a PCTwin that was stopped mid-read can be found and removed.
+pub const SNAPSHOT_PREFIX: &str = "pctwin-snapshot-";
+
+/// Removes database snapshot folders an earlier PCTwin left in the temporary folder when it was
+/// stopped mid-read (closed, crashed, laptop shut). One still in use by a running read cannot be
+/// removed on Windows and is left alone. Returns how many were removed.
+pub fn sweep_snapshots() -> usize {
+    let Ok(dir) = std::fs::read_dir(std::env::temp_dir()) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in dir.flatten() {
+        let named = entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(SNAPSHOT_PREFIX);
+        let folder = entry.file_type().is_ok_and(|t| t.is_dir());
+        if named && folder && std::fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// A database opened for reading without writing anything beside it (see [`sqlite_tables`]),
+/// with the private snapshot folder it may need. Dropping it closes the connection first, then
+/// removes the folder: in the other order Windows cannot remove a file SQLite still holds, and
+/// the closing connection would fold its log into a copy left behind in the temporary folder
+/// (sixth review, finding 1).
+struct ReadDb {
+    db: Option<rusqlite::Connection>,
+    snapshot: Option<tempfile::TempDir>,
+}
+
+impl std::ops::Deref for ReadDb {
+    type Target = rusqlite::Connection;
+    fn deref(&self) -> &rusqlite::Connection {
+        self.db.as_ref().expect("open until dropped")
+    }
+}
+
+impl std::ops::DerefMut for ReadDb {
+    fn deref_mut(&mut self) -> &mut rusqlite::Connection {
+        self.db.as_mut().expect("open until dropped")
+    }
+}
+
+impl Drop for ReadDb {
+    fn drop(&mut self) {
+        if let Some(db) = self.db.take() {
+            // A connection that will not close is dropped, which closes it all the same.
+            let _ = db.close();
+        }
+        if let Some(dir) = self.snapshot.take() {
+            let path = dir.path().to_owned();
+            if dir.close().is_err() {
+                // One more try once anything still closing has let go.
+                let _ = std::fs::remove_dir_all(&path);
+            }
+        }
+    }
+}
+
+/// Opens a database for reading without writing anything beside it (see [`sqlite_tables`] and
+/// [`ReadDb`]).
+fn open_read(path: &Path) -> Result<ReadDb, ContentError> {
     use rusqlite::OpenFlags;
     let wal = wal_of(path);
     let has_log = std::fs::symlink_metadata(&wal).is_ok_and(|m| m.is_file() && m.len() > 0);
     let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
     if has_log {
-        let dir = tempfile::tempdir().map_err(|e| damaged(&e))?;
+        let dir = tempfile::Builder::new()
+            .prefix(SNAPSHOT_PREFIX)
+            .tempdir()
+            .map_err(|e| damaged(&e))?;
         let copy = dir.path().join("db");
+        // From here the folder is removed on every way out, the copies with it.
+        let mut read = ReadDb {
+            db: None,
+            snapshot: Some(dir),
+        };
         std::fs::copy(path, &copy).map_err(|e| damaged(&e))?;
         std::fs::copy(&wal, wal_of(&copy)).map_err(|e| damaged(&e))?;
-        let db = rusqlite::Connection::open_with_flags(
-            &copy,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| damaged(&e))?;
-        Ok((db, Some(dir)))
+        read.db = Some(
+            rusqlite::Connection::open_with_flags(
+                &copy,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|e| damaged(&e))?,
+        );
+        Ok(read)
     } else {
         let db = rusqlite::Connection::open_with_flags(
             immutable_uri(path),
@@ -333,7 +405,10 @@ fn open_read(
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(|e| damaged(&e))?;
-        Ok((db, None))
+        Ok(ReadDb {
+            db: Some(db),
+            snapshot: None,
+        })
     }
 }
 
@@ -382,7 +457,7 @@ pub fn sqlite_paths(
     path: &Path,
     until: std::time::Instant,
 ) -> Result<(Vec<String>, bool), ContentError> {
-    let (mut db, _snapshot) = open_read(path)?;
+    let mut db = open_read(path)?;
     paths_in(&mut db, until)
 }
 
@@ -395,7 +470,7 @@ pub fn sqlite_facts(
     path: &Path,
     until: std::time::Instant,
 ) -> Result<(DbKind, Option<LinkedPaths>), ContentError> {
-    let (mut db, _snapshot) = open_read(path)?;
+    let mut db = open_read(path)?;
     let tables: Vec<Table> = tables_as_named(&db)?
         .into_iter()
         .map(|t| Table {
