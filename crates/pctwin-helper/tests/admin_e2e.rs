@@ -92,14 +92,15 @@ impl Adapters for TestMsi {
                 .map(|c| c.unwrap_or('?'))
                 .collect();
             let lines: Vec<&str> = text.lines().collect();
+            // The lines before the first failed action ("Return value 3"), else the end.
+            let end = lines
+                .iter()
+                .position(|l| l.contains("Return value 3"))
+                .map_or(lines.len(), |i| i + 1);
             eprintln!(
-                "Windows Installer log ({}):
-{}",
+                "Windows Installer log ({}):\n{}",
                 p.path().display(),
-                lines[lines.len().saturating_sub(80)..].join(
-                    "
-"
-                )
+                lines[end.saturating_sub(60)..end].join("\n")
             );
         }
         match status.map(|s| s.code()) {
