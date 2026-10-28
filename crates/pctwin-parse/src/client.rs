@@ -19,6 +19,8 @@ use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+use pctwin_special::content::{ContentError, DbFacts, JsonFacts};
+
 use crate::lockdown::Confinement;
 use crate::wire::{
     Answer, Hello, MAX_FRAME, MAX_JSON, MAX_READ, PROTOCOL, ReadAt, Request, TAG_ANSWER, TAG_BYTES,
@@ -179,12 +181,22 @@ impl Parser {
     /// Asks one request about `file`, held open by the caller. The answer is of the request's
     /// own kind, or the file could not be checked.
     pub fn ask(&self, request: Request, file: &File) -> Result<Answer, NotChecked> {
+        self.ask_about(request, &[Source::File(file)])
+    }
+
+    /// Asks one request about the bytes of `sources`, one after another (a database, then its
+    /// log), handed over in the pieces the parser asks for.
+    pub fn ask_about(
+        &self,
+        request: Request,
+        sources: &[Source<'_>],
+    ) -> Result<Answer, NotChecked> {
         let mut slot = self.running.lock().unwrap_or_else(|p| p.into_inner());
         let running = match slot.take() {
             Some(r) => r,
             None => self.start()?,
         };
-        match self.exchange(&running, request, file) {
+        match self.exchange(&running, request, sources) {
             Ok(answer) => {
                 *slot = Some(running);
                 match answer {
@@ -253,10 +265,10 @@ impl Parser {
         &self,
         running: &Running,
         request: Request,
-        file: &File,
+        sources: &[Source<'_>],
     ) -> Result<Answer, NotChecked> {
         let size = request.size();
-        let deadline = Instant::now() + self.limits.time_for(size);
+        let deadline = Instant::now() + self.limits.time_for(size) + request.own_time();
         let budget = self.limits.bytes_for(size);
         let mut served: u64 = 0;
         let body =
@@ -296,7 +308,7 @@ impl Parser {
                             "it asked for more of the file than a check needs".into(),
                         ));
                     }
-                    let reply = match read_piece(file, ask.offset, ask.len as usize) {
+                    let reply = match read_sources(sources, ask.offset, ask.len as usize) {
                         Ok(bytes) => (TAG_BYTES, bytes),
                         Err(_) => (TAG_READ_FAILED, Vec::new()),
                     };
@@ -332,6 +344,42 @@ impl Drop for Parser {
             running.end();
         }
     }
+}
+
+/// What the parser is handed: a file held open by the caller, or bytes it copied (bounded).
+#[derive(Debug, Clone, Copy)]
+pub enum Source<'a> {
+    File(&'a File),
+    Bytes(&'a [u8]),
+}
+
+impl Source<'_> {
+    fn len(&self) -> io::Result<u64> {
+        match self {
+            Source::File(f) => Ok(f.metadata()?.len()),
+            Source::Bytes(b) => Ok(b.len() as u64),
+        }
+    }
+}
+
+/// Reads `len` bytes at `offset` of the sources laid end to end, fewer only at their end.
+fn read_sources(sources: &[Source<'_>], offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(len);
+    let mut start = 0u64;
+    for s in sources {
+        let n = s.len()?;
+        let end = start + n;
+        if offset + (out.len() as u64) < end && out.len() < len {
+            let at = offset + out.len() as u64 - start;
+            let want = (len - out.len()).min((n - at) as usize);
+            match s {
+                Source::File(f) => out.extend(read_piece(f, at, want)?),
+                Source::Bytes(b) => out.extend_from_slice(&b[at as usize..at as usize + want]),
+            }
+        }
+        start = end;
+    }
+    Ok(out)
 }
 
 /// Reads `len` bytes at `offset` of `file`, fewer only at its end, without the caller's place
@@ -434,5 +482,86 @@ impl pctwin_readiness::checks::FileReader for Parser {
             Ok(_) => Err("it answered another question".into()),
             Err(e) => Err(e.to_string()),
         }
+    }
+}
+
+/// Files' contents (2.5's JSON facts and databases), read in the parser process.
+impl pctwin_special::content::ContentReader for Parser {
+    fn json(&self, bytes: &[u8]) -> Result<JsonFacts, ContentError> {
+        let request = Request::Json {
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::Json(facts)) => facts,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn sqlite(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+        time: Duration,
+    ) -> Result<DbFacts, ContentError> {
+        let log = log.unwrap_or_default();
+        let request = Request::DatabaseFacts {
+            size: db.len() as u64,
+            log: log.len() as u64,
+            millis: u64::try_from(time.as_millis()).unwrap_or(u64::MAX),
+        };
+        match self.ask_about(request, &[Source::Bytes(db), Source::Bytes(log)]) {
+            Ok(Answer::DatabaseFacts(facts)) => facts,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+}
+
+/// Several parser processes taking requests in turn, for readers that work on several threads
+/// at once (the app data plan reads folders in parallel).
+#[derive(Debug)]
+pub struct Pool {
+    parsers: Vec<Parser>,
+    next: std::sync::atomic::AtomicUsize,
+}
+
+impl Pool {
+    /// `n` (at least one) parser processes beside this program.
+    pub fn beside_this_program(n: usize) -> Self {
+        Self::of(
+            (0..n.max(1))
+                .map(|_| Parser::beside_this_program())
+                .collect(),
+        )
+    }
+
+    /// These parsers (at least one).
+    pub fn of(parsers: Vec<Parser>) -> Self {
+        assert!(!parsers.is_empty(), "a pool has a parser");
+        Self {
+            parsers,
+            next: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn one(&self) -> &Parser {
+        let i = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        &self.parsers[i % self.parsers.len()]
+    }
+}
+
+impl pctwin_special::content::ContentReader for Pool {
+    fn json(&self, bytes: &[u8]) -> Result<JsonFacts, ContentError> {
+        self.one().json(bytes)
+    }
+
+    fn sqlite(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+        time: Duration,
+    ) -> Result<DbFacts, ContentError> {
+        self.one().sqlite(db, log, time)
     }
 }

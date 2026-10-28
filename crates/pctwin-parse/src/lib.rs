@@ -22,5 +22,5 @@ pub mod lockdown;
 pub mod testing;
 pub mod wire;
 
-pub use client::{Limits, NotChecked, PARSER_PROGRAM, Parser};
+pub use client::{Limits, NotChecked, PARSER_PROGRAM, Parser, Pool, Source};
 pub use lockdown::{Confinement, Wall};

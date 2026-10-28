@@ -165,6 +165,7 @@ fn target() -> Target {
 
 #[test]
 fn a_component_lands_through_the_gate_journaled_and_verified() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let (cap, work) = captured(&t);
     let new = t.path().join("new");
@@ -212,6 +213,7 @@ fn a_component_lands_through_the_gate_journaled_and_verified() {
 
 #[test]
 fn an_existing_profile_is_never_written_over() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-016: the person already uses the app on the new laptop.
     let t = temp();
     let (cap, work) = captured(&t);
@@ -289,6 +291,7 @@ fn an_existing_profile_is_never_written_over() {
 
 #[test]
 fn landing_checks_its_grant() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let (cap, work) = captured(&t);
     let new = t.path().join("new");
@@ -356,6 +359,7 @@ fn landing_checks_its_grant() {
 
 #[test]
 fn a_stop_ends_the_landing_with_an_honest_record() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-007: revoked or cancelled while importing: no new work; what is there is recorded.
     let t = temp();
     let (cap, work) = captured(&t);
@@ -400,6 +404,7 @@ fn a_stop_ends_the_landing_with_an_honest_record() {
 
 #[test]
 fn after_a_crash_the_record_is_finished_by_looking() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-056: the intent is on disk, the files may or may not be there.
     let t = temp();
     let (cap, work) = captured(&t);
@@ -493,6 +498,7 @@ impl OwnerOnly for AppOwnerOnly {
 
 #[test]
 fn a_chosen_secret_lands_owner_only() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = t.path().join("old");
     ssh_folder(&home.join(".ssh"));
@@ -618,3 +624,8 @@ fn a_chosen_secret_lands_owner_only() {
         );
     }
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

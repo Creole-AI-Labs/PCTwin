@@ -348,6 +348,7 @@ fn one_prompt_for_the_sealed_plan_the_exact_bytes_staged_and_reinstalled_only_wh
 /// the step on its to-do list, and undo still lists it as installed by PCTwin.
 #[test]
 fn an_installed_app_that_needs_a_sign_in_or_its_licence_says_so_and_is_not_a_bare_reinstalled() {
+    pctwin_parse::testing::install_readers();
     let good = || FakeWinget {
         manifest: manifest(CODE, Some(sha(INSTALLER))),
         bytes: INSTALLER.to_vec(),
@@ -382,6 +383,7 @@ fn an_installed_app_that_needs_a_sign_in_or_its_licence_says_so_and_is_not_a_bar
 
 #[test]
 fn a_declined_prompt_installs_nothing_and_says_so() {
+    pctwin_parse::testing::install_readers();
     let r = run(
         FakeWinget {
             manifest: manifest(CODE, None),
@@ -405,6 +407,7 @@ fn a_declined_prompt_installs_nothing_and_says_so() {
 
 #[test]
 fn another_app_or_swapped_bytes_never_reach_the_helper() {
+    pctwin_parse::testing::install_readers();
     // A manifest for a different product.
     let other = run(
         FakeWinget {
@@ -441,6 +444,7 @@ fn another_app_or_swapped_bytes_never_reach_the_helper() {
 
 #[test]
 fn an_installer_that_slips_in_another_program_is_not_reinstalled() {
+    pctwin_parse::testing::install_readers();
     let r = run(
         FakeWinget {
             manifest: manifest(CODE, None),
@@ -463,6 +467,7 @@ fn an_installer_that_slips_in_another_program_is_not_reinstalled() {
 
 #[test]
 fn winget_is_searched_by_the_product_code_for_the_plan() {
+    pctwin_parse::testing::install_readers();
     let w = FakeWinget {
         manifest: String::new(),
         bytes: vec![],

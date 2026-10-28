@@ -97,6 +97,7 @@ fn accounted(home: &std::path::Path, f: &FolderReport) {
 
 #[test]
 fn with_no_catalogue_rows_everything_is_classified_by_its_content() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let roaming = home.join("AppData/Roaming");
@@ -253,6 +254,7 @@ fn with_no_catalogue_rows_everything_is_classified_by_its_content() {
 
 #[test]
 fn a_model_with_a_missing_part_is_never_complete() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-048: one blob the manifest lists is not there; a split model lacks one part.
     let t = temp();
     let home = home_of(&t);
@@ -303,6 +305,7 @@ fn a_model_with_a_missing_part_is_never_complete() {
 
 #[test]
 fn names_never_decide_bytes_do() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // Files named like the examples but holding something else are what their bytes say.
     let t = temp();
     let home = home_of(&t);
@@ -332,6 +335,7 @@ fn names_never_decide_bytes_do() {
 
 #[test]
 fn a_new_app_works_by_adding_one_catalogue_row() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let d = home.join("AppData/Roaming/Synthetic Journal");
@@ -404,6 +408,7 @@ fn a_new_app_works_by_adding_one_catalogue_row() {
 
 #[test]
 fn an_encrypted_store_beside_a_key_bound_to_this_laptop_is_never_copied() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // A chat app's database encrypted with no SQLite header, its key wrapped by the system and
     // written in hex (`v10...`), and a session file by its own format mark. Invented bytes.
     let t = temp();
@@ -456,6 +461,7 @@ fn an_encrypted_store_beside_a_key_bound_to_this_laptop_is_never_copied() {
 
 #[test]
 fn a_token_buried_deep_in_a_large_file_is_never_copied_as_plain_data() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let d = home.join("AppData/Roaming/Deep");
@@ -488,3 +494,8 @@ fn a_token_buried_deep_in_a_large_file_is_never_copied_as_plain_data() {
     assert_eq!(holding(f, "small.conf").custody, Custody::Portable);
     assert_eq!(skipped(f, "output.txt"), Skip::Log);
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

@@ -10,15 +10,28 @@
 //!   process when it breaks a bound, stops or says anything out of turn, and starts a fresh one
 //!   for the next request.
 //!
-//! Designed, behind [`confine_self`], not yet switched on: each needs a system call PCTwin has
-//! not had approved (Security Design: the unsafe fence), so it is listed for the user's approval:
-//! - Windows: started in an AppContainer with no capabilities (no network, no access to the
-//!   person's files, low integrity), inside a job object that kills it with the app, allows it
-//!   no child process and caps its memory;
-//! - Linux: Landlock with no file rules (no file system at all) and a seccomp filter that
-//!   refuses sockets and starting programs, after `no_new_privs`;
-//! - macOS: a Seatbelt profile that denies everything but the two pipes (`sandbox_init`, which
-//!   Apple marks deprecated but still honours; Chromium relies on it the same way).
+//! Designed, behind [`confine_self`], switched off: each needs system calls the user has not
+//! approved yet (Security Design: the unsafe fence). Exactly what each would need:
+//! - **Windows, started by the app or the helper** (a new fenced function in
+//!   `pctwin-helper-os`, or the crates named): an AppContainer with no capabilities, so no
+//!   network, no access to the person's files, low integrity: `CreateAppContainerProfile`,
+//!   `DeriveAppContainerSidFromAppContainerName`, `InitializeProcThreadAttributeList`,
+//!   `UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES)`,
+//!   `CreateProcessW` with `EXTENDED_STARTUPINFO_PRESENT` (crate `rappct`, MIT, wraps these);
+//!   and a job object: `CreateJobObjectW`, `SetInformationJobObject`
+//!   (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` = 1,
+//!   `JOB_OBJECT_LIMIT_PROCESS_MEMORY`), `AssignProcessToJobObject` (crate `win32job`, MIT or
+//!   Apache-2.0). From the elevated helper, also a restricted token (`CreateRestrictedToken` with
+//!   the administrators group made deny-only), so the parser never runs with an administrator's
+//!   rights.
+//! - **Linux, in the parser itself at its start**: `prctl(PR_SET_NO_NEW_PRIVS)`, Landlock
+//!   (`landlock_create_ruleset`, `landlock_restrict_self` with every file access handled and no
+//!   rule: crate `landlock`, MIT or Apache-2.0), and a seccomp filter refusing `socket`,
+//!   `connect`, `execve` and `execveat` (crate `seccompiler`, Apache-2.0).
+//! - **macOS, in the parser itself at its start**: `sandbox_init` with a profile that denies
+//!   everything but reading and writing the two pipes it was started with (Apple marks it
+//!   deprecated but still honours it; Chromium relies on it the same way). One fenced function,
+//!   no new crate.
 
 use serde::{Deserialize, Serialize};
 

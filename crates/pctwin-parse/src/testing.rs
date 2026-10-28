@@ -117,3 +117,9 @@ pub fn answer_in_memory(request: crate::wire::Request, bytes: &[u8]) -> crate::w
     });
     crate::child::answer(request, &mut FromApp(&app), &mut ToApp(&app))
 }
+
+/// Installs the real parser process as this test program's reader of files' contents
+/// (`pctwin_special::content`), once.
+pub fn install_readers() {
+    pctwin_special::content::install_reader(parser());
+}

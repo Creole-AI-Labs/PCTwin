@@ -57,16 +57,28 @@ fn in_process(request: Request, f: &File) -> Answer {
         Request::Database { .. } => {
             Answer::Database(pctwin_readiness::checks::database_shape(seal, &mut r, size))
         }
+        Request::Json { .. } | Request::DatabaseFacts { .. } => {
+            let mut bytes = Vec::new();
+            std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
+            std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
+            pctwin_parse::testing::answer_in_memory(request, &bytes)
+        }
     }
 }
 
-fn every_request(size: u64) -> [Request; 5] {
+fn every_request(size: u64) -> [Request; 7] {
     [
         Request::Installer { size },
         Request::OldCopy { size },
         Request::Font { size },
         Request::Archive { size },
         Request::Database { size },
+        Request::Json { size },
+        Request::DatabaseFacts {
+            size,
+            log: 0,
+            millis: 5000,
+        },
     ]
 }
 
@@ -501,4 +513,137 @@ fn the_reader_traits_go_through_the_process() {
     let read = OwnReader::installer(&p, &exe, tiny_pe().len() as u64).unwrap();
     assert_eq!(read.format, Format::WindowsProgram);
     assert_eq!(read.own, pctwin_maker::OwnRead::None);
+}
+
+// ---- Files' contents (2.5): JSON facts and live databases, read in the parser process ----
+
+mod contents {
+    use super::*;
+    use pctwin_special::content::{ContentError, ContentReader, DbKind, InThisProcess};
+
+    const OWN: InThisProcess = InThisProcess::new(pctwin_parse_seal::in_child());
+
+    /// A live database: its log beside it holds changes not yet folded into the file (a table
+    /// made, rows added), as a running app leaves it.
+    fn live_db(dir: &tempfile::TempDir) -> (rusqlite::Connection, PathBuf) {
+        let p = dir.path().join("live.sqlite");
+        let c = rusqlite::Connection::open(&p).unwrap();
+        c.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE old(id INTEGER, path TEXT);
+             INSERT INTO old VALUES(1, 'C:\\Users\\a\\one.txt');",
+        )
+        .unwrap();
+        c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        c.execute_batch(
+            "CREATE TABLE logins(origin_url TEXT, password_value BLOB);
+             INSERT INTO old VALUES(2, 'C:\\Users\\a\\two.txt');",
+        )
+        .unwrap();
+        (c, p)
+    }
+
+    #[test]
+    fn a_live_databases_log_is_read_as_sqlite_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (c, p) = live_db(&dir);
+        let db = std::fs::read(&p).unwrap();
+        let log = std::fs::read(pctwin_special::content::wal_of(&p)).unwrap();
+        assert!(!log.is_empty(), "the changes are in the log");
+        let parser = real();
+        let t = Duration::from_secs(5);
+        let via = parser.sqlite(&db, Some(&log), t).unwrap();
+        assert_eq!(via, OWN.sqlite(&db, Some(&log), t).unwrap());
+        // The table made only in the log is seen: a store of saved passwords.
+        let names: Vec<&str> = via.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["logins", "old"]);
+        assert_eq!(via.kind, DbKind::Credentials);
+        // Without its log, only what was folded in.
+        let without = parser.sqlite(&db, None, t).unwrap();
+        assert_eq!(without.kind, DbKind::Ordinary);
+        assert_eq!(
+            without.paths.unwrap().0,
+            vec!["C:\\Users\\a\\one.txt".to_string()]
+        );
+        // An ordinary live store: its paths, including the one only in the log.
+        c.execute_batch("DROP TABLE logins;").unwrap();
+        let log = std::fs::read(pctwin_special::content::wal_of(&p)).unwrap();
+        let facts = parser.sqlite(&db, Some(&log), t).unwrap();
+        assert_eq!(facts.kind, DbKind::Ordinary);
+        let (paths, complete) = facts.paths.unwrap();
+        assert!(complete);
+        assert_eq!(paths.len(), 2, "{paths:?}");
+        drop(c);
+    }
+
+    #[test]
+    fn a_torn_or_foreign_log_is_left_out_never_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let (c, p) = live_db(&dir);
+        let db = std::fs::read(&p).unwrap();
+        let log = std::fs::read(pctwin_special::content::wal_of(&p)).unwrap();
+        let t = Duration::from_secs(5);
+        let parser = real();
+        // A byte changed in the first frame: its checksum fails, so nothing after it counts.
+        let mut torn = log.clone();
+        torn[32 + 24 + 10] ^= 0xff;
+        let facts = parser.sqlite(&db, Some(&torn), t).unwrap();
+        assert_eq!(facts, OWN.sqlite(&db, Some(&torn), t).unwrap());
+        assert_eq!(facts, parser.sqlite(&db, None, t).unwrap());
+        assert_ne!(facts.kind, DbKind::Credentials);
+        // Only the last frame torn: the transactions before it still count.
+        let mut tail = log.clone();
+        let n = tail.len();
+        tail[n - 10] ^= 0xff;
+        assert_eq!(
+            parser.sqlite(&db, Some(&tail), t).unwrap(),
+            OWN.sqlite(&db, Some(&tail), t).unwrap()
+        );
+        // A log of nonsense is no log.
+        let junk = vec![0x5a; 4096];
+        assert_eq!(
+            parser.sqlite(&db, Some(&junk), t).unwrap(),
+            parser.sqlite(&db, None, t).unwrap()
+        );
+        drop(c);
+    }
+
+    #[test]
+    fn json_facts_come_back_as_in_process() {
+        let parser = real();
+        let doc = br#"{"token": "abc", "file": "C:\\Users\\a\\b.txt", "command": "run.exe"}"#;
+        assert_eq!(parser.json(doc).unwrap(), OWN.json(doc).unwrap());
+        assert!(parser.json(b"{not json").is_err());
+    }
+
+    #[test]
+    fn a_parser_that_stops_leaves_a_database_not_checked() {
+        let parser = double().with_limits(quick());
+        for size in [1usize, 2] {
+            let e = parser.sqlite(&vec![0u8; size], None, Duration::from_secs(1));
+            assert!(matches!(e, Err(ContentError::Damaged(_))), "{e:?}");
+            let e = parser.json(&vec![b'{'; size]);
+            assert!(matches!(e, Err(ContentError::Damaged(_))), "{e:?}");
+        }
+    }
+
+    #[test]
+    fn the_app_data_plan_reads_databases_through_the_parser() {
+        // Installed once for this test program: every database this program's plans read goes
+        // through the real parser process.
+        pctwin_special::content::install_reader(pctwin_parse::testing::parser());
+        let dir = tempfile::tempdir().unwrap();
+        let (c, p) = live_db(&dir);
+        let until = std::time::Instant::now() + Duration::from_secs(8);
+        let (kind, _) = pctwin_special::content::sqlite_facts(&p, until).unwrap();
+        assert_eq!(kind, DbKind::Credentials);
+        // Nothing beside the live database was written by the reading.
+        let mut names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["live.sqlite", "live.sqlite-shm", "live.sqlite-wal"]);
+        drop(c);
+    }
 }

@@ -17,6 +17,7 @@ use std::io::{self, Read, Write};
 
 use pctwin_maker::{InstallerRead, OldCopy};
 use pctwin_readiness::checks::{FontNames, Shape};
+use pctwin_special::content::{ContentError, DbFacts, JsonFacts};
 use serde::{Deserialize, Serialize};
 
 /// The version of this protocol. A parser program speaking another is refused (a parser left
@@ -67,6 +68,11 @@ pub enum Request {
     Archive { size: u64 },
     /// Whether a SQLite database's header is sound.
     Database { size: u64 },
+    /// A JSON file's facts (2.5).
+    Json { size: u64 },
+    /// A database's tables, kind and linked paths (2.5): `size` bytes of the database, then
+    /// `log` bytes of its write-ahead log; the scan of linked paths stops after `millis`.
+    DatabaseFacts { size: u64, log: u64, millis: u64 },
 }
 
 impl Request {
@@ -76,7 +82,19 @@ impl Request {
             | Request::OldCopy { size }
             | Request::Font { size }
             | Request::Archive { size }
-            | Request::Database { size } => size,
+            | Request::Database { size }
+            | Request::Json { size } => size,
+            Request::DatabaseFacts { size, log, .. } => size.saturating_add(log),
+        }
+    }
+
+    /// Time the request itself asks for, on top of reading its bytes.
+    pub fn own_time(&self) -> std::time::Duration {
+        match *self {
+            Request::DatabaseFacts { millis, .. } => {
+                std::time::Duration::from_millis(millis.min(10 * 60 * 1000))
+            }
+            _ => std::time::Duration::ZERO,
         }
     }
 }
@@ -98,6 +116,8 @@ pub enum Answer {
     Font(FontNames),
     Archive(Shape),
     Database(Shape),
+    Json(Result<JsonFacts, ContentError>),
+    DatabaseFacts(Result<DbFacts, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -112,6 +132,8 @@ impl Answer {
                 | (Answer::Font(_), Request::Font { .. })
                 | (Answer::Archive(_), Request::Archive { .. })
                 | (Answer::Database(_), Request::Database { .. })
+                | (Answer::Json(_), Request::Json { .. })
+                | (Answer::DatabaseFacts(_), Request::DatabaseFacts { .. })
                 | (Answer::Failed(_), _)
         )
     }

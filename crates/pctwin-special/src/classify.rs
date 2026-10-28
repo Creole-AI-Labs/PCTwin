@@ -849,7 +849,7 @@ fn classify_within(
                 Err(OUT_OF_TIME.to_string())
             } else {
                 whole(&f.path, content::MAX_JSON as u64)
-                    .and_then(|bytes| content::json_facts(&bytes).map_err(|e| e.to_string()))
+                    .and_then(|bytes| content::json_facts_of(&bytes).map_err(|e| e.to_string()))
             };
             (f.rel.clone(), facts)
         })

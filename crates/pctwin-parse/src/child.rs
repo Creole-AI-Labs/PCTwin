@@ -131,7 +131,38 @@ pub fn answer<R: Read, W: Write>(request: Request, from_app: &mut R, to_app: &mu
         Request::Database { .. } => Answer::Database(pctwin_readiness::checks::database_shape(
             seal, &mut file, size,
         )),
+        Request::Json { size } => Answer::Json(
+            whole(&mut file, size, pctwin_special::content::MAX_JSON as u64)
+                .and_then(|b| pctwin_special::content::json_facts(seal, &b)),
+        ),
+        Request::DatabaseFacts { size, log, millis } => {
+            let until = std::time::Instant::now() + request.own_time();
+            let _ = millis;
+            Answer::DatabaseFacts(
+                whole(&mut file, size, pctwin_special::content::MAX_DB).and_then(|db| {
+                    let log = whole(&mut file, log, pctwin_special::content::MAX_LOG)?;
+                    let log = (!log.is_empty()).then_some(log);
+                    pctwin_special::content::db_facts(seal, &db, log.as_deref(), until)
+                }),
+            )
+        }
     }
+}
+
+/// The next `n` bytes of `file`, at most `max`.
+fn whole(
+    file: &mut impl Read,
+    n: u64,
+    max: u64,
+) -> Result<Vec<u8>, pctwin_special::content::ContentError> {
+    use pctwin_special::content::ContentError;
+    if n > max {
+        return Err(ContentError::TooLarge);
+    }
+    let mut out = vec![0u8; n as usize];
+    file.read_exact(&mut out)
+        .map_err(|e| ContentError::Damaged(e.to_string()))?;
+    Ok(out)
 }
 
 /// The parser process: hello, then one request at a time until the app closes the pipe. Returns

@@ -295,6 +295,7 @@ fn files_under(root: &Path) -> Vec<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_when_ticked() {
+    pctwin_parse::testing::install_readers();
     let t = tempfile::tempdir().unwrap();
     let old = t.path().join("old");
     let new = t.path().join("new");
@@ -671,6 +672,7 @@ async fn stream(source: &mut Source, sink: &mut Sink) {
 /// data then comes; told "go on without", it ends needs-action, never copied.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
+    pctwin_parse::testing::install_readers();
     // Gap 2: also with the app's folder already on the new laptop (`taken`): it lands beside it,
     // and the result says so with the folder's new name, never a bare "needs action".
     for (close_it, taken) in [(true, false), (false, false), (true, true)] {
@@ -795,6 +797,7 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
 /// folder a crash left behind is swept away at the next start.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn staged_app_data_never_outlives_the_move_that_brought_it() {
+    pctwin_parse::testing::install_readers();
     let t = tempfile::tempdir().unwrap();
     let old = t.path().join("old");
     firefox(&old);

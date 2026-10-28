@@ -48,6 +48,7 @@ fn plan_of(bytes: Option<&[u8]>) -> FullPlan {
 
 #[test]
 fn secret_values_never_cross_the_link_they_are_only_counted() {
+    pctwin_parse::testing::install_readers();
     let mut h = MemHive::default();
     h.put(
         r"Software\SimonTatham\PuTTY\Sessions\Home",
@@ -88,6 +89,7 @@ fn secret_values_never_cross_the_link_they_are_only_counted() {
 
 #[test]
 fn one_long_value_is_left_out_and_counted_and_every_other_setting_still_moves() {
+    pctwin_parse::testing::install_readers();
     let mut h = MemHive::default();
     h.put(
         r"Software\Vend\Editor",
@@ -115,6 +117,7 @@ fn one_long_value_is_left_out_and_counted_and_every_other_setting_still_moves() 
 
 #[test]
 fn extras_the_new_laptop_refuses_are_said_on_the_plan() {
+    pctwin_parse::testing::install_readers();
     let plan = plan_of(Some(b"{not the extras"));
     assert!(
         plan.changes().iter().any(|c| c.kind == Kind::Settings

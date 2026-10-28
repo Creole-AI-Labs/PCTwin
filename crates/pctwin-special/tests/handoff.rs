@@ -62,6 +62,7 @@ impl Person for Recorded {
 
 #[test]
 fn every_component_that_does_not_copy_gets_its_step() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     chromium_profile(&home.join("AppData/Local/Chromey/User Data"));
@@ -252,6 +253,7 @@ impl SystemChecks for NoChecks {
 
 #[test]
 fn an_export_tool_runs_only_when_it_is_the_makers_own() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let app = t.path().join("Program Files/Synthetic");
     put(&app.join("synthetic-export.exe"), &tiny_pe());
@@ -402,3 +404,8 @@ fn an_export_tool_runs_only_when_it_is_the_makers_own() {
         assert!(calls.is_empty());
     }
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

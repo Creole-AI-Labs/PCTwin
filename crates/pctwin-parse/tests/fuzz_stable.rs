@@ -217,12 +217,18 @@ fn every_reader_survives_mutated_files() {
     let mut rng = Rng(seed);
     let mut seeds = made_seeds();
     seeds.extend(real_seeds(40));
-    let kinds: [fn(u64) -> Request; 5] = [
+    let kinds: [fn(u64) -> Request; 7] = [
         |size| Request::Installer { size },
         |size| Request::OldCopy { size },
         |size| Request::Font { size },
         |size| Request::Archive { size },
         |size| Request::Database { size },
+        |size| Request::Json { size },
+        |size| Request::DatabaseFacts {
+            size,
+            log: 0,
+            millis: 2000,
+        },
     ];
     let mut runs = 0u64;
     let mut found = Vec::new();

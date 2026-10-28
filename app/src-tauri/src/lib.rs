@@ -42,6 +42,15 @@ mod restart;
 mod undo_books;
 mod updates;
 
+/// Other apps' data files (their JSON and databases) are read in parser processes too, one per
+/// folder read at once; each starts only when first asked.
+fn install_content_readers() {
+    static CONTENTS: std::sync::OnceLock<pctwin_parse::Pool> = std::sync::OnceLock::new();
+    pctwin_special::content::install_reader(CONTENTS.get_or_init(|| {
+        pctwin_parse::Pool::beside_this_program(pctwin_special::classify::PLAN_THREADS)
+    }));
+}
+
 /// PCTwin's locked-down parser process (adoption change 1), beside the app: the insides of
 /// untrusted files (installers' signatures, the old laptop's own copies) are read only there.
 pub(crate) fn parser() -> &'static pctwin_parse::Parser {
@@ -314,6 +323,7 @@ fn has_tray<R: Runtime>() -> bool {
 /// the screens more at run time: Tauri's `dynamic-acl` feature is off (Cargo.toml), and lockdown.rs
 /// refuses code that names a capability or the permission store.
 pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+    install_content_readers();
     builder
         .plugin(navigation_guard())
         .plugin(tauri_plugin_opener::init())

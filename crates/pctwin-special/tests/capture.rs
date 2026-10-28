@@ -124,6 +124,7 @@ fn rows(db: &Path) -> i64 {
 /// app keeps it open.
 #[test]
 fn a_live_database_is_captured_whole_through_sqlites_own_backup() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let dir = home.join("AppData/Roaming/Live App");
@@ -218,6 +219,7 @@ fn wal_len(db: &Path) -> u64 {
 /// T25-009: the source changed after approval: not the approved generation.
 #[test]
 fn a_source_changed_after_approval_is_not_captured() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let dir = home.join("AppData/Roaming/Journal");
@@ -266,6 +268,7 @@ fn a_source_changed_after_approval_is_not_captured() {
 /// `pctwin-grant` and `capture_secret`).
 #[test]
 fn every_capture_checks_its_grant() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     ssh_folder(&home.join(".ssh"));
@@ -440,6 +443,7 @@ fn every_capture_checks_its_grant() {
 
 #[test]
 fn bound_and_service_held_components_are_never_captured() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     chromium_profile(&home.join("AppData/Local/Chromey/User Data"));
@@ -508,6 +512,7 @@ fn bound_and_service_held_components_are_never_captured() {
 
 #[test]
 fn a_store_whose_app_may_be_open_is_kept_labelled_never_copied() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let d = home.join("AppData/Roaming/Store App/db");
@@ -569,6 +574,7 @@ fn a_store_whose_app_may_be_open_is_kept_labelled_never_copied() {
 
 #[test]
 fn files_named_by_their_hash_are_checked_and_a_mismatch_is_partial() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let hashes = model_library(&home.join(".runner"), false);
@@ -599,6 +605,7 @@ fn files_named_by_their_hash_are_checked_and_a_mismatch_is_partial() {
 
 #[test]
 fn stopping_keeps_nothing_partly_read_and_keeps_the_private_folder() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     game_saves(&home.join("Saved Games/G"));
@@ -654,6 +661,7 @@ impl Holders for WakesUp {
 
 #[test]
 fn a_file_that_keeps_changing_is_not_captured() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let file = home.join("AppData/Roaming/Busy/log.txt");
@@ -688,3 +696,8 @@ fn a_file_that_keeps_changing_is_not_captured() {
         "nothing partly read is kept"
     );
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

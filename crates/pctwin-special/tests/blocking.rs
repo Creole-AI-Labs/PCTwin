@@ -32,6 +32,7 @@ fn run(home: &Path) -> pctwin_special::api::Plan {
 #[cfg(windows)]
 #[test]
 fn a_placeholder_and_a_junction_are_reported_never_opened() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let app = home.join("AppData/Roaming/Cloudy");
@@ -110,6 +111,7 @@ fn a_placeholder_and_a_junction_are_reported_never_opened() {
 #[cfg(unix)]
 #[test]
 fn a_pipe_is_reported_never_opened() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let app = home.join("AppData/Roaming/Piped");
@@ -130,3 +132,8 @@ fn a_pipe_is_reported_never_opened() {
         .unwrap();
     assert_eq!((n.rel.as_str(), n.count), ("fifo", 1));
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());
