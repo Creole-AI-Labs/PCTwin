@@ -41,7 +41,6 @@ use sha2::Digest;
 
 use crate::classify::hash_name;
 use crate::component::{Component, ComponentId, Custody, Evidence, Preservation};
-use crate::content::wal_of;
 use crate::sniff::{self, Shape};
 
 /// One file's state, cheap to read: its size and when it last changed.
@@ -449,28 +448,33 @@ fn run(
     }
     let unconfirmed = holding == Holding::CannotTell;
     let shapes: Vec<Shape> = paths.iter().map(|p| shape_of(p)).collect();
-    let database = component
+    // Each database, with the log or journal SQLite keeps beside it by its own naming rule.
+    let dbs: Vec<String> = component
         .members
         .iter()
         .zip(&shapes)
-        .find(|(_, s)| **s == Shape::Sqlite)
-        .map(|(m, _)| m.clone());
-    let live = shapes.iter().any(Shape::is_live_store)
+        .filter(|(_, s)| **s == Shape::Sqlite)
+        .map(|(m, _)| m.clone())
+        .collect();
+    let companions = |db: &str| [format!("{db}-wal"), format!("{db}-journal")];
+    let folded: Vec<String> = component
+        .members
+        .iter()
+        .filter(|m| dbs.iter().any(|d| companions(d).contains(m)))
+        .cloned()
+        .collect();
+    let rest: Vec<String> = component
+        .members
+        .iter()
+        .filter(|m| !dbs.contains(m) && !folded.contains(m))
+        .cloned()
+        .collect();
+    let live = shapes
+        .iter()
+        .any(|s| s.is_live_store() && *s != Shape::Sqlite)
         || shapes
             .iter()
             .any(|s| matches!(s, Shape::OutlookData { .. }));
-    if let Some(db) = database {
-        return sqlite(
-            approved,
-            component,
-            base,
-            work,
-            &db,
-            gen_now,
-            unconfirmed,
-            stop,
-        );
-    }
     if live && unconfirmed {
         // Whether its app is closed cannot be told here: a labelled copy, never "copied".
         let (files, evidence) = steady_copy(base, work, &component.members, stop)?;
@@ -485,13 +489,34 @@ fn run(
             closed_unconfirmed: true,
         });
     }
-    let (files, evidence) = steady_copy(base, work, &component.members, stop)?;
+    let (mut files, mut evidence) = steady_copy(base, work, &rest, stop)?;
+    for db in &dbs {
+        let group: Vec<String> = std::iter::once(db.clone())
+            .chain(
+                companions(db)
+                    .into_iter()
+                    .filter(|c| component.members.contains(c)),
+            )
+            .collect();
+        match sqlite_one(base, work, db, &group, stop) {
+            Ok(f) => files.push(f),
+            Err(e) => {
+                remove_written(work, &files);
+                return Err(e);
+            }
+        }
+    }
     let partial = evidence
         .iter()
         .any(|e| matches!(e, Evidence::HashMismatch | Evidence::MissingPart { .. }));
+    evidence.dedup();
     Ok(Capture {
         component: component.id,
-        method: Method::SteadyCopy,
+        method: if dbs.is_empty() {
+            Method::SteadyCopy
+        } else {
+            Method::OnlineBackup
+        },
         preservation: if partial {
             Preservation::Partial
         } else {
@@ -499,7 +524,7 @@ fn run(
         },
         generation: gen_now,
         files,
-        folded: Vec::new(),
+        folded,
         evidence,
         closed_unconfirmed: unconfirmed,
     })
@@ -596,26 +621,54 @@ fn remove_written(work: &Path, files: &[CapturedFile]) {
     }
 }
 
-/// Copies `members` into `work` and checks none changed while read; tries again a few times.
+/// Copies each of `members` into `work`, checking each stayed the same while it was read (tried
+/// again a few times). A file that keeps changing is left out and named, so the capture is
+/// partial; when every file keeps changing, nothing is captured.
 fn steady_copy(
     base: &Path,
     work: &Path,
     members: &[String],
     stop: &Stop,
 ) -> Result<(Vec<CapturedFile>, Vec<Evidence>), CaptureError> {
-    for attempt in 0..TRIES {
-        let before = generation(base, members);
-        let got = copy_all(base, work, members, stop)?;
-        let after = generation(base, members);
-        if before == after && sizes_match(&before, &got.0) {
-            return Ok(got);
+    let mut files = Vec::new();
+    let mut evidence = Vec::new();
+    let mut changing = 0usize;
+    for m in members {
+        let one = std::slice::from_ref(m);
+        let mut done = false;
+        for attempt in 0..TRIES {
+            let before = generation(base, one);
+            let got = match copy_all(base, work, one, stop) {
+                Ok(g) => g,
+                Err(e) => {
+                    remove_written(work, &files);
+                    return Err(e);
+                }
+            };
+            let after = generation(base, one);
+            if before == after && sizes_match(&before, &got.0) {
+                files.extend(got.0);
+                evidence.extend(got.1);
+                done = true;
+                break;
+            }
+            remove_written(work, &got.0);
+            if attempt + 1 < TRIES {
+                std::thread::sleep(SETTLE);
+            }
         }
-        remove_written(work, &got.0);
-        if attempt + 1 < TRIES {
-            std::thread::sleep(SETTLE);
+        if !done {
+            changing += 1;
+            evidence.push(Evidence::MissingPart {
+                what: format!("{m} (it kept changing while it was read)"),
+            });
         }
     }
-    Err(CaptureError::KeptChanging)
+    if changing > 0 && changing == members.len() {
+        remove_written(work, &files);
+        return Err(CaptureError::KeptChanging);
+    }
+    Ok((files, evidence))
 }
 
 fn sizes_match(g: &Generation, files: &[CapturedFile]) -> bool {
@@ -624,25 +677,38 @@ fn sizes_match(g: &Generation, files: &[CapturedFile]) -> bool {
         .all(|f| g.files.iter().any(|s| s.rel == f.rel && s.len == f.len))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn sqlite(
-    approved: &Approved,
-    component: &Component,
+/// One database: a steady snapshot of it with its log or journal (`group`) in a private folder,
+/// then SQLite's online backup (which replays the log) into one complete database in `work`,
+/// which must pass SQLite's own `quick_check`.
+fn sqlite_one(
     base: &Path,
     work: &Path,
     db: &str,
-    generation: Generation,
-    unconfirmed: bool,
+    group: &[String],
     stop: &Stop,
-) -> Result<Capture, CaptureError> {
-    let _ = approved;
-    // 1. A steady snapshot of the database with its log or journal, in a private folder.
+) -> Result<CapturedFile, CaptureError> {
     let snap = tempfile::tempdir().map_err(|e| CaptureError::Unreadable(e.kind().to_string()))?;
-    steady_copy(base, snap.path(), &component.members, stop)?;
+    // The database and its log must be steady together.
+    let mut steady = false;
+    for attempt in 0..TRIES {
+        let before = generation(base, group);
+        let (got, _) = copy_all(base, snap.path(), group, stop)?;
+        let after = generation(base, group);
+        if before == after && sizes_match(&before, &got) {
+            steady = true;
+            break;
+        }
+        remove_written(snap.path(), &got);
+        if attempt + 1 < TRIES {
+            std::thread::sleep(SETTLE);
+        }
+    }
+    if !steady {
+        return Err(CaptureError::KeptChanging);
+    }
     if stop.stopped() {
         return Err(CaptureError::Stopped);
     }
-    // 2. SQLite's online backup from the snapshot (which replays the log) into one database.
     let src = joined(snap.path(), db);
     let out = joined(work, db);
     if let Some(parent) = out.parent() {
@@ -659,7 +725,6 @@ fn sqlite(
         )
         .map_err(not_consistent)?;
     }
-    // 3. SQLite's own check of the result.
     {
         // Opened immutable: the check itself leaves nothing beside the result.
         let check = rusqlite::Connection::open_with_flags(
@@ -676,42 +741,9 @@ fn sqlite(
         }
     }
     let bytes = std::fs::read(&out).map_err(|e| CaptureError::Unreadable(e.kind().to_string()))?;
-    // The log and journal are folded into the database by the backup (SQLite's own naming rule
-    // ties them to it); anything else in the group comes from the same steady snapshot.
-    let (folded, others): (Vec<String>, Vec<String>) = component
-        .members
-        .iter()
-        .filter(|m| m.as_str() != db)
-        .cloned()
-        .partition(|m| {
-            let p = joined(base, m);
-            p == wal_of(&joined(base, db)) || *m == format!("{db}-journal")
-        });
-    let mut files = vec![CapturedFile {
+    Ok(CapturedFile {
         rel: db.to_string(),
         len: bytes.len() as u64,
         hash: *blake3::hash(&bytes).as_bytes(),
-    }];
-    let mut evidence = Vec::new();
-    if !others.is_empty() {
-        let (more, ev) = match copy_all(snap.path(), work, &others, stop) {
-            Ok(x) => x,
-            Err(e) => {
-                let _ = std::fs::remove_file(&out);
-                return Err(e);
-            }
-        };
-        files.extend(more);
-        evidence.extend(ev);
-    }
-    Ok(Capture {
-        component: component.id,
-        method: Method::OnlineBackup,
-        preservation: Preservation::Captured,
-        generation,
-        files,
-        folded,
-        evidence,
-        closed_unconfirmed: unconfirmed,
     })
 }

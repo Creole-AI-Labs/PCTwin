@@ -41,11 +41,11 @@ use crate::sniff::{self, Shape};
 /// The deepest a folder is walked.
 pub const MAX_DEPTH: usize = 24;
 /// The most files read in one app data folder; past it, the rest is reported, not read.
-pub const MAX_FILES: usize = 100_000;
-/// The largest text file read for credential-shaped values.
-const MAX_TEXT: u64 = 1024 * 1024;
+pub const MAX_FILES: usize = 20_000;
 /// The most time one app data folder's walk may take; the rest is "not fully checked".
-pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(120);
+pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(60);
+/// How many app folders are classified at once.
+pub const PLAN_THREADS: usize = 4;
 /// How much of a GGUF file's start is read for its split facts.
 const GGUF_HEADER: u64 = 4 * 1024 * 1024;
 
@@ -76,6 +76,8 @@ pub enum Skip {
     /// A browser add-on (a folder with a WebExtension manifest): code, installed again from its
     /// store through 2.1, never copied.
     AddOn,
+    /// A log the app writes again (text whose lines start with dates or times).
+    Log,
     /// Kept online by a cloud app (or offline): opening it would download it, so it is never
     /// opened here.
     OnlineOnly,
@@ -93,6 +95,7 @@ impl Skip {
             Skip::Program => "a program or add-on: apps are installed again, never copied",
             Skip::Link => "a link to somewhere else: links are not followed",
             Skip::AddOn => "a browser add-on: it is installed again from its store, never copied",
+            Skip::Log => "a log the app writes again: not moved",
             Skip::NotRead => {
                 "found, not fully checked: too deep, too many files, or out of time here"
             }
@@ -140,6 +143,8 @@ struct Found {
     shape: Shape,
     /// For bytes of no known format: whether they look encrypted (near-random).
     random: bool,
+    /// For text: whether it is a log by its shape.
+    log: bool,
 }
 
 /// Whether bytes look encrypted: near-random (Shannon entropy at least 7.5 bits per byte) over
@@ -198,6 +203,8 @@ fn whole(path: &Path, max: u64) -> Result<Vec<u8>, String> {
 const NO_ANSWER: &str = "it did not answer in time: not fully checked";
 /// Why a file was not looked into.
 const OUT_OF_TIME: &str = "not fully checked: the time for this folder ran out";
+/// A JSON file too large to read as one: it is scanned for credentials as a stream instead.
+const TOO_LARGE: &str = "too large to read as one";
 
 /// Runs `f` on `path` within [`guard::READ_LIMIT`].
 fn within<T: Send + 'static>(
@@ -334,12 +341,14 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
             Ok((head, tail)) => {
                 let shape = sniff::shape(&head, &tail, len);
                 let random = shape == Shape::Binary && near_random(&head);
+                let log = shape == Shape::Text && log_shaped(&head);
                 w.files.push(Found {
                     rel: child,
                     path,
                     len,
                     shape,
                     random,
+                    log,
                 })
             }
             Err(why) => w.unreadable.push((child, why)),
@@ -364,26 +373,118 @@ fn parent(rel: &str) -> &str {
     rel.rsplit_once('/').map_or("", |(p, _)| p)
 }
 
-/// Whether a text file's values look like credentials (`key=value`, `key: value`, or a whole
-/// line).
-fn text_has_credentials(path: &Path, len: u64) -> bool {
-    if len > MAX_TEXT {
+/// Whether a file holds a credential-shaped word (a token, a key), read streaming in bounded
+/// memory from start to end, whatever its size, with the same rules as every setting
+/// (`looks_secret`). `Some(true)`: one was found; `Some(false)`: the whole file was read and none
+/// was; `None`: it could not be read through by `until` (it is then "not fully checked").
+fn stream_has_credentials(path: &Path, until: std::time::Instant) -> Option<bool> {
+    // The scan keeps to its own time, before the reader's limit.
+    let until = until
+        .min(std::time::Instant::now() + guard::READ_LIMIT - std::time::Duration::from_secs(2));
+    within(path, move |p| scan_words(p, until)).flatten()
+}
+
+/// Splits a file into words (between spaces, quotes, `=`, `:`, commas and brackets) and asks of
+/// each long one whether it is a credential. A word longer than [`MAX_WORD`] is judged by its
+/// first [`MAX_WORD`] bytes.
+fn scan_words(p: &Path, until: std::time::Instant) -> Option<bool> {
+    let mut f = guard::open(p).ok()?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut word: Vec<u8> = Vec::with_capacity(256);
+    let check = |w: &[u8]| -> bool {
+        if w.starts_with(b"-----BEGIN") {
+            return true;
+        }
+        w.len() >= 16
+            && std::str::from_utf8(w)
+                .is_ok_and(|t| pctwin_settings::classify::looks_secret(t).is_some())
+    };
+    loop {
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        for &c in &buf[..n] {
+            let split = c.is_ascii_whitespace()
+                || matches!(
+                    c,
+                    b'"' | b'\''
+                        | b'='
+                        | b':'
+                        | b','
+                        | b';'
+                        | b'['
+                        | b']'
+                        | b'{'
+                        | b'}'
+                        | b'('
+                        | b')'
+                        | b'<'
+                        | b'>'
+                        | b'`'
+                );
+            if split {
+                if check(&word) {
+                    return Some(true);
+                }
+                word.clear();
+            } else if word.len() < MAX_WORD {
+                word.push(c);
+            }
+        }
+    }
+    Some(check(&word))
+}
+
+/// The longest word judged whole.
+const MAX_WORD: usize = 4096;
+
+/// Whether text is a log by its shape: most of its first lines start with a date or a time
+/// (`2026-10-28`, `2026/10/28`, `12:00:01`, perhaps after a `[`), the way logs are written by
+/// every kind of app. Never by the file's name.
+pub fn log_shaped(head: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(head);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(20)
+        .collect();
+    // The last line of the head may be cut short: it does not count.
+    let lines = &lines[..lines.len().saturating_sub(1)];
+    if lines.len() < 3 {
         return false;
     }
-    let Ok(bytes) = whole(path, MAX_TEXT) else {
-        return false;
-    };
-    let Ok(text) = String::from_utf8(bytes) else {
-        return false;
-    };
-    text.lines().any(|l| {
-        let v = l
-            .split_once('=')
-            .or_else(|| l.split_once(':'))
-            .map_or(l, |(_, v)| v)
-            .trim()
-            .trim_matches(['"', '\'']);
-        pctwin_settings::classify::looks_secret(v).is_some()
+    let stamped = lines.iter().filter(|l| starts_with_time(l)).count();
+    stamped * 5 >= lines.len() * 4
+}
+
+fn starts_with_time(line: &str) -> bool {
+    let b: Vec<u8> = line.bytes().take(40).collect();
+    let digit = |i: usize| b.get(i).is_some_and(u8::is_ascii_digit);
+    let at = |i: usize, c: &[u8]| b.get(i).is_some_and(|x| c.contains(x));
+    (0..b.len().min(24)).any(|i| {
+        // A date: four digits, a separator, two digits, the same separator, two digits.
+        let date = (0..4).all(|k| digit(i + k))
+            && at(i + 4, b"-/.")
+            && digit(i + 5)
+            && digit(i + 6)
+            && b.get(i + 7) == b.get(i + 4)
+            && digit(i + 8)
+            && digit(i + 9);
+        // A time: two digits, a colon, two digits, a colon, two digits.
+        let time = digit(i)
+            && digit(i + 1)
+            && at(i + 2, b":")
+            && digit(i + 3)
+            && digit(i + 4)
+            && at(i + 5, b":")
+            && digit(i + 6)
+            && digit(i + 7);
+        (i == 0 || !b[i - 1].is_ascii_digit()) && (date || time)
     })
 }
 
@@ -461,15 +562,6 @@ fn comparable(p: &str) -> String {
     if cfg!(windows) { p.to_lowercase() } else { p }
 }
 
-/// What the full local `paths` a component's data names say about what it needs: files inside
-/// its own folder move with it; files elsewhere that exist are offered for the person to add
-/// (never added silently); files that are not on this laptop are a missing part, and files on a
-/// drive that is not connected now are said to be there. A text shaped like a path whose first
-/// folder this laptop does not have (`/api/v1`) is not taken for a path.
-fn link_evidence(base: &Path, paths: &[String]) -> Vec<Evidence> {
-    link_evidence_within(base, paths, LINK_ASK, LINK_TIME)
-}
-
 /// How long one question about a linked path may take (a disconnected network drive can take
 /// far longer than that to say no).
 const LINK_ASK: std::time::Duration = std::time::Duration::from_secs(2);
@@ -483,7 +575,11 @@ fn ask_there(p: &Path, ask: std::time::Duration) -> Option<bool> {
     guard::bounded(ask, move || std::fs::symlink_metadata(&p).is_ok())
 }
 
-/// [`link_evidence`] with its limits given. Each drive or top folder is asked about once; a
+/// What the full local `paths` a component's data names say about what it needs: files inside
+/// its own folder move with it; files elsewhere that exist are offered for the person to add
+/// (never added silently); files that are not on this laptop are a missing part, and files on a
+/// drive that is not connected now are said to be there. A text shaped like a path whose first
+/// folder this laptop does not have (`/api/v1`) is not taken for a path. Each drive or top folder is asked about once; a
 /// question with no answer in `ask` counts its drive as not connected from then on; past `total`
 /// the rest are counted "not checked".
 fn link_evidence_within(
@@ -651,6 +747,7 @@ fn classify_within(
                     len: m.len(),
                     shape: sniff::shape(&h, &t, m.len()),
                     random: false,
+                    log: false,
                 });
             } else {
                 w.unreadable
@@ -670,15 +767,8 @@ fn classify_within(
     let mut sessions = false;
     // A key bound to this laptop sits here (a protected blob, or a value wrapped by the system):
     // near-random files of no known format beside it are taken to be encrypted under it.
-    let bound_key_here = w.files.iter().any(|f| f.shape == Shape::DpapiBlob)
-        || w.files.iter().any(|f| {
-            f.shape == Shape::Json
-                && f.len as usize <= content::MAX_JSON
-                && whole(&f.path, content::MAX_JSON as u64)
-                    .ok()
-                    .and_then(|b| content::json_facts(&b).ok())
-                    .is_some_and(|j| j.machine_bound_key)
-        });
+    // (The JSON half is decided once the JSON files are read, below: each is read once.)
+    let protected_blob_here = w.files.iter().any(|f| f.shape == Shape::DpapiBlob);
 
     for (rel, why) in std::mem::take(&mut w.unreadable) {
         b.push(
@@ -754,7 +844,7 @@ fn classify_within(
         .filter(|f| f.shape == Shape::Json && !used.contains(&f.rel))
         .map(|f| {
             let facts = if f.len as usize > content::MAX_JSON {
-                Err("too large to read".to_string())
+                Err(TOO_LARGE.to_string())
             } else if late() {
                 Err(OUT_OF_TIME.to_string())
             } else {
@@ -764,6 +854,20 @@ fn classify_within(
             (f.rel.clone(), facts)
         })
         .collect();
+
+    let bound_key_here = protected_blob_here
+        || json
+            .values()
+            .any(|j| j.as_ref().is_ok_and(|j| j.machine_bound_key));
+    // The linked paths of one component, checked within what is left of the folder's time.
+    let links = |paths: &[String]| {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        link_evidence_within(&base, paths, LINK_ASK, LINK_TIME.min(left))
+    };
+
+    // Files not looked into before the folder's time ran out: one unresolved component, never
+    // copied, never one line each.
+    let mut unchecked: Vec<String> = Vec::new();
 
     // SQLite databases with their log or journal, and what kind of store each is.
     let mut key_dbs: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -786,31 +890,32 @@ fn classify_within(
         if members.len() > 1 {
             ev.push(Evidence::SqliteCompanion);
         }
-        let kind = if late() {
+        // One opening: its kind, and for ordinary data the paths it links to. SQLite stops its own
+        // scan before the reader's limit or the folder's time.
+        let until = deadline
+            .min(std::time::Instant::now() + guard::READ_LIMIT - std::time::Duration::from_secs(2));
+        let facts = if late() {
             Err(content::ContentError::Damaged(OUT_OF_TIME.into()))
         } else {
-            within(&f.path, |p| {
-                content::sqlite_tables(p).map(|t| content::db_kind(&t))
-            })
-            .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
+            within(&f.path, move |p| content::sqlite_facts(p, until))
+                .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
+        };
+        let (kind, db_paths) = match facts {
+            Ok((k, paths)) => (Ok(k), paths),
+            Err(e) => (Err(e), None),
         };
         match kind {
             Ok(DbKind::Ordinary) => {
-                // SQLite stops its own scan before the reader's limit or the folder's time.
-                let until = deadline.min(
-                    std::time::Instant::now() + guard::READ_LIMIT
-                        - std::time::Duration::from_secs(2),
-                );
-                match within(&f.path, move |p| content::sqlite_paths(p, until)) {
-                    Some(Ok((paths, complete))) => {
-                        ev.extend(link_evidence(&base, &paths));
+                match db_paths {
+                    Some((paths, complete)) => {
+                        ev.extend(links(&paths));
                         if !complete {
                             ev.push(Evidence::MissingPart {
                                 what: "the files it links to were not all checked in time".into(),
                             });
                         }
                     }
-                    _ => ev.push(Evidence::MissingPart {
+                    None => ev.push(Evidence::MissingPart {
                         what: "the files it links to could not be checked".into(),
                     }),
                 }
@@ -831,6 +936,9 @@ fn classify_within(
             Ok(DbKind::MachineEncrypted) => {
                 ev.push(Evidence::MachineBoundProtection);
                 b.push(members, Custody::MachineBound, false, ev);
+            }
+            Err(content::ContentError::Damaged(m)) if m == OUT_OF_TIME => {
+                unchecked.extend(members);
             }
             Err(e) => {
                 ev.push(Evidence::Unreadable { why: e.to_string() });
@@ -1084,13 +1192,33 @@ fn classify_within(
                     vec![Evidence::StructuredData, Evidence::EnablesCommands],
                 ),
                 Some(Ok(j)) => {
-                    let links = link_evidence(&base, &j.paths);
+                    let links = links(&j.paths);
                     if links.is_empty() {
                         plain.push(f.rel.clone())
                     } else {
                         let mut ev = vec![Evidence::StructuredData];
                         ev.extend(links);
                         b.push(one, Custody::Portable, false, ev)
+                    }
+                }
+                Some(Err(why)) if why == OUT_OF_TIME => unchecked.push(f.rel.clone()),
+                Some(Err(why)) if why == TOO_LARGE => {
+                    match if late() {
+                        None
+                    } else {
+                        stream_has_credentials(&f.path, deadline)
+                    } {
+                        Some(true) => {
+                            sessions = true;
+                            b.push(
+                                one,
+                                Custody::MachineBound,
+                                false,
+                                vec![Evidence::CredentialValues],
+                            )
+                        }
+                        Some(false) => plain.push(f.rel.clone()),
+                        None => unchecked.push(f.rel.clone()),
                     }
                 }
                 Some(Err(why)) => b.push(
@@ -1101,14 +1229,32 @@ fn classify_within(
                 ),
                 None => plain.push(f.rel.clone()),
             },
-            Shape::Ini | Shape::Text if text_has_credentials(&f.path, f.len) => {
-                sessions = true;
-                b.push(
-                    one,
-                    Custody::MachineBound,
-                    false,
-                    vec![Evidence::CredentialValues],
-                )
+            // Not looked into in time: it may hold sign-ins, so it is never simply copied.
+            Shape::Text if f.log => not_moved.push(NotMoved {
+                rel: f.rel.clone(),
+                why: Skip::Log,
+            }),
+            // Read through for credentials, whatever its size; what cannot be read through in
+            // time is never copied unchecked.
+            Shape::Ini | Shape::Text => {
+                let found = if late() {
+                    None
+                } else {
+                    stream_has_credentials(&f.path, deadline)
+                };
+                match found {
+                    Some(true) => {
+                        sessions = true;
+                        b.push(
+                            one,
+                            Custody::MachineBound,
+                            false,
+                            vec![Evidence::CredentialValues],
+                        )
+                    }
+                    Some(false) => plain.push(f.rel.clone()),
+                    None => unchecked.push(f.rel.clone()),
+                }
             }
             Shape::SessionData => {
                 sessions = true;
@@ -1136,6 +1282,16 @@ fn classify_within(
             vec![Evidence::NoSpecialShape],
         );
     }
+    if !unchecked.is_empty() {
+        b.push(
+            unchecked,
+            Custody::Unresolved,
+            false,
+            vec![Evidence::Unreadable {
+                why: OUT_OF_TIME.into(),
+            }],
+        );
+    }
     if sessions {
         b.push(
             Vec::new(),
@@ -1144,6 +1300,7 @@ fn classify_within(
             vec![Evidence::ServiceAccount],
         );
     }
+    b.components = merge(std::mem::take(&mut b.components));
     if let Some(row) = row {
         let what = row.name.clone().unwrap_or_else(|| row.folder.clone());
         for c in &mut b.components {
@@ -1161,6 +1318,59 @@ fn classify_within(
     }
 }
 
+/// One app's data as the person sees it: its folder's components merged into one per class and
+/// step (copied; copied but needs a look; model files; a sign-in; set up again; the app's own
+/// export; not known), the files being each one's inventory. Each secret stays its own component,
+/// because each is chosen on its own.
+fn merge(components: Vec<Component>) -> Vec<Component> {
+    let needs_a_look = |c: &Component| {
+        c.evidence.iter().any(|e| {
+            matches!(
+                e,
+                Evidence::MissingPart { .. }
+                    | Evidence::LinksOutside { .. }
+                    | Evidence::EnablesCommands
+            )
+        })
+    };
+    let model = |c: &Component| c.evidence.contains(&Evidence::ModelData);
+    let mut out: Vec<Component> = Vec::new();
+    let mut at: BTreeMap<(u8, bool, bool, bool), usize> = BTreeMap::new();
+    for c in components {
+        if c.secret {
+            out.push(c);
+            continue;
+        }
+        let key = (
+            crate::catalogue::strictness(c.custody),
+            needs_a_look(&c),
+            model(&c),
+            c.preserve,
+        );
+        match at.get(&key) {
+            Some(&i) => {
+                let g = &mut out[i];
+                g.members.extend(c.members);
+                for e in c.evidence {
+                    if !g.evidence.contains(&e) {
+                        g.evidence.push(e);
+                    }
+                }
+            }
+            None => {
+                at.insert(key, out.len());
+                out.push(c);
+            }
+        }
+    }
+    for c in &mut out {
+        c.members.sort();
+        c.members.dedup();
+        c.id = crate::component::ComponentId::of(&c.owner, &c.place, &c.members);
+    }
+    out
+}
+
 /// Every folder classified, with the catalogue read through its only matching path: the folders a
 /// row knows, and those found with no row ("found, not yet supported"), both classified.
 pub fn classify_all(
@@ -1169,6 +1379,88 @@ pub fn classify_all(
     catalogue: &Catalogue<SpecialRow>,
 ) -> Vec<FolderReport> {
     classify_all_within(folders, system, catalogue, ROOT_TIME)
+}
+
+/// Every folder classified within one `deadline` for all of them, the most recently written
+/// first (by the folder's own last-write time), each also within [`FOLDER_TIME`]. A folder
+/// reached after `deadline` is not read: it is reported "not fully checked" as a whole.
+pub fn classify_newest_first(
+    folders: Vec<AppDataFolder>,
+    system: System,
+    catalogue: &Catalogue<SpecialRow>,
+    deadline: std::time::Instant,
+) -> Vec<FolderReport> {
+    let reading = catalogue.read(folders, |f, row| row.matches(system, f));
+    let mut all: Vec<(&AppDataFolder, Option<&SpecialRow>)> = reading
+        .known
+        .iter()
+        .map(|(f, r)| (f, Some(*r)))
+        .chain(reading.found_not_supported.iter().map(|f| (f, None)))
+        .collect();
+    let written = |f: &AppDataFolder| {
+        std::fs::symlink_metadata(f.path())
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+    };
+    let mut keyed: Vec<(std::time::SystemTime, usize)> = all
+        .iter()
+        .enumerate()
+        .map(|(i, (f, _))| (written(f), i))
+        .collect();
+    keyed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let order: Vec<usize> = keyed.into_iter().map(|(_, i)| i).collect();
+    // Several folders at once (each its own reader), results kept in newest-first order.
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .clamp(1, PLAN_THREADS);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<Option<FolderReport>>> =
+        order.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(&i) = order.get(k) else {
+                        break;
+                    };
+                    let (f, row) = all[i];
+                    let now = std::time::Instant::now();
+                    let report = if now >= deadline {
+                        FolderReport {
+                            folder: f.clone(),
+                            row: row.cloned(),
+                            components: Vec::new(),
+                            not_moved: vec![NotMoved {
+                                rel: String::new(),
+                                why: Skip::NotRead,
+                            }],
+                        }
+                    } else {
+                        classify_within(
+                            f,
+                            row,
+                            MAX_DEPTH,
+                            MAX_FILES,
+                            deadline.min(now + FOLDER_TIME),
+                        )
+                    };
+                    *slots[k]
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report);
+                }
+            });
+        }
+    });
+    let out: Vec<FolderReport> = slots
+        .into_iter()
+        .filter_map(|m| {
+            m.into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+        .collect();
+    all.clear();
+    out
 }
 
 /// The most time all the folders of one root kind may take together; folders past it are
@@ -1322,6 +1614,7 @@ mod tests {
             Skip::NotRead,
             Skip::OnlineOnly,
             Skip::NotAFile,
+            Skip::Log,
         ];
         let words: std::collections::BTreeSet<&str> = all.iter().map(Skip::words).collect();
         assert_eq!(words.len(), all.len());
@@ -1355,17 +1648,46 @@ mod tests {
     }
 
     #[test]
-    fn credentials_are_looked_for_through_the_whole_text_up_to_its_limit() {
+    fn credentials_are_looked_for_through_the_whole_file_whatever_its_size() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("settings.ini");
-        let mut text = "a=1\n".repeat(2000);
+        let far_off = || std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // A token buried past 256 KB, as a value and as a word in a line.
+        let mut text = "a=1\n".repeat(80_000);
         text.push_str("token=ghp_0123456789abcdefABCDEF0123456789abcd\n");
         std::fs::write(&p, &text).unwrap();
-        assert!(text_has_credentials(&p, text.len() as u64));
-        assert!(!text_has_credentials(&p, MAX_TEXT + 1));
-        assert!(text_has_credentials(&p, MAX_TEXT));
-        std::fs::write(&p, "a=1\nb: plain words\n").unwrap();
-        assert!(!text_has_credentials(&p, 20));
+        assert!(text.len() > 256 * 1024);
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        let mut words = "plain words here ".repeat(30_000);
+        words.push_str(
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl",
+        );
+        std::fs::write(&p, &words).unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        std::fs::write(&p, "-----BEGIN PRIVATE KEY-----\nAAAA\n").unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        // Plain text all the way through: none.
+        std::fs::write(&p, "a=1\nb: plain words\n".repeat(50_000)).unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(false));
+        // No time to read it through: not fully checked.
+        assert_eq!(stream_has_credentials(&p, std::time::Instant::now()), None);
+    }
+
+    #[test]
+    fn logs_are_told_by_their_lines_never_by_their_name() {
+        let log = b"2026-10-28 03:01:02 INFO started\n2026-10-28 03:01:03 WARN slow\n[2026/10/28 03:01:04] done\n12:00:01 tick\n12:00:02 tick\npartial line";
+        assert!(log_shaped(log));
+        assert!(!log_shaped(b"[General]\nname=x\nother=y\nmore=z\n"));
+        assert!(!log_shaped(b"2026-10-28 one\nplain\nplain\nplain\nplain\n"));
+        // Too few lines to tell.
+        assert!(!log_shaped(
+            b"2026-10-28 03:01:02 a\n2026-10-28 03:01:03 b\n"
+        ));
+        // A version number is not a date.
+        assert!(!log_shaped(b"v1.2.3 a\nv1.2.4 b\nv1.2.5 c\nv1.2.6 d\n"));
+        assert!(starts_with_time("2026.10.28 x"));
+        assert!(!starts_with_time("2026-10/28 x"));
+        assert!(!starts_with_time("123:45:67 x"));
     }
 
     #[test]
@@ -1594,6 +1916,39 @@ mod tests {
             .collect();
         not_read.sort();
         assert_eq!(not_read, vec!["a.txt", "sub"]);
+        // Files walked in time but not looked into before the time ran out gather into one
+        // unresolved component.
+        let dir2 = tempfile::tempdir().unwrap();
+        let many = dir2.path().join("Many");
+        std::fs::create_dir_all(&many).unwrap();
+        for n in 0..20 {
+            std::fs::write(many.join(format!("{n}.json")), br#"{"a":1}"#).unwrap();
+            std::fs::write(many.join(format!("{n}.ini")), b"a=1\n").unwrap();
+        }
+        let mut w = Walk {
+            files: Vec::new(),
+            web: Vec::new(),
+            not_moved: Vec::new(),
+            unreadable: Vec::new(),
+            max_depth: 10,
+            max_files: 100,
+            deadline: far(),
+        };
+        walk(&many, "", 0, &mut w);
+        assert_eq!(w.files.len(), 40);
+        let r = classify_within(
+            &folder_at(&many),
+            None,
+            10,
+            100,
+            std::time::Instant::now() + std::time::Duration::from_millis(1),
+        );
+        let unresolved: Vec<&Component> = r
+            .components
+            .iter()
+            .filter(|c| c.custody == Custody::Unresolved)
+            .collect();
+        assert!(unresolved.len() <= 1, "{}", unresolved.len());
         // A root's time spent: its later folders are not read either.
         let other = dir.path().join("Other");
         std::fs::create_dir_all(&other).unwrap();
@@ -1611,6 +1966,44 @@ mod tests {
                 r.not_moved
             );
             assert!(r.components.iter().all(|c| c.members.is_empty()));
+        }
+    }
+
+    #[test]
+    fn folders_are_taken_newest_first_and_none_past_the_deadline_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("Old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("a.txt"), b"x").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let new = dir.path().join("New");
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("b.txt"), b"x").unwrap();
+        let cat = Catalogue::shipped(crate::catalogue::SHIPPED);
+        let r = classify_newest_first(
+            vec![folder_at(&old), folder_at(&new)],
+            System::Windows,
+            &cat,
+            far(),
+        );
+        assert_eq!(r[0].folder.rel, "New");
+        assert_eq!(r[1].folder.rel, "Old");
+        assert!(r.iter().all(|f| !f.components.is_empty()));
+        let late = classify_newest_first(
+            vec![folder_at(&old), folder_at(&new)],
+            System::Windows,
+            &cat,
+            std::time::Instant::now(),
+        );
+        for f in late {
+            assert!(f.components.is_empty());
+            assert_eq!(
+                f.not_moved,
+                vec![NotMoved {
+                    rel: String::new(),
+                    why: Skip::NotRead
+                }]
+            );
         }
     }
 

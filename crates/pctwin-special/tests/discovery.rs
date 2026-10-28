@@ -271,11 +271,17 @@ fn a_model_with_a_missing_part_is_never_complete() {
         br#"{"weight_map":{"a":"model-00001-of-00002.safetensors","b":"model-00002-of-00002.safetensors"}}"#,
     );
     let r = discover(&home, &Catalogue::shipped(SHIPPED));
+    // Every missing part a component names (an app's model folders are one component).
     let missing = |c: &Component| {
-        c.evidence.iter().find_map(|e| match e {
-            Evidence::MissingPart { what } => Some(what.clone()),
-            _ => None,
-        })
+        let all: Vec<String> = c
+            .evidence
+            .iter()
+            .filter_map(|e| match e {
+                Evidence::MissingPart { what } => Some(what.clone()),
+                _ => None,
+            })
+            .collect();
+        (!all.is_empty()).then(|| all.join(" | "))
     };
     let lib = holding(
         folder(&r, ".modelrunner"),
@@ -283,12 +289,16 @@ fn a_model_with_a_missing_part_is_never_complete() {
     );
     assert!(missing(lib).unwrap().contains("1 file"));
     let split = holding(folder(&r, ".gguf-models"), "big/big-00001-of-00003.gguf");
-    assert_eq!(missing(split).unwrap(), "part 2 of 3");
+    assert!(missing(split).unwrap().contains("part 2 of 3"));
     let st = holding(
         folder(&r, ".gguf-models"),
         "st/model.safetensors.index.json",
     );
-    assert_eq!(missing(st).unwrap(), "model-00002-of-00002.safetensors");
+    assert!(
+        missing(st)
+            .unwrap()
+            .contains("model-00002-of-00002.safetensors")
+    );
 }
 
 #[test]
@@ -442,4 +452,39 @@ fn an_encrypted_store_beside_a_key_bound_to_this_laptop_is_never_copied() {
         holding(folder(&r, "Plain App"), "blob.bin").custody,
         Custody::Portable
     );
+}
+
+#[test]
+fn a_token_buried_deep_in_a_large_file_is_never_copied_as_plain_data() {
+    let t = temp();
+    let home = home_of(&t);
+    let d = home.join("AppData/Roaming/Deep");
+    let mut text = "name=value\n".repeat(40_000);
+    text.push_str("refresh=ghp_0123456789abcdefABCDEF0123456789abcd\n");
+    put(&d.join("big.conf"), text.as_bytes());
+    // JSON too large to read as one, with a token near its end.
+    let mut json = String::from("{\"items\":[");
+    for i in 0..300_000 {
+        json.push_str(&format!("{{\"n\":{i},\"v\":\"plain\"}},"));
+    }
+    json.push_str("{\"token\":\"ghp_0123456789abcdefABCDEF0123456789abcd\"}]}");
+    assert!(json.len() > 4 * 1024 * 1024);
+    put(&d.join("state.json"), json.as_bytes());
+    // A log, by its lines: not moved, whatever is in it.
+    let mut log = String::new();
+    for i in 0..1000 {
+        log.push_str(&format!(
+            "2026-10-28 03:{:02}:{:02} INFO step {i}\n",
+            (i / 60) % 60,
+            i % 60
+        ));
+    }
+    put(&d.join("output.txt"), log.as_bytes());
+    put(&d.join("small.conf"), b"theme=dark\n");
+    let r = discover(&home, &Catalogue::shipped(SHIPPED));
+    let f = folder(&r, "Deep");
+    assert_eq!(holding(f, "big.conf").custody, Custody::MachineBound);
+    assert_eq!(holding(f, "state.json").custody, Custody::MachineBound);
+    assert_eq!(holding(f, "small.conf").custody, Custody::Portable);
+    assert_eq!(skipped(f, "output.txt"), Skip::Log);
 }
