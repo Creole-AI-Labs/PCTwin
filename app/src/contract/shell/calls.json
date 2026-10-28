@@ -143,6 +143,12 @@
           [
             "music"
           ]
+        ],
+        [
+          "secrets",
+          [
+            2
+          ]
         ]
       ],
       "name": "move_approve"

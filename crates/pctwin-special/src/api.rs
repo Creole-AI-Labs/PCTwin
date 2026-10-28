@@ -38,7 +38,7 @@ use pctwin_types::ItemResult;
 
 use crate::capture::{self, Approved, Capture, CaptureError, Holders, Method, Stop};
 use crate::catalogue::SpecialRow;
-use crate::classify::{FolderReport, Placement, Skip, classify_all, placement};
+use crate::classify::{FolderReport, Placement, Skip, placement};
 use crate::component::{
     Access, Component, Custody, Evidence, Import, Outcome, Preservation, Readiness, Reversal,
     Transport,
@@ -72,9 +72,16 @@ pub struct Planned {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotMovedItem {
     pub app: String,
+    /// One of them, as an example (its path inside the app's folder).
     pub rel: String,
     pub why: String,
+    /// How many there are in this app's folder for this reason.
+    pub count: usize,
 }
+
+/// The most time [`plan`] takes in all, across every root; folders not reached are reported
+/// "not fully checked" (the least recently used ones, since folders are taken newest first).
+pub const PLAN_TIME: std::time::Duration = std::time::Duration::from_secs(270);
 
 /// One person's special-category plan.
 #[derive(Debug, Clone)]
@@ -107,9 +114,34 @@ pub fn plan(
     to: System,
     catalogue: &Catalogue<SpecialRow>,
 ) -> Plan {
+    plan_within(
+        owner,
+        home,
+        apps,
+        from,
+        to,
+        catalogue,
+        std::time::Instant::now() + PLAN_TIME,
+    )
+}
+
+/// [`plan`] finished by `deadline`, across every root: app folders are taken most recently
+/// written first (by the folder's own last-write time), each within its own time
+/// ([`crate::classify::FOLDER_TIME`]) and never past `deadline`; a folder reached after it is
+/// reported "not fully checked" without being read.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_within(
+    owner: &Owner,
+    home: &Path,
+    apps: &[FoundApp],
+    from: System,
+    to: System,
+    catalogue: &Catalogue<SpecialRow>,
+    deadline: std::time::Instant,
+) -> Plan {
     let roots = roots_of(from, home, &|v| std::env::var_os(v).map(PathBuf::from));
     let (folders, coverage) = find_folders(owner, home, &roots, apps);
-    let reports = classify_all(folders, from, catalogue);
+    let reports = crate::classify::classify_newest_first(folders, from, catalogue, deadline);
     let selection = Selection::default_for(&reports);
     let mut components = Vec::new();
     let mut not_moved = Vec::new();
@@ -128,12 +160,21 @@ pub fn plan(
                 root: r.folder.root,
             });
         }
+        // One line per reason in this app's folder, with how many.
+        let mut by_why: std::collections::BTreeMap<&'static str, (String, usize)> =
+            std::collections::BTreeMap::new();
         for n in &r.not_moved {
-            // (Each folder's own entries; the roots' skipped folders follow below.)
+            let e = by_why
+                .entry(n.why.words())
+                .or_insert_with(|| (n.rel.clone(), 0));
+            e.1 += 1;
+        }
+        for (why, (rel, count)) in by_why {
             not_moved.push(NotMovedItem {
                 app: app.clone(),
-                rel: n.rel.clone(),
-                why: n.why.words().to_string(),
+                rel,
+                why: why.to_string(),
+                count,
             });
         }
     }
@@ -142,6 +183,7 @@ pub fn plan(
             app: String::new(),
             rel: path.to_string_lossy().into_owned(),
             why: why.clone(),
+            count: 1,
         });
     }
     Plan {

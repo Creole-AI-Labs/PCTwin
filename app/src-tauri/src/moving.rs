@@ -218,6 +218,9 @@ struct Run {
     )>,
     /// The new laptop: the folders the person left out when they approved.
     left_out: std::collections::BTreeSet<FolderRole>,
+    /// The new laptop: the secret lines of app data the person ticked, one by one, when they
+    /// approved (none unless ticked).
+    secrets: Vec<u32>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
     /// when they chose it, with the folder as the system showed it.
     chosen: BTreeMap<FolderRole, (pctwin_gate::Destination, String)>,
@@ -274,6 +277,7 @@ impl Moving {
             live: live.clone(),
             scan_stop: scan_stop.clone(),
             waiting: None,
+            secrets: Vec::new(),
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
             placing: None,
@@ -325,7 +329,13 @@ impl Moving {
 
     /// The person's answer to the plan on screen: only for exactly that revision, and leaving
     /// out only folders that plan shows.
-    fn answer(&self, key: &PlanKey, yes: bool, left_out: &[FolderRole]) -> Result<(), MoveProblem> {
+    fn answer(
+        &self,
+        key: &PlanKey,
+        yes: bool,
+        left_out: &[FolderRole],
+        secrets: &[u32],
+    ) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.waiting.take() {
             Some((shown, groups, tx)) if shown == *key => {
                 if left_out.iter().any(|r| !groups.contains(r)) {
@@ -333,6 +343,7 @@ impl Moving {
                     return Err(MoveProblem::PlanChanged);
                 }
                 run.left_out = left_out.iter().copied().collect();
+                run.secrets = secrets.to_vec();
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -380,6 +391,13 @@ impl Moving {
                 chosen.retain(|role, _| !r.left_out.contains(role));
                 chosen
             })
+            .unwrap_or_default()
+    }
+
+    fn secrets(&self) -> Vec<u32> {
+        lock(&self.run)
+            .as_ref()
+            .map(|r| r.secrets.clone())
             .unwrap_or_default()
     }
 
@@ -1461,6 +1479,10 @@ struct AppSteps<R: Runtime> {
     extras: Option<Vec<u8>>,
     /// The full move's plan, made once when the plan is first shown.
     full: Option<pctwin_fullmove::plan::FullPlan>,
+    /// Where the app data the person chose arrives (made at the approval).
+    sink: Option<pctwin_fullmove::data::Sink>,
+    /// The secret lines the person ticked.
+    picked: Vec<u32>,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -1716,6 +1738,24 @@ impl<R: Runtime> Steps for AppSteps<R> {
         let _ = self.app.emit(PLAN_EVENT, view);
         match answer.await {
             Ok(true) => {
+                // The app data to bring: what copies, and only the secrets the person ticked,
+                // one by one (a tick on anything but a secret line counts for nothing).
+                if let Some(full) = &self.full {
+                    self.picked = self
+                        .moving
+                        .secrets()
+                        .into_iter()
+                        .filter(|at| full.special.get(*at as usize).is_some_and(|s| s.secret))
+                        .collect();
+                    if self.sink.is_none()
+                        && let Some(dir) = crate::fullmove::data_staging(&self.app)
+                    {
+                        self.sink = Some(pctwin_fullmove::data::Sink::new(
+                            full.choice(&self.picked),
+                            dir,
+                        ));
+                    }
+                }
                 // The folders the person unticked: none of their files is sent or received.
                 self.rules.left_out = self.moving.left_out();
                 // The places the person chose: those folders land there, and nowhere else.
@@ -1757,6 +1797,12 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     fn extras(&mut self, bytes: Vec<u8>) {
         self.extras = Some(bytes);
+    }
+
+    fn data_in(&mut self) -> Option<&mut dyn pctwin_move::extras::DataIn> {
+        self.sink
+            .as_mut()
+            .map(|s| s as &mut dyn pctwin_move::extras::DataIn)
     }
 }
 
@@ -1988,7 +2034,9 @@ async fn run_old<R: Runtime>(
     if scan_stop.load(Ordering::Acquire) {
         return Err(Stop::Cancelled.into());
     }
-    let extras = crate::fullmove::extras_here(special);
+    let extras = crate::fullmove::extras_here(special.as_ref());
+    // The app data the new laptop chooses is captured from these (read only), after its approval.
+    let mut source = crate::fullmove::data_source(app, special.as_ref());
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,
@@ -2012,6 +2060,9 @@ async fn run_old<R: Runtime>(
         live,
         opener,
         &mut back,
+        source
+            .as_mut()
+            .map(|s| s as &mut dyn pctwin_move::extras::DataOut),
     )
     .await;
     // The helper's session ends with the move, whatever became of it.
@@ -2159,6 +2210,8 @@ async fn run_new<R: Runtime>(
         held_places: held_places.clone(),
         extras: None,
         full: None,
+        sink: None,
+        picked: Vec::new(),
     };
     // The pairing's keys, for the way back after a drop once the plan is approved.
     let mut redial =
@@ -2195,7 +2248,15 @@ async fn run_new<R: Runtime>(
     {
         let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
         // Counted on their own lines: the files' counts stay the files'.
-        outcome.rebuilt = Some(crate::fullmove::rebuild_here(app, &full, &journal, &me));
+        let data = steps.sink.take();
+        let picked = std::mem::take(&mut steps.picked);
+        outcome.rebuilt = Some(crate::fullmove::rebuild_here(
+            app,
+            &full,
+            &journal,
+            &me,
+            data.as_ref().map(|s| (s, picked)),
+        ));
     }
     Ok(Ran {
         outcome,
@@ -2395,8 +2456,10 @@ pub fn move_approve(
     plan: PlanKey,
     approve: bool,
     left_out: Vec<FolderRole>,
+    secrets: Option<Vec<u32>>,
 ) -> Result<(), MoveProblem> {
-    moving.answer(&plan, approve, &left_out)
+    let secrets = secrets.unwrap_or_default();
+    moving.answer(&plan, approve, &left_out, &secrets)
 }
 
 /// What came of choosing a place for a group of folders (M05).
@@ -3019,7 +3082,9 @@ mod tests {
         moving.choose(FolderRole::Videos, open()).unwrap();
         // Back to the usual folder.
         moving.choose(FolderRole::Videos, None).unwrap();
-        moving.answer(&key, true, &[FolderRole::Music]).unwrap();
+        moving
+            .answer(&key, true, &[FolderRole::Music], &[])
+            .unwrap();
         // Once approved, nothing more is chosen.
         assert_eq!(
             moving.choose(FolderRole::Videos, open()),
@@ -3048,21 +3113,23 @@ mod tests {
             fingerprint: "ab".into(),
         };
         assert_eq!(
-            moving.answer(&stale, true, &[]),
+            moving.answer(&stale, true, &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
         assert!(rx.try_recv().is_err(), "no answer yet");
         // Leaving out a folder the plan does not show is refused, and the plan still waits.
         assert_eq!(
-            moving.answer(&key, true, &[FolderRole::Music]),
+            moving.answer(&key, true, &[FolderRole::Music], &[]),
             Err(MoveProblem::PlanChanged)
         );
-        moving.answer(&key, true, &[FolderRole::Documents]).unwrap();
+        moving
+            .answer(&key, true, &[FolderRole::Documents], &[])
+            .unwrap();
         assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
         assert_eq!(
-            moving.answer(&key, true, &[]),
+            moving.answer(&key, true, &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
     }

@@ -100,6 +100,215 @@ pub async fn receive(ch: &mut impl Channel) -> Result<Vec<u8>, TransferError> {
     Ok(bytes)
 }
 
+/* ---------- The app data stream (after the approval) ---------- */
+
+/// The kind of the new laptop's choice of app data (which components, which secrets).
+const CHOICE: u8 = 47;
+/// The kind of the app data stream.
+const DATA: u8 = 48;
+const DATA_HEAD: u8 = 1;
+const DATA_CHUNK: u8 = 2;
+const DATA_END_FILE: u8 = 3;
+const DATA_DONE: u8 = 4;
+
+/// The longest header of one file in the stream.
+pub const MAX_DATA_HEADER: usize = 60 * 1024;
+/// The most bytes of app data one move carries.
+pub const MAX_DATA: u64 = 16 * 1024 * 1024 * 1024;
+/// The most files in the app data stream.
+pub const MAX_DATA_FILES: u64 = 2_000_000;
+
+/// The old laptop's side of the app data: given the new laptop's choice, it gives each file to
+/// send, one after another: a header (the reader's own words for what follows) and its bytes.
+pub trait DataOut {
+    /// The new laptop's choice, as it sent it (unread bytes from the other laptop).
+    fn chosen(&mut self, choice: Vec<u8>);
+    /// The next file: its header and a reader of its bytes (`None`: no more).
+    fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)>;
+}
+
+/// The new laptop's side: what it chose, and where each file's bytes go. A sink that cannot keep
+/// a file answers `Ok` and drops it itself (the stream stays in step); an `Err` ends the move.
+pub trait DataIn {
+    fn choice(&mut self) -> Vec<u8>;
+    fn begin(&mut self, header: &[u8]) -> Result<(), String>;
+    fn chunk(&mut self, bytes: &[u8]) -> Result<(), String>;
+    fn end(&mut self) -> Result<(), String>;
+}
+
+/// Nothing chosen, nothing kept: an old laptop with no app data sends none, and a new laptop that
+/// chose none drops whatever arrives.
+pub struct NoData;
+
+impl DataOut for NoData {
+    fn chosen(&mut self, _: Vec<u8>) {}
+    fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)> {
+        None
+    }
+}
+
+impl DataIn for NoData {
+    fn choice(&mut self) -> Vec<u8> {
+        Vec::new()
+    }
+    fn begin(&mut self, _: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+    fn chunk(&mut self, _: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+    fn end(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// The new laptop: sends its choice.
+pub async fn send_choice(ch: &mut impl Channel, choice: &[u8]) -> Result<(), TransferError> {
+    send_kind(ch, CHOICE, choice).await
+}
+
+/// The old laptop: the new laptop's choice.
+pub async fn receive_choice(ch: &mut impl Channel) -> Result<Vec<u8>, TransferError> {
+    receive_kind(ch, CHOICE).await
+}
+
+async fn send_kind(ch: &mut impl Channel, kind: u8, bytes: &[u8]) -> Result<(), TransferError> {
+    if bytes.len() > MAX_EXTRAS {
+        return Err(bad("too large to send"));
+    }
+    let pages = bytes.len().div_ceil(PAGE_BYTES);
+    let total = u32::try_from(bytes.len()).map_err(|_| bad("too large to send"))?;
+    let count = u32::try_from(pages).map_err(|_| bad("too large to send"))?;
+    let mut head = vec![kind, HEAD];
+    head.extend_from_slice(&total.to_be_bytes());
+    head.extend_from_slice(&count.to_be_bytes());
+    ch.send(&head)
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    for chunk in bytes.chunks(PAGE_BYTES) {
+        let mut msg = Vec::with_capacity(chunk.len() + 2);
+        msg.push(kind);
+        msg.push(PAGE);
+        msg.extend_from_slice(chunk);
+        ch.send(&msg)
+            .await
+            .map_err(|_| TransferError::ConnectionDropped)?;
+    }
+    Ok(())
+}
+
+async fn receive_kind(ch: &mut impl Channel, kind: u8) -> Result<Vec<u8>, TransferError> {
+    let first = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    if first.first() != Some(&kind) {
+        return Err(bad("expected another message"));
+    }
+    let mut as_extras = first.clone();
+    as_extras[0] = EXTRAS;
+    let (total, pages) = head(&as_extras)?;
+    let mut bytes = Vec::with_capacity(total.min(PAGE_BYTES * 4));
+    for n in 0..pages {
+        let msg = ch
+            .recv()
+            .await
+            .map_err(|_| TransferError::ConnectionDropped)?;
+        let [k, PAGE, body @ ..] = msg.as_slice() else {
+            return Err(bad("expected a page"));
+        };
+        if *k != kind {
+            return Err(bad("expected a page"));
+        }
+        let want = if n + 1 == pages {
+            total - PAGE_BYTES * (pages - 1)
+        } else {
+            PAGE_BYTES
+        };
+        if body.len() != want {
+            return Err(bad("a page of the wrong length"));
+        }
+        bytes.extend_from_slice(body);
+    }
+    Ok(bytes)
+}
+
+/// The old laptop: sends every file `out` gives, then the end. A file that cannot be read part
+/// way is ended short; the new laptop's own checks (size and hash) refuse it.
+pub async fn send_data(ch: &mut impl Channel, out: &mut dyn DataOut) -> Result<(), TransferError> {
+    let mut buf = vec![0u8; PAGE_BYTES];
+    while let Some((header, mut reader)) = out.next() {
+        if header.len() > MAX_DATA_HEADER {
+            return Err(bad("a header too large"));
+        }
+        let mut msg = vec![DATA, DATA_HEAD];
+        msg.extend_from_slice(&header);
+        ch.send(&msg)
+            .await
+            .map_err(|_| TransferError::ConnectionDropped)?;
+        loop {
+            let n = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            };
+            let mut msg = Vec::with_capacity(n + 2);
+            msg.push(DATA);
+            msg.push(DATA_CHUNK);
+            msg.extend_from_slice(&buf[..n]);
+            ch.send(&msg)
+                .await
+                .map_err(|_| TransferError::ConnectionDropped)?;
+        }
+        ch.send(&[DATA, DATA_END_FILE])
+            .await
+            .map_err(|_| TransferError::ConnectionDropped)?;
+    }
+    ch.send(&[DATA, DATA_DONE])
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)
+}
+
+/// The new laptop: receives the stream into `sink`, bounded ([`MAX_DATA`], [`MAX_DATA_FILES`]).
+pub async fn receive_data(
+    ch: &mut impl Channel,
+    sink: &mut dyn DataIn,
+) -> Result<(), TransferError> {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let mut open = false;
+    loop {
+        let msg = ch
+            .recv()
+            .await
+            .map_err(|_| TransferError::ConnectionDropped)?;
+        match msg.as_slice() {
+            [DATA, DATA_HEAD, header @ ..] if !open => {
+                files += 1;
+                if header.len() > MAX_DATA_HEADER || files > MAX_DATA_FILES {
+                    return Err(bad("app data past its limits"));
+                }
+                sink.begin(header).map_err(|e| bad(&e))?;
+                open = true;
+            }
+            [DATA, DATA_CHUNK, body @ ..] if open => {
+                bytes += body.len() as u64;
+                if bytes > MAX_DATA || body.len() > PAGE_BYTES {
+                    return Err(bad("app data past its limits"));
+                }
+                sink.chunk(body).map_err(|e| bad(&e))?;
+            }
+            [DATA, DATA_END_FILE] if open => {
+                sink.end().map_err(|e| bad(&e))?;
+                open = false;
+            }
+            [DATA, DATA_DONE] if !open => return Ok(()),
+            _ => return Err(bad("app data out of order")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +381,68 @@ mod tests {
         let mut p = Pipe::default();
         assert!(run(send(&mut p, &vec![0; MAX_EXTRAS + 1])).is_err());
         assert!(p.0.is_empty());
+    }
+
+    struct Out(Vec<(Vec<u8>, Vec<u8>)>, Option<Vec<u8>>);
+    impl DataOut for Out {
+        fn chosen(&mut self, choice: Vec<u8>) {
+            self.1 = Some(choice);
+        }
+        fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)> {
+            if self.0.is_empty() {
+                return None;
+            }
+            let (h, b) = self.0.remove(0);
+            Some((h, Box::new(std::io::Cursor::new(b))))
+        }
+    }
+
+    #[derive(Default)]
+    struct In(Vec<(Vec<u8>, Vec<u8>)>);
+    impl DataIn for In {
+        fn choice(&mut self) -> Vec<u8> {
+            b"pick".to_vec()
+        }
+        fn begin(&mut self, header: &[u8]) -> Result<(), String> {
+            self.0.push((header.to_vec(), Vec::new()));
+            Ok(())
+        }
+        fn chunk(&mut self, bytes: &[u8]) -> Result<(), String> {
+            self.0
+                .last_mut()
+                .ok_or("no file")?
+                .1
+                .extend_from_slice(bytes);
+            Ok(())
+        }
+        fn end(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn app_data_crosses_file_by_file_after_the_choice() {
+        let big: Vec<u8> = (0..(PAGE_BYTES * 2 + 5)).map(|n| (n % 7) as u8).collect();
+        let files = vec![(b"a".to_vec(), big), (b"b".to_vec(), Vec::new())];
+        let mut pipe = Pipe::default();
+        let mut sink = In::default();
+        run(send_choice(&mut pipe, &sink.choice())).unwrap();
+        let mut out = Out(files.clone(), None);
+        out.chosen(run(receive_choice(&mut pipe)).unwrap());
+        assert_eq!(out.1.as_deref(), Some(&b"pick"[..]));
+        run(send_data(&mut pipe, &mut out)).unwrap();
+        run(receive_data(&mut pipe, &mut sink)).unwrap();
+        assert_eq!(sink.0, files);
+    }
+
+    #[test]
+    fn app_data_out_of_order_is_refused() {
+        let mut p = Pipe(VecDeque::from([vec![DATA, DATA_CHUNK, 1]]));
+        assert!(run(receive_data(&mut p, &mut In::default())).is_err());
+        let mut p = Pipe(VecDeque::from([
+            vec![DATA, DATA_HEAD, 1],
+            vec![DATA, DATA_DONE],
+        ]));
+        assert!(run(receive_data(&mut p, &mut In::default())).is_err());
     }
 }

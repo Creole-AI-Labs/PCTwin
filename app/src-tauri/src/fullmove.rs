@@ -93,7 +93,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// The old laptop: the extras for the person `mover`, read only: their settings, their folders
 /// here, and their special categories as `special` found them (`None`: not in time).
-pub fn extras_here(special: Option<pctwin_fullmove::extras::SpecialFound>) -> Vec<u8> {
+pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -123,6 +123,8 @@ pub struct ChangeView {
     pub needs: Option<Reason>,
     pub special: Option<SpecialStep>,
     pub files: u64,
+    /// A secret the person may tick to bring: its line (none unless ticked).
+    pub secret: Option<u32>,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -274,6 +276,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             needs: c.needs,
             special: c.special,
             files: c.files,
+            secret: c.secret,
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -467,6 +470,7 @@ pub fn rebuild_here<R: Runtime>(
     plan: &FullPlan,
     journal: &Journal,
     me: &str,
+    data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
 ) -> RebuiltView {
     let state = app.state::<AppFullMove>();
     let (Ok(laptop), Ok(scope)) = (LaptopId::generate(), Scope::for_a_move()) else {
@@ -485,6 +489,14 @@ pub fn rebuild_here<R: Runtime>(
         permission: Permission::OwnFolders,
     };
     let ledger = Rebuild::new(journal, &state.keys.install, &state.keys.setting);
+    // The app data that arrived: landed now, in the person's home, through the gate and the
+    // imports journal; whatever did not arrive whole ends needs-action.
+    let data_done = match data {
+        Some((sink, picked)) => {
+            land_data(sink, picked, journal, &state.keys.capture, scope, &actor)
+        }
+        None => pctwin_fullmove::run::DataDone::default(),
+    };
     // Windows with winget: the real chain (winget as the person, then the administrator helper
     // once). Elsewhere: every app needs the person, and no administrator is asked for.
     let mut no_installer = NoInstaller {
@@ -535,6 +547,7 @@ pub fn rebuild_here<R: Runtime>(
     let done = match settings_here(plan) {
         Some(mut settings) => pctwin_fullmove::run::rebuild(
             plan,
+            &data_done,
             &mut *installer,
             &mut settings,
             &ledger,
@@ -556,6 +569,7 @@ pub fn rebuild_here<R: Runtime>(
             let mut none = NoSettings;
             let mut done = pctwin_fullmove::run::rebuild(
                 &empty,
+                &data_done,
                 &mut *installer,
                 &mut none,
                 &ledger,
@@ -624,7 +638,8 @@ pub fn rebuild_here<R: Runtime>(
         Some(RestorePoint::NotMade { .. }) if !installs_here() => RestoreWord::NotAsked,
         Some(RestorePoint::NotMade { .. }) => RestoreWord::NotMade,
     };
-    let can_undo = !done.undo.recipes.is_empty() || !done.undo.apps.is_empty();
+    let can_undo =
+        !done.undo.recipes.is_empty() || !done.undo.apps.is_empty() || !done.undo.landed.is_empty();
     *lock(&state.last) = Some(done.undo.clone());
     // Kept beside the journal too, so Undo still works after PCTwin restarts.
     if can_undo && let Some(path) = book_path(app) {
@@ -637,6 +652,105 @@ pub fn rebuild_here<R: Runtime>(
         stopped: done.stopped.is_some(),
         can_undo,
     }
+}
+
+/// Where secrets land owner-only: the system's own private folder.
+struct AppOwnerOnly;
+
+impl pctwin_special::land::OwnerOnly for AppOwnerOnly {
+    fn private_folder(&self, path: &std::path::Path) -> std::io::Result<()> {
+        #[cfg(windows)]
+        return pctwin_helper_os::private_folder(path)
+            .map_err(|e| std::io::Error::other(format!("{e:?}")));
+        #[cfg(unix)]
+        return pctwin_special::land::UnixOwnerOnly.private_folder(path);
+    }
+}
+
+/// The signed-in person's home folder here.
+fn home_here() -> Option<std::path::PathBuf> {
+    pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.home)
+}
+
+/// Lands the app data in `sink` (the secrets the person ticked: `picked`) and says how each
+/// component ended; the staging folder is removed afterwards.
+fn land_data(
+    sink: &pctwin_fullmove::data::Sink,
+    picked: Vec<u32>,
+    journal: &Journal,
+    key: &pctwin_grant::CaptureKey,
+    scope: Scope,
+    actor: &Actor,
+) -> pctwin_fullmove::run::DataDone {
+    let mut done = pctwin_fullmove::run::DataDone {
+        picked,
+        ..Default::default()
+    };
+    let Some(home_path) = home_here() else {
+        return done;
+    };
+    let Ok(home) = pctwin_gate::Destination::open(&home_path) else {
+        return done;
+    };
+    let names: std::collections::BTreeMap<String, String> = sink
+        .arrived
+        .iter()
+        .filter_map(|(id, a)| Some((id.clone(), a.record.as_ref()?.app.clone())))
+        .collect();
+    let landed = pctwin_fullmove::data::land_all(
+        sink,
+        &pctwin_fullmove::data::Landing {
+            journal,
+            key,
+            home: &home,
+            home_path: &home_path,
+            owner_only: &AppOwnerOnly,
+            scope,
+            actor: actor.clone(),
+        },
+        &names,
+    );
+    done.landed = landed.iter().map(|l| (l.id.clone(), l.result)).collect();
+    done.effects = landed
+        .iter()
+        .filter_map(|l| Some((l.app.clone(), l.effect?)))
+        .collect();
+    done.home = Some(home_path.display().to_string());
+    sink.remove_staging();
+    done
+}
+
+/// A new staging folder for app data, in PCTwin's own data folder.
+pub fn data_staging<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    let mut b = [0u8; 8];
+    getrandom::fill(&mut b).ok()?;
+    let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let dir = crate::moving::journal_path(app)?.with_file_name(format!("fullmove-data-{tag}"));
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// The old laptop's app data source for the move (`None`: nothing found in time).
+pub fn data_source<'a, R: Runtime>(
+    app: &'a AppHandle<R>,
+    found: Option<&pctwin_fullmove::extras::SpecialFound>,
+) -> Option<pctwin_fullmove::data::Source<'a>> {
+    let found = found?;
+    let state = app.try_state::<AppFullMove>()?;
+    let key: &'a pctwin_grant::CaptureKey = &state.inner().keys.capture;
+    let mut b = [0u8; 8];
+    getrandom::fill(&mut b).ok()?;
+    let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let work = std::env::temp_dir().join(format!("pctwin-capture-{tag}"));
+    Some(pctwin_fullmove::data::Source::new(
+        found.planned.clone(),
+        key,
+        &pctwin_special::capture::SystemHolders,
+        work,
+    ))
 }
 
 /// An adapter for a laptop with no settings mechanism: nothing is read or written.
@@ -890,8 +1004,13 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
                         },
                     );
                     let rebuild = Rebuild::new(&journal, &state.keys.install, &state.keys.setting);
+                    let home = book
+                        .home
+                        .as_deref()
+                        .and_then(|h| pctwin_gate::Destination::open(std::path::Path::new(h)).ok());
+                    let data = home.as_ref().map(|h| (&state.keys.capture, h));
                     let (lines, display) =
-                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter) {
+                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter, data) {
                             Ok(lines) => (
                                 lines.into_iter().map(undo_line).collect::<Vec<_>>(),
                                 DisplayState::Complete,
