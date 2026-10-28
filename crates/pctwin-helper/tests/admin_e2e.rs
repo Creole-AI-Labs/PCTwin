@@ -76,7 +76,32 @@ impl Adapters for TestMsi {
     fn install(&mut self, p: &VerifiedArtifact, a: &InstallVerifiedPackage, _: &Revoker) -> Effect {
         self.installs += 1;
         let mut command = pctwin_helper::broker::tool::msiexec_install(p, a.scope).unwrap();
-        match command.status().map(|s| s.code()) {
+        // Windows Installer's own log, shown when the install fails, so a failure says why.
+        let log = std::env::temp_dir().join(format!("pctwin-test-msi-{}.log", self.installs));
+        command.arg("/l*v").arg(&log);
+        let status = command.status();
+        if !matches!(status.as_ref().map(|s| s.code()), Ok(Some(0 | 3010))) {
+            if let Ok(bytes) = std::fs::read(&log) {
+                let text: String = char::decode_utf16(
+                    bytes
+                        .chunks_exact(2)
+                        .map(|c| u16::from_le_bytes([c[0], c[1]])),
+                )
+                .map(|c| c.unwrap_or('?'))
+                .collect();
+                let lines: Vec<&str> = text.lines().collect();
+                eprintln!(
+                    "Windows Installer log ({}):
+{}",
+                    p.path().display(),
+                    lines[lines.len().saturating_sub(80)..].join(
+                        "
+"
+                    )
+                );
+            }
+        }
+        match status.map(|s| s.code()) {
             Ok(Some(0)) => Effect::Done {
                 restart_needed: false,
             },

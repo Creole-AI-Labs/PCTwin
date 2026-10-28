@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
-
 use super::download::{Outcome, Request};
 
 /// The fetch program's file name.
@@ -48,7 +46,9 @@ pub struct Fetcher {
     home: PathBuf,
 }
 
+#[cfg(windows)]
 fn sha(path: &Path) -> std::io::Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 256 * 1024];
