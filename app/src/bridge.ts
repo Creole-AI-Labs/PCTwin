@@ -281,12 +281,17 @@ export type Peer = {
   mine: About;
   theirs: About;
   other: Label | null;
+  /** This laptop's own name, and the name the other laptop said it has (checked by the engine). */
+  mineName: Label | null;
+  theirsName: Label | null;
   versions: "same" | "update-here" | "update-there";
   link: { bytesPerSecond: number; slow: boolean } | null;
 };
 
 function parseAbout(value: unknown): About | null {
-  const f = exactly(value, ["system", "chip", "app", "power", "freeBytes"]);
+  // The name a laptop says it has travels in its greeting too; the screens read it, checked, from Peer.
+  const keys = typeof value === "object" && value !== null && "label" in value ? ["system", "chip", "app", "power", "freeBytes", "label"] : ["system", "chip", "app", "power", "freeBytes"];
+  const f = exactly(value, keys);
   if (!f || !oneOf(f.system, ["windows", "mac", "linux", "other"] as const) || typeof f.chip !== "string" || typeof f.app !== "string") return null;
   const kind = typeof f.power === "object" && f.power !== null ? (f.power as Fields).kind : undefined;
   let power: About["power"] | null = null;
@@ -300,19 +305,22 @@ function parseAbout(value: unknown): About | null {
 }
 
 export function parsePeer(value: unknown): Peer | null {
-  const f = exactly(value, ["mine", "theirs", "other", "versions", "link"]);
+  const f = exactly(value, ["mine", "theirs", "other", "mineName", "theirsName", "versions", "link"]);
   if (!f || !oneOf(f.versions, ["same", "update-here", "update-there"] as const)) return null;
   const mine = parseAbout(f.mine);
   const theirs = parseAbout(f.theirs);
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
+  const mineName = f.mineName === null ? null : parseLabelView(f.mineName);
+  const theirsName = f.theirsName === null ? null : parseLabelView(f.theirsName);
+  if ((f.mineName !== null && mineName === null) || (f.theirsName !== null && theirsName === null)) return null;
   let link: Peer["link"] = null;
   if (f.link !== null) {
     const l = exactly(f.link, ["bytesPerSecond", "slow"]);
     if (!l || !isCount(l.bytesPerSecond) || typeof l.slow !== "boolean") return null;
     link = { bytesPerSecond: l.bytesPerSecond, slow: l.slow };
   }
-  return mine && theirs && { mine, theirs, other, versions: f.versions, link };
+  return mine && theirs && { mine, theirs, other, mineName, theirsName, versions: f.versions, link };
 }
 
 export function parseFound(value: unknown): { bytes: number } | null {
@@ -1022,17 +1030,21 @@ export type HistoryEntryRaw = {
   kind: "move";
   when: string;
   other: Label | null;
+  /** The new laptop's name, when known. */
+  newName: Label | null;
   state: "finished" | "steps-left" | "stopped";
   stepsLeft: number;
 };
 
 export function parseHistoryEntry(value: unknown): HistoryEntryRaw | null {
-  const f = exactly(value, ["id", "kind", "when", "other", "state", "stepsLeft"]);
+  const f = exactly(value, ["id", "kind", "when", "other", "newName", "state", "stepsLeft"]);
   if (!f || typeof f.id !== "string" || typeof f.when !== "string" || !isCount(f.stepsLeft)) return null;
   if (!oneOf(f.kind, ["move"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped"] as const)) return null;
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
-  return { id: f.id, kind: f.kind, when: f.when, other, state: f.state, stepsLeft: f.stepsLeft };
+  const newName = f.newName === null ? null : parseLabelView(f.newName);
+  if (f.newName !== null && newName === null) return null;
+  return { id: f.id, kind: f.kind, when: f.when, other, newName, state: f.state, stepsLeft: f.stepsLeft };
 }
 
 /** What an entry kept: the move's report. */

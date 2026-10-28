@@ -468,6 +468,7 @@ fn peers() -> Vec<crate::moving::Peer> {
         app: app.into(),
         power,
         free_bytes,
+        label: None,
     };
     vec![
         Peer {
@@ -486,6 +487,10 @@ fn peers() -> Vec<crate::moving::Peer> {
                 Some(52_000_000_000),
             ),
             other: Some(picked()),
+            mine_name: Some(LabelView::Named {
+                name: "Ada's new laptop".into(),
+            }),
+            theirs_name: Some(picked()),
             versions: Versions::Same,
             link: Some(LinkView {
                 bytes_per_second: 62_000_000,
@@ -496,6 +501,8 @@ fn peers() -> Vec<crate::moving::Peer> {
             mine: about(System::Linux, "x86_64", "0.1.0", Power::Unknown, None),
             theirs: about(System::Other, "riscv64", "0.1.0", Power::Plugged, None),
             other: None,
+            mine_name: None,
+            theirs_name: None,
             versions: Versions::Same,
             link: Some(LinkView {
                 bytes_per_second: 1_200_000,
@@ -506,6 +513,8 @@ fn peers() -> Vec<crate::moving::Peer> {
             mine: about(System::Windows, "x86_64", "0.1.0", Power::Plugged, None),
             theirs: about(System::Mac, "aarch64", "0.2.0", Power::Plugged, None),
             other: None,
+            mine_name: None,
+            theirs_name: None,
             versions: Versions::UpdateHere,
             link: None,
         },
@@ -937,6 +946,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     kind: "move".into(),
                     when: "2026-10-22T00:00:00Z".into(),
                     other: Some(json(picked())),
+                    new_name: None,
                     state: "steps-left".into(),
                     steps_left: 2,
                 },
@@ -945,6 +955,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     kind: "move".into(),
                     when: "2026-10-22T00:05:00Z".into(),
                     other: None,
+                    new_name: None,
                     state: "finished".into(),
                     steps_left: 0,
                 },

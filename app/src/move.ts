@@ -198,7 +198,8 @@ export function groupState(c: Counts): GroupState {
 export type MoveProgress = {
   state: RunState;
   /** The old laptop's label as pairing showed it (the new laptop has none of its own); null when not known. */
-  laptops: { old: Label | null };
+  /** The two laptops by their names; `new` is filled by the screens from the greeting, when known. */
+  laptops: { old: Label | null; new?: Label | null };
   /** The groups of the plan, each with its own measured counts. */
   groups: MoveGroup[];
   counts: Counts;

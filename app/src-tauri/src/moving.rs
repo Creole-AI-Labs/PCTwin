@@ -112,11 +112,16 @@ fn saved(meter: &pctwin_transfer::MoveMeter) -> (u64, u64) {
 /// This laptop and the other one, as each said when the move started (C06), and the link the new
 /// laptop measured (C07).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Peer {
     pub mine: pctwin_move::greeting::About,
     pub theirs: pctwin_move::greeting::About,
     /// The other laptop's label as pairing showed it, when known.
     pub other: Option<LabelView>,
+    /// The name this laptop's person gave it, and the one the other laptop said it has (checked):
+    /// each screen shows both laptops by their names (first real test, 28 October 2026).
+    pub mine_name: Option<LabelView>,
+    pub theirs_name: Option<LabelView>,
     pub versions: Versions,
     /// `None`: not measured (or the versions differ).
     pub link: Option<LinkView>,
@@ -134,7 +139,43 @@ pub enum Versions {
 /// This laptop, as it tells the other one: its power, and the free space in the home folder.
 /// `version`: this build's own version (the app's, set by the release; never the engine crate's
 /// placeholder, which said 0.1.0 on every build: first real test, 28 October 2026).
-fn about_here(version: String) -> pctwin_move::greeting::About {
+/// The name this laptop's person gave it, as the greeting carries it.
+fn called(label: &pctwin_discovery::Label) -> pctwin_move::greeting::Called {
+    match label {
+        pctwin_discovery::Label::Picked { colour, animal } => {
+            pctwin_move::greeting::Called::Picked {
+                colour: *colour,
+                animal: *animal,
+            }
+        }
+        pctwin_discovery::Label::Named(name) => {
+            pctwin_move::greeting::Called::Named { name: name.clone() }
+        }
+    }
+}
+
+/// The other laptop's name from its greeting, checked as a name found on the network is: a
+/// colour or animal PCTwin does not know, or a typed name it would not show, is no name.
+fn name_heard(called: Option<&pctwin_move::greeting::Called>) -> Option<LabelView> {
+    let label = match called? {
+        pctwin_move::greeting::Called::Picked { colour, animal } => ((*colour as usize)
+            < pctwin_discovery::COLOURS.len()
+            && (*animal as usize) < pctwin_discovery::ANIMALS.len())
+        .then_some(pctwin_discovery::Label::Picked {
+            colour: *colour,
+            animal: *animal,
+        })?,
+        pctwin_move::greeting::Called::Named { name } => {
+            pctwin_discovery::Label::named(name).ok()?
+        }
+    };
+    Some(LabelView::from(&label))
+}
+
+fn about_here(
+    version: String,
+    label: Option<&pctwin_discovery::Label>,
+) -> pctwin_move::greeting::About {
     use pctwin_move::greeting::Power;
     let now = pctwin_power::power_now();
     let power = match (now.on_battery, now.percent) {
@@ -151,6 +192,7 @@ fn about_here(version: String) -> pctwin_move::greeting::About {
         .and_then(|home| home.available_bytes());
     let mut about = pctwin_move::greeting::About::here(power, free);
     about.app = version;
+    about.label = label.map(called);
     about
 }
 
@@ -163,11 +205,15 @@ async fn greet<'l, R: Runtime>(
     side: pctwin_move::greeting::Side,
     other: Option<LabelView>,
 ) -> Result<pctwin_move::greeting::Greeted<'l, pctwin_link::Link>, TransferError> {
-    let mine = about_here(app.package_info().version.to_string());
-    let peer = |theirs, versions, link| Peer {
+    let own = crate::laptop_name::kept(app);
+    let mine = about_here(app.package_info().version.to_string(), own.as_ref());
+    let mine_name = own.as_ref().map(LabelView::from);
+    let peer = |theirs: pctwin_move::greeting::About, versions, link| Peer {
         mine: mine.clone(),
+        theirs_name: name_heard(theirs.label.as_ref()),
         theirs,
         other: other.clone(),
+        mine_name: mine_name.clone(),
         versions,
         link,
     };
@@ -178,11 +224,21 @@ async fn greet<'l, R: Runtime>(
                 bytes_per_second: b,
                 slow: b < SLOW_LINK,
             });
-            let _ = app.emit(PEER_EVENT, peer(g.theirs.clone(), Versions::Same, measured));
+            let shown = peer(g.theirs.clone(), Versions::Same, measured);
+            let new_name = match side {
+                pctwin_move::greeting::Side::Old => shown.theirs_name.clone(),
+                pctwin_move::greeting::Side::New => shown.mine_name.clone(),
+            };
+            let _ = app
+                .state::<AppMoving>()
+                .with_run(|run| run.new_name = new_name);
+            let _ = app.emit(PEER_EVENT, shown);
             Ok(greeted)
         }
         Err(not) => {
-            if let (Some(theirs), TransferError::VersionGap(gap)) = (not.theirs, &not.error) {
+            if let (Some(theirs), TransferError::VersionGap(gap)) =
+                (not.theirs.map(|t| *t), &not.error)
+            {
                 let versions = match gap {
                     pctwin_transfer::VersionGap::ThisLaptopOlder => Versions::UpdateHere,
                     pctwin_transfer::VersionGap::OtherLaptopOlder => Versions::UpdateThere,
@@ -250,6 +306,9 @@ struct Run {
         std::collections::BTreeSet<FolderRole>,
         oneshot::Sender<Choice>,
     )>,
+    /// The new laptop's name for the history: its own here, the one it said in its greeting on
+    /// the old laptop.
+    new_name: Option<LabelView>,
     report: Vec<ReportItem>,
     finished: bool,
 }
@@ -401,6 +460,7 @@ impl Moving {
             placing: None,
             privacy: None,
             choosing: None,
+            new_name: None,
             report: Vec::new(),
             finished: false,
         });
@@ -2692,10 +2752,12 @@ fn spawn_run<R: Runtime>(
                     link_lost,
                 }) => {
                     let (state, left) = crate::history::move_state(&outcome);
+                    let new_name = moving.with_run(|run| run.new_name.clone()).ok().flatten();
                     crate::history::add(
                         &app,
                         "move",
                         label.as_ref(),
+                        new_name.as_ref(),
                         state,
                         left,
                         &crate::history::report_kept(&report),

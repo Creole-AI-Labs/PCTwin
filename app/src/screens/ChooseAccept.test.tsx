@@ -12,6 +12,7 @@ import { parseChoiceView, parsePlanView, type ChoiceView } from "../bridge";
 import { localization } from "../i18n";
 import { violations } from "../testing/a11y";
 import AcceptMove from "./AcceptMove";
+import { RouteStrip } from "./ProgressParts";
 import ChooseWhat, { choiceOf } from "./ChooseWhat";
 import { next } from "./MoveHost";
 
@@ -102,6 +103,14 @@ describe("names in sentences", () => {
       expect(words).toContain("Pink Swordfish");
       expect(words).not.toMatch(/[⁦-⁩]/);
     }
+  });
+});
+
+describe("both laptops by their names", () => {
+  it("the route strip names the old and the new laptop, as their people named them", () => {
+    inApp(<RouteStrip laptops={{ old: { kind: "named", name: "Amun" }, new: { kind: "named", name: "Ada's new laptop" } }} />);
+    expect(screen.getByText("Amun")).toBeTruthy();
+    expect(screen.getByText("Ada's new laptop")).toBeTruthy();
   });
 });
 

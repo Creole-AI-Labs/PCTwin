@@ -38,12 +38,13 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
   // The screen's words for each entry: the old laptop by its pairing label, when known.
   const shown: HistoryEntry[] = entries.map((e) => {
     const other = e.other ? labelShownSafely(l10n, e.other) : null;
+    const newName = e.newName ? labelShownSafely(l10n, e.newName) : null;
     return {
       id: e.id,
       kind: "move",
       when: e.when,
       from: other ?? l10n.getString("progress-route-old"),
-      to: l10n.getString("progress-route-new"),
+      to: newName ?? l10n.getString("progress-route-new"),
       state: e.state,
       stepsLeft: e.stepsLeft,
     };

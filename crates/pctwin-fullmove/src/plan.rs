@@ -658,7 +658,9 @@ mod tests {
                 .any(|c| c.title == Title::Key(LEFT_BY_PERSON) && c.needs.is_none())
         );
         assert!(
-            changes.iter().all(|c| c.title != Title::Key(SPECIAL_NOT_YET)),
+            changes
+                .iter()
+                .all(|c| c.title != Title::Key(SPECIAL_NOT_YET)),
             "never also 'PCTwin did not move this'"
         );
         let x = Extras::decode(&{

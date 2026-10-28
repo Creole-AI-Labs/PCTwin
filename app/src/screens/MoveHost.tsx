@@ -407,7 +407,9 @@ export default function MoveHost({
   const othersNote = othersWhy ? l10n.getString(`move-others-${othersWhy}`) : undefined;
   // The other laptop, as C09 names it: its label where pairing gave one (the old laptop's, so only
   // on the new laptop), else "the other laptop".
-  const otherLaptop = !old && peer?.other ? labelText(l10n, peer.other) : l10n.getString("qs-label-other");
+  // The other laptop by its own name: what it said in its greeting, else what pairing showed.
+  const otherName = peer?.theirsName ?? (!old ? peer?.other : null) ?? null;
+  const otherLaptop = otherName ? labelText(l10n, otherName) : l10n.getString("qs-label-other");
 
   switch (view.kind) {
     case "who":
@@ -584,7 +586,9 @@ export default function MoveHost({
         />
       );
     case "progress": {
-      const { progress } = view;
+      // Both laptops by their names on the route strip, from the greeting.
+      const named = peer ? { old: old ? (peer.mineName ?? view.progress.laptops.old) : (peer.theirsName ?? view.progress.laptops.old), new: old ? peer.theirsName : peer.mineName } : view.progress.laptops;
+      const progress = { ...view.progress, laptops: named };
       const stop = <StopMove open={stopping} onKeep={() => { setStopping(false); }} onStop={() => { setStopping(false); stopNow(); }} />;
       if (progress.notice?.kind === "drive-problem") {
         return (

@@ -13,6 +13,10 @@
       },
       "system": "mac"
     },
+    "mineName": {
+      "kind": "named",
+      "name": "Ada's new laptop"
+    },
     "other": {
       "animal": "ant",
       "colour": "blue",
@@ -27,6 +31,11 @@
         "percent": 34
       },
       "system": "windows"
+    },
+    "theirsName": {
+      "animal": "ant",
+      "colour": "blue",
+      "kind": "picked"
     },
     "versions": "same"
   },
@@ -44,6 +53,7 @@
       },
       "system": "linux"
     },
+    "mineName": null,
     "other": null,
     "theirs": {
       "app": "0.1.0",
@@ -54,6 +64,7 @@
       },
       "system": "other"
     },
+    "theirsName": null,
     "versions": "same"
   },
   {
@@ -67,6 +78,7 @@
       },
       "system": "windows"
     },
+    "mineName": null,
     "other": null,
     "theirs": {
       "app": "0.2.0",
@@ -77,6 +89,7 @@
       },
       "system": "mac"
     },
+    "theirsName": null,
     "versions": "update-here"
   }
 ]
