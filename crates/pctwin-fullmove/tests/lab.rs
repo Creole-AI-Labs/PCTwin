@@ -113,11 +113,15 @@ impl LabHive {
     }
 }
 
-#[cfg(windows)]
+/// A guard on every system (so the tests hold it the same way everywhere); only Windows' has a
+/// key to remove.
 impl Drop for LabHive {
     fn drop(&mut self) {
-        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
-        let _ = hkcu.delete_subkey_all(&self.path);
+        #[cfg(windows)]
+        {
+            let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+            let _ = hkcu.delete_subkey_all(&self.path);
+        }
     }
 }
 
