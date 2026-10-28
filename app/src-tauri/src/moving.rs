@@ -2413,7 +2413,14 @@ async fn run_old<R: Runtime>(
                 &me.home,
             )
         });
-    let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
+    // The same ID every time this laptop sends, so a second move from it carries on in the
+    // folders the first one made instead of making "(2)" copies (gap 3 of the audit).
+    let laptop = this_laptops_id(
+        journal_path(app)
+            .as_deref()
+            .and_then(std::path::Path::parent),
+    )
+    .map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
         let _ = app.emit(
             FOUND_EVENT,
@@ -2652,6 +2659,27 @@ pub(crate) fn this_laptops_places() -> Result<(Destinations, Vec<FolderLookup>),
     let mut table = Destinations::new();
     pctwin_transfer::approve_new_places(&mut table, &found).map_err(|_| MoveProblem::Failed)?;
     Ok((table, found))
+}
+
+/// This laptop's own ID as an old laptop: made once and kept in PCTwin's data folder (`dir`), so
+/// every move from this laptop names its things the same way. A kept ID that cannot be read is
+/// made again; one that cannot be kept is still used for this move.
+pub(crate) fn this_laptops_id(
+    dir: Option<&std::path::Path>,
+) -> Result<LaptopId, pctwin_record::RecordError> {
+    let file = dir.map(|d| d.join("laptop-id"));
+    if let Some(id) = file
+        .as_ref()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| LaptopId::from_hex(t.trim()).ok())
+    {
+        return Ok(id);
+    }
+    let id = LaptopId::generate()?;
+    if let (Some(dir), Some(file)) = (dir, &file) {
+        let _ = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(file, id.to_hex()));
+    }
+    Ok(id)
 }
 
 /// Where this laptop's journal of writes is kept (`None`: the app has no data folder).
@@ -3340,6 +3368,23 @@ mod tests {
         assert_eq!(
             rx.try_recv().unwrap().folders,
             [key(FolderRole::Documents, &[])]
+        );
+    }
+
+    /// The old laptop's ID is made once and kept: a second move from it names its things the
+    /// same way, so it carries on in the folders the first move made (gap 3 of the audit).
+    #[test]
+    fn this_laptop_keeps_one_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = this_laptops_id(Some(dir.path())).unwrap();
+        assert_eq!(this_laptops_id(Some(dir.path())).unwrap(), first);
+        std::fs::write(dir.path().join("laptop-id"), "not an id").unwrap();
+        let made_again = this_laptops_id(Some(dir.path())).unwrap();
+        assert_ne!(made_again, first, "an unreadable ID is made again");
+        assert_eq!(this_laptops_id(Some(dir.path())).unwrap(), made_again);
+        assert!(
+            this_laptops_id(None).is_ok(),
+            "with no data folder, one for this move"
         );
     }
 
