@@ -461,12 +461,6 @@ fn comparable(p: &str) -> String {
     if cfg!(windows) { p.to_lowercase() } else { p }
 }
 
-/// What the full local `paths` a component's data names say about what it needs: files inside
-/// its own folder move with it; files elsewhere that exist are offered for the person to add
-/// (never added silently); files that are not on this laptop are a missing part, and files on a
-/// drive that is not connected now are said to be there. A text shaped like a path whose first
-/// folder this laptop does not have (`/api/v1`) is not taken for a path.
-
 /// How long one question about a linked path may take (a disconnected network drive can take
 /// far longer than that to say no).
 const LINK_ASK: std::time::Duration = std::time::Duration::from_secs(2);
@@ -480,8 +474,11 @@ fn ask_there(p: &Path, ask: std::time::Duration) -> Option<bool> {
     guard::bounded(ask, move || std::fs::symlink_metadata(&p).is_ok())
 }
 
-/// What the full local `paths` a component's data names say about what it needs, with its
-/// limits given. Each drive or top folder is asked about once; a
+/// What the full local `paths` a component's data names say about what it needs: files inside
+/// its own folder move with it; files elsewhere that exist are offered for the person to add
+/// (never added silently); files that are not on this laptop are a missing part, and files on a
+/// drive that is not connected now are said to be there. A text shaped like a path whose first
+/// folder this laptop does not have (`/api/v1`) is not taken for a path. Each drive or top folder is asked about once; a
 /// question with no answer in `ask` counts its drive as not connected from then on; past `total`
 /// the rest are counted "not checked".
 fn link_evidence_within(
