@@ -25,7 +25,10 @@ export function subtree(view: ChoiceView, top: ChoiceFolder): ChoiceFolder[] {
 
 /** A folder's state from the ticks of everything in it: ticked, not, or some. */
 export function stateOf(view: ChoiceView, top: ChoiceFolder, ticked: ReadonlySet<string>): "on" | "off" | "mixed" {
-  const all = subtree(view, top);
+  // Only folders that hold files count: a folder with none of its own (Documents holding only
+  // Lab) is ticked when everything in it is (found in the two-copy test, 28 October 2026).
+  const withFiles = subtree(view, top).filter((f) => f.files > 0);
+  const all = withFiles.length > 0 ? withFiles : subtree(view, top);
   const on = all.filter((f) => ticked.has(keyOf(f))).length;
   return on === 0 ? "off" : on === all.length ? "on" : "mixed";
 }

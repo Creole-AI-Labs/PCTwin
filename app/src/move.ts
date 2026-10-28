@@ -299,6 +299,11 @@ const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
 export function formatBytes(bytes: number, locale: string): string {
   let n = Math.max(0, bytes);
   let u = 0;
+  // Under a kilobyte reads as a share of one ("0.3 kB", "0 kB"), never "0 byte".
+  if (n < 1000) {
+    n /= 1000;
+    u = 1;
+  }
   while (n >= 1000 && u < UNITS.length - 1) {
     n /= 1000;
     u++;

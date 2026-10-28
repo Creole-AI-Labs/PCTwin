@@ -70,6 +70,20 @@ describe("choosing what moves, on the old laptop", () => {
     expect(choiceOf(v, "except", all, true).folders).not.toContainEqual({ role: "documents", parts: ["Work"] });
   });
 
+  it("a folder with no files of its own is ticked when everything in it is (Documents holding only Lab)", () => {
+    const v: ChoiceView = {
+      groups: [],
+      folders: [
+        { role: "documents", parts: [], files: 0, bytes: 0 },
+        { role: "documents", parts: ["Lab"], files: 426, bytes: 1 },
+      ],
+      apps: 0,
+      leftBehind: [],
+    };
+    expect(stateOf(v, v.folders[0], new Set([keyOf(v.folders[1])]))).toBe("on");
+    expect(stateOf(v, v.folders[0], new Set())).toBe("off");
+  });
+
   it("a folder with some of its folders ticked is partly ticked, and ticking it ticks all of it", () => {
     const v = found();
     const docs = v.folders.find((f) => f.role === "documents" && f.parts.length === 0);
