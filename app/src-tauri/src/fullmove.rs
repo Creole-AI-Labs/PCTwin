@@ -276,7 +276,15 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             files: c.files,
         })
         .collect();
-    let (changes, more) = bounded(changes);
+    // Each kind is bounded on its own, so many settings never hide an app or a step to take.
+    let mut more = 0;
+    let mut kept = Vec::new();
+    for kind in [Kind::App, Kind::Settings, Kind::Special] {
+        let (lines, cut) = bounded(changes.iter().filter(|c| c.kind == kind).cloned().collect());
+        kept.extend(lines);
+        more += cut;
+    }
+    let changes = kept;
     let asks = installs_here() && plan.changes_anything();
     RebuildPlanView {
         changes,

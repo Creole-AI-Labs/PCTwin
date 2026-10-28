@@ -289,23 +289,31 @@ pub fn special_here(
         pctwin_special::catalogue::SHIPPED,
     );
     let plan = pctwin_special::api::plan(owner, home, apps, system, system, &cat);
-    let mut lines: Vec<SpecialLine> = plan
-        .components
-        .iter()
-        .filter(|p| text_ok(&p.app))
-        .map(|p| SpecialLine {
-            name: p.app.clone(),
-            step: match p.component.custody {
-                Custody::Portable => SpecialStep::NotYet,
-                Custody::ServiceHeld => SpecialStep::SignIn,
-                Custody::MachineBound => SpecialStep::Relink,
-                Custody::NeedsExport => SpecialStep::ExportFirst,
-                Custody::Unresolved => SpecialStep::LookAtIt,
-            },
-            files: p.component.members.len() as u64,
-            secret: p.component.secret,
-        })
-        .collect();
+    // One line per app and step (an app's many components with the same step are one line, with
+    // their files counted), in the order found.
+    let mut lines: Vec<SpecialLine> = Vec::new();
+    for p in plan.components.iter().filter(|p| text_ok(&p.app)) {
+        let step = match p.component.custody {
+            Custody::Portable => SpecialStep::NotYet,
+            Custody::ServiceHeld => SpecialStep::SignIn,
+            Custody::MachineBound => SpecialStep::Relink,
+            Custody::NeedsExport => SpecialStep::ExportFirst,
+            Custody::Unresolved => SpecialStep::LookAtIt,
+        };
+        let files = p.component.members.len() as u64;
+        match lines.iter_mut().find(|l| l.name == p.app && l.step == step) {
+            Some(l) => {
+                l.files += files;
+                l.secret |= p.component.secret;
+            }
+            None => lines.push(SpecialLine {
+                name: p.app.clone(),
+                step,
+                files,
+                secret: p.component.secret,
+            }),
+        }
+    }
     lines.truncate(MAX_SPECIAL);
     // What 2.5 could not fully check (out of time, no answer, unreadable) is said, never dropped.
     let not_checked = plan
