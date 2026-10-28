@@ -723,3 +723,57 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
         }
     }
 }
+
+/// Sixth review, finding 2: a move that ends before its app data lands (a stop, a lost link, the
+/// app closed) leaves nothing staged on the new laptop, a ticked secret least of all; and a staging
+/// folder a crash left behind is swept away at the next start.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn staged_app_data_never_outlives_the_move_that_brought_it() {
+    let t = tempfile::tempdir().unwrap();
+    let old = t.path().join("old");
+    firefox(&old);
+    let mover = Owner::Person {
+        account_id: MOVER.into(),
+    };
+    let found = SpecialScan::start(&mover, &old)
+        .unwrap()
+        .wait(&|| false)
+        .unwrap();
+    let mut plan = FullPlan::default();
+    plan.special = found.lines.clone();
+    // The person ticks every secret, so the secret's files are staged too.
+    let picked: Vec<u32> = plan
+        .special
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.secret)
+        .map(|(at, _)| at as u32)
+        .collect();
+    assert!(!picked.is_empty(), "a secret to tick");
+    let data = t.path().join("PCTwin data");
+    let staging = data.join(format!("{}abc", pctwin_fullmove::data::STAGING_PREFIX));
+    std::fs::create_dir_all(&staging).unwrap();
+    let mut source = Source::new(
+        found.planned.clone(),
+        &keys().capture,
+        Arc::new(Free),
+        t.path().join("work"),
+    );
+    let mut sink = Sink::new(plan.choice(&picked), staging.clone());
+    stream(&mut source, &mut sink).await;
+    assert!(
+        !files_under(&staging).is_empty(),
+        "the app data, the secret's included, was staged"
+    );
+    // The move ends here, without landing.
+    drop(sink);
+    assert!(!staging.exists(), "nothing staged outlives the move");
+
+    // A staging folder left by a crash is swept at the next start; nothing else is touched.
+    let left = data.join(format!("{}def", pctwin_fullmove::data::STAGING_PREFIX));
+    put(&left.join("x/logins.json"), b"{}");
+    put(&data.join("journal"), b"kept");
+    assert_eq!(pctwin_fullmove::data::sweep_staging(&data), 1);
+    assert!(!left.exists());
+    assert!(data.join("journal").exists());
+}

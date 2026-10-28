@@ -707,9 +707,11 @@ fn land_data(
         ..Default::default()
     };
     let Some(home_path) = home_here() else {
+        sink.remove_staging();
         return done;
     };
     let Ok(home) = pctwin_gate::Destination::open(&home_path) else {
+        sink.remove_staging();
         return done;
     };
     let names: std::collections::BTreeMap<String, String> = sink
@@ -740,12 +742,23 @@ fn land_data(
     done
 }
 
+/// At start: removes any app data staging folder an earlier run left (a crash, the laptop turned
+/// off part way), so nothing staged, secrets least of all, stays behind.
+pub fn sweep_staging<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(dir) = crate::moving::journal_path(app).and_then(|j| j.parent().map(|p| p.to_path_buf())) {
+        pctwin_fullmove::data::sweep_staging(&dir);
+    }
+}
+
 /// A new staging folder for app data, in PCTwin's own data folder.
 pub fn data_staging<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
     let mut b = [0u8; 8];
     getrandom::fill(&mut b).ok()?;
     let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    let dir = crate::moving::journal_path(app)?.with_file_name(format!("fullmove-data-{tag}"));
+    let dir = crate::moving::journal_path(app)?.with_file_name(format!(
+        "{}{tag}",
+        pctwin_fullmove::data::STAGING_PREFIX
+    ));
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }

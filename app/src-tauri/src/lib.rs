@@ -317,6 +317,8 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             // The change journal asks the system through the helper's probe, before any journal
             // is opened (third review, finding 8).
             pctwin_helper::os_probes::install();
+            // App data staged by a run that never finished is removed before anything else.
+            fullmove::sweep_staging(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

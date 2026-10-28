@@ -571,6 +571,11 @@ impl Sink {
         let _ = std::fs::remove_dir_all(&self.staging);
     }
 
+    /// The staging folder itself.
+    pub fn staging(&self) -> &Path {
+        &self.staging
+    }
+
     /// The staging folder of component `id`.
     pub fn folder(&self, id: &str) -> PathBuf {
         self.staging.join(id)
@@ -714,6 +719,37 @@ impl pctwin_move::extras::DataIn for Sink {
         }
         Ok(())
     }
+}
+
+/// The staging folder belongs to the sink: whatever becomes of the move (landed, stopped, the link
+/// lost, the app closed), nothing staged (a ticked secret least of all) outlives it.
+impl Drop for Sink {
+    fn drop(&mut self) {
+        // A file part way is closed first, so it can be removed.
+        self.open = None;
+        self.remove_staging();
+    }
+}
+
+/// The prefix of every staging folder (swept away at start: one a crash left behind).
+pub const STAGING_PREFIX: &str = "fullmove-data-";
+
+/// Removes every staging folder left in `dir` (PCTwin's own data folder) by an earlier run that
+/// ended without cleaning up (the laptop turned off, the app crashed). Returns how many.
+pub fn sweep_staging(dir: &Path) -> usize {
+    let mut n = 0;
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let is_ours = e
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(STAGING_PREFIX));
+        // Never follow a link out of PCTwin's own folder.
+        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+        if is_ours && is_dir && std::fs::remove_dir_all(e.path()).is_ok() {
+            n += 1;
+        }
+    }
+    n
 }
 
 /// The new laptop, for landing.
