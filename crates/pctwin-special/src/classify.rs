@@ -731,7 +731,7 @@ fn classify_within(
         .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())));
         match kind {
             Ok(DbKind::Ordinary) => {
-                if let Some(Ok(paths)) = within(&f.path, |p| content::sqlite_paths(p)) {
+                if let Some(Ok(paths)) = within(&f.path, content::sqlite_paths) {
                     ev.extend(link_evidence(&base, &paths));
                 }
                 b.push(members, Custody::Portable, false, ev)

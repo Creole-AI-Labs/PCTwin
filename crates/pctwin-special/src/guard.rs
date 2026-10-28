@@ -148,9 +148,7 @@ pub fn bounded<T: Send + 'static>(
     let job: Job = Box::new(move || {
         let _ = tx.send(f());
     });
-    let Some(w) = worker() else {
-        return None;
-    };
+    let w = worker()?;
     if w.send(job).is_err() {
         abandon();
         return None;
