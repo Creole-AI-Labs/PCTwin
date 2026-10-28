@@ -18,6 +18,7 @@
 //! Nothing here decides alone that something worked: every result comes from the executor's
 //! read-back, the helper's receipt and the laptop's own list after an install.
 
+pub mod data;
 pub mod extras;
 pub mod install;
 pub mod plan;

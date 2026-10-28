@@ -48,6 +48,7 @@ getrandom = "0.4.3"
 pctwin-journal = { path = "../../crates/pctwin-journal" }
 # The full move: apps, settings and special categories joined to the move (src/fullmove.rs).
 pctwin-fullmove = { path = "../../crates/pctwin-fullmove" }
+pctwin-special = { path = "../../crates/pctwin-special" }
 pctwin-settings = { path = "../../crates/pctwin-settings" }
 pctwin-executor = { path = "../../crates/pctwin-executor" }
 pctwin-recipe = { path = "../../crates/pctwin-recipe" }

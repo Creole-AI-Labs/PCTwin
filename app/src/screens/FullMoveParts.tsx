@@ -7,7 +7,7 @@
  * word with an icon, never colour alone. Names are shown exactly as they are.
  */
 import { useLocalization } from "@fluent/react";
-import { Badge, Banner, Button, Row, RowList, Section } from "../components/kit";
+import { Badge, Banner, Button, Checkbox, Row, RowList, Section } from "../components/kit";
 import type { ChangeView, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
 import { Attention, Check } from "../icons";
 import { pageLocale } from "../move";
@@ -48,10 +48,12 @@ function Changes({ titleId, changes }: { titleId: string; changes: ChangeView[] 
 }
 
 /** M23's section for the full move: every app, setting and special category, with what undo can do for each. */
-export function RebuildPlanSection({ rebuild }: { rebuild: RebuildPlan }) {
+export function RebuildPlanSection({ rebuild, picked = [], onPick }: { rebuild: RebuildPlan; picked?: readonly number[]; onPick?: (line: number, bring: boolean) => void }) {
   const { l10n } = useLocalization();
   const install = rebuild.changes.filter((c) => c.kind === "app" && c.action === "install");
   const settings = rebuild.changes.filter((c) => c.kind === "settings");
+  const appData = rebuild.changes.filter((c) => c.kind === "special" && c.special === "copy" && c.secret === null);
+  const secrets = rebuild.changes.filter((c) => c.secret !== null);
   const needs = rebuild.changes.filter((c) => c.needs !== null);
   const here = rebuild.changes.filter((c) => c.kind === "app" && c.action === "leave-alone" && c.needs === null);
   const left = rebuild.notMoved.filter((n) => n.count > 0);
@@ -64,6 +66,30 @@ export function RebuildPlanSection({ rebuild }: { rebuild: RebuildPlan }) {
       <UndoLegend />
       <Changes titleId="fullmove-group-install" changes={install} />
       <Changes titleId="fullmove-group-settings" changes={settings} />
+      <Changes titleId="fullmove-group-appdata" changes={appData} />
+      {secrets.length > 0 && (
+        <PlanBox title={l10n.getString("fullmove-group-secrets", { count: secrets.length })}>
+          <p className="plan-lead">{l10n.getString("fullmove-secrets-body")}</p>
+          <ul className="plan-items">
+            {secrets.map((c) => {
+              const line = c.secret ?? -1;
+              const name = c.title.kind === "name" ? c.title.value : l10n.getString(c.title.value);
+              return (
+                <li key={line} className="plan-item">
+                  <Checkbox
+                    checked={picked.includes(line)}
+                    onChange={(on) => {
+                      onPick?.(line, on);
+                    }}
+                    label={l10n.getString("fullmove-secret-bring", { name })}
+                    hint={l10n.getString("fullmove-secret-hint")}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </PlanBox>
+      )}
       <Changes titleId="fullmove-group-needs" changes={needs} />
       <Changes titleId="fullmove-group-here" changes={here} />
       {rebuild.more > 0 && <p className="subhead">{l10n.getString("fullmove-more", { count: rebuild.more })}</p>}

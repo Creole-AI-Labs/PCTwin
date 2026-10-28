@@ -87,17 +87,20 @@ pub struct Change {
     pub special: Option<SpecialStep>,
     /// How many files a special category's component holds.
     pub files: u64,
+    /// A secret the person may tick to bring (off unless ticked): its line in the plan's special
+    /// list.
+    pub secret: Option<u32>,
 }
 
 /// What a special category's step ends as: a component that would copy is not joined to the
 /// move yet, so it is never claimed copied.
 pub fn special_reason(step: SpecialStep) -> Option<Reason> {
     match step {
+        SpecialStep::Copy => None,
         SpecialStep::SignIn | SpecialStep::Relink => Some(Reason::SignIn),
-        SpecialStep::Copy
-        | SpecialStep::ExportFirst
-        | SpecialStep::NotYet
-        | SpecialStep::LookAtIt => Some(Reason::FinishByHand),
+        SpecialStep::ExportFirst | SpecialStep::NotYet | SpecialStep::LookAtIt => {
+            Some(Reason::FinishByHand)
+        }
     }
 }
 
@@ -398,6 +401,7 @@ impl FullPlan {
                 needs,
                 special: None,
                 files: 0,
+                secret: None,
             });
         }
         for g in &self.groups {
@@ -410,9 +414,10 @@ impl FullPlan {
                 needs: None,
                 special: None,
                 files: 0,
+                secret: None,
             });
         }
-        for s in &self.special {
+        for (at, s) in self.special.iter().enumerate() {
             let needs = special_reason(s.step);
             out.push(Change {
                 title: Title::Name(s.name.clone()),
@@ -431,6 +436,7 @@ impl FullPlan {
                 needs,
                 special: Some(s.step),
                 files: s.files,
+                secret: s.secret.then_some(at as u32),
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -445,6 +451,7 @@ impl FullPlan {
                 needs: Some(Reason::FinishByHand),
                 special: Some(SpecialStep::LookAtIt),
                 files: 0,
+                secret: None,
             });
         }
         if self.from.is_some() && !self.special_searched {
@@ -457,6 +464,7 @@ impl FullPlan {
                 needs: Some(Reason::FinishByHand),
                 special: Some(SpecialStep::NotYet),
                 files: 0,
+                secret: None,
             });
         }
         out
@@ -474,6 +482,25 @@ impl FullPlan {
     /// the restore point are asked for once).
     pub fn changes_anything(&self) -> bool {
         !self.to_install().is_empty() || !self.settings.moves.is_empty()
+    }
+
+    /// The app data to bring: every component that copies, and the secrets at `picked` (lines of
+    /// [`FullPlan::special`] the person ticked, one by one).
+    pub fn choice(&self, picked: &[u32]) -> crate::data::Choice {
+        let mut c = crate::data::Choice::default();
+        for (at, s) in self.special.iter().enumerate() {
+            if s.step != SpecialStep::Copy {
+                continue;
+            }
+            if s.secret {
+                if picked.contains(&(at as u32)) {
+                    c.secrets.extend(s.ids.iter().cloned());
+                }
+            } else {
+                c.copy.extend(s.ids.iter().cloned());
+            }
+        }
+        c
     }
 
     /// The digest the approval names: the extras as they arrived and every change shown.

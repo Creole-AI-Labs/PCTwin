@@ -72,6 +72,17 @@ describe("the approval screen's apps, settings and app data", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("a secret is brought only when the person ticks it, one by one, and none is ticked to begin with", () => {
+    const onPick = vi.fn();
+    inApp(<RebuildPlanSection rebuild={fullPlan()} picked={[]} onPick={onPick} />);
+    const tick = screen.getByRole("checkbox", { name: (n) => plain(n).startsWith(plain(text("fullmove-secret-bring", { name: "Browser" }))) });
+    expect((tick as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(tick);
+    expect(onPick).toHaveBeenCalledWith(2, true);
+    // App data that copies is listed with its undo promise.
+    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-group-appdata", { count: 1 })));
+  });
+
   it("an older old laptop's plan has no section, and the files-only plan is unchanged", () => {
     const plan = parsePlanView(plans[0]);
     expect(plan).not.toBeNull();

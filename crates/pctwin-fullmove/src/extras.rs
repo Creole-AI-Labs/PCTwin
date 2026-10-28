@@ -127,6 +127,9 @@ pub struct SpecialLine {
     /// Secret material (keys, password stores): moved only if the person chooses it.
     #[serde(default)]
     pub secret: bool,
+    /// Its components' IDs (what the new laptop chooses by).
+    #[serde(default)]
+    pub ids: Vec<String>,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -282,35 +285,42 @@ pub fn special_here(
     owner: &pctwin_record::Owner,
     home: &std::path::Path,
     apps: &[pctwin_record::FoundApp],
+    deadline: std::time::Instant,
 ) -> SpecialFound {
     use pctwin_special::component::Custody;
     let system = pctwin_special::roots::System::here();
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
     );
-    let plan = pctwin_special::api::plan(owner, home, apps, system, system, &cat);
+    let plan = pctwin_special::api::plan_within(owner, home, apps, system, system, &cat, deadline);
     // One line per app and step (an app's many components with the same step are one line, with
     // their files counted), in the order found.
     let mut lines: Vec<SpecialLine> = Vec::new();
     for p in plan.components.iter().filter(|p| text_ok(&p.app)) {
         let step = match p.component.custody {
-            Custody::Portable => SpecialStep::NotYet,
+            Custody::Portable => SpecialStep::Copy,
             Custody::ServiceHeld => SpecialStep::SignIn,
             Custody::MachineBound => SpecialStep::Relink,
             Custody::NeedsExport => SpecialStep::ExportFirst,
             Custody::Unresolved => SpecialStep::LookAtIt,
         };
         let files = p.component.members.len() as u64;
-        match lines.iter_mut().find(|l| l.name == p.app && l.step == step) {
+        let id = crate::data::id_hex(&p.component);
+        // A secret is always its own line: the person ticks each one by itself (D07).
+        let same = |l: &&mut SpecialLine| {
+            !p.component.secret && !l.secret && l.name == p.app && l.step == step
+        };
+        match lines.iter_mut().find(same) {
             Some(l) => {
                 l.files += files;
-                l.secret |= p.component.secret;
+                l.ids.push(id);
             }
             None => lines.push(SpecialLine {
                 name: p.app.clone(),
                 step,
                 files,
                 secret: p.component.secret,
+                ids: vec![id],
             }),
         }
     }
@@ -320,23 +330,27 @@ pub fn special_here(
         .not_moved
         .iter()
         .filter(|n| n.why.contains("not fully checked"))
-        .count()
+        .map(|n| n.count.max(1))
+        .sum::<usize>()
         + plan.coverage.unreadable.len();
     SpecialFound {
         lines,
-        not_moved: plan.not_moved.len() as u64,
+        not_moved: plan.not_moved.iter().map(|n| n.count.max(1) as u64).sum(),
         not_checked: not_checked as u64,
+        planned: plan.components,
     }
 }
 
 /// What 2.5 found on the old laptop.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct SpecialFound {
     pub lines: Vec<SpecialLine>,
     /// Found and not moved (caches, the system's own).
     pub not_moved: u64,
     /// Places not fully checked (out of time, no answer, unreadable).
     pub not_checked: u64,
+    /// The components themselves, kept on the old laptop for capture (never sent).
+    pub planned: Vec<pctwin_special::api::Planned>,
 }
 
 /// The special-category scan, running beside the scan of files and people.
@@ -354,7 +368,9 @@ impl SpecialScan {
         std::thread::Builder::new()
             .name("pctwin-special-scan".into())
             .spawn(move || {
-                let _ = tx.send(special_here(&owner, &home, &[]));
+                // 2.5 stops reading in time for its answer to arrive within the budget.
+                let deadline = std::time::Instant::now() + SPECIAL_BUDGET - SPECIAL_MARGIN;
+                let _ = tx.send(special_here(&owner, &home, &[], deadline));
             })
             .ok()?;
         Some(Self {
@@ -392,9 +408,9 @@ impl SpecialScan {
 
 impl Extras {
     /// Adds what the special-category scan found (`None`: it did not finish in time).
-    pub fn with_special(&mut self, found: Option<SpecialFound>) {
+    pub fn with_special(&mut self, found: Option<&SpecialFound>) {
         if let Some(f) = found {
-            self.special = f.lines;
+            self.special = f.lines.clone();
             self.special_searched = true;
             self.special_not_moved = f.not_moved;
             self.special_not_checked = f.not_checked;
@@ -436,6 +452,9 @@ pub fn here(folders: Vec<OldFolder>) -> Extras {
 /// How long looking for the special categories may take on the old laptop in all, from when the
 /// move starts (2.5's own budgets: 10 s per read, 120 s per app folder, 600 s per kind of root).
 pub const SPECIAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How much earlier than the budget 2.5 is asked to stop reading, so its answer is ready.
+pub const SPECIAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[cfg(test)]
 mod tests {

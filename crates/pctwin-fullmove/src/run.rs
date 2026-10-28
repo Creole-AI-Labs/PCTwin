@@ -113,6 +113,12 @@ pub struct UndoBook {
     pub labels: BTreeMap<String, String>,
     /// The apps PCTwin installed, by name (undo leaves them for the person to remove).
     pub apps: Vec<String>,
+    /// App data landed (2.5): its app's name and its landing in the journal.
+    #[serde(default)]
+    pub landed: Vec<(String, u64)>,
+    /// The person's home folder on this laptop, where app data landed.
+    #[serde(default)]
+    pub home: Option<String>,
 }
 
 /// How the apps, settings and special categories of a move ended.
@@ -366,9 +372,21 @@ fn settings_system(os: Os) -> System {
 /// once, the apps through `installer`, the settings through `settings` and the executor (each
 /// change in `ledger`, for move `scope`, as `actor`), and the special categories. `progress` is
 /// told where it is.
+/// The app data that came with the move: the secrets the person ticked (lines of the plan's
+/// special list) and each landed component's result, by its ID.
+#[derive(Debug, Clone, Default)]
+pub struct DataDone {
+    pub picked: Vec<u32>,
+    pub landed: BTreeMap<String, ItemResult>,
+    /// Each landing in the journal, by its app's name (for undo).
+    pub effects: Vec<(String, u64)>,
+    pub home: Option<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn rebuild(
     plan: &FullPlan,
+    data: &DataDone,
     installer: &mut dyn Installer,
     settings: &mut dyn Adapter,
     ledger: &dyn EffectLedger,
@@ -461,9 +479,35 @@ pub fn rebuild(
     let mut special: Vec<(Title, ItemResult)> = plan
         .special
         .iter()
-        .map(|s| {
-            // Copying a component's files is not joined to the move yet: never claimed.
-            let r = ItemResult::because(special_reason(s.step).unwrap_or(Reason::FinishByHand));
+        .enumerate()
+        .map(|(at, s)| {
+            let r = match special_reason(s.step) {
+                Some(reason) => ItemResult::because(reason),
+                // A secret not ticked stays on the old laptop, by the person's choice.
+                None if s.secret && !data.picked.contains(&(at as u32)) => {
+                    ItemResult::skipped_by_user()
+                }
+                // Copied only when every component of the line landed copied, by 2.5's own word;
+                // one never landed (or not proven) ends needs-action.
+                None => {
+                    let results: Vec<ItemResult> = s
+                        .ids
+                        .iter()
+                        .map(|id| {
+                            data.landed
+                                .get(id)
+                                .copied()
+                                .unwrap_or(ItemResult::because(Reason::FinishByHand))
+                        })
+                        .collect();
+                    results
+                        .iter()
+                        .find(|r| r.status() != pctwin_types::ItemStatus::Copied)
+                        .copied()
+                        .or(results.first().copied())
+                        .unwrap_or(ItemResult::because(Reason::FinishByHand))
+                }
+            };
             (Title::Name(s.name.clone()), r)
         })
         .collect();
@@ -495,6 +539,8 @@ pub fn rebuild(
             .filter(|(_, a)| a.result.status() == ItemStatus::Reinstalled)
             .map(|(n, _)| n.clone())
             .collect(),
+        landed: data.effects.clone(),
+        home: data.home.clone(),
     };
     Rebuilt {
         apps,

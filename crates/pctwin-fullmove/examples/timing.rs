@@ -10,7 +10,12 @@ fn main() {
         x.encode().len()
     );
     let t = std::time::Instant::now();
-    let f = pctwin_fullmove::extras::special_here(&pctwin_record::Owner::Shared, &home, &[]);
+    let f = pctwin_fullmove::extras::special_here(
+        &pctwin_record::Owner::Shared,
+        &home,
+        &[],
+        std::time::Instant::now() + pctwin_fullmove::extras::SPECIAL_BUDGET,
+    );
     println!(
         "special: {} lines, {} not moved, {} not fully checked, {:?}",
         f.lines.len(),
