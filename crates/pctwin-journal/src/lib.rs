@@ -868,6 +868,18 @@ pub struct MadeFolder {
     pub id: Option<FileId>,
 }
 
+/// A folder an earlier move made (see [`Ledger::folders_made_from`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EarlierFolder {
+    /// Its stored path inside the destination.
+    pub folder: String,
+    /// Its identity on the drive when it was made (`None`: the drive gave none).
+    pub id: Option<FileId>,
+    /// The file whose write made it (an item ID is the same for the same file of the same old
+    /// laptop in every move).
+    pub item: ItemId,
+}
+
 /// Whether undo is still possible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UndoGate {
@@ -2498,6 +2510,18 @@ pub trait Ledger {
         let _ = (scope, destination);
         Ok(Vec::new())
     }
+    /// The folders earlier moves from the old laptop `source` made in `destination`, whose write
+    /// was not undone since; never a Quick Send's. A move started again from the same old laptop
+    /// finds its own folders by these, and only these (gap 3, 28 October 2026). A ledger that
+    /// keeps no record of folders knows none.
+    fn folders_made_from(
+        &self,
+        source: LaptopId,
+        destination: &str,
+    ) -> Result<Vec<EarlierFolder>, JournalError> {
+        let _ = (source, destination);
+        Ok(Vec::new())
+    }
 }
 
 impl Ledger for Journal {
@@ -2512,6 +2536,32 @@ impl Ledger for Journal {
                 && self.entry(m.entry)?.is_some_and(|e| e.write.scope == scope)
             {
                 out.push(m.folder);
+            }
+        }
+        Ok(out)
+    }
+    fn folders_made_from(
+        &self,
+        source: LaptopId,
+        destination: &str,
+    ) -> Result<Vec<EarlierFolder>, JournalError> {
+        let mut out = Vec::new();
+        for m in self.made_folders()? {
+            if m.destination != destination {
+                continue;
+            }
+            let Some(e) = self.entry(m.entry)? else {
+                continue;
+            };
+            if e.write.source_laptop == source
+                && e.write.scope != Scope::QUICK_SEND
+                && self.undo_of(m.entry)?.is_none()
+            {
+                out.push(EarlierFolder {
+                    folder: m.folder,
+                    id: m.id,
+                    item: e.write.item,
+                });
             }
         }
         Ok(out)

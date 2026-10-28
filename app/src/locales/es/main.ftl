@@ -926,14 +926,18 @@ plan-place-free = { $size } libres ahí
 plan-place-no-room = No hay suficiente espacio libre ahí. Elige otro lugar o desmarca esta carpeta.
 plan-place-no-safe-name = PCTwin no puede guardar archivos de forma segura en esa unidad. Elige otro lugar.
 plan-place-cannot-open = PCTwin no pudo abrir esa carpeta. Elige otro lugar.
+plan-place-locked = Esa unidad está bloqueada. Desbloquéala primero y vuelve a elegirla.
 plan-version = Versión del plan { $revision }
 plan-details = Más detalles
 plan-preview-title = Antes de empezar
 plan-preview-fits = Hay suficiente espacio libre en este portátil.
+plan-preview-fits-about = Debería haber suficiente espacio libre en este portátil. Se cuentan unos { $extra } para las aplicaciones que instala PCTwin y sus datos.
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
 plan-preview-first = Trasladaremos esto primero, para que tu portátil nuevo esté listo antes: { $places }.
 plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
+plan-preview-short-about = Este portátil necesita unos { $size } más de espacio libre, contando unos { $extra } para las aplicaciones que instala PCTwin y sus datos. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
+plan-preview-synced = En este portátil, { $folder } se guarda en { $service }. Los archivos que se trasladen ahí se subirán a { $service } y usarán tu espacio allí.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Unos { $minutes } minuto.
@@ -1359,6 +1363,7 @@ reason-refused-by-safety-check = El control de seguridad del portátil nuevo rec
 reason-name-not-allowed = Este nombre no se puede usar en el portátil nuevo, y no fue posible darle otro nombre seguro. Cámbiale el nombre en el portátil antiguo y empieza un traslado nuevo que lo incluya.
 reason-install-failed = La aplicación no se instaló. Instálala desde la web de su fabricante.
 reason-no-equivalent = No hay versión de esta aplicación para el sistema del portátil nuevo. Busca una aplicación parecida que funcione allí.
+reason-drive-locked = La unidad de destino está bloqueada. Desbloquéala (por ejemplo, con su contraseña o clave de recuperación de BitLocker) y vuelve a trasladarlo.
 reason-sign-in = Ya está en su sitio, pero tienes que entrar con tu cuenta. Ábrela y entra con tu cuenta.
 reason-activation = La aplicación ya está en su sitio, pero necesita su licencia en el portátil nuevo. Ábrela y actívala con tu licencia o tu cuenta.
 reason-permission = Primero el portátil nuevo tiene que dar permiso. Abre el elemento y elige Permitir cuando te lo pida.
@@ -1367,6 +1372,7 @@ reason-manual-install = Esta aplicación hay que conseguirla en la web de su fab
 reason-restart = El portátil nuevo tiene que reiniciarse para terminar. Reinícialo cuando te venga bien.
 reason-finish-by-hand = PCTwin no puede hacer este paso por ti. Sigue los pasos que aparecen para él en este informe.
 reason-parts-missing = Algunos archivos de esta carpeta no llegaron, así que no está completa en el portátil nuevo. Aparecen en este informe con el motivo. Envíalos de nuevo o copia la carpeta de otra forma.
+reason-moved-file-missing = Este ajuste apunta a un archivo o una carpeta que no está en el portátil nuevo con el nombre que le dio el traslado, así que PCTwin dejó el ajuste como estaba. Abre la aplicación y vuelve a elegir el archivo.
 
 ## Item results (every item ends with one of these)
 
@@ -2023,6 +2029,8 @@ guard-rescue-use = Usar lo que se pudo leer
 
 guard-undo-preview-title = Lo que hará deshacer
 guard-undo-preview-body = PCTwin acaba de mirar cada cambio. Todo lo que cambiaste después del traslado se conserva. No pasa nada hasta que elijas Deshacer.
+guard-undo-preview-which = Esto deshace el traslado que terminó el { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") }. Tus otros traslados no cambian.
+guard-undo-preview-which-earlier = Esto deshace el traslado hecho con una versión anterior de PCTwin. Tus otros traslados no cambian.
 guard-undo-plan-put-back = Se deja como estaba
 guard-undo-plan-remove-app = Aplicación quitada, tu trabajo conservado
 guard-undo-plan-keep-changed = Se conserva: lo cambiaste

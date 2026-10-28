@@ -142,6 +142,22 @@ impl Ledger for SplitLedger<'_> {
             }
         }
     }
+    fn folders_made_from(
+        &self,
+        source: pctwin_record::LaptopId,
+        destination: &str,
+    ) -> Result<Vec<pctwin_journal::EarlierFolder>, JournalError> {
+        match self.place_for(destination)? {
+            None => self.mine.folders_made_from(source, destination),
+            Some(n) => {
+                let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+                let (_, journal) = held
+                    .get(n)
+                    .ok_or(JournalError::Damaged("no such holding place"))?;
+                journal.folders_made_from(source, destination)
+            }
+        }
+    }
     fn temp_tag(&self, id: u64) -> String {
         self.on(id, |l, i| Ok(l.temp_tag(i)))
             .unwrap_or_else(|_| self.mine.temp_tag(id))

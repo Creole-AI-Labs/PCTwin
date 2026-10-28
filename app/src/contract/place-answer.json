@@ -17,5 +17,8 @@
   },
   {
     "kind": "cannot-open"
+  },
+  {
+    "kind": "locked"
   }
 ]

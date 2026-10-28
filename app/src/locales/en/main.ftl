@@ -790,14 +790,18 @@ plan-place-free = { $size } free there
 plan-place-no-room = There isn't enough free space there. Choose another place, or untick this folder.
 plan-place-no-safe-name = PCTwin can't safely save files on that drive. Choose another place.
 plan-place-cannot-open = PCTwin couldn't open that folder. Choose another place.
+plan-place-locked = That drive is locked. Unlock it first, then choose it again.
 plan-version = Plan version { $revision }
 plan-details = More details
 plan-preview-title = Before you start
 plan-preview-fits = There is enough free space on this laptop.
+plan-preview-fits-about = There should be enough free space on this laptop. This counts about { $extra } for the apps PCTwin installs and their data.
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
 plan-preview-first = We’ll move these first, so your new laptop is ready to use sooner: { $places }.
 plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
+plan-preview-short-about = This laptop needs about { $size } more free space, counting about { $extra } for the apps PCTwin installs and their data. Free some space before you start, or the move stops when the drive is full.
 plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
+plan-preview-synced = { $folder } is kept in { $service } on this laptop. Files moved there will upload to { $service } and use your space there.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] About { $minutes } minute.
@@ -1201,6 +1205,7 @@ reason-refused-by-safety-check = The new laptop’s safety check refused this it
 reason-name-not-allowed = This name cannot be used on the new laptop, and no safe new name was possible. Rename it on the old laptop, then start a new move that includes it.
 reason-install-failed = The app did not install. Install it from its maker’s website.
 reason-no-equivalent = There is no version of this app for the new laptop’s system. Look for a similar app that works there.
+reason-drive-locked = The drive this goes to is locked. Unlock it (for example with its BitLocker password or recovery key), then move it again.
 reason-sign-in = It is in place, but you need to sign in. Open it and sign in.
 reason-activation = The app is in place, but it needs its licence on the new laptop. Open it and activate it with your licence or account.
 reason-permission = The new laptop needs to give permission first. Open the item and choose Allow when asked.
@@ -1209,6 +1214,7 @@ reason-manual-install = This app must come from its maker’s website. Download 
 reason-restart = The new laptop must restart to finish. Restart it when you are ready.
 reason-finish-by-hand = PCTwin cannot do this step for you. Follow the steps shown for it in this report.
 reason-parts-missing = Some files inside this folder did not arrive, so it is not complete on the new laptop. They are listed in this report with why. Send them again, or copy the folder another way.
+reason-moved-file-missing = This setting points at a file or folder that is not on the new laptop under the name the move gave it, so PCTwin left the setting as it was. Open the app and choose the file again.
 
 ## Item results (every item ends with one of these)
 
@@ -1838,6 +1844,8 @@ guard-rescue-use = Use what could be read
 
 guard-undo-preview-title = What undo will do
 guard-undo-preview-body = PCTwin looked at each change just now. Anything you changed after the move is kept. Nothing happens until you choose Undo.
+guard-undo-preview-which = This undoes the move that finished on { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") }. Your other moves are not changed.
+guard-undo-preview-which-earlier = This undoes the move made with an earlier version of PCTwin. Your other moves are not changed.
 guard-undo-plan-put-back = Put back as it was
 guard-undo-plan-remove-app = App removed, your work kept
 guard-undo-plan-keep-changed = Kept: you changed it

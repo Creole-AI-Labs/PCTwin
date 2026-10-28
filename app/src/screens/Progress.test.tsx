@@ -102,11 +102,11 @@ describe("the engine's results, mirrored", () => {
   it("lists the reasons in the engine's order, with the engine's names", () => {
     // crates/pctwin-types result.rs: reason_names_are_stable_translation_keys
     expect(ALL_REASONS.join(",")).toBe(
-      "not-enough-space,changed-during-move,unreadable,not-verified,refused-by-safety-check,name-not-allowed,install-failed,no-equivalent," +
-        "sign-in,activation,permission,online-only,manual-install,restart,finish-by-hand,parts-missing",
+      "not-enough-space,changed-during-move,unreadable,not-verified,refused-by-safety-check,name-not-allowed,install-failed,no-equivalent,drive-locked," +
+        "sign-in,activation,permission,online-only,manual-install,restart,finish-by-hand,parts-missing,moved-file-missing",
     );
-    expect(FAILED_REASONS).toHaveLength(8);
-    expect(NEEDS_ACTION_REASONS).toHaveLength(8);
+    expect(FAILED_REASONS).toHaveLength(9);
+    expect(NEEDS_ACTION_REASONS).toHaveLength(9);
     // crates/pctwin-types lib.rs: serialises_with_stable_names
     expect(ITEM_STATUSES.join(",")).toBe("copied,reinstalled,converted,needs-action,skipped-by-user,failed");
   });

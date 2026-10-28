@@ -410,6 +410,7 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
         restore_point: RestoreWord::NotAsked,
         stopped: false,
         can_undo: true,
+        undo_id: Some("01010101010101010101010101010101".into()),
     }
 }
 
@@ -534,6 +535,11 @@ fn plans() -> Vec<PlanView> {
         preview: PreviewView {
             fits: Some(true),
             short_bytes: 0,
+            estimated_bytes: 0,
+            synced: vec![crate::moving::SyncedPlace {
+                folder: "C:\\Users\\ada\\OneDrive\\Documents".into(),
+                service: "OneDrive".into(),
+            }],
             minutes: Some(Range { low: 4, high: 8 }),
             renamed: 1,
             too_big: 0,
@@ -935,6 +941,7 @@ fn families() -> Vec<(&'static str, Value)> {
                 crate::moving::PlaceAnswer::NotChosen,
                 crate::moving::PlaceAnswer::NoSafeName,
                 crate::moving::PlaceAnswer::CannotOpen,
+                crate::moving::PlaceAnswer::Locked,
             ]),
         ),
         ("qs-picked", json(qs_picked())),
@@ -1223,7 +1230,7 @@ fn calls() -> Value {
             { "name": "laptop_name_type", "args": [["name", "Ezzy Laptop"]] },
             { "name": "guard_view", "args": [] },
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
-            { "name": "fullmove_undo", "args": [] },
+            { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
         ],
         "events": {

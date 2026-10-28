@@ -607,7 +607,7 @@ describe("M23 plan review and approval", () => {
   });
 
   describe("we'll move these first", () => {
-    const preview: PlanPreview = { fits: true, shortBytes: 0, minutes: null, renamed: 0, tooBig: 0, refused: 0, runsAtSignIn: 0 };
+    const preview: PlanPreview = { fits: true, shortBytes: 0, minutes: null, renamed: 0, tooBig: 0, refused: 0, runsAtSignIn: 0, estimatedBytes: 0, synced: [] };
     /** The preview's lines, as said. */
     const lines = () => [...document.querySelectorAll(".plan-notice .plan-item-text")].map((el) => plain(el.textContent));
     const firstSays = (places: string) => plain(text("plan-preview-first", { places }));
@@ -628,6 +628,32 @@ describe("M23 plan review and approval", () => {
       inApp(view({ ...sample.plan, preview, first: [] }, null));
       expect(lines().some((l) => l.startsWith(firstSays("").slice(0, 10)))).toBe(false);
       expect(movesFirst({ ...sample.plan, first: ["documents"] }, ["documents"])).toEqual([]);
+    });
+  });
+
+  describe("space beyond the files, and places that sync online (gaps 9 and 10a)", () => {
+    const base: PlanPreview = { fits: true, shortBytes: 0, minutes: null, renamed: 0, tooBig: 0, refused: 0, runsAtSignIn: 0, estimatedBytes: 0, synced: [] };
+    const lines = () => [...document.querySelectorAll(".plan-notice .plan-item-text")].map((el) => plain(el.textContent));
+
+    it("a fit that counts installers and app data is said with about, never as measured", () => {
+      inApp(view({ ...sample.plan, preview: { ...base, estimatedBytes: 2 * 1024 ** 3 } }, null));
+      expect(lines().some((l) => l.startsWith(plain(text("plan-preview-fits-about", { extra: "X" })).split("X")[0]))).toBe(true);
+      expect(lines()).not.toContain(plain(text("plan-preview-fits")));
+      noMissingStrings();
+    });
+
+    it("a short fit with an estimate says about too", () => {
+      inApp(view({ ...sample.plan, preview: { ...base, fits: false, shortBytes: 1024 ** 3, estimatedBytes: 1024 ** 3 } }, null));
+      expect(lines().some((l) => l.startsWith(plain(text("plan-preview-short-about", { size: "X", extra: "Y" })).split("X")[0]))).toBe(true);
+      noMissingStrings();
+    });
+
+    it("a place kept in a sync service's folder says its files upload there", async () => {
+      const synced = [{ folder: "C:\\Users\\ada\\OneDrive\\Documents", service: "OneDrive" }];
+      inApp(view({ ...sample.plan, preview: { ...base, synced } }, null));
+      expect(lines()).toContain(plain(text("plan-preview-synced", { folder: synced[0].folder, service: "OneDrive" })));
+      noMissingStrings();
+      expect(await accessible()).toEqual([]);
     });
   });
 

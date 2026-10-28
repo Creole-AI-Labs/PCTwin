@@ -82,6 +82,8 @@ export type Rebuilt = {
   restorePoint: RestoreWord;
   stopped: boolean;
   canUndo: boolean;
+  /** The move this outcome's undo book belongs to. */
+  undoId: string | null;
 };
 
 export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number };
@@ -204,14 +206,15 @@ function parseLine(v: unknown): RebuiltLine | null {
 
 /** The outcome section (`RebuiltView`). */
 export function parseRebuilt(v: unknown): Rebuilt | null {
-  const f = exactly(v, ["lines", "more", "here", "hereMore", "fresh", "restorePoint", "stopped", "canUndo"]);
+  const f = exactly(v, ["lines", "more", "here", "hereMore", "fresh", "restorePoint", "stopped", "canUndo", "undoId"]);
   if (!f || !isCount(f.more) || !isCount(f.hereMore) || typeof f.fresh !== "boolean" || !oneOf(f.restorePoint, RESTORE_WORDS) || typeof f.stopped !== "boolean" || typeof f.canUndo !== "boolean") return null;
+  if (f.undoId !== null && !(typeof f.undoId === "string" && /^[0-9a-f]{32}$/.test(f.undoId))) return null;
   const lines = listOf(f.lines, parseLine);
   const here = listOf(f.here, (x) => {
     const h = exactly(x, ["name", "older"]);
     return h && typeof h.name === "string" && nameOrNull(h.older) ? { name: h.name, older: h.older } : null;
   });
-  return lines && here ? { lines, more: f.more, here, hereMore: f.hereMore, fresh: f.fresh, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo } : null;
+  return lines && here ? { lines, more: f.more, here, hereMore: f.hereMore, fresh: f.fresh, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo, undoId: f.undoId } : null;
 }
 
 /** Where rebuilding is (`Progress`, event `move-rebuild`). */

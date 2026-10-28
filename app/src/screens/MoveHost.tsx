@@ -606,7 +606,7 @@ export default function MoveHost({
             view.outcome.rebuilt?.canUndo
               ? () => {
                   const outcome = view.outcome;
-                  fullmoveUndo().then(
+                  fullmoveUndo(outcome.rebuilt?.undoId ?? null).then(
                     () => {
                       setView({ kind: "undo", outcome });
                     },

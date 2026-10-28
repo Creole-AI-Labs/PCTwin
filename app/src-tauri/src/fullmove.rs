@@ -42,10 +42,11 @@ pub const REBUILD_EVENT: &str = "move-rebuild";
 /// The undo the screens opened is over (the person went back).
 pub const UNDO_CLOSED_EVENT: &str = "move-undo-closed";
 
-/// The full move's state: the role keys, and the last move's undo book.
+/// The full move's state: the role keys, and each move's undo book made since PCTwin started
+/// (by its move's ID; also kept on disk, one file per move: [`crate::undo_books`]).
 pub struct FullMoveState {
     keys: pctwin_grant::RoleKeys,
-    last: Mutex<Option<UndoBook>>,
+    books: Mutex<std::collections::BTreeMap<String, UndoBook>>,
     epoch: AtomicU64,
 }
 
@@ -91,7 +92,7 @@ fn made() -> Option<AppFullMove> {
         });
     Some(Arc::new(FullMoveState {
         keys: pctwin_grant::RoleKeys::mint()?,
-        last: Mutex::new(None),
+        books: Mutex::new(std::collections::BTreeMap::new()),
         // Sessions of the undo screens only grow, from when the app started.
         epoch: AtomicU64::new(
             std::time::SystemTime::now()
@@ -585,6 +586,8 @@ pub struct RebuiltView {
     pub stopped: bool,
     /// Undo can put something back.
     pub can_undo: bool,
+    /// The move's own ID, for undoing this move and no other (`None`: nothing to undo).
+    pub undo_id: Option<String>,
 }
 
 /// The new laptop, after the files: rebuilds `plan` (the approved one) for the signed-in person
@@ -595,6 +598,7 @@ pub fn rebuild_here<R: Runtime>(
     journal: &Journal,
     me: &str,
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
+    files: Vec<(String, String)>,
 ) -> RebuiltView {
     let state = app.state::<AppFullMove>();
     let (Ok(laptop), Ok(scope)) = (LaptopId::generate(), Scope::for_a_move()) else {
@@ -608,6 +612,7 @@ pub fn rebuild_here<R: Runtime>(
             restore_point: RestoreWord::NotAsked,
             stopped: true,
             can_undo: false,
+            undo_id: None,
         };
     };
     let actor = Actor {
@@ -624,6 +629,8 @@ pub fn rebuild_here<R: Runtime>(
         }
         None => pctwin_fullmove::run::DataDone::default(),
     };
+    // What landed where: a moved setting points only at a file that is there.
+    let data_done = pctwin_fullmove::run::DataDone { files, ..data_done };
     // Windows with winget: the real chain (winget as the person, then the administrator helper
     // once). Elsewhere: every app needs the person, and no administrator is asked for.
     let mut no_installer = NoInstaller {
@@ -780,10 +787,14 @@ pub fn rebuild_here<R: Runtime>(
     };
     let can_undo =
         !done.undo.recipes.is_empty() || !done.undo.apps.is_empty() || !done.undo.landed.is_empty();
-    *lock(&state.last) = Some(done.undo.clone());
-    // Kept beside the journal too, so Undo still works after PCTwin restarts.
-    if can_undo && let Some(path) = book_path(app) {
-        let _ = std::fs::write(path, serde_json::to_vec(&done.undo).unwrap_or_default());
+    // One book per move, never over another move's: kept here and beside the journal, so Undo
+    // still works after PCTwin restarts, for this move and every earlier one.
+    let undo_id = can_undo.then(|| done.undo.id());
+    if can_undo {
+        lock(&state.books).insert(done.undo.id(), done.undo.clone());
+        if let Some(folder) = books_folder(app) {
+            let _ = crate::undo_books::save(&folder, &done.undo);
+        }
     }
     RebuiltView {
         lines,
@@ -794,6 +805,7 @@ pub fn rebuild_here<R: Runtime>(
         restore_point,
         stopped: done.stopped.is_some(),
         can_undo,
+        undo_id,
     }
 }
 
@@ -1062,9 +1074,13 @@ fn undo_line(l: pctwin_fullmove::undo::Line) -> UndoLine {
 
 const JOB: &str = "move-undo";
 
-/// Where the last move's undo book is kept (PCTwin's own data folder, beside the journal).
-fn book_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
-    crate::moving::journal_path(app).map(|j| j.with_file_name("fullmove-undo.json"))
+/// Where each move's undo book is kept (PCTwin's own data folder, beside the journal), with the
+/// one book PCTwin 0.1.x kept moved in first.
+fn books_folder<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    let journal = crate::moving::journal_path(app)?;
+    let folder = journal.with_file_name(crate::undo_books::FOLDER);
+    crate::undo_books::migrate(&folder, &journal.with_file_name(crate::undo_books::LEGACY));
+    Some(folder)
 }
 
 fn publish<R: Runtime>(
@@ -1091,19 +1107,33 @@ fn publish<R: Runtime>(
     );
 }
 
-/// Opens undo for the last move's apps and settings: the preview (R05) through the flow guard,
-/// then, when the person presses Undo there, undo itself (R06). Back closes it.
+/// Opens undo for one move's apps and settings (`id`, the move's own ID from its result; none:
+/// the newest move): the preview (R05) through the flow guard, saying which move it is, then,
+/// when the person presses Undo there, undo itself (R06). Back closes it. Every other move's
+/// book is left as it is.
 #[tauri::command]
 pub fn fullmove_undo<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppFullMove>,
     guard: State<'_, AppGuard>,
+    id: Option<String>,
 ) -> Result<(), crate::moving::MoveProblem> {
-    let book = lock(&state.last)
-        .clone()
+    let held = {
+        let books = lock(&state.books);
+        match &id {
+            Some(id) => books.get(id).cloned(),
+            None => None,
+        }
+    };
+    let book = held
+        .or_else(|| crate::undo_books::find(&books_folder(&app)?, id.as_deref()))
         .or_else(|| {
-            let bytes = std::fs::read(book_path(&app)?).ok()?;
-            serde_json::from_slice::<UndoBook>(&bytes).ok()
+            // Not on disk (it could not be written): the newest kept since PCTwin started.
+            let books = lock(&state.books);
+            match &id {
+                Some(_) => None,
+                None => books.values().max_by_key(|b| b.when).cloned(),
+            }
         })
         .ok_or(crate::moving::MoveProblem::NotMoving)?;
     let epoch = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1161,7 +1191,11 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
         DisplayState::AwaitingPerson,
         vec![IntentName::Undo, IntentName::Back],
         None,
-        ScreenView::UndoPreview { lines, more },
+        ScreenView::UndoPreview {
+            lines,
+            more,
+            when: book.when,
+        },
     );
     // The person's answer: Undo, or Back. Nothing happens without it; an hour without one closes.
     let until = std::time::Instant::now() + Duration::from_secs(3600);

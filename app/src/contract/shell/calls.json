@@ -399,7 +399,12 @@
       "name": "guard_intent"
     },
     {
-      "args": [],
+      "args": [
+        [
+          "id",
+          "01010101010101010101010101010101"
+        ]
+      ],
       "name": "fullmove_undo"
     },
     {

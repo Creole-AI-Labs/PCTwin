@@ -31,6 +31,9 @@ pub enum Reason {
     InstallFailed,
     /// There is no version or equivalent for the new laptop's system.
     NoEquivalent,
+    /// The drive it lands on is locked (BitLocker or another drive lock): nothing could be
+    /// written there until it is unlocked.
+    DriveLocked,
 
     // Needs action: it is in place, but the person must finish a step.
     /// The person must sign in.
@@ -50,11 +53,15 @@ pub enum Reason {
     /// A folder that moves as one whole (a Photos Library, a project's history) arrived without
     /// every file inside it: those are listed in the report with why.
     PartsMissing,
+    /// A setting that points at a moved file or folder that is not on the new laptop under the
+    /// name the move gave it: the setting was left as it was, for the person to choose the file
+    /// again.
+    MovedFileMissing,
 }
 
 impl Reason {
     /// Every reason, in report order.
-    pub const ALL: [Reason; 16] = [
+    pub const ALL: [Reason; 18] = [
         Reason::NotEnoughSpace,
         Reason::ChangedDuringMove,
         Reason::Unreadable,
@@ -63,6 +70,7 @@ impl Reason {
         Reason::NameNotAllowed,
         Reason::InstallFailed,
         Reason::NoEquivalent,
+        Reason::DriveLocked,
         Reason::SignIn,
         Reason::Activation,
         Reason::Permission,
@@ -71,6 +79,7 @@ impl Reason {
         Reason::Restart,
         Reason::FinishByHand,
         Reason::PartsMissing,
+        Reason::MovedFileMissing,
     ];
 
     /// The one status this reason belongs to.
@@ -83,7 +92,8 @@ impl Reason {
             | Reason::RefusedBySafetyCheck
             | Reason::NameNotAllowed
             | Reason::InstallFailed
-            | Reason::NoEquivalent => ItemStatus::Failed,
+            | Reason::NoEquivalent
+            | Reason::DriveLocked => ItemStatus::Failed,
             Reason::SignIn
             | Reason::Activation
             | Reason::Permission
@@ -91,7 +101,8 @@ impl Reason {
             | Reason::ManualInstall
             | Reason::Restart
             | Reason::FinishByHand
-            | Reason::PartsMissing => ItemStatus::NeedsAction,
+            | Reason::PartsMissing
+            | Reason::MovedFileMissing => ItemStatus::NeedsAction,
         }
     }
 }
@@ -252,8 +263,8 @@ mod tests {
             names.join(","),
             "\"not-enough-space\",\"changed-during-move\",\"unreadable\",\"not-verified\",\
              \"refused-by-safety-check\",\"name-not-allowed\",\"install-failed\",\"no-equivalent\",\
-             \"sign-in\",\"activation\",\"permission\",\"online-only\",\"manual-install\",\"restart\",\"finish-by-hand\",\
-             \"parts-missing\""
+             \"drive-locked\",\"sign-in\",\"activation\",\"permission\",\"online-only\",\"manual-install\",\
+             \"restart\",\"finish-by-hand\",\"parts-missing\",\"moved-file-missing\""
         );
     }
 }

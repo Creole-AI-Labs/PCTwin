@@ -1894,6 +1894,18 @@ fn is_name_error(e: &io::Error) -> bool {
     }
 }
 
+/// Whether `e` says the drive is locked: Windows answers any read or write on a drive BitLocker
+/// keeps locked with `FVE_E_LOCKED_VOLUME` (0x80310000), the system's own word for it, whichever
+/// app locked it. Nothing can be written there until the person unlocks it (gap 9 of the
+/// complications audit, 28 October 2026). A Mac or Linux drive that is locked is not mounted at
+/// all, so it is never a place of the move.
+pub fn is_drive_locked(e: &io::Error) -> bool {
+    const FVE_E_LOCKED_VOLUME: u32 = 0x8031_0000;
+    cfg!(windows)
+        && e.raw_os_error()
+            .is_some_and(|c| c as u32 == FVE_E_LOCKED_VOLUME)
+}
+
 /// Whether an error says the drive's handle went stale (the drive was removed, or another put
 /// in its place): what was learnt about the drive no longer holds.
 fn is_stale(e: &GateError) -> bool {

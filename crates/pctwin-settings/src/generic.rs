@@ -28,6 +28,9 @@ pub struct Move {
     pub value: SettingValue,
     /// Its paths were pointed at the moved files.
     pub rewritten: bool,
+    /// For a rewritten one: the value as found on the old laptop, so its paths are pointed again
+    /// at where the files really landed once they are in ([`FoundPlan::point_at_landed`]).
+    pub from: Option<SettingValue>,
 }
 
 /// The plan for every found setting.
@@ -88,6 +91,7 @@ pub fn plan_found(
                 label,
                 value: v,
                 rewritten: false,
+                from: None,
             }),
             Fate::Rewritten(v) => p.moves.push(Move {
                 key: f.address.key(),
@@ -95,6 +99,7 @@ pub fn plan_found(
                 label,
                 value: v,
                 rewritten: true,
+                from: Some(f.value.clone()),
             }),
             Fate::NotMoved(why) => p.not_moved.push(not(why)),
         }
@@ -231,6 +236,47 @@ fn label_of(cat: &Catalogue, system: System, f: &FoundSetting) -> String {
 }
 
 impl FoundPlan {
+    /// Once the files are in: each setting whose paths were pointed at the moved files is
+    /// pointed again, by the very same rules, at where those files really are now (`ctx.paths`:
+    /// [`crate::classify::Landed`], the move's own record of what landed where). One that points
+    /// at a file or folder that is not there under that name (it did not arrive, or the planned
+    /// name was taken) is taken out of the plan and returned, with why: it is never written to
+    /// point at the wrong file or at nothing (gap 5 of the complications audit, 28 October 2026).
+    pub fn point_at_landed(&mut self, ctx: &Ctx<'_>) -> Vec<NotMoved> {
+        let mut out = Vec::new();
+        self.moves.retain_mut(|m| {
+            if !m.rewritten {
+                return true;
+            }
+            let again = m.from.clone().map(|value| {
+                fate(
+                    &FoundSetting {
+                        address: m.address.clone(),
+                        label: m.label.clone(),
+                        value,
+                    },
+                    ctx,
+                )
+            });
+            match again {
+                Some(Fate::Rewritten(v)) => {
+                    m.value = v;
+                    true
+                }
+                _ => {
+                    out.push(NotMoved {
+                        label: m.label.clone(),
+                        store: m.address.store().to_string(),
+                        name: m.address.name().to_string(),
+                        why: Why::NotLanded,
+                    });
+                    false
+                }
+            }
+        });
+        out
+    }
+
     /// Every move's address by its executor key: what the new laptop's store must be given
     /// ([`crate::store::Store::remember`]) to apply, read back and undo them.
     pub fn book(&self) -> BTreeMap<String, Address> {

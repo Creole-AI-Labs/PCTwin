@@ -33,9 +33,14 @@ function PreviewNotes({ preview, first }: { preview: PlanPreview; first: FolderR
     const list = listText(names);
     lines.push({ key: "first", text: l10n.getString("plan-preview-first", { places: list }) });
   }
-  if (preview.fits === true) lines.push({ key: "fits", text: l10n.getString("plan-preview-fits") });
-  else if (preview.fits === false) lines.push({ key: "fits", text: l10n.getString("plan-preview-short", { size: fmt.total(preview.shortBytes, false) }) });
-  else lines.push({ key: "fits", text: l10n.getString("plan-preview-space-unknown") });
+  const about = preview.estimatedBytes > 0;
+  const extra = fmt.total(preview.estimatedBytes, false);
+  if (preview.fits === true) lines.push({ key: "fits", text: about ? l10n.getString("plan-preview-fits-about", { extra }) : l10n.getString("plan-preview-fits") });
+  else if (preview.fits === false) {
+    const size = fmt.total(preview.shortBytes, false);
+    lines.push({ key: "fits", text: about ? l10n.getString("plan-preview-short-about", { size, extra }) : l10n.getString("plan-preview-short", { size }) });
+  } else lines.push({ key: "fits", text: l10n.getString("plan-preview-space-unknown") });
+  for (const s of preview.synced) lines.push({ key: `synced-${s.folder}`, text: l10n.getString("plan-preview-synced", { folder: s.folder, service: s.service }) });
   if (preview.minutes) {
     const { low, high } = preview.minutes;
     lines.push({ key: "time", text: low === high ? l10n.getString("plan-preview-time-one", { minutes: low }) : l10n.getString("plan-preview-time", { low, high }) });
@@ -69,7 +74,7 @@ function PreviewNotes({ preview, first }: { preview: PlanPreview; first: FolderR
 export type ChosenPlace = { path: string; freeBytes: number | null };
 
 /** Why the place just chosen for a group was not taken. */
-export type PlaceNote = { role: FolderRole; kind: "no-safe-name" | "cannot-open" };
+export type PlaceNote = { role: FolderRole; kind: "no-safe-name" | "cannot-open" | "locked" };
 
 export interface PlanReviewProps {
   plan: PlanView;

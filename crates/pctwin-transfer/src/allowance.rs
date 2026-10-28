@@ -166,6 +166,11 @@ pub struct WholePlace {
     /// Its path as stored here: the planned one, or a name of its own beside what was already
     /// there; `None` when no name could be given.
     pub stored: Option<String>,
+    /// The stored folder was already there, made by an earlier move from this same old laptop
+    /// (the journal says so, and this is its identity on the drive): this move carries on in it
+    /// rather than starting a second one beside it. Written into only while the folder there is
+    /// still this very one (see `pctwin_gate::Fresh`); `None` for a folder this move makes.
+    pub adopted: Option<pctwin_gate::FileId>,
 }
 
 /// Where the path `path` is below the folder `top` (`Some("")` at the folder itself).
@@ -231,6 +236,16 @@ impl Allowance {
             Some((w, rest)) => format!("{}/{rest}", w.planned),
             None => stored.to_string(),
         }
+    }
+
+    /// The identity of the folder an earlier move from this old laptop made at `stored` in
+    /// `destination`, when a whole of this move carries on in it (see [`WholePlace::adopted`]).
+    pub fn adopted_at(&self, destination: &str, stored: &str) -> Option<pctwin_gate::FileId> {
+        self.wholes
+            .get(destination)?
+            .iter()
+            .find(|w| w.stored.as_deref() == Some(stored))
+            .and_then(|w| w.adopted)
     }
 
     /// For a file stored at `stored` inside a whole: how many folders down its top folder is,

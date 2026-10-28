@@ -174,6 +174,7 @@ export const undoPreview = view(
       { name: "Documents already on this laptop", plan: "leave-alone" },
     ],
     more: 0,
+    when: 1793000000,
   },
   "awaiting-person",
   ["undo", "back"],

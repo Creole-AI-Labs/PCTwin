@@ -55,7 +55,8 @@ impl NotMovedGroup {
             | Why::Fetches
             | Why::PlaceUnknown
             | Why::PathNotMoved
-            | Why::RecentMissing => NotMovedGroup::CouldRun,
+            | Why::RecentMissing
+            | Why::NotLanded => NotMovedGroup::CouldRun,
             Why::Cache
             | Why::WindowPlace
             | Why::HardwarePath

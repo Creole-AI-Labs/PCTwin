@@ -658,11 +658,66 @@ pub struct PreviewView {
     /// `None`: the free space could not be read.
     pub fits: Option<bool>,
     pub short_bytes: u64,
+    /// How much of what is counted is an estimate (installers, apps, app data: their sizes are
+    /// not known before the move), so the fit is said with "about" (0: all measured).
+    pub estimated_bytes: u64,
+    /// The places the mover's files land in that this laptop's system keeps synced to an
+    /// online storage service: files there upload and use that service's space.
+    pub synced: Vec<SyncedPlace>,
     pub minutes: Option<Range>,
     pub renamed: u64,
     pub too_big: u64,
     pub refused: u64,
     pub runs_at_sign_in: u64,
+}
+
+/// A place the move lands in that this laptop keeps synced online (gap 9, 28 October 2026).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedPlace {
+    /// The folder, as the plan shows it.
+    pub folder: String,
+    /// The service's name (as its row names it, else as the system named it).
+    pub service: String,
+}
+
+/// Which of `folders` (each as the plan shows it) is inside one of `clouds`, the folders this
+/// laptop's system says a sync service keeps (found by the system's own record, never by a list
+/// of apps: [`pctwin_scan::clouds::seen_on_this_laptop`]). A Windows path is compared without
+/// case, as Windows names are.
+pub(crate) fn synced_places(
+    folders: &[String],
+    clouds: &[pctwin_scan::clouds::FoundCloud],
+) -> Vec<SyncedPlace> {
+    let norm = |p: &std::path::Path| {
+        let s = p.to_string_lossy().replace('\\', "/");
+        let s = s.trim_end_matches('/').to_string();
+        if s.as_bytes().get(1) == Some(&b':') {
+            s.to_lowercase()
+        } else {
+            s
+        }
+    };
+    let mut out: Vec<SyncedPlace> = Vec::new();
+    for folder in folders {
+        let f = norm(std::path::Path::new(folder));
+        let Some(c) = clouds.iter().find(|c| {
+            let root = norm(&c.root);
+            !root.is_empty() && (f == root || f.starts_with(&format!("{root}/")))
+        }) else {
+            continue;
+        };
+        let service = pctwin_scan::clouds::provider_name(c.provider)
+            .map(str::to_string)
+            .unwrap_or_else(|| c.found_name.clone());
+        if !out.iter().any(|s| s.folder == *folder) {
+            out.push(SyncedPlace {
+                folder: folder.clone(),
+                service,
+            });
+        }
+    }
+    out
 }
 
 /// The connection the new laptop measured as the laptops greeted (C07).
@@ -805,6 +860,8 @@ fn plan_view(
         preview: PreviewView {
             fits,
             short_bytes: fit.places.iter().map(|p| p.short_by()).sum(),
+            estimated_bytes: fit.estimated(),
+            synced: Vec::new(),
             minutes,
             renamed: preview.problems.renamed.count,
             too_big: preview.problems.too_big.count,
@@ -1179,6 +1236,7 @@ fn status_of(cause: Cause) -> (ItemStatus, Reason) {
         Cause::OnlineOnly => (ItemStatus::NeedsAction, Reason::OnlineOnly),
         Cause::RefusedBySafetyCheck => failed(Reason::RefusedBySafetyCheck),
         Cause::NameNotAllowed => failed(Reason::NameNotAllowed),
+        Cause::DriveLocked => failed(Reason::DriveLocked),
         Cause::NotVerified
         | Cause::CouldNotWrite
         | Cause::RemovedAfterCopy
@@ -1518,6 +1576,18 @@ struct AppSteps<R: Runtime> {
 }
 
 impl<R: Runtime> AppSteps<R> {
+    /// Plans the full move for `record` once (apps, settings, special categories).
+    fn plan_full(&mut self, record: &Record) {
+        if self.full.is_none() {
+            self.full = Some(crate::fullmove::plan_here(
+                record,
+                &self.rules.mover,
+                self.extras.as_deref(),
+                &self.me,
+            ));
+        }
+    }
+
     /// Asks the mover, once, where each other person's things go (M06 on the new laptop).
     async fn ask_places(&mut self, record: &Record) -> Result<(), Stop> {
         let accounts = crate::others::accounts_here();
@@ -1735,18 +1805,57 @@ impl<R: Runtime> Steps for AppSteps<R> {
         })
     }
 
+    fn also_needed(&mut self, record: &Record) -> Vec<pctwin_transfer::AlsoNeeded> {
+        // The full move, planned now (once), so its installers and app data are counted in the
+        // space the person sees before approving.
+        self.plan_full(record);
+        let Some(full) = &self.full else {
+            return Vec::new();
+        };
+        let room = full.room_needed();
+        let mut also = vec![pctwin_transfer::AlsoNeeded {
+            at: std::env::temp_dir(),
+            bytes: room.installs,
+        }];
+        if let Some(home) = pctwin_scan::list_people()
+            .into_iter()
+            .find(|p| p.is_me)
+            .map(|p| p.home)
+        {
+            also.push(pctwin_transfer::AlsoNeeded {
+                at: home,
+                bytes: room.app_data,
+            });
+        }
+        if let Some(journal) = journal_path(&self.app) {
+            // Staged beside PCTwin's own data first.
+            also.push(pctwin_transfer::AlsoNeeded {
+                at: journal.parent().map(|p| p.to_path_buf()).unwrap_or(journal),
+                bytes: room.app_data,
+            });
+        }
+        also
+    }
+
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
         let mut view = plan_view(record, preview, &self.rules, &self.shown);
+        // A place that syncs online on this laptop (Documents kept in a cloud folder, say): said
+        // on the plan, as files there upload and use that service's space.
+        let folders: Vec<String> = view.groups.iter().map(|g| g.to_folder.clone()).collect();
+        if let Some(home) = pctwin_scan::list_people()
+            .into_iter()
+            .find(|p| p.is_me)
+            .map(|p| p.home)
+        {
+            let clouds = pctwin_scan::clouds::name_seen(
+                pctwin_scan::clouds::shipped(),
+                pctwin_scan::clouds::seen_on_this_laptop(&home),
+            );
+            view.preview.synced = synced_places(&folders, &clouds);
+        }
         // The full move: every app, setting and special category, planned once, shown on the same
         // screen, and named in what the person approves.
-        if self.full.is_none() {
-            self.full = Some(crate::fullmove::plan_here(
-                record,
-                &self.rules.mover,
-                self.extras.as_deref(),
-                &self.me,
-            ));
-        }
+        self.plan_full(record);
         if let Some(full) = &self.full {
             view.rebuild = Some(crate::fullmove::plan_view(full));
             view.fingerprint = crate::fullmove::approved_fingerprint(&view.fingerprint, full);
@@ -2286,12 +2395,15 @@ async fn run_new<R: Runtime>(
         // Counted on their own lines: the files' counts stay the files'.
         let data = steps.sink.take();
         let picked = std::mem::take(&mut steps.picked);
+        let files =
+            pctwin_fullmove::run::files_landed(&full, landed_here(&received, &steps.rules, &table));
         outcome.rebuilt = Some(crate::fullmove::rebuild_here(
             app,
             &full,
             &journal,
             &me,
             data.as_ref().map(|s| (s, picked)),
+            files,
         ));
     }
     Ok(Ran {
@@ -2299,6 +2411,40 @@ async fn run_new<R: Runtime>(
         report,
         link_lost: received.ended == Ended::LinkLost,
     })
+}
+
+/// The mover's own files on this laptop now, each with the full path where it is stored (copied
+/// and checked, or found already there), from the move's own results and the very rules that
+/// placed them: what a moved setting may point at.
+fn landed_here<'a>(
+    received: &'a Received,
+    rules: &LandingRules,
+    table: &Destinations,
+) -> Vec<(&'a Item, std::path::PathBuf)> {
+    let items: HashMap<ItemId, &Item> = received.record.items.iter().map(|i| (i.id, i)).collect();
+    received
+        .files
+        .iter()
+        .filter_map(|f| {
+            let item = *items.get(&f.item)?;
+            if !shown_to_mover(item, &rules.mover) {
+                return None;
+            }
+            let stored = match f.outcome.as_ref()? {
+                ReceiveOutcome::Finished(d) => &d.final_path,
+                ReceiveOutcome::AlreadyThere(s) => s,
+                _ => return None,
+            };
+            let root = table
+                .get(&rules.landing(item)?.destination)
+                .ok()?
+                .shown_path()?;
+            Some((
+                item,
+                stored.split('/').fold(root.to_path_buf(), |p, n| p.join(n)),
+            ))
+        })
+        .collect()
 }
 
 /// One line per other person in the move: how their things ended, counted, and whether they are
@@ -2518,6 +2664,8 @@ pub enum PlaceAnswer {
     NoSafeName,
     /// The folder could not be opened.
     CannotOpen,
+    /// The folder is on a drive that is locked (BitLocker): unlock it first.
+    Locked,
 }
 
 /// The new laptop, while the plan waits for an answer: the person chooses, in the system's
@@ -2535,8 +2683,10 @@ pub async fn move_choose_place(
     let Some(folder) = picked else {
         return Ok(PlaceAnswer::NotChosen);
     };
-    let Ok(place) = pctwin_gate::Destination::open(&folder) else {
-        return Ok(PlaceAnswer::CannotOpen);
+    let place = match pctwin_gate::Destination::open(&folder) {
+        Ok(place) => place,
+        Err(e) if pctwin_gate::is_drive_locked(&e) => return Ok(PlaceAnswer::Locked),
+        Err(_) => return Ok(PlaceAnswer::CannotOpen),
     };
     if place
         .check_drive()
@@ -2667,6 +2817,46 @@ fn old_laptop_apps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gap 9 (28 October 2026): a place the move lands in that this laptop's system keeps in a
+    /// sync service's folder (Documents kept in OneDrive, say) is said on the plan with the
+    /// service's name; a place outside every such folder, or one whose name only starts the
+    /// same, is not.
+    #[test]
+    fn a_place_inside_a_synced_folder_is_said_on_the_plan() {
+        let cloud = |root: &str, name: &str| pctwin_scan::clouds::FoundCloud {
+            provider: pctwin_record::CloudProvider::from_found_name(name),
+            root: std::path::PathBuf::from(root),
+            work: false,
+            named: false,
+            how: pctwin_scan::clouds::How::SyncRoot,
+            found_name: name.into(),
+        };
+        let clouds = [
+            cloud("C:\\Users\\ada\\OneDrive", "SomeSync"),
+            cloud("/home/ada/Cloud", "Other"),
+        ];
+        let folders = [
+            "c:\\users\\ada\\onedrive\\Documents".to_string(),
+            "C:\\Users\\ada\\OneDrive Old\\Pictures".to_string(),
+            "C:\\Users\\ada\\Music".to_string(),
+            "/home/ada/Cloud".to_string(),
+        ];
+        let synced = synced_places(&folders, &clouds);
+        assert_eq!(
+            synced,
+            [
+                SyncedPlace {
+                    folder: folders[0].clone(),
+                    service: "SomeSync".into(),
+                },
+                SyncedPlace {
+                    folder: folders[3].clone(),
+                    service: "Other".into(),
+                },
+            ]
+        );
+    }
     use pctwin_gate::Finished;
     use pctwin_move::ReceivedFile;
     use pctwin_record::{ItemKind, ItemName, ItemPath, ManagedBy, Place, Portability};

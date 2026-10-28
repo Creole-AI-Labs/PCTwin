@@ -77,7 +77,7 @@ pub use allowance::{
 };
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use cause::{Cause, Failure, Side};
-pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};
+pub use fit::{AlsoNeeded, Fit, KEEP_FREE, PlaceFit, TimeRange, WORK_PLACE};
 pub use inventory::{
     INVENTORY_PIECE_WAIT, InventoryFrame, PAGED_FROM, receive_inventory, send_inventory,
 };

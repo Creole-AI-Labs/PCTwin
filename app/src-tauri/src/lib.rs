@@ -39,6 +39,7 @@ mod quicksend;
 pub mod rebuild;
 mod recovery;
 mod restart;
+mod undo_books;
 mod updates;
 
 use serde::Deserialize;
