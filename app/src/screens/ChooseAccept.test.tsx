@@ -15,6 +15,8 @@ import AcceptMove from "./AcceptMove";
 import { RouteStrip } from "./ProgressParts";
 import Outcome from "./Outcome";
 import History from "./History";
+import { RebuildPlanSection } from "./FullMoveParts";
+import plansFull from "../contract/plan-view.json";
 import outcomes from "../contract/move-outcome.json";
 import { parseMoveOutcome } from "../bridge";
 import ChooseWhat, { choiceOf, keyOf, stateOf } from "./ChooseWhat";
@@ -169,6 +171,22 @@ describe("undo from the history", () => {
     expect(undo).toHaveLength(1);
     fireEvent.click(undo[0]);
     expect(onUndo).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
+  });
+});
+
+describe("updating an older app already here", () => {
+  it("an older app offers Update it, off unless ticked, and the tick names its place in the plan", () => {
+    const full = parsePlanView(plansFull[1])?.rebuild;
+    if (!full) throw new Error("the engine's full plan example parses");
+    const line = { ...full.changes[0], action: "leave-alone" as const, needs: null, update: 4 };
+    const rebuild = { ...full, changes: [line] };
+    const onUpdate = vi.fn();
+    inApp(<RebuildPlanSection rebuild={rebuild} onUpdate={onUpdate} />);
+    const name = line.title.kind === "name" ? line.title.value : text(line.title.value);
+    const box: HTMLInputElement = screen.getByRole("checkbox", { name: (n) => n.startsWith(text("fullmove-update-it", { name })) });
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    expect(onUpdate).toHaveBeenCalledWith(4, true);
   });
 });
 

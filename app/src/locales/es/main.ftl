@@ -2072,6 +2072,14 @@ fullmove-step-sign-in = Vuelve a iniciar sesión en esta laptop.
 fullmove-step-relink = Configúrala de nuevo en esta laptop o vuelve a vincularla desde la app.
 fullmove-step-not-yet = PCTwin todavía no mueve los datos de esta app. Siguen a salvo en tu laptop anterior.
 fullmove-step-look-at-it = PCTwin no pudo saber qué es esto. Revísalo en tu laptop anterior.
+fullmove-group-update =
+    { $count ->
+        [one] Hay una versión anterior en este portátil
+        [many] Hay versiones anteriores en este portátil
+       *[other] Hay versiones anteriores en este portátil
+    }
+fullmove-update-it = Actualizar { $name }
+fullmove-update-hint = PCTwin instala la versión más nueva. Tus ajustes se conservan.
 fullmove-special-not-yet = Datos de apps como correo, navegadores y juegos
 fullmove-left-by-person = Aplicaciones, ajustes y datos de aplicaciones: se quedan en tu portátil antiguo, como elegiste
 fullmove-special-finish = PCTwin no movió esto. Sigue a salvo en tu laptop anterior.

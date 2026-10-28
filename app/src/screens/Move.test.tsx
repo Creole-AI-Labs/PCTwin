@@ -209,7 +209,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(start);
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [] });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [], updates: [] });
     });
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-starting-title"));
@@ -223,7 +223,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [] });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [], updates: [] });
     });
   });
 
@@ -278,7 +278,7 @@ describe("the move, once paired", () => {
     await host(false);
     showPlan(plan);
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
-    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [] });
+    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [], updates: [] });
   });
 
   it("shows the measured progress, then pausing and paused with a way to stop that asks first", async () => {

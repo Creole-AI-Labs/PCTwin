@@ -155,6 +155,8 @@ pub struct ChangeView {
     pub files: u64,
     /// A secret the person may tick to bring: its line (none unless ticked).
     pub secret: Option<u32>,
+    /// An older version is here and PCTwin can update it if ticked: the app's place in the plan.
+    pub update: Option<u32>,
     pub source: Option<String>,
     /// What else the person should know (an older version here, saved sign-ins to websites).
     pub note: Option<ChangeNote>,
@@ -312,6 +314,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             special: c.special,
             files: c.files,
             secret: c.secret,
+            update: c.update,
             source: c.source.map(|n| name(&n)),
             note: c.note.map(|n| match n {
                 ChangeNote::OlderHere { version } => ChangeNote::OlderHere {

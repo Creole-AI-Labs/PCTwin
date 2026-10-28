@@ -95,6 +95,9 @@ pub struct Change {
     /// A secret the person may tick to bring (off unless ticked): its line in the plan's special
     /// list.
     pub secret: Option<u32>,
+    /// An older version of this app is on the new laptop and PCTwin can update it if the person
+    /// ticks "Update it" (off unless ticked): the app's place in the plan's app list.
+    pub update: Option<u32>,
     /// Where PCTwin gets an app it installs: the package's own name in its catalog (winget's ID),
     /// shown beside the old laptop's name for it.
     pub source: Option<String>,
@@ -190,6 +193,9 @@ pub struct RoomNeeded {
 /// The full move's plan.
 #[derive(Debug, Clone, Default)]
 pub struct FullPlan {
+    /// The older apps already on the new laptop the person ticked "Update it" for, by their
+    /// place in [`Self::apps`]: only these are updated; every other app already here is left.
+    pub updates: Vec<u32>,
     /// The mover's apps and everyone's, each with its plan (apps that come with the system are
     /// left out: the new laptop has them).
     pub apps: Vec<AppEntry>,
@@ -424,6 +430,7 @@ impl FullPlan {
             })
             .collect();
         Self {
+            updates: Vec::new(),
             apps,
             groups,
             not_moved,
@@ -444,7 +451,7 @@ impl FullPlan {
     /// Every change, in the order the screen shows them: apps, settings, special categories.
     pub fn changes(&self) -> Vec<Change> {
         let mut out = Vec::new();
-        for e in &self.apps {
+        for (at, e) in self.apps.iter().enumerate() {
             let (action, undo, needs) = match e.plan.disposition {
                 Disposition::AlreadyHere | Disposition::PartOfSystem => {
                     (Action::LeaveAlone, Promise::MustKeep, None)
@@ -468,6 +475,8 @@ impl FullPlan {
                     .then(|| e.winget().map(str::to_string))
                     .flatten(),
                 note: older_here(&e.plan).map(|version| ChangeNote::OlderHere { version }),
+                update: (older_here(&e.plan).is_some() && e.winget().is_some())
+                    .then_some(at as u32),
             });
         }
         for g in &self.groups {
@@ -481,6 +490,7 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                update: None,
                 source: None,
                 note: None,
             });
@@ -505,6 +515,7 @@ impl FullPlan {
                 special: Some(s.step),
                 files: s.files,
                 secret: s.secret.then_some(at as u32),
+                update: None,
                 source: None,
                 note: s.sites.then_some(ChangeNote::Sites),
             });
@@ -522,6 +533,7 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                update: None,
                 source: None,
                 note: None,
             });
@@ -537,6 +549,7 @@ impl FullPlan {
                 special: Some(SpecialStep::LookAtIt),
                 files: 0,
                 secret: None,
+                update: None,
                 source: None,
                 note: None,
             });
@@ -552,6 +565,7 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                update: None,
                 source: None,
                 note: None,
             });
@@ -566,6 +580,7 @@ impl FullPlan {
                 special: Some(SpecialStep::NotYet),
                 files: 0,
                 secret: None,
+                update: None,
                 source: None,
                 note: None,
             });
@@ -577,7 +592,15 @@ impl FullPlan {
     pub fn to_install(&self) -> Vec<&AppEntry> {
         self.apps
             .iter()
-            .filter(|e| e.plan.disposition == Disposition::Install && needs_of(&e.plan).is_none())
+            .enumerate()
+            .filter(|(at, e)| {
+                (e.plan.disposition == Disposition::Install && needs_of(&e.plan).is_none())
+                    // An older app here the person chose to update, by a route PCTwin installs from.
+                    || (self.updates.contains(&(*at as u32))
+                        && older_here(&e.plan).is_some()
+                        && e.winget().is_some())
+            })
+            .map(|(_, e)| e)
             .collect()
     }
 
@@ -810,6 +833,38 @@ mod tests {
         assert_eq!(changes[1].action, Action::LeaveAlone);
         assert_eq!(changes[1].note, None);
         assert!(plan.to_install().is_empty(), "nothing installed twice");
+        // No route PCTwin installs from: nothing to offer.
+        assert_eq!(changes[0].update, None);
+
+        // With a winget route, the older app offers "Update it", and only a tick installs it.
+        let found = |a: &FoundApp| {
+            if a.name == "Notes" {
+                vec![("Vendor.Notes".to_string(), WingetBy::ProductCode)]
+            } else {
+                vec![]
+            }
+        };
+        let here = NewLaptop {
+            winget: &found,
+            ..here
+        };
+        let mut plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
+        let line = plan.changes()[0].update;
+        assert_eq!(line, Some(0));
+        assert!(
+            plan.to_install().is_empty(),
+            "never updated without the tick"
+        );
+        plan.updates = vec![0];
+        let names: Vec<&str> = plan
+            .to_install()
+            .iter()
+            .map(|e| e.app.name.as_str())
+            .collect();
+        assert_eq!(names, ["Notes"]);
+        // A tick on an app that is not an older one here installs nothing.
+        plan.updates = vec![1];
+        assert!(plan.to_install().is_empty());
     }
 
     #[test]

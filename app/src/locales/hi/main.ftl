@@ -2012,6 +2012,13 @@ fullmove-step-sign-in = इस लैपटॉप पर इसमें फि�
 fullmove-step-relink = इसे इस लैपटॉप पर फिर से सेट करें, या ऐप से फिर से जोड़ें।
 fullmove-step-not-yet = PCTwin अभी इस ऐप का डेटा नहीं ले जाता। यह आपके पुराने लैपटॉप पर सुरक्षित है।
 fullmove-step-look-at-it = PCTwin पता नहीं लगा सका कि यह क्या है। इसे अपने पुराने लैपटॉप पर देखें।
+fullmove-group-update =
+    { $count ->
+        [one] इस लैपटॉप पर एक पुराना संस्करण है
+       *[other] इस लैपटॉप पर पुराने संस्करण हैं
+    }
+fullmove-update-it = { $name } अपडेट करें
+fullmove-update-hint = PCTwin नया संस्करण इंस्टॉल करेगा। आपकी सेटिंग वैसी ही रहेंगी।
 fullmove-special-not-yet = ऐप डेटा, जैसे ईमेल, ब्राउज़र और गेम
 fullmove-left-by-person = ऐप, सेटिंग और ऐप डेटा: आपकी पसंद के अनुसार पुराने लैपटॉप पर ही रहे
 fullmove-special-finish = PCTwin ने इसे नहीं ले जाया। यह आपके पुराने लैपटॉप पर सुरक्षित है।

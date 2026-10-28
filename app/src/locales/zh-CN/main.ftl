@@ -1777,6 +1777,12 @@ fullmove-step-sign-in = 在这台电脑上重新登录。
 fullmove-step-relink = 在这台电脑上重新设置，或从应用里重新关联。
 fullmove-step-not-yet = PCTwin 暂时还不迁移这个应用的数据。它仍安全地保存在你的旧电脑上。
 fullmove-step-look-at-it = PCTwin 无法判断这是什么。请在旧电脑上查看。
+fullmove-group-update =
+    { $count ->
+       *[other] 这台笔记本电脑上有较旧的版本
+    }
+fullmove-update-it = 更新 { $name }
+fullmove-update-hint = PCTwin 会安装较新的版本，你的设置保持不变。
 fullmove-special-not-yet = 应用数据，例如邮件、浏览器和游戏
 fullmove-left-by-person = 应用、设置和应用数据：按你的选择留在旧笔记本电脑上
 fullmove-special-finish = PCTwin 没有迁移这个。它仍安全地保存在你的旧电脑上。

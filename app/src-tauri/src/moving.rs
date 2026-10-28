@@ -290,6 +290,8 @@ struct Run {
     /// The new laptop: the secret lines of app data the person ticked, one by one, when they
     /// approved (none unless ticked).
     secrets: Vec<u32>,
+    /// The new laptop: the older apps here the person ticked "Update it" for, when they approved.
+    updates: Vec<u32>,
     /// The old laptop: where the person's answer about apps to close goes.
     close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
@@ -546,6 +548,7 @@ impl Moving {
             scan_stop: scan_stop.clone(),
             waiting: None,
             secrets: Vec::new(),
+            updates: Vec::new(),
             close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
@@ -638,6 +641,7 @@ impl Moving {
         yes: bool,
         left_out: &[FolderRole],
         secrets: &[u32],
+        updates: &[u32],
     ) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.waiting.take() {
             Some((shown, groups, tx)) if shown == *key => {
@@ -647,6 +651,7 @@ impl Moving {
                 }
                 run.left_out = left_out.iter().copied().collect();
                 run.secrets = secrets.to_vec();
+                run.updates = updates.to_vec();
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -715,6 +720,13 @@ impl Moving {
             }
             None => Err(MoveProblem::NotMoving),
         })?
+    }
+
+    fn updates(&self) -> Vec<u32> {
+        lock(&self.run)
+            .as_ref()
+            .map(|r| r.updates.clone())
+            .unwrap_or_default()
     }
 
     fn secrets(&self) -> Vec<u32> {
@@ -2772,8 +2784,10 @@ async fn run_new<R: Runtime>(
     // The full move, once every file is in: apps, settings and special categories, each with its
     // result. A move that was stopped or broke off changes nothing more.
     if received.ended == Ended::Finished
-        && let Some(full) = steps.full.take()
+        && let Some(mut full) = steps.full.take()
     {
+        // Only the older apps the person ticked "Update it" for are updated.
+        full.updates = steps.moving.updates();
         let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
         // Counted on their own lines: the files' counts stay the files'.
         let data = steps.sink.take();
@@ -3028,9 +3042,11 @@ pub fn move_approve(
     approve: bool,
     left_out: Vec<FolderRole>,
     secrets: Option<Vec<u32>>,
+    updates: Option<Vec<u32>>,
 ) -> Result<(), MoveProblem> {
     let secrets = secrets.unwrap_or_default();
-    moving.answer(&plan, approve, &left_out, &secrets)
+    let updates = updates.unwrap_or_default();
+    moving.answer(&plan, approve, &left_out, &secrets, &updates)
 }
 
 /// What came of choosing a place for a group of folders (M05).
@@ -3906,7 +3922,7 @@ mod tests {
         // Back to the usual folder.
         moving.choose(FolderRole::Videos, None).unwrap();
         moving
-            .answer(&key, true, &[FolderRole::Music], &[])
+            .answer(&key, true, &[FolderRole::Music], &[], &[])
             .unwrap();
         // Once approved, nothing more is chosen.
         assert_eq!(
@@ -3936,23 +3952,23 @@ mod tests {
             fingerprint: "ab".into(),
         };
         assert_eq!(
-            moving.answer(&stale, true, &[], &[]),
+            moving.answer(&stale, true, &[], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
         assert!(rx.try_recv().is_err(), "no answer yet");
         // Leaving out a folder the plan does not show is refused, and the plan still waits.
         assert_eq!(
-            moving.answer(&key, true, &[FolderRole::Music], &[]),
+            moving.answer(&key, true, &[FolderRole::Music], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
         moving
-            .answer(&key, true, &[FolderRole::Documents], &[])
+            .answer(&key, true, &[FolderRole::Documents], &[], &[])
             .unwrap();
         assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
         assert_eq!(
-            moving.answer(&key, true, &[], &[]),
+            moving.answer(&key, true, &[], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
     }

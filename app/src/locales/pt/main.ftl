@@ -2076,6 +2076,14 @@ fullmove-step-sign-in = Entre de novo neste notebook.
 fullmove-step-relink = Configure de novo neste notebook ou vincule de novo pelo app.
 fullmove-step-not-yet = O PCTwin ainda não move os dados deste app. Eles continuam seguros no seu notebook antigo.
 fullmove-step-look-at-it = O PCTwin não conseguiu saber o que é isto. Veja no seu notebook antigo.
+fullmove-group-update =
+    { $count ->
+        [one] Há uma versão mais antiga neste notebook
+        [many] Há versões mais antigas neste notebook
+       *[other] Há versões mais antigas neste notebook
+    }
+fullmove-update-it = Atualizar { $name }
+fullmove-update-hint = O PCTwin instala a versão mais nova. Suas configurações ficam.
 fullmove-special-not-yet = Dados de apps como e-mail, navegadores e jogos
 fullmove-left-by-person = Apps, configurações e dados de apps: ficam no seu notebook antigo, como você escolheu
 fullmove-special-finish = O PCTwin não moveu isto. Continua seguro no seu notebook antigo.

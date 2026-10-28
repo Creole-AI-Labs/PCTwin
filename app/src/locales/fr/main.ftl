@@ -2081,6 +2081,14 @@ fullmove-step-sign-in = Reconnectez-vous sur cet ordinateur.
 fullmove-step-relink = Configurez-la à nouveau sur cet ordinateur, ou reliez-la depuis l’application.
 fullmove-step-not-yet = PCTwin ne transfère pas encore les données de cette application. Elles restent en sécurité sur votre ancien ordinateur.
 fullmove-step-look-at-it = PCTwin n’a pas pu savoir ce que c’est. Regardez-le sur votre ancien ordinateur.
+fullmove-group-update =
+    { $count ->
+        [one] Une version plus ancienne est sur ce portable
+        [many] Des versions plus anciennes sont sur ce portable
+       *[other] Des versions plus anciennes sont sur ce portable
+    }
+fullmove-update-it = Mettre à jour { $name }
+fullmove-update-hint = PCTwin installe la version plus récente. Vos réglages restent.
 fullmove-special-not-yet = Données d’applications comme les e-mails, les navigateurs et les jeux
 fullmove-left-by-person = Applications, réglages et données d'applications : laissés sur votre ancien portable, comme vous l'avez choisi
 fullmove-special-finish = PCTwin n’a pas transféré ceci. C’est toujours en sécurité sur votre ancien ordinateur.

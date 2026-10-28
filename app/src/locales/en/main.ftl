@@ -1887,6 +1887,13 @@ fullmove-step-sign-in = Sign in to it again on this laptop.
 fullmove-step-relink = Set it up again on this laptop, or link it again from the app.
 fullmove-step-not-yet = PCTwin does not move this app’s data yet. It is still safe on your old laptop.
 fullmove-step-look-at-it = PCTwin could not tell what this is. Look at it on your old laptop.
+fullmove-group-update =
+    { $count ->
+        [one] An older version is on this laptop
+       *[other] Older versions are on this laptop
+    }
+fullmove-update-it = Update { $name }
+fullmove-update-hint = PCTwin installs the newer version. Your settings for it stay.
 fullmove-special-not-yet = App data such as email, browsers and games
 fullmove-left-by-person = Apps, settings and app data: left on your old laptop, as you chose
 fullmove-special-finish = PCTwin did not move this. It is still safe on your old laptop.

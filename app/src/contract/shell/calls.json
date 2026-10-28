@@ -153,6 +153,12 @@
           [
             2
           ]
+        ],
+        [
+          "updates",
+          [
+            0
+          ]
         ]
       ],
       "name": "move_approve"
