@@ -1088,6 +1088,8 @@ async function runInApp(command: string, args: Record<string, unknown>): Promise
 export type WindowMode = "everyday" | "mini" | "expanded";
 
 export const setWindowMode = (mode: WindowMode): Promise<void> => runInApp("set_window_mode", { mode });
+/** The mini box has no frame: dragging its body moves it (the app starts the drag). */
+export const windowDrag = (): Promise<void> => runInApp("window_drag", {});
 
 /** The tray menu speaks the person's language too. */
 export const setTrayLabels = (show: string, quit: string): Promise<void> => runInApp("set_tray_labels", { show, quit });

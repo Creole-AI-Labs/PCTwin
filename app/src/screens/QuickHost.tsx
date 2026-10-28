@@ -36,6 +36,8 @@ import QuickProgress from "./QuickProgress";
 import QuickStop from "./QuickStop";
 import { Folder, Tile } from "./QsParts";
 import "./progress.css";
+import MiniPanel from "./MiniPanel";
+import { setWindowMode, type WindowMode } from "../native";
 
 type View =
   | { kind: "pick" }
@@ -64,7 +66,16 @@ function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
  * number is the acceptance (Security Design T). Both follow the measured progress and end on the
  * Done page. The screens never see a path on this laptop, only names and sizes.
  */
-export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; onHome: () => void }) {
+export default function QuickHost({
+  mode,
+  onHome,
+  onWindow,
+}: {
+  mode: "send" | "receive";
+  onHome: () => void;
+  /** The window size the page asks for, so the frame can fit it (the mini box has no header). */
+  onWindow?: (mode: WindowMode) => void;
+}) {
   const { l10n } = useLocalization();
   const bytes = useBytes();
   const sender = mode === "send";
@@ -79,6 +90,13 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   // After Keep original dates: how many got theirs back, or that it could not be done.
   const [datesKept, setDatesKept] = useState<{ kind: "kept"; count: number } | { kind: "failed" } | null>(null);
   const [stopping, setStopping] = useState(false);
+  // Keep it compact: the small box that floats in the corner, until Open.
+  const [mini, setMini] = useState(false);
+  const windowMode: WindowMode = mini && view.kind === "progress" ? "mini" : "everyday";
+  useEffect(() => {
+    void setWindowMode(windowMode).catch(() => undefined);
+    onWindow?.(windowMode);
+  }, [windowMode, onWindow]);
   const [failed, setFailed] = useState(false);
   const [tooMany, setTooMany] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -291,6 +309,27 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
         />
       );
     case "progress":
+      if (mini) {
+        const p = view.progress;
+        const running = p.phase !== "paused" && p.phase !== "lost";
+        return (
+          <MiniPanel
+            kind="send"
+            progress={{
+              state: running ? "running" : "paused",
+              bytes: { checked: p.bytesDone, total: p.bytesTotal },
+              // Only the percent is shown here: a send still under way is never shown as 100%.
+              counts: { total: p.filesTotal, waiting: Math.max(0, p.filesTotal - p.filesDone - p.failed), copying: 0, checking: 0, done: p.filesDone, needsAction: 0, failed: p.failed, skippedByUser: 0 },
+              minutesLeft: p.minutesLeft ?? undefined,
+            }}
+            onPause={() => void qsPause().catch(() => undefined)}
+            onResume={() => void qsResume().catch(() => undefined)}
+            onOpen={() => {
+              setMini(false);
+            }}
+          />
+        );
+      }
       return (
         <>
           <QuickProgress
@@ -300,7 +339,9 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
             side={sender ? "send" : "receive"}
             onPause={() => void qsPause().catch(() => undefined)}
             onResume={() => void qsResume().catch(() => undefined)}
-            onCompact={() => undefined}
+            onCompact={() => {
+              setMini(true);
+            }}
             onStop={() => {
               setStopping(true);
             }}

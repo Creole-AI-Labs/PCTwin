@@ -64,7 +64,7 @@ impl WindowMode {
     pub fn size(self) -> (f64, f64) {
         match self {
             Self::Everyday => (480.0, 620.0),
-            Self::Mini => (360.0, 240.0),
+            Self::Mini => (340.0, 176.0),
             Self::Expanded => (760.0, 620.0),
         }
     }
@@ -74,9 +74,40 @@ impl WindowMode {
 #[tauri::command]
 fn set_window_mode<R: Runtime>(window: WebviewWindow<R>, mode: WindowMode) -> Result<(), String> {
     let (width, height) = mode.size();
+    let e = |e: tauri::Error| e.to_string();
+    // Was it the mini box? Then the normal window comes back where the person can see it.
+    let was_mini = !window.is_decorated().map_err(e)?;
+    let mini = mode == WindowMode::Mini;
+    // The mini box floats like a call's small window: no frame, above other windows, in the
+    // corner of the screen; the person drags it by its body (data-tauri-drag-region).
+    window.set_decorations(!mini).map_err(e)?;
+    window.set_always_on_top(mini).map_err(e)?;
     window
         .set_size(LogicalSize::new(width, height))
-        .map_err(|e| e.to_string())
+        .map_err(e)?;
+    if mini {
+        if let Some(monitor) = window.current_monitor().map_err(e)? {
+            let area = monitor.work_area();
+            let scale = monitor.scale_factor();
+            let margin = (16.0 * scale) as i32;
+            let (w, h) = ((width * scale) as i32, (height * scale) as i32);
+            let x = area.position.x + area.size.width as i32 - w - margin;
+            let y = area.position.y + area.size.height as i32 - h - margin;
+            window
+                .set_position(tauri::PhysicalPosition::new(x, y))
+                .map_err(e)?;
+        }
+    } else if was_mini {
+        window.center().map_err(e)?;
+    }
+    Ok(())
+}
+
+/// The mini box has no frame: the person drags it by its body, and the screen asks for that here
+/// (a named command of the closed list, never the window's own permissions).
+#[tauri::command]
+fn window_drag<R: Runtime>(window: WebviewWindow<R>) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
 }
 
 /// The approved symbol in one colour (scripts/make-tray-icons.py): black for macOS's menu bar
@@ -196,6 +227,7 @@ fn navigation_guard<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         set_window_mode,
+        window_drag,
         set_tray_labels,
         pairing::pairing_old_start,
         pairing::pairing_old_pick,
@@ -380,7 +412,9 @@ mod tests {
     #[test]
     fn the_three_window_sizes_match_the_design_system() {
         assert_eq!(WindowMode::Everyday.size(), (480.0, 620.0));
-        assert_eq!(WindowMode::Mini.size(), (360.0, 240.0));
+        // The mini box: smaller than the design system's 360 x 240 panel, floating in the corner
+        // (asked for in the first real test, 28 October 2026).
+        assert_eq!(WindowMode::Mini.size(), (340.0, 176.0));
         assert_eq!(WindowMode::Expanded.size(), (760.0, 620.0));
     }
 

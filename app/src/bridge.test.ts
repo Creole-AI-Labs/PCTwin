@@ -68,6 +68,7 @@ import {
   pairingStop,
   setTrayLabels,
   setWindowMode,
+  windowDrag,
   toProblem,
   guardIntent,
   guardView,
@@ -214,6 +215,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
       await setWindowMode("mini");
+      await windowDrag();
       await setTrayLabels("Show", "Quit");
       await pairingOldStart(null);
       await pairingOldPick(1, 42);

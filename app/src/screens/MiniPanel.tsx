@@ -2,10 +2,14 @@ import { useLocalization } from "@fluent/react";
 import { Button, MiniProgress } from "../components/kit";
 import { measuredPercent, type MoveProgress } from "../move";
 import FrameFooter from "./FrameFooter";
+import "./progress.css";
+import { windowDrag } from "../native";
 import { useAttribute, useTimeLeft } from "./ProgressParts";
 
 /**
- * F09 Mini panel (360 x 240): what is moving, the measured percent, Pause (or Resume) and Open.
+ * F09 Mini panel (340 x 176): a small box that floats above other windows in the corner of the
+ * screen, like a call's small window (asked for in the first real test, 28 October 2026): what is
+ * moving, the measured percent, the time left, Pause (or Resume) and Open. Dragged by its body.
  * Shows a move or, with `kind="send"`, a Quick Send (the same panel, the send's own words).
  * No paid states: nothing here is about cloud, storage or backup.
  */
@@ -17,7 +21,7 @@ export default function MiniPanel({
   onOpen,
 }: {
   kind?: "move" | "send";
-  progress: MoveProgress;
+  progress: Pick<MoveProgress, "state" | "bytes" | "counts" | "minutesLeft">;
   onPause: () => void;
   onResume: () => void;
   onOpen: () => void;
@@ -35,7 +39,13 @@ export default function MiniPanel({
         ? l10n.getString(send ? "mini-title-send-paused" : "mini-title-paused")
         : l10n.getString(send ? "mini-title-send" : "mini-title");
   return (
-    <>
+    <div
+      className="mini-box"
+      onMouseDown={(e) => {
+        // Dragging the box by its body, never by its buttons.
+        if (e.button === 0 && !(e.target as HTMLElement).closest("button")) void windowDrag().catch(() => undefined);
+      }}
+    >
       <MiniProgress
         kind={kind}
         title={title}
@@ -55,11 +65,11 @@ export default function MiniPanel({
           )
         }
       />
-      <FrameFooter note={send ? "send" : "move"}>
+      <FrameFooter note="none">
         <Button variant="primary" onClick={onOpen}>
           {l10n.getString(send ? "mini-open-send" : "mini-open")}
         </Button>
       </FrameFooter>
-    </>
+    </div>
   );
 }
