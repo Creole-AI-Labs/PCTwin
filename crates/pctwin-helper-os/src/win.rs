@@ -62,7 +62,7 @@ use windows::Win32::System::Threading::{
     QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{
-    SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    AssocIsDangerous, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 use windows::core::{HRESULT, PCWSTR, PWSTR, w};
@@ -1017,6 +1017,36 @@ pub struct FileTrust {
     pub code: i32,
     /// The signing certificate's bytes as Windows read them, when it trusts the signature.
     pub signer: Option<Vec<u8>>,
+}
+
+/// Whether Windows itself counts a file type as dangerous to open (`AssocIsDangerous`: its own
+/// list plus the policy's high-risk types and what the type's registration says). `assoc` is the
+/// ending with its dot, NUL-terminated. Added 28 October 2026 (fifth review, residual of finding
+/// 1: types the registry does not mark, like `.ps1`, `.theme` or `.chm`); approved by the user,
+/// 28 October 2026.
+fn os_assoc_is_dangerous(assoc: &[u16]) -> bool {
+    assert!(assoc.ends_with(&[0]), "NUL-terminated");
+    // SAFETY: `assoc` is a NUL-terminated UTF-16 string that lives for the whole call; the call
+    // only reads it and keeps no pointer to it.
+    #[expect(unsafe_code, reason = "AssocIsDangerous has no safe binding")]
+    let r = unsafe { AssocIsDangerous(PCWSTR(assoc.as_ptr())) };
+    r.as_bool()
+}
+
+/// Whether Windows counts files ending in `ending` (with or without its dot) as dangerous to
+/// open (see [`os_assoc_is_dangerous`]). An ending that is empty or holds anything but letters,
+/// digits, `-` and `_` is answered `true`: it is not a plain file type, so it is not trusted.
+pub fn file_type_is_dangerous(ending: &str) -> bool {
+    let e = ending.trim_start_matches('.');
+    if e.is_empty()
+        || e.len() > 64
+        || !e
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return true;
+    }
+    os_assoc_is_dangerous(&wide(OsStr::new(&format!(".{e}"))))
 }
 
 /// Asks Windows itself, with no tool or script in between, whether it trusts the signature

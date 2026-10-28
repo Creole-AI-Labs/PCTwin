@@ -81,8 +81,8 @@ mod win;
 #[cfg(windows)]
 pub use win::{
     DiskHotplug, FileTrust, PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder,
-    caller_of, clean_command, defender_scanner, disk_hotplug, minimal_env, program_folder,
-    system_folder, verify_file_trust,
+    caller_of, clean_command, defender_scanner, disk_hotplug, file_type_is_dangerous, minimal_env,
+    program_folder, system_folder, verify_file_trust,
 };
 #[cfg(windows)]
 pub use win::{folder_access_list, private_folder};

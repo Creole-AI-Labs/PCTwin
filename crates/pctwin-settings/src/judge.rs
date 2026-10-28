@@ -38,6 +38,21 @@ pub struct Facts {
     schemes: Option<BTreeSet<String>>,
     /// Whether a path's own file is looked at when it is there.
     look_at_files: bool,
+    /// Whether the system's own danger check (when the app gave one) is asked too: true only for
+    /// [`Facts::system`], so facts given in tests stay exactly what they say.
+    ask_system: bool,
+}
+
+/// The system's own judgement of a file ending, given once by the app at start (on Windows,
+/// `pctwin_helper_os::file_type_is_dangerous`, Windows' `AssocIsDangerous`). This crate may not
+/// link the helper's OS calls itself, so the app passes the check in.
+static DANGER: OnceLock<fn(&str) -> bool> = OnceLock::new();
+
+/// Gives the system's own check of whether a file ending is dangerous to open; it can only add
+/// caution (an ending it calls dangerous is held back; one it does not is still judged by every
+/// other fact). Later calls are ignored.
+pub fn use_system_danger_check(check: fn(&str) -> bool) {
+    let _ = DANGER.set(check);
 }
 
 impl Facts {
@@ -52,19 +67,26 @@ impl Facts {
                 .collect(),
             schemes: schemes.map(|s| s.into_iter().map(str::to_ascii_lowercase).collect()),
             look_at_files: true,
+            ask_system: false,
         }
     }
 
     /// This laptop's own facts, read once.
     pub fn system() -> &'static Facts {
         static FACTS: OnceLock<Facts> = OnceLock::new();
-        FACTS.get_or_init(discover)
+        FACTS.get_or_init(|| Facts {
+            ask_system: true,
+            ..discover()
+        })
     }
 
-    /// Whether a file ending (with or without its dot) runs or acts when opened.
+    /// Whether a file ending (with or without its dot) runs or acts when opened: one the facts
+    /// hold, or, for the system's own facts, one the system's own check calls dangerous (see
+    /// [`use_system_danger_check`]).
     pub fn ending_runs(&self, ending: &str) -> bool {
         let e = ending.trim_start_matches('.').to_ascii_lowercase();
-        !e.is_empty() && self.runs.contains(&e)
+        !e.is_empty()
+            && (self.runs.contains(&e) || (self.ask_system && DANGER.get().is_some_and(|f| f(&e))))
     }
 
     /// Whether the system has a handler for `scheme`: `None` when it cannot say.
@@ -91,6 +113,7 @@ fn discover() -> Facts {
         runs: BTreeSet::new(),
         schemes: unix_facts::desktop_schemes(),
         look_at_files: true,
+        ask_system: false,
     }
 }
 
@@ -102,6 +125,7 @@ fn discover() -> Facts {
         runs: BTreeSet::new(),
         schemes: None,
         look_at_files: true,
+        ask_system: false,
     }
 }
 
@@ -163,6 +187,7 @@ mod windows_facts {
             runs,
             schemes: Some(schemes),
             look_at_files: true,
+            ask_system: false,
         }
     }
 
