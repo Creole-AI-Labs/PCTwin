@@ -703,6 +703,7 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
                     for_account: HERE.into(),
                     permission: Permission::OwnFolders,
                 },
+                system: pctwin_special::roots::System::Windows,
             },
             &names,
         );
