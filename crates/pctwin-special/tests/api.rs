@@ -106,7 +106,11 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
     std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
     std::fs::create_dir_all(new.join("AppData/Local")).unwrap();
     let home = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let stop = Stop::new();
     let made = MadeFolders::default();
@@ -330,7 +334,11 @@ fn undo_keeps_what_the_person_changed_since() {
     let new = t.path().join("new");
     std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
     let home = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let stop = Stop::new();
     let made = MadeFolders::default();
@@ -433,7 +441,11 @@ fn a_store_kept_only_as_found_never_lands_where_the_app_opens_it() {
     let new = t.path().join("new");
     std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
     let home = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let stop = Stop::new();
     let made = MadeFolders::default();

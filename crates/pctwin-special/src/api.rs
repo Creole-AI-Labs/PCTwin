@@ -353,6 +353,16 @@ pub fn apply(
     conflict: Conflict,
     now: Now,
 ) -> Applied {
+    // A secret lands only with a secret grant naming exactly it (sixth review, finding 8): an
+    // ordinary grant never lands one, whatever the caller chose.
+    if p.component.secret && matches!(grant, Grant::Ordinary(_)) {
+        return Applied {
+            result: ItemResult::because(pctwin_types::Reason::FinishByHand),
+            outcome: Outcome::pending(),
+            landed: None,
+            words: "a secret lands only with its own permission; it was not landed".into(),
+        };
+    }
     // A capture whose consistency was not established, or that is partial, is kept in PCTwin's
     // own folder of things brought over, never where the app would open it.
     let kept_aside;

@@ -31,7 +31,7 @@ function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l
     return [l10n.getString("fullmove-settings-count", { count: c.count }), l10n.getString(c.action === "replace" ? "fullmove-settings-replace" : "fullmove-settings-merge")].join(" ");
   }
   if (c.needs) return l10n.getString(`reason-${c.needs}`);
-  if (c.action === "install") return l10n.getString("fullmove-app-install");
+  if (c.action === "install") return c.source ? l10n.getString("fullmove-app-from", { id: c.source }) : l10n.getString("fullmove-app-install");
   return l10n.getString("fullmove-app-here");
 }
 

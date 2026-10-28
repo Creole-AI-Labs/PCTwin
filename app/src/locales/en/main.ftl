@@ -1919,3 +1919,4 @@ fullmove-close-body = These apps are still open on this laptop, so PCTwin cannot
 fullmove-close-again = Try again
 fullmove-close-without = Go on without them
 fullmove-extras-refused = Settings and app data from the old laptop could not be read here, so none were moved. They are still on your old laptop.
+fullmove-app-from = PCTwin installs the winget package { $id } from its maker, after checking it is this app and the same maker.

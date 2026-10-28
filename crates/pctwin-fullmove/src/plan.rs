@@ -93,6 +93,9 @@ pub struct Change {
     /// A secret the person may tick to bring (off unless ticked): its line in the plan's special
     /// list.
     pub secret: Option<u32>,
+    /// Where PCTwin gets an app it installs: the package's own name in its catalog (winget's ID),
+    /// shown beside the old laptop's name for it.
+    pub source: Option<String>,
 }
 
 /// What a special category's step ends as: a component that would copy is not joined to the
@@ -409,6 +412,9 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                source: (action == Action::Install)
+                    .then(|| e.winget().map(str::to_string))
+                    .flatten(),
             });
         }
         for g in &self.groups {
@@ -422,6 +428,7 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                source: None,
             });
         }
         for (at, s) in self.special.iter().enumerate() {
@@ -444,6 +451,7 @@ impl FullPlan {
                 special: Some(s.step),
                 files: s.files,
                 secret: s.secret.then_some(at as u32),
+                source: None,
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -459,6 +467,7 @@ impl FullPlan {
                 special: None,
                 files: 0,
                 secret: None,
+                source: None,
             });
         }
         if self.special_not_checked > 0 {
@@ -472,6 +481,7 @@ impl FullPlan {
                 special: Some(SpecialStep::LookAtIt),
                 files: 0,
                 secret: None,
+                source: None,
             });
         }
         if self.from.is_some() && !self.special_searched {
@@ -485,6 +495,7 @@ impl FullPlan {
                 special: Some(SpecialStep::NotYet),
                 files: 0,
                 secret: None,
+                source: None,
             });
         }
         out

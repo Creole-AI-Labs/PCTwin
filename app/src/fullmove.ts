@@ -31,6 +31,8 @@ export type ChangeView = {
   files: number;
   /** A secret the person may tick to bring: its line (none moves unless ticked). */
   secret: number | null;
+  /** Where PCTwin gets an app it installs: the package's own ID in its catalog. */
+  source: string | null;
 };
 
 export type RebuildPlan = {
@@ -88,20 +90,21 @@ function parseTitle(v: unknown): Title | null {
 }
 
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "source"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
   if (!isCount(f.count) || !isCount(f.files)) return null;
   if (f.special !== null && !oneOf(f.special, SPECIAL_STEPS)) return null;
   if (f.secret !== null && !isCount(f.secret)) return null;
+  if (f.source !== null && typeof f.source !== "string") return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, source: f.source };
 }
 
 /** The plan section (`RebuildPlanView`). */

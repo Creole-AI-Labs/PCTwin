@@ -2113,3 +2113,4 @@ fullmove-close-body = Ces applications sont encore ouvertes sur cet ordinateur, 
 fullmove-close-again = Réessayer
 fullmove-close-without = Continuer sans elles
 fullmove-extras-refused = Les réglages et données d’applications de l’ancien ordinateur n’ont pas pu être lus ici, donc rien n’a été transféré. Ils sont toujours sur votre ancien ordinateur.
+fullmove-app-from = PCTwin installe le paquet winget { $id } de son créateur, après avoir vérifié que c’est cette application et le même créateur.

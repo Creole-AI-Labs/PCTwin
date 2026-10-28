@@ -142,6 +142,7 @@ pub struct ChangeView {
     pub files: u64,
     /// A secret the person may tick to bring: its line (none unless ticked).
     pub secret: Option<u32>,
+    pub source: Option<String>,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -294,6 +295,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             special: c.special,
             files: c.files,
             secret: c.secret,
+            source: c.source.map(|n| name(&n)),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.

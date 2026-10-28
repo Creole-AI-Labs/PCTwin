@@ -2108,3 +2108,4 @@ fullmove-close-body = Estes apps ainda estão abertos neste notebook, então o P
 fullmove-close-again = Tentar de novo
 fullmove-close-without = Continuar sem eles
 fullmove-extras-refused = Não foi possível ler aqui as configurações e os dados de apps do notebook antigo, então nada foi movido. Eles continuam no seu notebook antigo.
+fullmove-app-from = O PCTwin instala o pacote do winget { $id } do criador, depois de verificar que é este app e o mesmo criador.

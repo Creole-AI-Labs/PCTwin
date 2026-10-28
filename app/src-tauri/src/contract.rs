@@ -174,19 +174,23 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         special,
         files,
         secret: None,
+        source: None,
     };
     crate::fullmove::RebuildPlanView {
         changes: vec![
-            change(
-                Title::Name("Writer".into()),
-                Kind::App,
-                ChangeAction::Install,
-                UndoPromise::RemoveYourself,
-                0,
-                None,
-                None,
-                0,
-            ),
+            ChangeView {
+                source: Some("Example.Writer".into()),
+                ..change(
+                    Title::Name("Writer".into()),
+                    Kind::App,
+                    ChangeAction::Install,
+                    UndoPromise::RemoveYourself,
+                    0,
+                    None,
+                    None,
+                    0,
+                )
+            },
             change(
                 Title::Name("Sketch Tool".into()),
                 Kind::App,

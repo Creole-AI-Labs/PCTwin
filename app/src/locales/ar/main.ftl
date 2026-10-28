@@ -2327,3 +2327,4 @@ fullmove-close-body = هذه التطبيقات ما زالت مفتوحة عل�
 fullmove-close-again = حاول مرة أخرى
 fullmove-close-without = تابع بدونها
 fullmove-extras-refused = تعذّرت قراءة إعدادات وبيانات تطبيقات الحاسوب القديم هنا، لذلك لم يُنقل شيء منها. ما زالت على حاسوبك القديم.
+fullmove-app-from = يثبّت PCTwin حزمة winget ‏{ $id } من مطوّرها، بعد التحقق من أنها هذا التطبيق ومن المطوّر نفسه.

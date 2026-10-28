@@ -1809,3 +1809,4 @@ fullmove-close-body = 这些应用在这台电脑上仍然打开，所以 PCTwin
 fullmove-close-again = 重试
 fullmove-close-without = 不带它们继续
 fullmove-extras-refused = 无法在这里读取旧电脑的设置和应用数据，所以都没有迁移。它们仍在你的旧电脑上。
+fullmove-app-from = PCTwin 会从开发者那里安装 winget 软件包 { $id }，安装前会检查它就是这个应用、且开发者相同。
