@@ -1270,6 +1270,7 @@ outcome-kind-documents = المستندات
 outcome-kind-count = { $copied } من { $planned } نُسخت وتم التحقق منها
 outcome-next-title = الخطوات التالية
 outcome-old-safe = كل ما لم يكتمل يبقى مدرجًا هنا. لم يُحذف أي شيء من حاسوبك المحمول القديم.
+outcome-landed-title = أين أغراضك الآن
 outcome-report = عرض التقرير الكامل
 outcome-home = العودة إلى الرئيسية
 outcome-person-copied =

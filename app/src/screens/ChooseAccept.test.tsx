@@ -13,6 +13,9 @@ import { localization } from "../i18n";
 import { violations } from "../testing/a11y";
 import AcceptMove from "./AcceptMove";
 import { RouteStrip } from "./ProgressParts";
+import Outcome from "./Outcome";
+import outcomes from "../contract/move-outcome.json";
+import { parseMoveOutcome } from "../bridge";
 import ChooseWhat, { choiceOf } from "./ChooseWhat";
 import { next } from "./MoveHost";
 
@@ -111,6 +114,16 @@ describe("both laptops by their names", () => {
     inApp(<RouteStrip laptops={{ old: { kind: "named", name: "Amun" }, new: { kind: "named", name: "Ada's new laptop" } }} />);
     expect(screen.getByText("Amun")).toBeTruthy();
     expect(screen.getByText("Ada's new laptop")).toBeTruthy();
+  });
+});
+
+describe("where things landed", () => {
+  it("the results page names each group's folder on the new laptop", () => {
+    const outcome = parseMoveOutcome(outcomes[1]);
+    if (!outcome?.landed) throw new Error("the engine's full example says where things landed");
+    inApp(<Outcome outcome={outcome} onReport={vi.fn()} />);
+    expect(screen.getByText(text("outcome-landed-title"))).toBeTruthy();
+    expect(screen.getByText(outcome.landed[0].folder)).toBeTruthy();
   });
 });
 

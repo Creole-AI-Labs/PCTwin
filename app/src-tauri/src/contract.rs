@@ -680,9 +680,14 @@ fn outcomes() -> Vec<MoveOutcome> {
             ..Default::default()
         },
         rebuilt: None,
+        landed: Vec::new(),
     };
     let full = MoveOutcome {
         rebuilt: Some(rebuilt()),
+        landed: vec![crate::moving::LandedPlace {
+            name: crate::moving::group_name("documents"),
+            folder: r"C:\Users\Ada\Documents".into(),
+        }],
         ..files_only.clone()
     };
     vec![files_only, full]

@@ -1176,7 +1176,7 @@ pub struct MoveProgress {
 
 /// A group's name on screen, from its destination label: a folder by its role, or the place's
 /// own name.
-fn group_name(label: &str) -> GroupName {
+pub(crate) fn group_name(label: &str) -> GroupName {
     const ROLES: [FolderRole; 10] = [
         FolderRole::Home,
         FolderRole::Desktop,
@@ -1326,6 +1326,41 @@ pub struct MoveOutcome {
     /// laptop; absent when there were none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rebuilt: Option<crate::fullmove::RebuiltView>,
+    /// The new laptop: where each group of the person's things is now, as the person reads the
+    /// folder (asked for in the first real test, 28 October 2026). Only groups something landed in.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub landed: Vec<LandedPlace>,
+}
+
+/// One group's folder on the new laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LandedPlace {
+    pub name: GroupName,
+    pub folder: String,
+}
+
+/// Where the person's things landed: each shown place that holds at least one item now on this
+/// laptop (copied, reinstalled or converted).
+fn landed_places(shown: &BTreeMap<String, String>, report: &[ReportItem]) -> Vec<LandedPlace> {
+    shown
+        .iter()
+        .filter(|(_, folder)| {
+            report.iter().any(|i| {
+                matches!(
+                    i.status,
+                    ItemStatus::Copied | ItemStatus::Reinstalled | ItemStatus::Converted
+                ) && i
+                    .destination
+                    .as_deref()
+                    .is_some_and(|d| d.starts_with(folder.as_str()))
+            })
+        })
+        .map(|(label, folder)| LandedPlace {
+            name: group_name(label),
+            folder: folder.clone(),
+        })
+        .collect()
 }
 
 /// One kind of file in the after-move check: how many the approved plan held, and how many of
@@ -2607,6 +2642,7 @@ async fn run_new<R: Runtime>(
     let not_handed = steps.finish_others();
     let received = received?;
     let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
+    outcome.landed = landed_places(&steps.shown, &report);
     outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
     // The full move, once every file is in: apps, settings and special categories, each with its
     // result. A move that was stopped or broke off changes nothing more.

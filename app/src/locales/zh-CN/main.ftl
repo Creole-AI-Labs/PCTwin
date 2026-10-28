@@ -946,6 +946,7 @@ outcome-kind-documents = 文档
 outcome-kind-count = { $planned } 个中已复制并检查 { $copied } 个
 outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。
+outcome-landed-title = 你的东西现在在哪里
 outcome-report = 查看完整报告
 outcome-home = 返回首页
 outcome-person-copied =

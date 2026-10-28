@@ -71,6 +71,15 @@
     },
     "bytesChecked": 1100000,
     "checkedFromMemory": 3,
+    "landed": [
+      {
+        "folder": "C:\\Users\\Ada\\Documents",
+        "name": {
+          "kind": "role",
+          "role": "documents"
+        }
+      }
+    ],
     "notCopied": 0,
     "people": [
       {

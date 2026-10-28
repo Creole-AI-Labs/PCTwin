@@ -1162,6 +1162,7 @@ outcome-kind-documents = Documentos
 outcome-kind-count = { $copied } de { $planned } copiados e verificados
 outcome-next-title = O que fazer agora
 outcome-old-safe = O que não terminou continua listado aqui. Nada foi removido do seu notebook antigo.
+outcome-landed-title = Onde estão suas coisas agora
 outcome-report = Ver o relatório completo
 outcome-home = Voltar ao início
 outcome-person-copied =

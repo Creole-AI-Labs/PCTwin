@@ -6,7 +6,7 @@ import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
 import { RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
 import { TopStrip } from "./FrameParts";
-import { Heading } from "./ProgressParts";
+import { GroupLabel, Heading } from "./ProgressParts";
 import { shownName } from "../names";
 
 const DONE = ["copied", "reinstalled", "converted"] as const;
@@ -97,6 +97,16 @@ export default function Outcome({ outcome, onReport, onHome, onUndo }: { outcome
         <div className="mv-note">
           <Banner tone="attention">{l10n.getString("outcome-old-safe")}</Banner>
         </div>
+      )}
+      {outcome.landed && outcome.landed.length > 0 && (
+        // Where the person's things are now, by group (first real test, 28 October 2026).
+        <Section title={l10n.getString("outcome-landed-title")}>
+          <RowList>
+            {outcome.landed.map((l) => (
+              <Row key={l.folder} title={<GroupLabel name={l.name} />} detail={<bdi dir="auto">{l.folder}</bdi>} />
+            ))}
+          </RowList>
+        </Section>
       )}
       <AfterMoveCheck outcome={outcome} />
       {outcome.rebuilt && <RebuiltSection rebuilt={outcome.rebuilt} onUndo={onUndo} />}

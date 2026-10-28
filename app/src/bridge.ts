@@ -381,7 +381,7 @@ export type PlanKey = { revision: number; fingerprint: string };
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "plan-view": ["rebuild"],
-  "move-outcome": ["rebuilt"],
+  "move-outcome": ["rebuilt", "landed"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
   "report-item": ["destination", "reason", "evidence", "note"],
   "qs-picked": ["problem"],
@@ -615,6 +615,15 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
     const rebuilt = parseRebuilt(f.rebuilt);
     if (!rebuilt) return null;
     outcome.rebuilt = rebuilt;
+  }
+  if ("landed" in f) {
+    const landed = listOf(f.landed, (x) => {
+      const l = exactly(x, ["name", "folder"]);
+      const name = l && parseGroupName(l.name);
+      return name && typeof l.folder === "string" ? { name, folder: l.folder } : null;
+    });
+    if (!landed) return null;
+    outcome.landed = landed;
   }
   return outcome;
 }

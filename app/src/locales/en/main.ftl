@@ -1010,6 +1010,7 @@ outcome-kind-documents = Documents
 outcome-kind-count = { $copied } of { $planned } copied and checked
 outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.
+outcome-landed-title = Where your things are now
 outcome-report = View complete report
 outcome-home = Return home
 outcome-person-copied =
