@@ -356,7 +356,7 @@ enum Open {
         path: PathBuf,
         file: Option<std::fs::File>,
         len: u64,
-        hash: blake3::Hasher,
+        hash: Box<blake3::Hasher>,
     },
     Dropped,
 }
@@ -449,7 +449,7 @@ impl pctwin_move::extras::DataIn for Sink {
                         path,
                         file,
                         len: 0,
-                        hash: blake3::Hasher::new(),
+                        hash: Box::new(blake3::Hasher::new()),
                     }
                 }
             }

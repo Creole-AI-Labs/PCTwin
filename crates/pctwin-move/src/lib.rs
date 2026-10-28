@@ -415,6 +415,7 @@ pub async fn send_with<C: Channel>(
 /// ([`resume`]): a dropped connection is then picked up again, without pairing again, and the move
 /// carries on where it stopped; if the laptops cannot find each other again the move ends with
 /// every file's result kept ([`Ended::LinkLost`]). A drop before then fails the move.
+#[allow(clippy::too_many_arguments)]
 pub async fn send_by_rules<C: Channel, B: Comeback>(
     link: &mut greeting::Greeted<'_, C>,
     record: &Record,
