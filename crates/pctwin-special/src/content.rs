@@ -386,12 +386,15 @@ pub fn sqlite_paths(
     paths_in(&mut db, until)
 }
 
+/// The full local paths a database names, and whether every value was read.
+pub type LinkedPaths = (Vec<String>, bool);
+
 /// A database's kind and, for ordinary data, the full local paths its place-named columns hold
 /// (see [`sqlite_paths`]), from one opening of it.
 pub fn sqlite_facts(
     path: &Path,
     until: std::time::Instant,
-) -> Result<(DbKind, Option<(Vec<String>, bool)>), ContentError> {
+) -> Result<(DbKind, Option<LinkedPaths>), ContentError> {
     let (mut db, _snapshot) = open_read(path)?;
     let tables: Vec<Table> = tables_as_named(&db)?
         .into_iter()
