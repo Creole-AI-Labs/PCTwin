@@ -83,6 +83,7 @@
           "files": 0,
           "kind": "app",
           "needs": null,
+          "secret": null,
           "special": null,
           "title": {
             "kind": "name",
@@ -96,6 +97,7 @@
           "files": 0,
           "kind": "app",
           "needs": "manual-install",
+          "secret": null,
           "special": null,
           "title": {
             "kind": "name",
@@ -109,6 +111,7 @@
           "files": 0,
           "kind": "settings",
           "needs": null,
+          "secret": null,
           "special": null,
           "title": {
             "kind": "name",
@@ -122,6 +125,7 @@
           "files": 3,
           "kind": "special",
           "needs": "sign-in",
+          "secret": null,
           "special": "sign-in",
           "title": {
             "kind": "name",
@@ -130,11 +134,40 @@
           "undo": "must-keep"
         },
         {
+          "action": "merge",
+          "count": 0,
+          "files": 12,
+          "kind": "special",
+          "needs": null,
+          "secret": null,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Browser"
+          },
+          "undo": "can-reverse"
+        },
+        {
+          "action": "merge",
+          "count": 0,
+          "files": 2,
+          "kind": "special",
+          "needs": null,
+          "secret": 2,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Browser"
+          },
+          "undo": "can-reverse"
+        },
+        {
           "action": "leave-alone",
           "count": 0,
           "files": 0,
           "kind": "special",
           "needs": "finish-by-hand",
+          "secret": null,
           "special": "not-yet",
           "title": {
             "kind": "key",

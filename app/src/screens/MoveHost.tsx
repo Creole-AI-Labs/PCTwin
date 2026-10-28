@@ -226,6 +226,8 @@ export default function MoveHost({
   const [planChanged, setPlanChanged] = useState(false);
   // The folders the person unticked on the plan: they stay on the old laptop.
   const [leftOut, setLeftOut] = useState<FolderRole[]>([]);
+  // The secret lines of app data the person ticked, one by one: none unless ticked.
+  const [picked, setPicked] = useState<number[]>([]);
   // The places the person chose for some folders (M05), and why the last one was not taken.
   const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
@@ -502,8 +504,12 @@ export default function MoveHost({
             );
           }}
           onApprovalChange={setApproval}
+          picked={picked}
+          onPick={(line, bring) => {
+            setPicked((p) => (bring ? (p.includes(line) ? p : [...p, line]) : p.filter((l) => l !== line)));
+          }}
           onStart={(a) => {
-            moveApprove(a, true, leftOut).then(
+            moveApprove(a, true, leftOut, picked).then(
               () => {
                 setView({ kind: "wait", stage: "moving" });
               },

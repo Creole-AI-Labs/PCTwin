@@ -3680,6 +3680,7 @@ dependencies = [
  "pctwin-scan",
  "pctwin-session",
  "pctwin-settings",
+ "pctwin-special",
  "pctwin-transfer",
  "pctwin-types",
  "rfd",

@@ -394,6 +394,11 @@ impl Sink {
         self.choice.copy.iter().any(|c| c == id) || self.choice.secrets.iter().any(|c| c == id)
     }
 
+    /// Removes the staging folder (after landing: what landed is in the person's home now).
+    pub fn remove_staging(&self) {
+        let _ = std::fs::remove_dir_all(&self.staging);
+    }
+
     /// The staging folder of component `id`.
     pub fn folder(&self, id: &str) -> PathBuf {
         self.staging.join(id)

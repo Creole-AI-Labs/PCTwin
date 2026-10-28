@@ -285,13 +285,14 @@ pub fn special_here(
     owner: &pctwin_record::Owner,
     home: &std::path::Path,
     apps: &[pctwin_record::FoundApp],
+    deadline: std::time::Instant,
 ) -> SpecialFound {
     use pctwin_special::component::Custody;
     let system = pctwin_special::roots::System::here();
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
     );
-    let plan = pctwin_special::api::plan(owner, home, apps, system, system, &cat);
+    let plan = pctwin_special::api::plan_within(owner, home, apps, system, system, &cat, deadline);
     // One line per app and step (an app's many components with the same step are one line, with
     // their files counted), in the order found.
     let mut lines: Vec<SpecialLine> = Vec::new();
@@ -329,11 +330,12 @@ pub fn special_here(
         .not_moved
         .iter()
         .filter(|n| n.why.contains("not fully checked"))
-        .count()
+        .map(|n| n.count.max(1))
+        .sum::<usize>()
         + plan.coverage.unreadable.len();
     SpecialFound {
         lines,
-        not_moved: plan.not_moved.len() as u64,
+        not_moved: plan.not_moved.iter().map(|n| n.count.max(1) as u64).sum(),
         not_checked: not_checked as u64,
         planned: plan.components,
     }
@@ -366,7 +368,9 @@ impl SpecialScan {
         std::thread::Builder::new()
             .name("pctwin-special-scan".into())
             .spawn(move || {
-                let _ = tx.send(special_here(&owner, &home, &[]));
+                // 2.5 stops reading in time for its answer to arrive within the budget.
+                let deadline = std::time::Instant::now() + SPECIAL_BUDGET - SPECIAL_MARGIN;
+                let _ = tx.send(special_here(&owner, &home, &[], deadline));
             })
             .ok()?;
         Some(Self {
@@ -448,6 +452,9 @@ pub fn here(folders: Vec<OldFolder>) -> Extras {
 /// How long looking for the special categories may take on the old laptop in all, from when the
 /// move starts (2.5's own budgets: 10 s per read, 120 s per app folder, 600 s per kind of root).
 pub const SPECIAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How much earlier than the budget 2.5 is asked to stop reading, so its answer is ready.
+pub const SPECIAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[cfg(test)]
 mod tests {

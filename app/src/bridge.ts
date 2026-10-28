@@ -673,7 +673,8 @@ export const moveChoosePlace = (role: FolderRole) => ask("move_choose_place", pa
 /** The folders of `role` go to their usual place again. */
 export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { role });
 /** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
-export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = []) => run("move_approve", { plan, approve, leftOut });
+/** `secrets`: the secret lines of app data the person ticked, one by one (none unless ticked). */
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = []) => run("move_approve", { plan, approve, leftOut, secrets });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");

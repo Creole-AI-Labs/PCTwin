@@ -94,6 +94,9 @@ export interface PlanReviewProps {
   /** The plan cannot be approved until people are mapped to accounts: go and do that. */
   onFixPeople?: () => void;
   onBack?: () => void;
+  /** The secret lines of app data the person ticked, one by one (none unless ticked). */
+  picked?: readonly number[];
+  onPick?: (line: number, bring: boolean) => void;
 }
 
 /**
@@ -105,7 +108,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const holds = approvalHolds(plan, approval);
@@ -275,7 +278,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         </PlanBox>
       </div>
 
-      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} />}
+      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} picked={picked} onPick={onPick} />}
 
       {!blocked && (
         <div className="plan-approve">
