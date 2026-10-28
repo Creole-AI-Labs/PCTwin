@@ -393,7 +393,9 @@ pub fn sqlite_paths(
     let mut out = Vec::new();
     let mut read = 0usize;
     'tables: for t in tables_as_named(&db)? {
-        for c in &t.columns {
+        // Only columns whose names say they hold places (paths, files, folders, locations,
+        // addresses): the same words for every app; other columns are not read.
+        for c in t.columns.iter().filter(|c| place_column(c)) {
             let sql = format!(
                 "SELECT {col} FROM {table} WHERE typeof({col}) = 'text' LIMIT {limit}",
                 col = ident(c),
@@ -427,6 +429,14 @@ pub fn sqlite_paths(
     out.sort();
     out.dedup();
     Ok((out, true))
+}
+
+/// Whether a column's name says it holds a place.
+fn place_column(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["path", "file", "folder", "dir", "location", "uri", "url"]
+        .iter()
+        .any(|w| n.contains(w))
 }
 
 /// What kind of store a database is, by its tables' shape.

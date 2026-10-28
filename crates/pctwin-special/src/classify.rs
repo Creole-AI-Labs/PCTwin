@@ -41,11 +41,11 @@ use crate::sniff::{self, Shape};
 /// The deepest a folder is walked.
 pub const MAX_DEPTH: usize = 24;
 /// The most files read in one app data folder; past it, the rest is reported, not read.
-pub const MAX_FILES: usize = 100_000;
+pub const MAX_FILES: usize = 20_000;
 /// The largest text file read for credential-shaped values.
 const MAX_TEXT: u64 = 1024 * 1024;
 /// The most time one app data folder's walk may take; the rest is "not fully checked".
-pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(120);
+pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(60);
 /// How much of a GGUF file's start is read for its split facts.
 const GGUF_HEADER: u64 = 4 * 1024 * 1024;
 
@@ -1243,6 +1243,62 @@ pub fn classify_all(
     classify_all_within(folders, system, catalogue, ROOT_TIME)
 }
 
+/// Every folder classified within one `deadline` for all of them, the most recently written
+/// first (by the folder's own last-write time), each also within [`FOLDER_TIME`]. A folder
+/// reached after `deadline` is not read: it is reported "not fully checked" as a whole.
+pub fn classify_newest_first(
+    folders: Vec<AppDataFolder>,
+    system: System,
+    catalogue: &Catalogue<SpecialRow>,
+    deadline: std::time::Instant,
+) -> Vec<FolderReport> {
+    let reading = catalogue.read(folders, |f, row| row.matches(system, f));
+    let mut all: Vec<(&AppDataFolder, Option<&SpecialRow>)> = reading
+        .known
+        .iter()
+        .map(|(f, r)| (f, Some(*r)))
+        .chain(reading.found_not_supported.iter().map(|f| (f, None)))
+        .collect();
+    let written = |f: &AppDataFolder| {
+        std::fs::symlink_metadata(f.path())
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+    };
+    let mut keyed: Vec<(std::time::SystemTime, usize)> = all
+        .iter()
+        .enumerate()
+        .map(|(i, (f, _))| (written(f), i))
+        .collect();
+    keyed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let order: Vec<usize> = keyed.into_iter().map(|(_, i)| i).collect();
+    let mut out = Vec::with_capacity(all.len());
+    for i in order {
+        let (f, row) = all[i];
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            out.push(FolderReport {
+                folder: f.clone(),
+                row: row.cloned(),
+                components: Vec::new(),
+                not_moved: vec![NotMoved {
+                    rel: String::new(),
+                    why: Skip::NotRead,
+                }],
+            });
+        } else {
+            out.push(classify_within(
+                f,
+                row,
+                MAX_DEPTH,
+                MAX_FILES,
+                deadline.min(now + FOLDER_TIME),
+            ));
+        }
+    }
+    all.clear();
+    out
+}
+
 /// The most time all the folders of one root kind may take together; folders past it are
 /// reported "not fully checked" without being read.
 pub const ROOT_TIME: std::time::Duration = std::time::Duration::from_secs(600);
@@ -1716,6 +1772,44 @@ mod tests {
                 r.not_moved
             );
             assert!(r.components.iter().all(|c| c.members.is_empty()));
+        }
+    }
+
+    #[test]
+    fn folders_are_taken_newest_first_and_none_past_the_deadline_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("Old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("a.txt"), b"x").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let new = dir.path().join("New");
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("b.txt"), b"x").unwrap();
+        let cat = Catalogue::shipped(crate::catalogue::SHIPPED);
+        let r = classify_newest_first(
+            vec![folder_at(&old), folder_at(&new)],
+            System::Windows,
+            &cat,
+            far(),
+        );
+        assert_eq!(r[0].folder.rel, "New");
+        assert_eq!(r[1].folder.rel, "Old");
+        assert!(r.iter().all(|f| !f.components.is_empty()));
+        let late = classify_newest_first(
+            vec![folder_at(&old), folder_at(&new)],
+            System::Windows,
+            &cat,
+            std::time::Instant::now(),
+        );
+        for f in late {
+            assert!(f.components.is_empty());
+            assert_eq!(
+                f.not_moved,
+                vec![NotMoved {
+                    rel: String::new(),
+                    why: Skip::NotRead
+                }]
+            );
         }
     }
 
