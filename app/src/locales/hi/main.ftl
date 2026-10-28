@@ -167,6 +167,7 @@ check-internet-unknown = PCTwin पता नहीं लगा सका क�
 check-again = फिर से जाँच करें
 check-estimate-note = समय का अनुमान कोई पक्का वादा नहीं है।
 check-continue = चुनें कि क्या भेजना है
+check-continue-new = आगे बढ़ें
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = स्थानांतरण शुरू होने से पहले
 check-before-lids-title = दोनों लैपटॉप के ढक्कन खुले रखें
@@ -2010,6 +2011,7 @@ fullmove-step-relink = इसे इस लैपटॉप पर फिर स�
 fullmove-step-not-yet = PCTwin अभी इस ऐप का डेटा नहीं ले जाता। यह आपके पुराने लैपटॉप पर सुरक्षित है।
 fullmove-step-look-at-it = PCTwin पता नहीं लगा सका कि यह क्या है। इसे अपने पुराने लैपटॉप पर देखें।
 fullmove-special-not-yet = ऐप डेटा, जैसे ईमेल, ब्राउज़र और गेम
+fullmove-left-by-person = ऐप, सेटिंग और ऐप डेटा: आपकी पसंद के अनुसार पुराने लैपटॉप पर ही रहे
 fullmove-special-finish = PCTwin ने इसे नहीं ले जाया। यह आपके पुराने लैपटॉप पर सुरक्षित है।
 fullmove-more = और { $count } और।
 fullmove-not-moved-title = सेटिंग्स जो PCTwin पुराने लैपटॉप पर छोड़ता है

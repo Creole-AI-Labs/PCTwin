@@ -168,6 +168,7 @@ check-internet-unknown = PCTwin no pudo saber si este portátil está en línea.
 check-again = Comprobar de nuevo
 check-estimate-note = El tiempo calculado es aproximado, no una promesa.
 check-continue = Elegir qué trasladar
+check-continue-new = Continuar
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = Antes de que empiece el traslado
 check-before-lids-title = Deja las dos tapas abiertas
@@ -2070,6 +2071,7 @@ fullmove-step-relink = Configúrala de nuevo en esta laptop o vuelve a vincularl
 fullmove-step-not-yet = PCTwin todavía no mueve los datos de esta app. Siguen a salvo en tu laptop anterior.
 fullmove-step-look-at-it = PCTwin no pudo saber qué es esto. Revísalo en tu laptop anterior.
 fullmove-special-not-yet = Datos de apps como correo, navegadores y juegos
+fullmove-left-by-person = Aplicaciones, ajustes y datos de aplicaciones: se quedan en tu portátil antiguo, como elegiste
 fullmove-special-finish = PCTwin no movió esto. Sigue a salvo en tu laptop anterior.
 fullmove-more = Y { $count } más.
 fullmove-not-moved-title = Ajustes que PCTwin deja en la laptop anterior

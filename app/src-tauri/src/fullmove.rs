@@ -134,6 +134,7 @@ pub fn extras_here(
     x.links = links;
     if !settings {
         x.settings.clear();
+        x.left_out_by_person = true;
     }
     x.encode()
 }

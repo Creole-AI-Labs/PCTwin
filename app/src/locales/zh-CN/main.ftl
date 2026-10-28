@@ -159,6 +159,7 @@ check-internet-unknown = PCTwin无法判断这台笔记本电脑是否在线。�
 check-again = 再次检查
 check-estimate-note = 预计时间仅供参考，并非固定承诺。
 check-continue = 选择要迁移的内容
+check-continue-new = 继续
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = 迁移开始前
 check-before-lids-title = 两台电脑的屏幕都保持打开
@@ -1775,6 +1776,7 @@ fullmove-step-relink = 在这台电脑上重新设置，或从应用里重新关
 fullmove-step-not-yet = PCTwin 暂时还不迁移这个应用的数据。它仍安全地保存在你的旧电脑上。
 fullmove-step-look-at-it = PCTwin 无法判断这是什么。请在旧电脑上查看。
 fullmove-special-not-yet = 应用数据，例如邮件、浏览器和游戏
+fullmove-left-by-person = 应用、设置和应用数据：按你的选择留在旧笔记本电脑上
 fullmove-special-finish = PCTwin 没有迁移这个。它仍安全地保存在你的旧电脑上。
 fullmove-more = 还有 { $count } 项。
 fullmove-not-moved-title = PCTwin 留在旧电脑上的设置

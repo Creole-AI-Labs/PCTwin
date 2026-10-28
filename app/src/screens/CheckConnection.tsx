@@ -23,11 +23,14 @@ type Tone = "good" | "warn" | "neutral";
  */
 export default function CheckConnection({
   check,
+  old = true,
   onContinue,
   onRecheck,
   onBack,
 }: {
   check: ConnectionCheck | null;
+  /** The old laptop goes on to choose what moves; the new laptop only waits for that (first real test, 28 October 2026). */
+  old?: boolean;
   onContinue: () => void;
   /** Measure again. Without it there is no "Check again" (the move measured once, as the laptops greeted). */
   onRecheck?: () => void;
@@ -59,7 +62,7 @@ export default function CheckConnection({
       {check !== null && (
         <FrameFooter>
           <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
-            <Localized id="check-continue">
+            <Localized id={old ? "check-continue" : "check-continue-new"}>
               <span />
             </Localized>
           </Button>

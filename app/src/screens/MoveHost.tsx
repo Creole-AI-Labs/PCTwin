@@ -377,6 +377,7 @@ export default function MoveHost({
     return (
       <CheckConnection
         check={connectionCheck(greeted, old, naming)}
+        old={old}
         onContinue={() => {
           setIntro("done");
         }}

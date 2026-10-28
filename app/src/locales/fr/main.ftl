@@ -168,6 +168,7 @@ check-internet-unknown = PCTwin ne sait pas si cet ordinateur portable est en li
 check-again = Vérifier à nouveau
 check-estimate-note = La durée estimée n’est pas une promesse.
 check-continue = Choisir quoi transférer
+check-continue-new = Continuer
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = Avant le début du transfert
 check-before-lids-title = Gardez les deux écrans ouverts
@@ -2079,6 +2080,7 @@ fullmove-step-relink = Configurez-la à nouveau sur cet ordinateur, ou reliez-la
 fullmove-step-not-yet = PCTwin ne transfère pas encore les données de cette application. Elles restent en sécurité sur votre ancien ordinateur.
 fullmove-step-look-at-it = PCTwin n’a pas pu savoir ce que c’est. Regardez-le sur votre ancien ordinateur.
 fullmove-special-not-yet = Données d’applications comme les e-mails, les navigateurs et les jeux
+fullmove-left-by-person = Applications, réglages et données d'applications : laissés sur votre ancien portable, comme vous l'avez choisi
 fullmove-special-finish = PCTwin n’a pas transféré ceci. C’est toujours en sécurité sur votre ancien ordinateur.
 fullmove-more = Et { $count } de plus.
 fullmove-not-moved-title = Réglages que PCTwin laisse sur l’ancien ordinateur

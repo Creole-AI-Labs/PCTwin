@@ -163,6 +163,10 @@ pub struct Extras {
     /// Links and junctions found among the person's files: counted, never followed, never moved.
     #[serde(default)]
     pub links: u64,
+    /// The person chose on the old laptop to leave their apps, settings and app data behind
+    /// (decided 28 October 2026): said as their own choice, never as something left to do.
+    #[serde(default)]
+    pub left_out_by_person: bool,
 }
 
 /// Why the old laptop's extras were refused.
@@ -194,6 +198,7 @@ impl Extras {
             special_not_moved: 0,
             special_not_checked: 0,
             links: 0,
+            left_out_by_person: false,
         }
     }
 
@@ -355,6 +360,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         special_not_moved: 0,
         special_not_checked: 0,
         links: 0,
+        left_out_by_person: false,
     }
 }
 

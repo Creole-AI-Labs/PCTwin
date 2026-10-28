@@ -695,7 +695,12 @@ pub fn rebuild(
             ItemResult::because(Reason::FinishByHand),
         ));
     }
-    if plan.from.is_some() && !plan.special_searched {
+    if plan.left_out_by_person {
+        special.push(SpecialDone::of(
+            Title::Key(crate::plan::LEFT_BY_PERSON),
+            ItemResult::skipped_by_user(),
+        ));
+    } else if plan.from.is_some() && !plan.special_searched {
         special.push(SpecialDone::of(
             Title::Key(SPECIAL_NOT_YET),
             ItemResult::because(Reason::FinishByHand),

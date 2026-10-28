@@ -155,7 +155,9 @@ describe("the move, once paired", () => {
     // Measured just now: 62 MB a second; the old laptop runs on battery, and it says so.
     expect(plain(document.body.textContent)).toContain("62");
     expect(screen.queryByRole("button", { name: text("check-again") })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: text("check-continue") }));
+    // The new laptop does not choose: its button only goes on (the old laptop chooses what moves).
+    expect(screen.queryByRole("button", { name: text("check-continue") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: text("check-continue-new") }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-list-title"));
   });
 

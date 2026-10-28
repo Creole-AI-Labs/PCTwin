@@ -167,6 +167,7 @@ check-internet-unknown = PCTwin could not tell whether this laptop is online. Th
 check-again = Check again
 check-estimate-note = The time estimate is not a fixed promise.
 check-continue = Choose what to move
+check-continue-new = Continue
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = Before the move starts
 check-before-lids-title = Keep both lids open
@@ -1885,6 +1886,7 @@ fullmove-step-relink = Set it up again on this laptop, or link it again from the
 fullmove-step-not-yet = PCTwin does not move this app’s data yet. It is still safe on your old laptop.
 fullmove-step-look-at-it = PCTwin could not tell what this is. Look at it on your old laptop.
 fullmove-special-not-yet = App data such as email, browsers and games
+fullmove-left-by-person = Apps, settings and app data: left on your old laptop, as you chose
 fullmove-special-finish = PCTwin did not move this. It is still safe on your old laptop.
 fullmove-more = And { $count } more.
 fullmove-not-moved-title = Settings PCTwin leaves on the old laptop
