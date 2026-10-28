@@ -68,6 +68,9 @@ pub enum Title {
 /// The special categories this version does not move yet, as one line.
 pub const SPECIAL_NOT_YET: &str = "fullmove-special-not-yet";
 
+/// The old laptop's settings and app data could not be read here, as one line.
+pub const EXTRAS_REFUSED: &str = "fullmove-extras-refused";
+
 /// App data places 2.5 could not fully check, as one line.
 pub const SPECIAL_NOT_CHECKED: &str = "fullmove-special-not-checked";
 
@@ -164,6 +167,9 @@ pub struct FullPlan {
     pub from: Option<System>,
     /// The extras exactly as they arrived ([`crate::extras::digest`]).
     pub extras_digest: Option<[u8; 32]>,
+    /// The old laptop sent extras this laptop refused (broken, or past a limit): its settings and
+    /// app data are not moved, and the plan says so, never silently.
+    pub extras_refused: bool,
 }
 
 /// Whether `app` belongs in the mover's plan: theirs, or everyone's.
@@ -376,6 +382,7 @@ impl FullPlan {
             from: Some(x.system),
             extras_digest: Some(digest),
             settings,
+            extras_refused: false,
         }
     }
 
@@ -441,6 +448,19 @@ impl FullPlan {
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
         // silent.
+        if self.extras_refused {
+            out.push(Change {
+                title: Title::Key(EXTRAS_REFUSED),
+                kind: Kind::Settings,
+                action: Action::LeaveAlone,
+                undo: Promise::MustKeep,
+                count: 0,
+                needs: Some(Reason::FinishByHand),
+                special: None,
+                files: 0,
+                secret: None,
+            });
+        }
         if self.special_not_checked > 0 {
             out.push(Change {
                 title: Title::Key(SPECIAL_NOT_CHECKED),

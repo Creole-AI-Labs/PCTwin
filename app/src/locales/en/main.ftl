@@ -1918,3 +1918,4 @@ fullmove-close-title = Close these apps to bring their data
 fullmove-close-body = These apps are still open on this laptop, so PCTwin cannot copy their data safely. Close them, then choose Try again. If you go on without them, their data stays here.
 fullmove-close-again = Try again
 fullmove-close-without = Go on without them
+fullmove-extras-refused = Settings and app data from the old laptop could not be read here, so none were moved. They are still on your old laptop.

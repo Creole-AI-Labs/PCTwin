@@ -2107,3 +2107,4 @@ fullmove-close-title = Feche estes apps para trazer os dados deles
 fullmove-close-body = Estes apps ainda estão abertos neste notebook, então o PCTwin não consegue copiar os dados deles com segurança. Feche-os e escolha Tentar de novo. Se continuar sem eles, os dados ficam aqui.
 fullmove-close-again = Tentar de novo
 fullmove-close-without = Continuar sem eles
+fullmove-extras-refused = Não foi possível ler aqui as configurações e os dados de apps do notebook antigo, então nada foi movido. Eles continuam no seu notebook antigo.

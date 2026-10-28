@@ -379,6 +379,8 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
         })
         .collect();
     let decoded = extras.and_then(|b| Some((Extras::decode(b).ok()?, b)));
+    // Extras that arrived but could not be read are said on the plan, never dropped silently.
+    let refused = extras.is_some_and(|b| !b.is_empty()) && decoded.is_none();
     // Where each app comes from: winget searched as the person, a few at a time, for the mover's
     // apps this laptop does not have yet.
     let hints = match winget_here() {
@@ -431,7 +433,7 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
         let a = adapter.as_mut()?;
         a.store.read(key).ok()
     };
-    FullPlan::build(
+    let mut plan = FullPlan::build(
         record,
         mover,
         decoded
@@ -439,7 +441,9 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
             .map(|(x, b)| (x, pctwin_fullmove::extras::digest(b))),
         &here,
         &mut current,
-    )
+    );
+    plan.extras_refused = refused;
+    plan
 }
 
 /* ---------- After the files ---------- */
@@ -745,7 +749,9 @@ fn land_data(
 /// At start: removes any app data staging folder an earlier run left (a crash, the laptop turned
 /// off part way), so nothing staged, secrets least of all, stays behind.
 pub fn sweep_staging<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(dir) = crate::moving::journal_path(app).and_then(|j| j.parent().map(|p| p.to_path_buf())) {
+    if let Some(dir) =
+        crate::moving::journal_path(app).and_then(|j| j.parent().map(|p| p.to_path_buf()))
+    {
         pctwin_fullmove::data::sweep_staging(&dir);
     }
 }
@@ -755,10 +761,8 @@ pub fn data_staging<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf
     let mut b = [0u8; 8];
     getrandom::fill(&mut b).ok()?;
     let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    let dir = crate::moving::journal_path(app)?.with_file_name(format!(
-        "{}{tag}",
-        pctwin_fullmove::data::STAGING_PREFIX
-    ));
+    let dir = crate::moving::journal_path(app)?
+        .with_file_name(format!("{}{tag}", pctwin_fullmove::data::STAGING_PREFIX));
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }

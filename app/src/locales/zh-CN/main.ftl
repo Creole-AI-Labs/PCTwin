@@ -1808,3 +1808,4 @@ fullmove-close-title = 关闭这些应用以带上它们的数据
 fullmove-close-body = 这些应用在这台电脑上仍然打开，所以 PCTwin 无法安全地复制它们的数据。关闭它们，然后选择重试。如果不带它们继续，它们的数据会留在这里。
 fullmove-close-again = 重试
 fullmove-close-without = 不带它们继续
+fullmove-extras-refused = 无法在这里读取旧电脑的设置和应用数据，所以都没有迁移。它们仍在你的旧电脑上。

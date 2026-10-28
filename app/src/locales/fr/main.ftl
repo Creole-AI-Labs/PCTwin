@@ -2112,3 +2112,4 @@ fullmove-close-title = Fermez ces applications pour apporter leurs données
 fullmove-close-body = Ces applications sont encore ouvertes sur cet ordinateur, PCTwin ne peut donc pas copier leurs données sans risque. Fermez-les, puis choisissez Réessayer. Si vous continuez sans elles, leurs données restent ici.
 fullmove-close-again = Réessayer
 fullmove-close-without = Continuer sans elles
+fullmove-extras-refused = Les réglages et données d’applications de l’ancien ordinateur n’ont pas pu être lus ici, donc rien n’a été transféré. Ils sont toujours sur votre ancien ordinateur.
