@@ -271,11 +271,17 @@ fn a_model_with_a_missing_part_is_never_complete() {
         br#"{"weight_map":{"a":"model-00001-of-00002.safetensors","b":"model-00002-of-00002.safetensors"}}"#,
     );
     let r = discover(&home, &Catalogue::shipped(SHIPPED));
+    // Every missing part a component names (an app's model folders are one component).
     let missing = |c: &Component| {
-        c.evidence.iter().find_map(|e| match e {
-            Evidence::MissingPart { what } => Some(what.clone()),
-            _ => None,
-        })
+        let all: Vec<String> = c
+            .evidence
+            .iter()
+            .filter_map(|e| match e {
+                Evidence::MissingPart { what } => Some(what.clone()),
+                _ => None,
+            })
+            .collect();
+        (!all.is_empty()).then(|| all.join(" | "))
     };
     let lib = holding(
         folder(&r, ".modelrunner"),
@@ -283,12 +289,16 @@ fn a_model_with_a_missing_part_is_never_complete() {
     );
     assert!(missing(lib).unwrap().contains("1 file"));
     let split = holding(folder(&r, ".gguf-models"), "big/big-00001-of-00003.gguf");
-    assert_eq!(missing(split).unwrap(), "part 2 of 3");
+    assert!(missing(split).unwrap().contains("part 2 of 3"));
     let st = holding(
         folder(&r, ".gguf-models"),
         "st/model.safetensors.index.json",
     );
-    assert_eq!(missing(st).unwrap(), "model-00002-of-00002.safetensors");
+    assert!(
+        missing(st)
+            .unwrap()
+            .contains("model-00002-of-00002.safetensors")
+    );
 }
 
 #[test]

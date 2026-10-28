@@ -1162,6 +1162,7 @@ fn classify_within(
             vec![Evidence::ServiceAccount],
         );
     }
+    b.components = merge(std::mem::take(&mut b.components));
     if let Some(row) = row {
         let what = row.name.clone().unwrap_or_else(|| row.folder.clone());
         for c in &mut b.components {
@@ -1177,6 +1178,59 @@ fn classify_within(
         components,
         not_moved,
     }
+}
+
+/// One app's data as the person sees it: its folder's components merged into one per class and
+/// step (copied; copied but needs a look; model files; a sign-in; set up again; the app's own
+/// export; not known), the files being each one's inventory. Each secret stays its own component,
+/// because each is chosen on its own.
+fn merge(components: Vec<Component>) -> Vec<Component> {
+    let needs_a_look = |c: &Component| {
+        c.evidence.iter().any(|e| {
+            matches!(
+                e,
+                Evidence::MissingPart { .. }
+                    | Evidence::LinksOutside { .. }
+                    | Evidence::EnablesCommands
+            )
+        })
+    };
+    let model = |c: &Component| c.evidence.contains(&Evidence::ModelData);
+    let mut out: Vec<Component> = Vec::new();
+    let mut at: BTreeMap<(u8, bool, bool, bool), usize> = BTreeMap::new();
+    for c in components {
+        if c.secret {
+            out.push(c);
+            continue;
+        }
+        let key = (
+            crate::catalogue::strictness(c.custody),
+            needs_a_look(&c),
+            model(&c),
+            c.preserve,
+        );
+        match at.get(&key) {
+            Some(&i) => {
+                let g = &mut out[i];
+                g.members.extend(c.members);
+                for e in c.evidence {
+                    if !g.evidence.contains(&e) {
+                        g.evidence.push(e);
+                    }
+                }
+            }
+            None => {
+                at.insert(key, out.len());
+                out.push(c);
+            }
+        }
+    }
+    for c in &mut out {
+        c.members.sort();
+        c.members.dedup();
+        c.id = crate::component::ComponentId::of(&c.owner, &c.place, &c.members);
+    }
+    out
 }
 
 /// Every folder classified, with the catalogue read through its only matching path: the folders a
