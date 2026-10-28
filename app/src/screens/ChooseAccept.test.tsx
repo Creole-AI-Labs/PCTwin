@@ -230,6 +230,15 @@ describe("accepting on the new laptop", () => {
     }
   });
 
+  it("lists only what changes this laptop: an app already here or a line about what stays is not coming", () => {
+    const withRebuild = plans.map(parsePlanView).find((p) => p?.rebuild && p.rebuild.changes.length > 0);
+    if (!withRebuild?.rebuild) throw new Error("the engine's examples include a plan with changes");
+    const changes = withRebuild.rebuild.changes.map((c) => ({ ...c, action: "leave-alone" as const }));
+    const p = { ...withRebuild, rebuild: { ...withRebuild.rebuild, changes } };
+    inApp(<AcceptMove plan={p} from="Yellow Wolf" onAccept={vi.fn()} onDetails={vi.fn()} onNotNow={vi.fn()} />);
+    expect(screen.queryByText(text("accept-settings"))).toBeNull();
+  });
+
   it("never offers Accept while something needs the person", () => {
     const base = plan();
     if (!base.preview) throw new Error("the engine's example has its preview");

@@ -488,11 +488,27 @@ fn apply_choice(record: &mut Record, choice: &Choice) {
         .iter()
         .map(|f| (f.role, f.parts.clone()))
         .collect();
+    // A folder stays when it is chosen, inside a chosen folder, or on the way to one; any other
+    // is left out with the files in it, so a group with nothing chosen is not in the plan.
+    let folder_kept = |item: &Item| {
+        let parts: Vec<String> = item
+            .path
+            .parts()
+            .iter()
+            .map(|n| n.display().to_string())
+            .collect();
+        let shown = &parts[..parts.len().min(depth)];
+        kept.iter().any(|(role, k)| {
+            *role == item.place.role && (k.starts_with(shown) || shown.starts_with(k))
+        })
+    };
     for item in &mut record.items {
-        if item.inclusion == pctwin_record::Inclusion::Included
-            && matches!(item.kind, pctwin_record::ItemKind::File)
-            && !kept.contains(&node_of(item, depth))
-        {
+        let moves = match item.kind {
+            pctwin_record::ItemKind::File => kept.contains(&node_of(item, depth)),
+            pctwin_record::ItemKind::Folder | pctwin_record::ItemKind::Package => folder_kept(item),
+            _ => true,
+        };
+        if item.inclusion == pctwin_record::Inclusion::Included && !moves {
             item.inclusion = pctwin_record::Inclusion::LeftOut {
                 reason: pctwin_record::LeftOutReason::ChosenByUser,
             };
@@ -1114,7 +1130,10 @@ fn plan_view(
                     (0, 0, to)
                 });
                 g.0 = g.0.saturating_add(item.size_bytes);
-                g.1 += 1;
+                // Files are counted, not folders, as the old laptop's choice counted them.
+                if matches!(item.kind, pctwin_record::ItemKind::File) {
+                    g.1 += 1;
+                }
             }
             Inclusion::LeftOut { reason } if shown_to_mover(item, mover) => {
                 left.entry(format!("{reason:?}")).or_insert((reason, 0)).1 += 1;
@@ -3350,6 +3369,77 @@ mod tests {
             })
         );
         assert!(record.apps.is_empty());
+    }
+
+    /// A folder outside the choice is left out with its files, so a group with nothing chosen is
+    /// not in the plan; a folder on the way to a chosen one, or inside it, still moves (found in
+    /// the two-copy test, 29 October 2026).
+    #[test]
+    fn folders_outside_the_choice_are_left_out_too() {
+        let mut record = found_in(&[FolderRole::Documents, FolderRole::Pictures]);
+        let template = record.items[0].clone();
+        for (role, name) in [
+            (FolderRole::Documents, "Work"),
+            (FolderRole::Documents, "Work/Old"),
+            (FolderRole::Documents, "Home"),
+            (FolderRole::Pictures, "Trip"),
+        ] {
+            let mut folder = template.clone();
+            folder.kind = ItemKind::Folder;
+            folder.place.role = role;
+            folder.path =
+                ItemPath::new(name.split('/').map(ItemName::from_text).collect()).unwrap();
+            folder.size_bytes = 0;
+            record.items.push(folder);
+        }
+        let chosen = vec![FolderKey {
+            role: FolderRole::Documents,
+            parts: vec!["Work".into(), "Old".into()],
+        }];
+        apply_choice(
+            &mut record,
+            &Choice {
+                folders: chosen,
+                apps: false,
+            },
+        );
+        let folder = |role, name: &str| {
+            record
+                .items
+                .iter()
+                .find(|i| {
+                    i.kind == ItemKind::Folder
+                        && i.place.role == role
+                        && i.path
+                            .parts()
+                            .iter()
+                            .map(|n| n.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                            == name
+                })
+                .map(|i| i.inclusion)
+        };
+        let left = Some(pctwin_record::Inclusion::LeftOut {
+            reason: pctwin_record::LeftOutReason::ChosenByUser,
+        });
+        let moves = Some(pctwin_record::Inclusion::Included);
+        assert_eq!(
+            folder(FolderRole::Documents, "Work"),
+            moves,
+            "on the way to the chosen folder"
+        );
+        assert_eq!(
+            folder(FolderRole::Documents, "Work/Old"),
+            moves,
+            "the chosen folder"
+        );
+        assert_eq!(folder(FolderRole::Documents, "Home"), left);
+        assert_eq!(
+            folder(FolderRole::Pictures, "Trip"),
+            left,
+            "a group with nothing chosen"
+        );
     }
 
     /// A choice naming a folder that was never shown is refused, and the page still waits.

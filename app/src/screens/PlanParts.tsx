@@ -60,12 +60,13 @@ export function leaf(path: string): string {
 /** A folder's name for a screen reader or a label: its role in words, or (for other folders) its own name. */
 export function useFolderName() {
   const { l10n } = useLocalization();
-  return (role: FolderRole, path: string): string => (role === "other" ? leaf(path) : l10n.getString(`plan-role-${role}`));
+  // A whole group of other folders has no path of its own: it is named as a group.
+  return (role: FolderRole, path: string): string => (role === "other" && leaf(path) !== "" ? leaf(path) : l10n.getString(`plan-role-${role}`));
 }
 
 /** The folder's name in the screen: a known role in words, an other folder by its own name, kept in its own direction. */
 export function FolderTitle({ role, path }: { role: FolderRole; path: string }): ReactNode {
-  if (role === "other") return <bdi dir="auto">{shownName(leaf(path))}</bdi>;
+  if (role === "other" && leaf(path) !== "") return <bdi dir="auto">{shownName(leaf(path))}</bdi>;
   return (
     <Localized id={`plan-role-${role}`}>
       <span />

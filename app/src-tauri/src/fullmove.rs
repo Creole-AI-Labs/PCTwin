@@ -133,7 +133,13 @@ pub fn extras_here(
     x.with_special(special);
     x.links = links;
     if !settings {
+        // "Apps, settings and app data" unticked: none of it comes, so nothing of it is counted
+        // either (found in the two-copy test, 29 October 2026).
         x.settings.clear();
+        x.not_moved.clear();
+        x.special.clear();
+        x.special_not_moved = 0;
+        x.special_not_checked = 0;
         x.left_out_by_person = true;
     }
     x.encode()
