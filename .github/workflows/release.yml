@@ -82,6 +82,19 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             timestamp.sigstore.dev:443
+      # Right after the network guard starts, a runner can be unable to reach github.com for a few
+      # seconds (0.1.8's ubuntu-latest build: "Failed to connect to github.com port 443", three
+      # tries in 30 seconds, 28 October 2026). Wait (bounded) until it answers before checking out.
+      - name: Wait for github.com (Linux and macOS)
+        if: runner.os != 'Windows'
+        timeout-minutes: 3
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sS -o /dev/null --max-time 5 https://github.com; then echo "github.com ready after $i tries"; exit 0; fi
+            sleep 2
+          done
+          echo "github.com did not answer within two minutes" >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
