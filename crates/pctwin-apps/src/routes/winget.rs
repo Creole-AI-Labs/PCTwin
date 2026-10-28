@@ -364,6 +364,21 @@ fn same_text(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
 }
 
+/// Names that are the same once their version numbers are set aside, ignoring case.
+fn same_name(a: &str, b: &str) -> bool {
+    let strip = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_ascii_digit() && *c != '.')
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let (x, y) = (strip(a), strip(b));
+    !x.is_empty() && x == y
+}
+
 /// Whether manifest `m` describes `app`: by the product code when the app has one (and then only
 /// by it), or else by an Apps & Features entry with exactly its name and publisher. This only
 /// picks the package; the installer's signer is what PCTwin trusts.
@@ -379,9 +394,17 @@ pub fn confirms(m: &Manifest, app: &FoundApp) -> Option<Confirmed> {
             ..
         } => {
             let mut codes = codes;
-            codes
-                .any(|c| same_text(c, code))
-                .then_some(Confirmed::ProductCode)
+            // The product code, and the name too (sixth review, finding 5): an old laptop's list
+            // that names an app one thing and gives another package's code never installs that
+            // other package under the name shown. Names compare without their version numbers
+            // ("PuTTY release 0.85" and "PuTTY release 0.86"), and the package's own name counts.
+            let named = m
+                .entries
+                .iter()
+                .filter_map(|e| e.display_name.as_deref())
+                .chain(m.name.as_deref())
+                .any(|n| same_name(n, &app.name));
+            (codes.any(|c| same_text(c, code)) && named).then_some(Confirmed::ProductCode)
         }
         FoundWhere::WindowsEntry { .. } => {
             let publisher = app.publisher.as_deref()?;
@@ -646,5 +669,21 @@ ManifestType: merged
         assert!(downloaded(dir.path()).is_ok());
         std::fs::write(dir.path().join("b.exe"), "x").unwrap();
         assert!(downloaded(dir.path()).is_err());
+    }
+
+    /// Sixth review, finding 5: an app named one thing on the old laptop with another package's
+    /// product code is never confirmed as that package.
+    #[test]
+    fn a_product_code_under_another_name_is_not_confirmed() {
+        let m = Manifest::parse(PUTTY).unwrap();
+        let code = Some("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}");
+        assert_eq!(confirms(&m, &putty_app(code)), Some(Confirmed::ProductCode));
+        let mut other = putty_app(code);
+        other.name = "Calculator".into();
+        assert_eq!(confirms(&m, &other), None);
+        // Another release of the same app is still the same name.
+        let mut newer = putty_app(code);
+        newer.name = "PuTTY release 0.86 (64-bit)".into();
+        assert_eq!(confirms(&m, &newer), Some(Confirmed::ProductCode));
     }
 }

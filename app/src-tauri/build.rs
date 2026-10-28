@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "guard_view",
     "guard_intent",
     "fullmove_undo",
+    "move_appdata_answer",
 ];
 
 fn main() {

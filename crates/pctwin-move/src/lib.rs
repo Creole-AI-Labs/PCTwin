@@ -440,9 +440,18 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
             extras::send(link, who.extras).await?;
         }
         let rules = landing::receive_rules(link).await?;
-        // From move protocol 6: the app data the new laptop chose, captured now (read only) and
-        // sent before the files, inside the sealed link.
-        if version >= pctwin_transfer::EXTRAS_SINCE {
+        // The plan is approved: the way back opens, for exactly this plan.
+        let port = back.open(&resume::plan_print(&record.items, &rules)).await;
+        resume::say_port(link, port).await?;
+        Ok((rules, port))
+    })
+    .await?;
+    // From move protocol 6: the app data the new laptop chose, captured now (read only, off the
+    // link, which meanwhile carries progress) and sent before the files, inside the sealed link.
+    // The way back is open by now: a drop here loses only the app data not yet sent (the new
+    // laptop says so), and the files carry on over the connection the laptops come back on.
+    if version >= pctwin_transfer::EXTRAS_SINCE {
+        let exchanged = or_stop(&live.control, async {
             let choice = extras::receive_choice(link).await?;
             match data.as_deref_mut() {
                 Some(out) => {
@@ -451,13 +460,19 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
                 }
                 None => extras::send_data(link, &mut extras::NoData).await?,
             }
+            Ok(())
+        })
+        .await;
+        match exchanged {
+            Ok(()) => {}
+            Err(MoveError::Transfer(TransferError::ConnectionDropped)) if port.is_some() => {
+                if let Some(out) = data.as_mut() {
+                    out.lost();
+                }
+            }
+            Err(e) => return Err(e),
         }
-        // The plan is approved: the way back opens, for exactly this plan.
-        let port = back.open(&resume::plan_print(&record.items, &rules)).await;
-        resume::say_port(link, port).await?;
-        Ok((rules, port))
-    })
-    .await?;
+    }
     // An older new laptop was sent no personal order, so none is used here either: the order
     // its person saw is the order sent.
     let mut plain = None;
@@ -1095,20 +1110,6 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
             Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?
                 .with_wholes(wholes);
         landing::send_rules(link, &rules).await?;
-        // From move protocol 6: the app data this laptop chose, received before the files.
-        if version >= pctwin_transfer::EXTRAS_SINCE {
-            match steps.data_in() {
-                Some(sink) => {
-                    let choice = sink.choice();
-                    extras::send_choice(link, &choice).await?;
-                    extras::receive_data(link, sink).await?;
-                }
-                None => {
-                    extras::send_choice(link, &[]).await?;
-                    extras::receive_data(link, &mut extras::NoData).await?;
-                }
-            }
-        }
         // The plan is approved and the rules said: both laptops make their resume keys for
         // exactly this plan, and the old laptop says where it waits for this one's return.
         let plan = resume::finish_print(approved.listed.clone(), &rules);
@@ -1120,6 +1121,36 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         Some(port) if redial.prepare(&plan, port) => OnDrop::Resumes(redial),
         _ => OnDrop::Ends,
     };
+    // From move protocol 6: the app data this laptop chose, received before the files. A drop
+    // here loses only the app data not yet whole (said as not arrived); the files carry on over
+    // the connection the laptops come back on.
+    if link.greeting().version >= pctwin_transfer::EXTRAS_SINCE {
+        let resumes = matches!(on_drop, OnDrop::Resumes(_));
+        let exchanged = or_stop(&live.control, async {
+            match steps.data_in() {
+                Some(sink) => {
+                    let choice = sink.choice();
+                    extras::send_choice(link, &choice).await?;
+                    extras::receive_data(link, sink).await?;
+                }
+                None => {
+                    extras::send_choice(link, &[]).await?;
+                    extras::receive_data(link, &mut extras::NoData).await?;
+                }
+            }
+            Ok(())
+        })
+        .await;
+        match exchanged {
+            Ok(()) => {}
+            Err(MoveError::Transfer(TransferError::ConnectionDropped)) if resumes => {
+                if let Some(sink) = steps.data_in() {
+                    sink.lost();
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
     approved.receive_on(link, table, here, live, on_drop).await
 }
 

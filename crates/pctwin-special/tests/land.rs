@@ -170,7 +170,11 @@ fn a_component_lands_through_the_gate_journaled_and_verified() {
     let new = t.path().join("new");
     std::fs::create_dir(&new).unwrap();
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let landed = land(
         &rec,
@@ -217,7 +221,11 @@ fn an_existing_profile_is_never_written_over() {
         b"the person's own new data",
     );
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let skipped = land(
         &rec,
@@ -286,7 +294,11 @@ fn landing_checks_its_grant() {
     let new = t.path().join("new");
     std::fs::create_dir(&new).unwrap();
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let k = &keys().capture;
     for g in [
@@ -350,7 +362,11 @@ fn a_stop_ends_the_landing_with_an_honest_record() {
     let new = t.path().join("new");
     std::fs::create_dir(&new).unwrap();
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let stop = Stop::new();
     stop.stop();
@@ -390,7 +406,11 @@ fn after_a_crash_the_record_is_finished_by_looking() {
     let new = t.path().join("new");
     std::fs::create_dir(&new).unwrap();
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let place = SettingsPlace {
         root: SettingsRoot::Config,
@@ -505,7 +525,11 @@ fn a_chosen_secret_lands_owner_only() {
     let new = t.path().join("newhome");
     std::fs::create_dir(&new).unwrap();
     let dest = Destination::open(&new).unwrap();
-    let j = Journal::open(&t.path().join("j.redb")).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
     let rec = j.imports(&keys().capture);
     let target = Target {
         root: SettingsRoot::Home,

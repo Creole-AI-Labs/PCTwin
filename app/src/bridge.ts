@@ -17,7 +17,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
-import { parseRebuildPlan, parseRebuilt, parseRebuildStep, type RebuildStep } from "./fullmove";
+import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -709,6 +709,8 @@ export function parseConnectionView(value: unknown): ConnectionView | null {
 export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportItem));
 /** Opens undo for the last move's apps and settings: the flow guard shows the preview (R05), then the result (R06). */
 export const fullmoveUndo = () => run("fullmove_undo");
+/** The old laptop: the person's answer about the apps to close (true: try again). */
+export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", { retry });
 /** The undo the screens opened is over (the person went back). */
 export const listenUndoClosed = (handler: () => void): Promise<UnlistenFn> =>
   listen<unknown>("move-undo-closed", () => {
@@ -727,7 +729,9 @@ export type MoveEvent =
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly }
   | { kind: "link"; link: ConnectionView }
-  | { kind: "rebuild"; step: RebuildStep };
+  | { kind: "rebuild"; step: RebuildStep }
+  | { kind: "appdata"; progress: DataProgress }
+  | { kind: "appdata-open"; open: AppsOpen };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -749,6 +753,8 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
     on("move-link", parseConnectionView, (link) => ({ kind: "link", link })),
     on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
+    on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
+    on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
   ]);
   return () => {
     for (const stop of all) stop();

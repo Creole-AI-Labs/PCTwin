@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSettle } from "../motion/screen";
 import {
   fullmoveUndo,
+  moveAppdataAnswer,
   helpCode,
   listenMove,
   moveApprove,
@@ -55,9 +56,9 @@ import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
-import { Rebuilding } from "./FullMoveParts";
+import { AppDataComing, CloseApps, Rebuilding } from "./FullMoveParts";
 import UndoHost from "./UndoHost";
-import type { RebuildStep } from "../fullmove";
+import type { DataProgress, RebuildStep } from "../fullmove";
 import StopMove from "./StopMove";
 
 /** What the move page shows now. */
@@ -83,7 +84,11 @@ type View =
   /** The new laptop, after the files: apps, settings and special categories being set up. */
   | { kind: "rebuilding"; step: RebuildStep | null }
   /** Undo of the full move's apps and settings, through the flow guard (R05, R06). */
-  | { kind: "undo"; outcome: MoveOutcome };
+  | { kind: "undo"; outcome: MoveOutcome }
+  /** The new laptop: the old laptop's app data coming, before the files. */
+  | { kind: "appdata"; progress: DataProgress }
+  /** The old laptop: apps to close before their data can be read. */
+  | { kind: "close-apps"; apps: string[] };
 
 type Waiting = Extract<ConnectionView, { kind: "waiting" }>;
 type LinkEnded = Extract<ConnectionView, { kind: "ended" }>;
@@ -142,6 +147,8 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "link-ended":
     case "moved":
     case "rebuilding":
+    case "appdata":
+    case "close-apps":
       return "moving";
     case "undo":
       return "finished";
@@ -158,6 +165,11 @@ export function next(view: View, event: MoveEvent): View {
     if (event.kind === "problem") return { kind: "end", end: { kind: "ended", why: event.problem } };
     return view;
   }
+  // Before the files, the old laptop's app data: its progress, and on the old laptop the apps to
+  // close. The first measured progress of the files takes the page on.
+  if (event.kind === "appdata") return view.kind === "progress" ? view : { kind: "appdata", progress: event.progress };
+  if (event.kind === "appdata-open") return { kind: "close-apps", apps: event.open.apps };
+  if (view.kind === "appdata" && event.kind === "stage") return view;
   switch (event.kind) {
     case "link":
       // Waiting for the other laptop takes the page until connected again (then the progress
@@ -607,6 +619,18 @@ export default function MoveHost({
       );
     case "rebuilding":
       return <Rebuilding step={view.step} />;
+    case "appdata":
+      return <AppDataComing progress={view.progress} />;
+    case "close-apps":
+      return (
+        <CloseApps
+          apps={view.apps}
+          onAnswer={(retry) => {
+            setView({ kind: "wait", stage: "moving" });
+            void moveAppdataAnswer(retry).catch(() => undefined);
+          }}
+        />
+      );
     case "undo":
       return (
         <UndoHost

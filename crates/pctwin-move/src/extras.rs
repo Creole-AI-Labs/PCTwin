@@ -110,6 +110,26 @@ const DATA_HEAD: u8 = 1;
 const DATA_CHUNK: u8 = 2;
 const DATA_END_FILE: u8 = 3;
 const DATA_DONE: u8 = 4;
+/// Still working (capturing on the old laptop): sent at least every [`DATA_KEEPALIVE`], with the
+/// progress so far (the reader's own words), so the link is never silent.
+const DATA_WAIT: u8 = 5;
+
+/// How often the old laptop says it is still working while nothing else is sent.
+pub const DATA_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long the new laptop waits in silence before it takes the link for lost.
+pub const DATA_SILENCE: std::time::Duration = std::time::Duration::from_secs(30);
+/// The longest progress note.
+pub const MAX_PROGRESS: usize = 4 * 1024;
+
+/// What the old laptop has next for the stream.
+pub enum NextData {
+    /// A file: its header and a reader of its bytes.
+    File(Vec<u8>, Box<dyn std::io::Read + Send>),
+    /// Nothing yet (still capturing): the progress so far.
+    Wait(Vec<u8>),
+    /// No more.
+    Done,
+}
 
 /// The longest header of one file in the stream.
 pub const MAX_DATA_HEADER: usize = 60 * 1024;
@@ -123,8 +143,11 @@ pub const MAX_DATA_FILES: u64 = 2_000_000;
 pub trait DataOut {
     /// The new laptop's choice, as it sent it (unread bytes from the other laptop).
     fn chosen(&mut self, choice: Vec<u8>);
-    /// The next file: its header and a reader of its bytes (`None`: no more).
-    fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)>;
+    /// What is next, waiting at most `wait` (the capture runs off the link; meanwhile the link
+    /// carries progress).
+    fn next_within(&mut self, wait: std::time::Duration) -> NextData;
+    /// The connection was lost part way: nothing more is captured.
+    fn lost(&mut self) {}
 }
 
 /// The new laptop's side: what it chose, and where each file's bytes go. A sink that cannot keep
@@ -134,6 +157,10 @@ pub trait DataIn {
     fn begin(&mut self, header: &[u8]) -> Result<(), String>;
     fn chunk(&mut self, bytes: &[u8]) -> Result<(), String>;
     fn end(&mut self) -> Result<(), String>;
+    /// The old laptop's progress note while it captures.
+    fn progress(&mut self, _note: &[u8]) {}
+    /// The connection was lost part way: what arrived whole stays, the rest did not arrive.
+    fn lost(&mut self) {}
 }
 
 /// Nothing chosen, nothing kept: an old laptop with no app data sends none, and a new laptop that
@@ -142,8 +169,8 @@ pub struct NoData;
 
 impl DataOut for NoData {
     fn chosen(&mut self, _: Vec<u8>) {}
-    fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)> {
-        None
+    fn next_within(&mut self, _: std::time::Duration) -> NextData {
+        NextData::Done
     }
 }
 
@@ -236,8 +263,29 @@ async fn receive_kind(ch: &mut impl Channel, kind: u8) -> Result<Vec<u8>, Transf
 /// The old laptop: sends every file `out` gives, then the end. A file that cannot be read part
 /// way is ended short; the new laptop's own checks (size and hash) refuse it.
 pub async fn send_data(ch: &mut impl Channel, out: &mut dyn DataOut) -> Result<(), TransferError> {
+    send_data_every(ch, out, DATA_KEEPALIVE).await
+}
+
+/// [`send_data`], saying it is still working at least every `keepalive`.
+pub async fn send_data_every(
+    ch: &mut impl Channel,
+    out: &mut dyn DataOut,
+    keepalive: std::time::Duration,
+) -> Result<(), TransferError> {
     let mut buf = vec![0u8; PAGE_BYTES];
-    while let Some((header, mut reader)) = out.next() {
+    loop {
+        let (header, mut reader) = match out.next_within(keepalive) {
+            NextData::Done => break,
+            NextData::Wait(note) => {
+                let mut msg = vec![DATA, DATA_WAIT];
+                msg.extend_from_slice(&note[..note.len().min(MAX_PROGRESS)]);
+                ch.send(&msg)
+                    .await
+                    .map_err(|_| TransferError::ConnectionDropped)?;
+                continue;
+            }
+            NextData::File(h, r) => (h, r),
+        };
         if header.len() > MAX_DATA_HEADER {
             return Err(bad("a header too large"));
         }
@@ -275,15 +323,30 @@ pub async fn receive_data(
     ch: &mut impl Channel,
     sink: &mut dyn DataIn,
 ) -> Result<(), TransferError> {
+    receive_data_within(ch, sink, DATA_SILENCE).await
+}
+
+/// [`receive_data`], taking the link for lost after `silence` with nothing from the old laptop.
+pub async fn receive_data_within(
+    ch: &mut impl Channel,
+    sink: &mut dyn DataIn,
+    silence: std::time::Duration,
+) -> Result<(), TransferError> {
     let mut bytes = 0u64;
     let mut files = 0u64;
     let mut open = false;
     loop {
-        let msg = ch
-            .recv()
+        let msg = tokio::time::timeout(silence, ch.recv())
             .await
+            .map_err(|_| TransferError::ConnectionDropped)?
             .map_err(|_| TransferError::ConnectionDropped)?;
         match msg.as_slice() {
+            [DATA, DATA_WAIT, note @ ..] => {
+                if note.len() > MAX_PROGRESS {
+                    return Err(bad("a progress note too long"));
+                }
+                sink.progress(note);
+            }
             [DATA, DATA_HEAD, header @ ..] if !open => {
                 files += 1;
                 if header.len() > MAX_DATA_HEADER || files > MAX_DATA_FILES {
@@ -330,6 +393,7 @@ mod tests {
 
     fn run<T>(f: impl std::future::Future<Output = T>) -> T {
         tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
             .unwrap()
             .block_on(f)
@@ -388,12 +452,12 @@ mod tests {
         fn chosen(&mut self, choice: Vec<u8>) {
             self.1 = Some(choice);
         }
-        fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)> {
+        fn next_within(&mut self, _: std::time::Duration) -> NextData {
             if self.0.is_empty() {
-                return None;
+                return NextData::Done;
             }
             let (h, b) = self.0.remove(0);
-            Some((h, Box::new(std::io::Cursor::new(b))))
+            NextData::File(h, Box::new(std::io::Cursor::new(b)))
         }
     }
 
@@ -444,5 +508,122 @@ mod tests {
             vec![DATA, DATA_DONE],
         ]));
         assert!(run(receive_data(&mut p, &mut In::default())).is_err());
+    }
+
+    /// A capture slower than the new laptop's silence limit: the old laptop is "still working"
+    /// for 1.5 s before its file, while the new laptop gives up after 0.3 s of silence.
+    struct Slow {
+        until: std::time::Instant,
+        sent: bool,
+    }
+    impl DataOut for Slow {
+        fn chosen(&mut self, _: Vec<u8>) {}
+        fn next_within(&mut self, wait: std::time::Duration) -> NextData {
+            if self.sent {
+                return NextData::Done;
+            }
+            let now = std::time::Instant::now();
+            if now < self.until {
+                std::thread::sleep(wait.min(self.until - now));
+                return NextData::Wait(b"{\"done\":0,\"total\":1}".to_vec());
+            }
+            self.sent = true;
+            NextData::File(
+                b"h".to_vec(),
+                Box::new(std::io::Cursor::new(b"slow bytes".to_vec())),
+            )
+        }
+    }
+
+    struct Tokio {
+        tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    }
+    impl Channel for Tokio {
+        async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+            self.tx.send(data.to_vec()).map_err(|_| ChannelError)
+        }
+        async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+            self.rx.recv().await.ok_or(ChannelError)
+        }
+    }
+    fn tokio_pair() -> (Tokio, Tokio) {
+        let (a_tx, b_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (b_tx, a_rx) = tokio::sync::mpsc::unbounded_channel();
+        (Tokio { tx: a_tx, rx: a_rx }, Tokio { tx: b_tx, rx: b_rx })
+    }
+
+    #[derive(Default)]
+    struct Noted(In, Vec<Vec<u8>>);
+    impl DataIn for Noted {
+        fn choice(&mut self) -> Vec<u8> {
+            Vec::new()
+        }
+        fn begin(&mut self, h: &[u8]) -> Result<(), String> {
+            self.0.begin(h)
+        }
+        fn chunk(&mut self, b: &[u8]) -> Result<(), String> {
+            self.0.chunk(b)
+        }
+        fn end(&mut self) -> Result<(), String> {
+            self.0.end()
+        }
+        fn progress(&mut self, note: &[u8]) {
+            self.1.push(note.to_vec());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_capture_slower_than_the_silence_limit_keeps_the_link_alive_and_succeeds() {
+        use std::time::Duration;
+        let (mut old, mut new) = tokio_pair();
+        let sender = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let mut out = Slow {
+                        until: std::time::Instant::now() + Duration::from_millis(1500),
+                        sent: false,
+                    };
+                    send_data_every(&mut old, &mut out, Duration::from_millis(100)).await
+                })
+        });
+        let mut sink = Noted::default();
+        receive_data_within(&mut new, &mut sink, Duration::from_millis(300))
+            .await
+            .unwrap();
+        sender.join().unwrap().unwrap();
+        assert_eq!(sink.0.0, vec![(b"h".to_vec(), b"slow bytes".to_vec())]);
+        assert!(sink.1.len() >= 5, "progress kept coming: {}", sink.1.len());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn without_word_from_the_old_laptop_the_link_is_taken_for_lost() {
+        use std::time::Duration;
+        let (mut old, mut new) = tokio_pair();
+        let sender = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let mut out = Slow {
+                        until: std::time::Instant::now() + Duration::from_millis(1200),
+                        sent: false,
+                    };
+                    // Its "still working" comes only every second: past the new laptop's limit.
+                    send_data_every(&mut old, &mut out, Duration::from_millis(1000)).await
+                })
+        });
+        let got =
+            receive_data_within(&mut new, &mut Noted::default(), Duration::from_millis(300)).await;
+        assert!(
+            matches!(got, Err(TransferError::ConnectionDropped)),
+            "{got:?}"
+        );
+        drop(new);
+        let _ = sender.join();
     }
 }

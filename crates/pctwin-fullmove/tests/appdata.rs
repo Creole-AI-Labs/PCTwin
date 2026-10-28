@@ -361,7 +361,12 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         sink: None,
         staging: staging.clone(),
     };
-    let mut source = Source::new(found.planned.clone(), &keys().capture, &Free, work.clone());
+    let mut source = Source::new(
+        found.planned.clone(),
+        &keys().capture,
+        Arc::new(Free),
+        work.clone(),
+    );
 
     let (mut a, mut b) = mem_pair();
     let (old_live, new_live) = (Live::default(), Live::default());
@@ -589,4 +594,190 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             "the person's edit is kept: {after:#?}"
         );
     }
+}
+
+/// Says Chromey's files are held open until the person closes it.
+struct OpenUntilClosed(Arc<std::sync::atomic::AtomicBool>);
+impl Holders for OpenUntilClosed {
+    fn holding(&self, files: &[PathBuf]) -> Holding {
+        let chromey = files
+            .iter()
+            .any(|f| f.to_string_lossy().contains("Chromey"));
+        if chromey && !self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            Holding::Held {
+                by: vec!["chromey.exe".into()],
+            }
+        } else {
+            Holding::Free
+        }
+    }
+}
+
+/// Runs the choice and the stream between `source` and `sink` in memory.
+async fn stream(source: &mut Source, sink: &mut Sink) {
+    use pctwin_move::extras::{DataIn, receive_choice, receive_data, send_choice, send_data_every};
+    let (mut a, mut b) = mem_pair();
+    send_choice(&mut b, &sink.choice()).await.unwrap();
+    let choice = receive_choice(&mut a).await.unwrap();
+    pctwin_move::extras::DataOut::chosen(source, choice);
+    let (sent, got) = tokio::join!(
+        send_data_every(&mut a, source, std::time::Duration::from_millis(50)),
+        receive_data(&mut b, sink)
+    );
+    sent.unwrap();
+    got.unwrap();
+}
+
+/// An app open on the old laptop: the person is told which, closes it and tries again, and its
+/// data then comes; told "go on without", it ends needs-action, never copied.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
+    for close_it in [true, false] {
+        let t = tempfile::tempdir().unwrap();
+        let old = t.path().join("old");
+        let new = t.path().join("new");
+        std::fs::create_dir_all(new.join("AppData/Local")).unwrap();
+        chromium(&old);
+        let mover = Owner::Person {
+            account_id: MOVER.into(),
+        };
+        let found = SpecialScan::start(&mover, &old)
+            .unwrap()
+            .wait(&|| false)
+            .unwrap();
+        let plan = FullPlan {
+            special: found.lines.clone(),
+            ..FullPlan::default()
+        };
+        let choice = plan.choice(&[]);
+        assert!(!choice.copy.is_empty());
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let asked: Arc<std::sync::Mutex<Vec<Vec<String>>>> = Default::default();
+        let ask = {
+            let (closed, asked) = (closed.clone(), asked.clone());
+            Box::new(move |names: &[String]| {
+                asked.lock().unwrap().push(names.to_vec());
+                if close_it {
+                    closed.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                close_it
+            }) as pctwin_fullmove::data::AskClose
+        };
+        let mut source = Source::new(
+            found.planned.clone(),
+            &keys().capture,
+            Arc::new(OpenUntilClosed(closed.clone())),
+            t.path().join("work"),
+        )
+        .asking(ask);
+        let mut sink = Sink::new(choice, t.path().join("staging"));
+        stream(&mut source, &mut sink).await;
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 1, "asked once, naming the app: {asked:?}");
+        assert!(asked[0].iter().any(|n| n.contains("Chromey")), "{asked:?}");
+        let journal = Journal::open_with_record_key(
+            &t.path().join("j.redb"),
+            pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+        )
+        .unwrap();
+        let home = Destination::open(&new).unwrap();
+        let names: BTreeMap<String, String> = found
+            .lines
+            .iter()
+            .flat_map(|l| l.ids.iter().map(|i| (i.clone(), l.name.clone())))
+            .collect();
+        let landed = land_all(
+            &sink,
+            &Landing {
+                journal: &journal,
+                key: &keys().capture,
+                home: &home,
+                home_path: &new,
+                owner_only: &AppOwnerOnly,
+                scope: Scope::for_a_move().unwrap(),
+                actor: Actor {
+                    acting_account: HERE.into(),
+                    for_account: HERE.into(),
+                    permission: Permission::OwnFolders,
+                },
+            },
+            &names,
+        );
+        let copied = landed
+            .iter()
+            .filter(|l| l.result.status() == ItemStatus::Copied)
+            .count();
+        if close_it {
+            assert!(copied > 0, "{landed:#?}");
+            assert!(
+                new.join("AppData/Local/Chromey/User Data/Default/History")
+                    .is_file()
+            );
+        } else {
+            assert_eq!(copied, 0, "{landed:#?}");
+            assert!(
+                landed
+                    .iter()
+                    .all(|l| l.result.status() == ItemStatus::NeedsAction
+                        && l.words.contains("open")),
+                "{landed:#?}"
+            );
+        }
+    }
+}
+
+/// Sixth review, finding 2: a move that ends before its app data lands (a stop, a lost link, the
+/// app closed) leaves nothing staged on the new laptop, a ticked secret least of all; and a staging
+/// folder a crash left behind is swept away at the next start.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn staged_app_data_never_outlives_the_move_that_brought_it() {
+    let t = tempfile::tempdir().unwrap();
+    let old = t.path().join("old");
+    firefox(&old);
+    let mover = Owner::Person {
+        account_id: MOVER.into(),
+    };
+    let found = SpecialScan::start(&mover, &old)
+        .unwrap()
+        .wait(&|| false)
+        .unwrap();
+    let plan = FullPlan {
+        special: found.lines.clone(),
+        ..FullPlan::default()
+    };
+    // The person ticks every secret, so the secret's files are staged too.
+    let picked: Vec<u32> = plan
+        .special
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.secret)
+        .map(|(at, _)| at as u32)
+        .collect();
+    assert!(!picked.is_empty(), "a secret to tick");
+    let data = t.path().join("PCTwin data");
+    let staging = data.join(format!("{}abc", pctwin_fullmove::data::STAGING_PREFIX));
+    std::fs::create_dir_all(&staging).unwrap();
+    let mut source = Source::new(
+        found.planned.clone(),
+        &keys().capture,
+        Arc::new(Free),
+        t.path().join("work"),
+    );
+    let mut sink = Sink::new(plan.choice(&picked), staging.clone());
+    stream(&mut source, &mut sink).await;
+    assert!(
+        !files_under(&staging).is_empty(),
+        "the app data, the secret's included, was staged"
+    );
+    // The move ends here, without landing.
+    drop(sink);
+    assert!(!staging.exists(), "nothing staged outlives the move");
+
+    // A staging folder left by a crash is swept at the next start; nothing else is touched.
+    let left = data.join(format!("{}def", pctwin_fullmove::data::STAGING_PREFIX));
+    put(&left.join("x/logins.json"), b"{}");
+    put(&data.join("journal"), b"kept");
+    assert_eq!(pctwin_fullmove::data::sweep_staging(&data), 1);
+    assert!(!left.exists());
+    assert!(data.join("journal").exists());
 }

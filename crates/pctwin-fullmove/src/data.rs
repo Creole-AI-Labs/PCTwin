@@ -158,24 +158,62 @@ pub struct Record {
 
 /* ---------- The old laptop ---------- */
 
-/// The old laptop's app data, given the new laptop's choice (read only).
-pub struct Source<'a> {
+/// What the old laptop says while it captures: how many of the chosen apps are done, and the
+/// apps waiting to be closed (their names), if any.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DataProgress {
+    pub done: u64,
+    pub total: u64,
+    #[serde(default)]
+    pub waiting_for: Vec<String>,
+}
+
+impl DataProgress {
+    pub fn encode(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_default()
+    }
+    /// A note from the other laptop, read strictly and bounded.
+    pub fn decode(b: &[u8]) -> Option<Self> {
+        let p: DataProgress = serde_json::from_slice(b).ok()?;
+        (p.done <= p.total
+            && p.waiting_for.len() <= 64
+            && p.waiting_for.iter().all(|n| n.len() <= 512))
+        .then_some(p)
+    }
+}
+
+/// Who is told the old laptop's progress with the app data.
+pub type Tell = Box<dyn FnMut(&DataProgress) + Send>;
+
+/// The person's answer when apps must be closed first: try those again, or go on without them.
+pub type AskClose = Box<dyn FnMut(&[String]) -> bool + Send>;
+
+/// One thing for the stream.
+enum Item {
+    /// A header, and the file its bytes come from (none: no bytes).
+    File(Vec<u8>, Option<PathBuf>),
+}
+
+/// The old laptop's app data, given the new laptop's choice (read only). Capturing runs on a
+/// thread of its own, so the link carries progress while a big database is backed up.
+pub struct Source {
     planned: Vec<Planned>,
-    key: &'a CaptureKey,
-    holders: &'a dyn Holders,
+    key: &'static CaptureKey,
+    holders: std::sync::Arc<dyn Holders + Send + Sync>,
     /// PCTwin's own private work folder on the old laptop (removed when done).
     work: PathBuf,
     stop: Stop,
-    todo: Vec<(usize, bool)>,
-    queue: Vec<(Vec<u8>, PathBuf)>,
-    seal: PlanSeal,
+    ask: Option<AskClose>,
+    rx: Option<std::sync::mpsc::Receiver<Item>>,
+    progress: std::sync::Arc<std::sync::Mutex<DataProgress>>,
 }
 
-impl<'a> Source<'a> {
+impl Source {
     pub fn new(
         planned: Vec<Planned>,
-        key: &'a CaptureKey,
-        holders: &'a dyn Holders,
+        key: &'static CaptureKey,
+        holders: std::sync::Arc<dyn Holders + Send + Sync>,
         work: PathBuf,
     ) -> Self {
         Self {
@@ -184,114 +222,119 @@ impl<'a> Source<'a> {
             holders,
             work,
             stop: Stop::new(),
-            todo: Vec::new(),
-            queue: Vec::new(),
-            seal: PlanSeal::new(1, [0; 32]),
+            ask: None,
+            rx: None,
+            progress: Default::default(),
         }
     }
 
-    fn header(h: &Header) -> Vec<u8> {
-        serde_json::to_vec(h).unwrap_or_default()
-    }
-
-    /// Captures the component at `at` (`secret`: with a secret grant naming exactly it) and
-    /// queues what it sends.
-    fn capture(&mut self, at: usize, secret: bool) {
-        let p = &self.planned[at];
-        let id = id_hex(&p.component);
-        let root = RootRef::new(1);
-        let approved = api::approve(p, self.seal, root, at as u64);
-        let work = self.work.join(at.to_string());
-        let not = |why| {
-            (
-                Self::header(&Header::NotCaptured {
-                    id: id.clone(),
-                    why,
-                }),
-                PathBuf::new(),
-            )
-        };
-        if std::fs::create_dir_all(&work).is_err() {
-            self.queue.push(not(NotCaptured::Unreadable));
-            return;
-        }
-        let grant = if secret {
-            self.key
-                .secret(
-                    self.seal,
-                    vec![approved.object()],
-                    SecretEffect::Read,
-                    GRANT,
-                    Now::real(),
-                )
-                .map(Grant::Secret)
-        } else {
-            self.key
-                .grant(
-                    self.seal,
-                    vec![root],
-                    CaptureEffect::ReadPrivate,
-                    GRANT,
-                    Now::real(),
-                )
-                .map(Grant::Ordinary)
-        };
-        let Ok(grant) = grant else {
-            self.queue.push(not(NotCaptured::Stopped));
-            return;
-        };
-        match api::capture_planned(
-            p,
-            grant,
-            &approved,
-            &work,
-            self.holders,
-            &self.stop,
-            Now::real(),
-        ) {
-            Ok(capture) => {
-                let record = Record {
-                    app: p.app.clone(),
-                    component: p.component.clone(),
-                    placement: (&p.placement).into(),
-                    root: p.root,
-                    capture: capture.clone(),
-                };
-                let body = self.work.join(format!("{at}.record"));
-                if std::fs::write(&body, serde_json::to_vec(&record).unwrap_or_default()).is_err() {
-                    self.queue.push(not(NotCaptured::Unreadable));
-                    return;
-                }
-                self.queue
-                    .push((Self::header(&Header::Record { id: id.clone() }), body));
-                for f in &capture.files {
-                    let path = f
-                        .rel
-                        .split('/')
-                        .fold(work.clone(), |path, part| path.join(part));
-                    self.queue.push((
-                        Self::header(&Header::File {
-                            id: id.clone(),
-                            rel: f.rel.clone(),
-                        }),
-                        path,
-                    ));
-                }
-            }
-            Err(e) => self.queue.push(not((&e).into())),
-        }
+    /// Asks the person, when chosen apps are still open, whether to try them again once closed.
+    pub fn asking(mut self, ask: AskClose) -> Self {
+        self.ask = Some(ask);
+        self
     }
 }
 
-impl Drop for Source<'_> {
+fn header(h: &Header) -> Vec<u8> {
+    serde_json::to_vec(h).unwrap_or_default()
+}
+
+/// What capturing one component gave: the items to send, or why not.
+enum Captured {
+    Items(Vec<Item>),
+    Not(NotCaptured),
+}
+
+/// Captures the component `p` (number `at`; `secret`: with a secret grant naming exactly it),
+/// for the choice sealed as `seal`.
+#[allow(clippy::too_many_arguments)]
+fn capture_one(
+    p: &Planned,
+    at: usize,
+    secret: bool,
+    seal: PlanSeal,
+    key: &CaptureKey,
+    holders: &dyn Holders,
+    work: &Path,
+    stop: &Stop,
+) -> Captured {
+    let id = id_hex(&p.component);
+    let root = RootRef::new(1);
+    let approved = api::approve(p, seal, root, at as u64);
+    let folder = work.join(at.to_string());
+    let _ = std::fs::remove_dir_all(&folder);
+    if std::fs::create_dir_all(&folder).is_err() {
+        return Captured::Not(NotCaptured::Unreadable);
+    }
+    let grant = if secret {
+        key.secret(
+            seal,
+            vec![approved.object()],
+            SecretEffect::Read,
+            GRANT,
+            Now::real(),
+        )
+        .map(Grant::Secret)
+    } else {
+        key.grant(
+            seal,
+            vec![root],
+            CaptureEffect::ReadPrivate,
+            GRANT,
+            Now::real(),
+        )
+        .map(Grant::Ordinary)
+    };
+    let Ok(grant) = grant else {
+        return Captured::Not(NotCaptured::Stopped);
+    };
+    match api::capture_planned(p, grant, &approved, &folder, holders, stop, Now::real()) {
+        Ok(capture) => {
+            let record = Record {
+                app: p.app.clone(),
+                component: p.component.clone(),
+                placement: (&p.placement).into(),
+                root: p.root,
+                capture: capture.clone(),
+            };
+            let body = work.join(format!("{at}.record"));
+            if std::fs::write(&body, serde_json::to_vec(&record).unwrap_or_default()).is_err() {
+                return Captured::Not(NotCaptured::Unreadable);
+            }
+            let mut items = vec![Item::File(
+                header(&Header::Record { id: id.clone() }),
+                Some(body),
+            )];
+            for f in &capture.files {
+                let path = f
+                    .rel
+                    .split('/')
+                    .fold(folder.clone(), |path, part| path.join(part));
+                items.push(Item::File(
+                    header(&Header::File {
+                        id: id.clone(),
+                        rel: f.rel.clone(),
+                    }),
+                    Some(path),
+                ));
+            }
+            Captured::Items(items)
+        }
+        Err(e) => Captured::Not((&e).into()),
+    }
+}
+
+impl Drop for Source {
     fn drop(&mut self) {
+        self.stop.stop();
+        // The thread may still be reading: its folder goes when it is done, or here.
         let _ = std::fs::remove_dir_all(&self.work);
     }
 }
 
-impl pctwin_move::extras::DataOut for Source<'_> {
+impl pctwin_move::extras::DataOut for Source {
     fn chosen(&mut self, choice: Vec<u8>) {
-        self.seal = PlanSeal::new(
+        let seal = PlanSeal::new(
             1,
             *blake3::Hasher::new_derive_key("PCTwin app data choice 2026-10-28 v1")
                 .update(&choice)
@@ -299,36 +342,157 @@ impl pctwin_move::extras::DataOut for Source<'_> {
                 .as_bytes(),
         );
         let c = Choice::decode(&choice);
-        for (at, p) in self.planned.iter().enumerate() {
-            let id = id_hex(&p.component);
-            // Only what was chosen is read: a component that copies (never a secret by this
-            // list), and each secret the person ticked by itself.
-            if !p.component.secret && c.copy.contains(&id) {
-                self.todo.push((at, false));
-            } else if p.component.secret && c.secrets.contains(&id) {
-                self.todo.push((at, true));
-            }
-        }
-        self.todo.reverse();
-    }
-
-    fn next(&mut self) -> Option<(Vec<u8>, Box<dyn std::io::Read + Send>)> {
-        loop {
-            if !self.queue.is_empty() {
-                let (header, path) = self.queue.remove(0);
-                let reader: Box<dyn std::io::Read + Send> = if path.as_os_str().is_empty() {
-                    Box::new(std::io::empty())
+        // Only what was chosen is read: a component that copies (never a secret by this list),
+        // and each secret the person ticked by itself.
+        let todo: Vec<(usize, bool)> = self
+            .planned
+            .iter()
+            .enumerate()
+            .filter_map(|(at, p)| {
+                let id = id_hex(&p.component);
+                if !p.component.secret && c.copy.contains(&id) {
+                    Some((at, false))
+                } else if p.component.secret && c.secrets.contains(&id) {
+                    Some((at, true))
                 } else {
-                    match std::fs::File::open(&path) {
-                        Ok(f) => Box::new(f),
-                        Err(_) => Box::new(std::io::empty()),
+                    None
+                }
+            })
+            .collect();
+        let apps: std::collections::BTreeSet<&str> = todo
+            .iter()
+            .map(|(at, _)| self.planned[*at].app.as_str())
+            .collect();
+        if let Ok(mut p) = self.progress.lock() {
+            p.total = apps.len() as u64;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.rx = Some(rx);
+        let planned = self.planned.clone();
+        let (key, holders, work, stop) = (
+            self.key,
+            self.holders.clone(),
+            self.work.clone(),
+            self.stop.clone(),
+        );
+        let progress = self.progress.clone();
+        let mut ask = self.ask.take();
+        let _ = std::thread::Builder::new()
+            .name("pctwin-capture".into())
+            .spawn(move || {
+                let mut done_apps: std::collections::BTreeSet<String> = Default::default();
+                let mut open: Vec<(usize, bool)> = Vec::new();
+                let send = |items: Vec<Item>| items.into_iter().all(|i| tx.send(i).is_ok());
+                let mark = |app: &str, done_apps: &mut std::collections::BTreeSet<String>| {
+                    done_apps.insert(app.to_string());
+                    if let Ok(mut p) = progress.lock() {
+                        p.done = (done_apps.len() as u64).min(p.total);
                     }
                 };
-                return Some((header, reader));
+                for (at, secret) in todo {
+                    if stop.stopped() {
+                        return;
+                    }
+                    let p = &planned[at];
+                    match capture_one(p, at, secret, seal, key, &*holders, &work, &stop) {
+                        Captured::Items(items) => {
+                            if !send(items) {
+                                return;
+                            }
+                        }
+                        Captured::Not(NotCaptured::AppOpen) => {
+                            open.push((at, secret));
+                            continue;
+                        }
+                        Captured::Not(why) => {
+                            let id = id_hex(&p.component);
+                            if !send(vec![Item::File(
+                                header(&Header::NotCaptured { id, why }),
+                                None,
+                            )]) {
+                                return;
+                            }
+                        }
+                    }
+                    mark(&p.app, &mut done_apps);
+                }
+                // Apps still open: the person is asked to close them, and they are tried again
+                // as often as the person asks; otherwise they are said as not captured.
+                while !open.is_empty() && !stop.stopped() {
+                    let names: Vec<String> = {
+                        let set: std::collections::BTreeSet<&str> = open
+                            .iter()
+                            .map(|(at, _)| planned[*at].app.as_str())
+                            .collect();
+                        set.into_iter().map(str::to_string).collect()
+                    };
+                    if let Ok(mut p) = progress.lock() {
+                        p.waiting_for = names.clone();
+                    }
+                    let again = ask.as_mut().is_some_and(|ask| ask(&names));
+                    if let Ok(mut p) = progress.lock() {
+                        p.waiting_for.clear();
+                    }
+                    let mut still = Vec::new();
+                    for (at, secret) in std::mem::take(&mut open) {
+                        let p = &planned[at];
+                        let id = id_hex(&p.component);
+                        let got = if again {
+                            capture_one(p, at, secret, seal, key, &*holders, &work, &stop)
+                        } else {
+                            Captured::Not(NotCaptured::AppOpen)
+                        };
+                        match got {
+                            Captured::Items(items) => {
+                                if !send(items) {
+                                    return;
+                                }
+                                mark(&p.app, &mut done_apps);
+                            }
+                            Captured::Not(NotCaptured::AppOpen) if again => {
+                                still.push((at, secret))
+                            }
+                            Captured::Not(why) => {
+                                if !send(vec![Item::File(
+                                    header(&Header::NotCaptured { id, why }),
+                                    None,
+                                )]) {
+                                    return;
+                                }
+                                mark(&p.app, &mut done_apps);
+                            }
+                        }
+                    }
+                    open = still;
+                }
+            });
+    }
+
+    fn next_within(&mut self, wait: std::time::Duration) -> pctwin_move::extras::NextData {
+        use pctwin_move::extras::NextData;
+        let Some(rx) = &self.rx else {
+            return NextData::Done;
+        };
+        match rx.recv_timeout(wait) {
+            Ok(Item::File(h, path)) => {
+                let reader: Box<dyn std::io::Read + Send> = match path {
+                    Some(p) => match std::fs::File::open(&p) {
+                        Ok(f) => Box::new(f),
+                        Err(_) => Box::new(std::io::empty()),
+                    },
+                    None => Box::new(std::io::empty()),
+                };
+                NextData::File(h, reader)
             }
-            let (at, secret) = self.todo.pop()?;
-            self.capture(at, secret);
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                NextData::Wait(self.progress.lock().map(|p| p.encode()).unwrap_or_default())
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => NextData::Done,
         }
+    }
+
+    fn lost(&mut self) {
+        self.stop.stop();
     }
 }
 
@@ -367,6 +531,9 @@ pub struct Sink {
     staging: PathBuf,
     pub arrived: BTreeMap<String, Arrived>,
     open: Option<Open>,
+    /// The connection was lost part way through the app data.
+    pub lost: bool,
+    on_progress: Option<Tell>,
 }
 
 /// Whether `rel` is a plain path inside a folder: names separated by `/`, none empty, `.` or
@@ -387,7 +554,15 @@ impl Sink {
             staging,
             arrived: BTreeMap::new(),
             open: None,
+            lost: false,
+            on_progress: None,
         }
+    }
+
+    /// Tells `tell` the old laptop's progress while it captures.
+    pub fn telling(mut self, tell: Tell) -> Self {
+        self.on_progress = Some(tell);
+        self
     }
 
     fn chosen(&self, id: &str) -> bool {
@@ -399,6 +574,11 @@ impl Sink {
         let _ = std::fs::remove_dir_all(&self.staging);
     }
 
+    /// The staging folder itself.
+    pub fn staging(&self) -> &Path {
+        &self.staging
+    }
+
     /// The staging folder of component `id`.
     pub fn folder(&self, id: &str) -> PathBuf {
         self.staging.join(id)
@@ -408,6 +588,21 @@ impl Sink {
 impl pctwin_move::extras::DataIn for Sink {
     fn choice(&mut self) -> Vec<u8> {
         self.choice.encode()
+    }
+
+    fn progress(&mut self, note: &[u8]) {
+        if let (Some(p), Some(tell)) = (DataProgress::decode(note), self.on_progress.as_mut()) {
+            tell(&p);
+        }
+    }
+
+    fn lost(&mut self) {
+        self.lost = true;
+        // A file part way is not kept.
+        if let Some(Open::File { id, path, .. }) = self.open.take() {
+            let _ = std::fs::remove_file(&path);
+            self.arrived.entry(id).or_default().refused = true;
+        }
     }
 
     fn begin(&mut self, header: &[u8]) -> Result<(), String> {
@@ -529,6 +724,37 @@ impl pctwin_move::extras::DataIn for Sink {
     }
 }
 
+/// The staging folder belongs to the sink: whatever becomes of the move (landed, stopped, the link
+/// lost, the app closed), nothing staged (a ticked secret least of all) outlives it.
+impl Drop for Sink {
+    fn drop(&mut self) {
+        // A file part way is closed first, so it can be removed.
+        self.open = None;
+        self.remove_staging();
+    }
+}
+
+/// The prefix of every staging folder (swept away at start: one a crash left behind).
+pub const STAGING_PREFIX: &str = "fullmove-data-";
+
+/// Removes every staging folder left in `dir` (PCTwin's own data folder) by an earlier run that
+/// ended without cleaning up (the laptop turned off, the app crashed). Returns how many.
+pub fn sweep_staging(dir: &Path) -> usize {
+    let mut n = 0;
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let is_ours = e
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(STAGING_PREFIX));
+        // Never follow a link out of PCTwin's own folder.
+        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+        if is_ours && is_dir && std::fs::remove_dir_all(e.path()).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
 /// The new laptop, for landing.
 pub struct Landing<'a> {
     pub journal: &'a Journal,
@@ -592,7 +818,11 @@ pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -
             words: words.into(),
         };
         let Some(a) = sink.arrived.get(id) else {
-            out.push(needs("it did not arrive"));
+            out.push(needs(if sink.lost {
+                "the connection was lost before it arrived; it is still safe on your old laptop"
+            } else {
+                "it did not arrive"
+            }));
             continue;
         };
         if let Some(why) = a.not_captured {

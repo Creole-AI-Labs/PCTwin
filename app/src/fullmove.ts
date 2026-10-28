@@ -8,7 +8,7 @@ import { CHANGE_ACTIONS, UNDO_PROMISES, type ChangeAction, type UndoPromise } fr
 import { ITEM_STATUSES, parseResult, type ItemStatus, type Reason } from "./move";
 
 /** PCTwin's own lines, by key. */
-export const OWN_TITLES = ["fullmove-special-not-yet", "fullmove-special-not-checked"] as const;
+export const OWN_TITLES = ["fullmove-special-not-yet", "fullmove-special-not-checked", "fullmove-extras-refused"] as const;
 export type Title = { kind: "name"; value: string } | { kind: "key"; value: (typeof OWN_TITLES)[number] };
 
 export const CHANGE_KINDS = ["app", "settings", "special"] as const;
@@ -31,6 +31,8 @@ export type ChangeView = {
   files: number;
   /** A secret the person may tick to bring: its line (none moves unless ticked). */
   secret: number | null;
+  /** Where PCTwin gets an app it installs: the package's own ID in its catalog. */
+  source: string | null;
 };
 
 export type RebuildPlan = {
@@ -88,20 +90,21 @@ function parseTitle(v: unknown): Title | null {
 }
 
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "source"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
   if (!isCount(f.count) || !isCount(f.files)) return null;
   if (f.special !== null && !oneOf(f.special, SPECIAL_STEPS)) return null;
   if (f.secret !== null && !isCount(f.secret)) return null;
+  if (f.source !== null && typeof f.source !== "string") return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, source: f.source };
 }
 
 /** The plan section (`RebuildPlanView`). */
@@ -143,4 +146,23 @@ export function parseRebuildStep(v: unknown): RebuildStep | null {
     return f && isCount(f.done) && isCount(f.total) && f.done <= f.total ? { step, done: f.done, total: f.total } : null;
   }
   return null;
+}
+
+/** The old laptop's progress with the app data (`DataProgress`, event `move-appdata`). */
+export type DataProgress = { done: number; total: number; waitingFor: string[] };
+
+export function parseDataProgress(v: unknown): DataProgress | null {
+  const f = exactly(v, ["done", "total", "waitingFor"]);
+  if (!f || !isCount(f.done) || !isCount(f.total) || f.done > f.total) return null;
+  const waitingFor = listOf(f.waitingFor, (x) => (typeof x === "string" ? x : null));
+  return waitingFor ? { done: f.done, total: f.total, waitingFor } : null;
+}
+
+/** The apps to close on the old laptop before their data can be read (`AppsOpen`, event `move-appdata-open`). */
+export type AppsOpen = { apps: string[] };
+
+export function parseAppsOpen(v: unknown): AppsOpen | null {
+  const f = exactly(v, ["apps"]);
+  const apps = f ? listOf(f.apps, (x) => (typeof x === "string" ? x : null)) : null;
+  return apps ? { apps } : null;
 }

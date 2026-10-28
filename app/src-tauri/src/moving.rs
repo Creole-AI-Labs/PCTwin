@@ -221,6 +221,8 @@ struct Run {
     /// The new laptop: the secret lines of app data the person ticked, one by one, when they
     /// approved (none unless ticked).
     secrets: Vec<u32>,
+    /// The old laptop: where the person's answer about apps to close goes.
+    close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
     /// when they chose it, with the folder as the system showed it.
     chosen: BTreeMap<FolderRole, (pctwin_gate::Destination, String)>,
@@ -278,6 +280,7 @@ impl Moving {
             scan_stop: scan_stop.clone(),
             waiting: None,
             secrets: Vec::new(),
+            close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
             placing: None,
@@ -392,6 +395,26 @@ impl Moving {
                 chosen
             })
             .unwrap_or_default()
+    }
+
+    /// The old laptop: waits for the person's answer about apps to close.
+    pub(crate) fn wait_for_close(&self) -> std::sync::mpsc::Receiver<bool> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Some(run) = lock(&self.run).as_mut() {
+            run.close = Some(tx);
+        }
+        rx
+    }
+
+    /// The person's answer about the apps to close: try again, or go on without them.
+    pub(crate) fn close_answer(&self, retry: bool) -> Result<(), MoveProblem> {
+        self.with_run(|run| match run.close.take() {
+            Some(tx) => {
+                let _ = tx.send(retry);
+                Ok(())
+            }
+            None => Err(MoveProblem::NotMoving),
+        })?
     }
 
     fn secrets(&self) -> Vec<u32> {
@@ -1750,10 +1773,13 @@ impl<R: Runtime> Steps for AppSteps<R> {
                     if self.sink.is_none()
                         && let Some(dir) = crate::fullmove::data_staging(&self.app)
                     {
-                        self.sink = Some(pctwin_fullmove::data::Sink::new(
-                            full.choice(&self.picked),
-                            dir,
-                        ));
+                        let app = self.app.clone();
+                        self.sink = Some(
+                            pctwin_fullmove::data::Sink::new(full.choice(&self.picked), dir)
+                                .telling(Box::new(move |p| {
+                                    let _ = app.emit(crate::fullmove::APPDATA_EVENT, p.clone());
+                                })),
+                        );
                     }
                 }
                 // The folders the person unticked: none of their files is sent or received.
@@ -2036,7 +2062,7 @@ async fn run_old<R: Runtime>(
     }
     let extras = crate::fullmove::extras_here(special.as_ref());
     // The app data the new laptop chooses is captured from these (read only), after its approval.
-    let mut source = crate::fullmove::data_source(app, special.as_ref());
+    let mut source = crate::fullmove::data_source(app, moving, special.as_ref());
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,

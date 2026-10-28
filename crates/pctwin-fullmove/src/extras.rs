@@ -215,16 +215,7 @@ impl Extras {
         }
         let mut keys = std::collections::HashSet::new();
         for s in &self.settings {
-            let a = &s.address;
-            if !text_ok(&s.label) || !text_ok(a.store()) || a.name().len() > MAX_TEXT {
-                return limit;
-            }
-            if let pctwin_recipe::SettingValue::Text(t) = &s.value
-                && t.len() > pctwin_types::limits::SETTING_TEXT_BYTES
-            {
-                return limit;
-            }
-            if !keys.insert(a.key()) {
+            if !setting_ok(s) || !keys.insert(s.address.key()) {
                 return limit;
             }
         }
@@ -241,6 +232,74 @@ impl Extras {
     }
 }
 
+/// Whether one found setting may cross: within every limit the new laptop checks. The one rule
+/// both laptops use: the old laptop leaves out (and counts) what breaks it, the new laptop refuses
+/// a message that holds one.
+pub fn setting_ok(s: &FoundSetting) -> bool {
+    let a = &s.address;
+    text_ok(&s.label)
+        && text_ok(a.store())
+        && a.name().len() <= MAX_TEXT
+        && match &s.value {
+            pctwin_recipe::SettingValue::Text(t) => {
+                t.len() <= pctwin_types::limits::SETTING_TEXT_BYTES
+            }
+            _ => true,
+        }
+}
+
+/// The old laptop's own judgement of what it found, before anything is sent: the general rules
+/// (secrets, security, machine identities, what would run or fetch...) run here, so a password or
+/// a token never crosses the link; only what may move, or may once its path is pointed at a moved
+/// folder on the new laptop, is sent. What stays is counted, never sent.
+fn screened(system: System, d: Discovery) -> (Vec<FoundSetting>, Vec<NotMoved>) {
+    use pctwin_settings::classify::{Ctx, FolderMap};
+    let Ok(cat) = pctwin_settings::catalogue::Catalogue::starter() else {
+        // Without the rules nothing is judged, so nothing is sent.
+        let mut not = d.not_moved;
+        not.extend(d.found.iter().map(|f| NotMoved {
+            label: f.label.clone(),
+            store: f.address.store().to_string(),
+            name: f.address.name().to_string(),
+            why: Why::Unreadable("the rules could not be read".into()),
+        }));
+        return (Vec::new(), not);
+    };
+    let none = FolderMap(Vec::new());
+    let ctx = Ctx {
+        paths: &none,
+        same_screens: false,
+        hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
+    };
+    let plan = pctwin_settings::generic::plan_found(&cat, system, system, &d, &ctx);
+    let moves: std::collections::HashSet<String> =
+        plan.moves.iter().map(|m| m.key.clone()).collect();
+    // A path to something not moved may be one the new laptop moves: the new laptop decides.
+    let for_the_new_laptop = |w: &Why| matches!(w, Why::PathNotMoved | Why::RecentMissing);
+    let path_ones: std::collections::HashSet<(String, String)> = plan
+        .not_moved
+        .iter()
+        .filter(|n| for_the_new_laptop(&n.why))
+        .map(|n| (n.store.clone(), n.name.clone()))
+        .collect();
+    let kept: Vec<NotMoved> = plan
+        .not_moved
+        .into_iter()
+        .filter(|n| !for_the_new_laptop(&n.why))
+        .collect();
+    let send = d
+        .found
+        .into_iter()
+        .filter(|f| {
+            moves.contains(&f.address.key())
+                || path_ones
+                    .contains(&(f.address.store().to_string(), f.address.name().to_string()))
+        })
+        .collect();
+    (send, kept)
+}
+
 /// The digest of the extras exactly as they arrived: it joins the plan the person approves.
 pub fn digest(bytes: &[u8]) -> [u8; 32] {
     *blake3::Hasher::new_derive_key("PCTwin full move extras 2026-10-27 v1")
@@ -255,19 +314,30 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
     let mut folders = folders;
     folders.retain(|f| text_ok(&f.path));
     folders.truncate(MAX_FOLDERS);
-    let mut settings = d.found;
-    settings.truncate(pctwin_types::limits::FOUND_SETTINGS);
+    let (mut found, mut not_moved) = screened(system, d);
+    found.truncate(pctwin_types::limits::FOUND_SETTINGS);
     let mut seen = std::collections::HashSet::new();
-    settings.retain(|s| {
-        text_ok(&s.label)
-            && text_ok(s.address.store())
-            && s.address.name().len() <= MAX_TEXT
-            && seen.insert(s.address.key())
-    });
+    let mut settings = Vec::with_capacity(found.len());
+    for s in found {
+        if !seen.insert(s.address.key()) {
+            continue;
+        }
+        if setting_ok(&s) {
+            settings.push(s);
+        } else {
+            // Too long to cross (a value past its limit, say): left out, and counted.
+            not_moved.push(NotMoved {
+                label: s.label.clone(),
+                store: s.address.store().to_string(),
+                name: s.address.name().to_string(),
+                why: Why::TooLarge,
+            });
+        }
+    }
     Extras {
         format: FORMAT,
         system,
-        not_moved: count_not_moved(&d.not_moved),
+        not_moved: count_not_moved(&not_moved),
         settings,
         folders,
         special: Vec::new(),

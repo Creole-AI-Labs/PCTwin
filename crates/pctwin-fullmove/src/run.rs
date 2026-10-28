@@ -511,6 +511,12 @@ pub fn rebuild(
             (Title::Name(s.name.clone()), r)
         })
         .collect();
+    if plan.extras_refused {
+        special.push((
+            Title::Key(crate::plan::EXTRAS_REFUSED),
+            ItemResult::because(Reason::FinishByHand),
+        ));
+    }
     if plan.special_not_checked > 0 {
         special.push((
             Title::Key(crate::plan::SPECIAL_NOT_CHECKED),
