@@ -232,10 +232,15 @@ pub fn help_code<R: tauri::Runtime>(
     topic: HelpTopic,
     step: HelpStep,
 ) -> String {
+    code_for(&app.package_info().version.to_string(), topic, step)
+}
+
+/// The code for a problem on the build `version`.
+fn code_for(version: &str, topic: HelpTopic, step: HelpStep) -> String {
     encode(&Said {
         topic,
         step,
-        version: this_version(&app.package_info().version.to_string()),
+        version: this_version(version),
         system: System::this(),
     })
 }
@@ -278,12 +283,7 @@ mod tests {
 
     #[test]
     fn a_mistyped_code_is_refused() {
-        let app = tauri::test::mock_app();
-        let code = help_code(
-            app.handle().clone(),
-            HelpTopic::ConnectionLost,
-            HelpStep::Moving,
-        );
+        let code = code_for("0.1.8", HelpTopic::ConnectionLost, HelpStep::Moving);
         assert!(decode(&code).is_some());
         let chars: Vec<char> = code.chars().collect();
         let mut caught = 0;
@@ -312,19 +312,15 @@ mod tests {
     fn the_code_holds_only_the_six_facts() {
         // Every topic and step is from a closed list, and the version and system are the app's
         // own: there is no input of the person's for a code to carry.
-        let app = tauri::test::mock_app();
-        let said = decode(&help_code(
-            app.handle().clone(),
+        let said = decode(&code_for(
+            "0.1.8",
             HelpTopic::DriveProblem,
             HelpStep::Moving,
         ))
         .unwrap();
         assert_eq!(said.topic, HelpTopic::DriveProblem);
         assert_eq!(said.step, HelpStep::Moving);
-        assert_eq!(
-            said.version,
-            this_version(&app.package_info().version.to_string())
-        );
+        assert_eq!(said.version, this_version("0.1.8"));
         assert_eq!(this_version("0.1.8"), (0, 1, 8));
         assert_eq!(said.system, System::this());
     }
