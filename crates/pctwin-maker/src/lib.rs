@@ -17,18 +17,19 @@ pub mod check;
 pub mod facts;
 pub mod linux;
 pub mod mac;
-pub mod msi;
+pub(crate) mod msi;
 pub mod native;
 pub mod oracle;
-pub mod pe;
+pub mod own;
+pub(crate) mod pe;
 pub mod run;
-pub mod signer;
+pub(crate) mod signer;
 pub mod sniff;
 pub mod windows;
 
 pub use check::{
-    CheckError, Expected, HelperStaged, Limits, OldCopy, OldMaker, SystemChecks, SystemSignature,
-    check, check_staged, windows_maker_of, windows_old_copy,
+    CheckError, Expected, HelperStaged, Limits, NOT_CHECKED_BY_READER, OldCopy, OldMaker,
+    SystemChecks, SystemSignature, check, check_staged, windows_maker_of, windows_old_copy,
 };
 pub use facts::{
     Arch, ArchFact, ArchSet, Bytes, Coverage, Decision, Format, FormatFact, LinuxSource, MacTeam,
@@ -37,3 +38,4 @@ pub use facts::{
 };
 pub use native::NativeChecks;
 pub use oracle::{NoOracle, TrustOracle};
+pub use own::{InThisProcess, InstallerRead, OwnRead, OwnReader};

@@ -12,9 +12,9 @@ use common::os_checks;
 use std::path::{Path, PathBuf};
 
 use pctwin_maker::facts::*;
-use pctwin_maker::pe::{PeSignature, read_pe};
+use pctwin_maker::own::raw::PeSignature;
 use pctwin_maker::windows::{DefenderState, defender_status, judge_status};
-use pctwin_maker::{Expected, Limits, NativeChecks, SystemChecks, check, windows_maker_of};
+use pctwin_maker::{Expected, Limits, NativeChecks, SystemChecks, check};
 
 fn system32(name: &str) -> PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
@@ -32,7 +32,7 @@ fn signed_programs() -> Vec<PathBuf> {
     ];
     let found: Vec<PathBuf> = candidates
         .into_iter()
-        .filter(|p| windows_maker_of(p).is_ok())
+        .filter(|p| pctwin_maker::windows_maker_of(p, &own()).is_ok())
         .collect();
     assert!(
         !found.is_empty(),
@@ -60,7 +60,7 @@ fn reads_the_maker_of_real_signed_programs_as_windows_does() {
     let native = os_checks();
     let mut compared = 0;
     for p in signed_programs() {
-        let ours = windows_maker_of(&p).unwrap();
+        let ours = pctwin_maker::windows_maker_of(&p, &own()).unwrap();
         eprintln!("{}: {:?}", p.display(), ours.subject);
         assert!(ours.subject.organization.is_some(), "{}", p.display());
         let sys = native.signature(
@@ -84,7 +84,7 @@ fn reads_the_maker_of_real_signed_programs_as_windows_does() {
         "no program Windows checks by its own signature"
     );
     let stub = system32("MpSigStub.exe");
-    if let Ok(s) = windows_maker_of(&stub) {
+    if let Ok(s) = pctwin_maker::windows_maker_of(&stub, &own()) {
         assert_eq!(
             s.subject.organization.as_deref(),
             Some("Microsoft Corporation")
@@ -131,7 +131,12 @@ fn the_streamed_digest_is_the_authenticode_crates_digest() {
         assert_eq!(table.digest(), &theirs[..], "{}", p.display());
         // ...and PCTwin's streamed reading agrees.
         let mut f = std::fs::File::open(&p).unwrap();
-        let ours = read_pe(&mut f, data.len() as u64).unwrap();
+        let ours = pctwin_maker::own::raw::pe_signature(
+            pctwin_parse_seal::in_child(),
+            &mut f,
+            data.len() as u64,
+        )
+        .unwrap();
         assert!(
             matches!(
                 ours,
@@ -156,7 +161,7 @@ fn copy_into(dir: &tempfile::TempDir, from: &Path) -> PathBuf {
 fn expected_for(original: &Path) -> Expected {
     Expected {
         system: System::Windows,
-        maker: Maker::Windows(windows_maker_of(original).unwrap()),
+        maker: Maker::Windows(pctwin_maker::windows_maker_of(original, &own()).unwrap()),
         formats: vec![Format::WindowsProgram, Format::WindowsInstaller],
         arch: laptop_arch(),
         bytes: None,
@@ -169,7 +174,7 @@ fn a_real_signed_program_from_the_same_maker_is_approved() {
     let dir = tempfile::tempdir().unwrap();
     let copy = copy_into(&dir, &original);
     let e = expected_for(&original);
-    let v = check(&copy, &e, &os_checks(), &Limits::default()).unwrap();
+    let v = check(&copy, &e, &own(), &os_checks(), &Limits::default()).unwrap();
     eprintln!("{v:#?}");
     assert_eq!(v.signature, Signature::Trusted);
     assert_eq!(
@@ -202,7 +207,7 @@ fn a_real_signed_program_from_the_same_maker_is_approved() {
     s.certificate = Sha256([0; 32]);
     s.subject.organization = Some("Another Company".into());
     other.maker = Maker::Windows(s);
-    let v = check(&copy, &other, &os_checks(), &Limits::default()).unwrap();
+    let v = check(&copy, &other, &own(), &os_checks(), &Limits::default()).unwrap();
     assert!(matches!(v.same_maker, SameMaker::No { .. }));
     assert!(matches!(v.decide(), Decision::NeedsAction { why } if why.contains(&Why::OtherMaker)));
 }
@@ -221,7 +226,12 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
     std::fs::write(&copy, &bytes).unwrap();
     let mut f = std::fs::File::open(&copy).unwrap();
     assert!(matches!(
-        read_pe(&mut f, bytes.len() as u64).unwrap(),
+        pctwin_maker::own::raw::pe_signature(
+            pctwin_parse_seal::in_child(),
+            &mut f,
+            bytes.len() as u64
+        )
+        .unwrap(),
         PeSignature::Signed {
             digest_matches: true,
             ..
@@ -246,7 +256,12 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
     std::fs::write(&copy, &bytes).unwrap();
     let mut f = std::fs::File::open(&copy).unwrap();
     assert!(matches!(
-        read_pe(&mut f, bytes.len() as u64).unwrap(),
+        pctwin_maker::own::raw::pe_signature(
+            pctwin_parse_seal::in_child(),
+            &mut f,
+            bytes.len() as u64
+        )
+        .unwrap(),
         PeSignature::Signed {
             digest_matches: false,
             ..
@@ -267,6 +282,7 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
     let v = check(
         &copy,
         &expected_for(&original),
+        &own(),
         &os_checks(),
         &Limits::default(),
     )
@@ -287,9 +303,12 @@ fn a_program_signed_only_through_a_windows_catalog_is_not_approved() {
     }
     let mut f = std::fs::File::open(&notepad).unwrap();
     let size = f.metadata().unwrap().len();
-    assert_eq!(read_pe(&mut f, size).unwrap(), PeSignature::None);
+    assert_eq!(
+        pctwin_maker::own::raw::pe_signature(pctwin_parse_seal::in_child(), &mut f, size).unwrap(),
+        PeSignature::None
+    );
     let e = expected_for(&signed_programs()[0]);
-    let v = check(&notepad, &e, &os_checks(), &Limits::default()).unwrap();
+    let v = check(&notepad, &e, &own(), &os_checks(), &Limits::default()).unwrap();
     eprintln!("{:?}", v.signature);
     // Windows is asked about the file alone: a catalog signature is no signature inside it.
     assert_eq!(v.signature, Signature::Missing);
@@ -312,11 +331,11 @@ fn real_installer_packages_name_the_signer_windows_names() {
         let Ok(f) = std::fs::File::open(&p) else {
             continue;
         };
-        let Ok(read) = pctwin_maker::msi::read_msi(f) else {
+        let Ok(read) = pctwin_maker::own::raw::msi(pctwin_parse_seal::in_child(), f) else {
             continue;
         };
         assert!(read.is_package, "{}", p.display());
-        let pctwin_maker::msi::MsiSignature::Signed(Ok(ours)) = read.signature else {
+        let pctwin_maker::own::raw::MsiSignature::Signed(Ok(ours)) = read.signature else {
             continue;
         };
         let sys = native.signature(
@@ -404,7 +423,7 @@ fn a_changed_old_copy_names_no_maker() {
     let mid = bytes.len() / 2;
     bytes[mid] ^= 0x01;
     std::fs::write(&copy, &bytes).unwrap();
-    let e = windows_maker_of(&copy).unwrap_err();
+    let e = pctwin_maker::windows_maker_of(&copy, &own()).unwrap_err();
     assert!(e.contains("changed after it was signed"), "{e}");
 }
 
@@ -484,10 +503,14 @@ fn with_certificates(
 
 #[test]
 fn the_signer_is_the_one_certificate_with_its_issuer_and_serial() {
-    use pctwin_maker::signer::read_signature;
     let (bytes, leaf) = real_signature();
-    let ours = read_signature(&bytes).unwrap().signer.unwrap();
-    let theirs = pctwin_maker::signer::signer_from_certificate(&leaf).unwrap();
+    let ours = pctwin_maker::own::raw::signature(pctwin_parse_seal::in_child(), &bytes)
+        .unwrap()
+        .signer
+        .unwrap();
+    let theirs =
+        pctwin_maker::own::raw::signer_of_certificate(pctwin_parse_seal::in_child(), &leaf)
+            .unwrap();
     assert_eq!(ours, theirs);
 
     // Another certificate from the same issuer, with another serial, is not the signer.
@@ -497,7 +520,13 @@ fn the_signer_is_the_one_certificate_with_its_issuer_and_serial() {
             x509_cert::serial_number::SerialNumber::new(&[0x42]).unwrap();
         certs.push(cms::cert::CertificateChoices::Certificate(twin));
     });
-    assert_eq!(read_signature(&other_serial).unwrap().signer.unwrap(), ours);
+    assert_eq!(
+        pctwin_maker::own::raw::signature(pctwin_parse_seal::in_child(), &other_serial)
+            .unwrap()
+            .signer
+            .unwrap(),
+        ours
+    );
 
     // Two certificates both naming the signer: refused.
     let twice = with_certificates(&bytes, |certs| {
@@ -505,14 +534,20 @@ fn the_signer_is_the_one_certificate_with_its_issuer_and_serial() {
         twin.signature = der::asn1::BitString::from_bytes(&[1, 2, 3]).unwrap();
         certs.push(cms::cert::CertificateChoices::Certificate(twin));
     });
-    let e = read_signature(&twice).unwrap().signer.unwrap_err();
+    let e = pctwin_maker::own::raw::signature(pctwin_parse_seal::in_child(), &twice)
+        .unwrap()
+        .signer
+        .unwrap_err();
     assert!(e.contains("two certificates"), "{e}");
 
     // The signer's certificate missing.
     let missing = with_certificates(&bytes, |certs| {
         certs.retain(|c| !matches!(c, cms::cert::CertificateChoices::Certificate(c) if c == &leaf));
     });
-    let e = read_signature(&missing).unwrap().signer.unwrap_err();
+    let e = pctwin_maker::own::raw::signature(pctwin_parse_seal::in_child(), &missing)
+        .unwrap()
+        .signer
+        .unwrap_err();
     assert!(e.contains("missing"), "{e}");
 
     // A signed digest of the wrong length is not a signature.
@@ -529,7 +564,7 @@ fn the_signer_is_the_one_certificate_with_its_issuer_and_serial() {
     if wrong[at - 1] as usize == digest.len() {
         wrong[at - 1] -= 1;
         wrong.remove(at);
-        assert!(read_signature(&wrong).is_err());
+        assert!(pctwin_maker::own::raw::signature(pctwin_parse_seal::in_child(), &wrong).is_err());
     }
 }
 
@@ -544,7 +579,6 @@ fn with_subject(leaf: &x509_cert::Certificate, rdns: Vec<(&str, &str)>) -> x509_
 
 #[test]
 fn subject_names_are_read_whatever_their_order() {
-    use pctwin_maker::signer::signer_from_certificate;
     let (_, leaf) = real_signature();
     // A part PCTwin does not read (a department) comes first.
     let c = with_subject(
@@ -556,7 +590,9 @@ fn subject_names_are_read_whatever_their_order() {
             ("C", "NG"),
         ],
     );
-    let s = signer_from_certificate(&c).unwrap().subject;
+    let s = pctwin_maker::own::raw::signer_of_certificate(pctwin_parse_seal::in_child(), &c)
+        .unwrap()
+        .subject;
     assert_eq!(s.organization.as_deref(), Some("Example Ltd"));
     assert_eq!(s.common_name.as_deref(), Some("Example Ltd"));
     assert_eq!(s.country.as_deref(), Some("NG"));
@@ -565,7 +601,9 @@ fn subject_names_are_read_whatever_their_order() {
         &leaf,
         vec![("OU", "Tools+CN=Example Ltd"), ("O", "Example Ltd")],
     );
-    let s = signer_from_certificate(&c).unwrap().subject;
+    let s = pctwin_maker::own::raw::signer_of_certificate(pctwin_parse_seal::in_child(), &c)
+        .unwrap()
+        .subject;
     assert_eq!(s.common_name.as_deref(), Some("Example Ltd"));
     // The same name twice is fine; two different ones are refused.
     let c = with_subject(
@@ -576,7 +614,9 @@ fn subject_names_are_read_whatever_their_order() {
             ("O", "Example Ltd"),
         ],
     );
-    assert!(signer_from_certificate(&c).is_ok());
+    assert!(
+        pctwin_maker::own::raw::signer_of_certificate(pctwin_parse_seal::in_child(), &c).is_ok()
+    );
     let c = with_subject(
         &leaf,
         vec![
@@ -585,7 +625,8 @@ fn subject_names_are_read_whatever_their_order() {
             ("O", "Example Ltd"),
         ],
     );
-    let e = signer_from_certificate(&c).unwrap_err();
+    let e = pctwin_maker::own::raw::signer_of_certificate(pctwin_parse_seal::in_child(), &c)
+        .unwrap_err();
     assert!(e.contains("twice"), "{e}");
 }
 
@@ -682,7 +723,7 @@ fn a_folder_link_swapped_during_the_check_never_approves_other_bytes() {
         good,
         evil: bad,
     };
-    let v = check(&path, &exp, &sw, &Limits::default()).unwrap();
+    let v = check(&path, &exp, &own(), &sw, &Limits::default()).unwrap();
     eprintln!("{:?} {:?}", v.signature, v.decide());
     assert_ne!(v.signature, Signature::Trusted);
     assert!(matches!(v.decide(), Decision::NeedsAction { .. }));
@@ -695,4 +736,9 @@ fn a_folder_link_swapped_during_the_check_never_approves_other_bytes() {
         .args(["/d", "/c", "rmdir"])
         .arg(&link)
         .output();
+}
+
+/// PCTwin's own readers, run in the test's own process (only a parser crate's tests may).
+fn own() -> pctwin_maker::InThisProcess {
+    pctwin_maker::InThisProcess::new(pctwin_parse_seal::in_child())
 }

@@ -42,6 +42,13 @@ mod restart;
 mod undo_books;
 mod updates;
 
+/// PCTwin's locked-down parser process (adoption change 1), beside the app: the insides of
+/// untrusted files (installers' signatures, the old laptop's own copies) are read only there.
+pub(crate) fn parser() -> &'static pctwin_parse::Parser {
+    static PARSER: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    PARSER.get_or_init(pctwin_parse::Parser::beside_this_program)
+}
+
 use serde::Deserialize;
 use tauri::ipc::Invoke;
 use tauri::menu::{Menu, MenuItem};

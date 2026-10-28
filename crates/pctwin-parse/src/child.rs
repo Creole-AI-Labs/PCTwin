@@ -1,0 +1,161 @@
+//! The parser process's side: say hello, then answer one request at a time, reading the file
+//! only through the app ([`Remote`]).
+
+use std::io::{self, Read, Seek, SeekFrom, Write};
+
+use pctwin_parse_seal::in_child;
+
+use crate::wire::{
+    Answer, Hello, MAX_FRAME, MAX_JSON, MAX_READ, PROTOCOL, ReadAt, Request, TAG_ANSWER, TAG_BYTES,
+    TAG_HELLO, TAG_READ_AT, TAG_READ_FAILED, TAG_REQUEST, json, read_frame, write_json,
+};
+
+/// The smallest piece asked for at once: small reads (a font's table records) are served from it.
+const MIN_PIECE: u32 = 64 * 1024;
+
+/// The file being read, as the app hands it over: `Read + Seek` over the pipes. Reads ahead,
+/// growing while the reading goes straight on, so hashing a large program takes few round trips.
+pub struct Remote<'a, R: Read, W: Write> {
+    from_app: &'a mut R,
+    to_app: &'a mut W,
+    size: u64,
+    pos: u64,
+    piece_at: u64,
+    piece: Vec<u8>,
+    ahead: u32,
+}
+
+impl<'a, R: Read, W: Write> Remote<'a, R, W> {
+    pub fn new(from_app: &'a mut R, to_app: &'a mut W, size: u64) -> Self {
+        Self {
+            from_app,
+            to_app,
+            size,
+            pos: 0,
+            piece_at: 0,
+            piece: Vec::new(),
+            ahead: MIN_PIECE,
+        }
+    }
+
+    fn fetch(&mut self, want: usize) -> io::Result<()> {
+        let straight_on = self.pos == self.piece_at + self.piece.len() as u64;
+        self.ahead = if straight_on {
+            (self.ahead.saturating_mul(2)).min(MAX_READ)
+        } else {
+            MIN_PIECE
+        };
+        let want = u32::try_from(want)
+            .unwrap_or(MAX_READ)
+            .clamp(self.ahead, MAX_READ);
+        let len = u64::from(want).min(self.size - self.pos) as u32;
+        write_json(
+            self.to_app,
+            TAG_READ_AT,
+            &ReadAt {
+                offset: self.pos,
+                len,
+            },
+        )?;
+        match read_frame(self.from_app, MAX_FRAME)? {
+            Some((TAG_BYTES, bytes)) if bytes.len() <= len as usize => {
+                self.piece_at = self.pos;
+                self.piece = bytes;
+                Ok(())
+            }
+            Some((TAG_READ_FAILED, _)) => Err(io::Error::other("the file could not be read")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the app answered out of turn",
+            )),
+        }
+    }
+}
+
+impl<R: Read, W: Write> Read for Remote<'_, R, W> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() || self.pos >= self.size {
+            return Ok(0);
+        }
+        let end = self.piece_at + self.piece.len() as u64;
+        if self.pos < self.piece_at || self.pos >= end {
+            self.fetch(buf.len())?;
+        }
+        let from = (self.pos - self.piece_at) as usize;
+        let n = buf.len().min(self.piece.len().saturating_sub(from));
+        buf[..n].copy_from_slice(&self.piece[from..from + n]);
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl<R: Read, W: Write> Seek for Remote<'_, R, W> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let base = match to {
+            SeekFrom::Start(n) => Some(n),
+            SeekFrom::End(d) => self.size.checked_add_signed(d),
+            SeekFrom::Current(d) => self.pos.checked_add_signed(d),
+        };
+        let Some(at) = base else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a place before the start",
+            ));
+        };
+        self.pos = at;
+        Ok(at)
+    }
+}
+
+/// Answers one request, reading through `from_app` and `to_app`.
+pub fn answer<R: Read, W: Write>(request: Request, from_app: &mut R, to_app: &mut W) -> Answer {
+    let seal = in_child();
+    let mut file = Remote::new(from_app, to_app, request.size());
+    let size = request.size();
+    match request {
+        Request::Installer { .. } => {
+            match pctwin_maker::own::read_installer(seal, &mut file, size) {
+                Ok(read) => Answer::Installer(read),
+                Err(e) => Answer::Failed(e.to_string()),
+            }
+        }
+        Request::OldCopy { .. } => {
+            Answer::OldCopy(pctwin_maker::own::read_old_copy(seal, &mut file, size))
+        }
+        Request::Font { .. } => {
+            Answer::Font(pctwin_readiness::checks::font_names(seal, &mut file, size))
+        }
+        Request::Archive { .. } => Answer::Archive(pctwin_readiness::checks::archive_shape(
+            seal, &mut file, size,
+        )),
+        Request::Database { .. } => Answer::Database(pctwin_readiness::checks::database_shape(
+            seal, &mut file, size,
+        )),
+    }
+}
+
+/// The parser process: hello, then one request at a time until the app closes the pipe. Returns
+/// the exit code: 0 when the app closed it, 2 when the app said something out of turn.
+pub fn serve(mut from_app: impl Read, mut to_app: impl Write) -> u8 {
+    let hello = Hello {
+        protocol: PROTOCOL,
+        confinement: crate::lockdown::confine_self(),
+    };
+    if write_json(&mut to_app, TAG_HELLO, &hello).is_err() {
+        return 2;
+    }
+    loop {
+        let request = match read_frame(&mut from_app, MAX_JSON) {
+            Ok(None) => return 0,
+            Ok(Some((TAG_REQUEST, body))) => match json::<Request>(&body) {
+                Ok(r) => r,
+                Err(_) => return 2,
+            },
+            _ => return 2,
+        };
+        let answer = answer(request, &mut from_app, &mut to_app);
+        if write_json(&mut to_app, TAG_ANSWER, &answer).is_err() {
+            return 2;
+        }
+    }
+}

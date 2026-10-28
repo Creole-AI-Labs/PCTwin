@@ -28,6 +28,8 @@ One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job 
 | `pctwin-power` | Keeping both laptops awake and watching the battery |
 | `pctwin-lease` | The first place that calls the system unsafely (Linux write leases) |
 | `pctwin-helper-os` | The administrator helper's system calls: the system's prompt, its private channel, who is calling (the second and last unsafe place, 20 October 2026) |
+| `pctwin-parse` | The locked-down parser process: the insides of untrusted files are read only in it, asked with typed requests, bounded in time and bytes (28 October 2026) |
+| `pctwin-parse-seal` | The seal that lets only the parser process (and the readers' own tests) run a reader of untrusted files in its own process |
 
 ## Rules that come with it
 

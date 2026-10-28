@@ -174,7 +174,7 @@ pub fn check_rpm(runner: &dyn Runner, path: &Path, t: Duration) -> (RpmCheck, Op
 /// Reads a `.flatpakref` file: the app, remote and key it names (for the report and as a hint
 /// only; see the module notes). The whole file is read, and a file with a second group, or a key
 /// named twice, is refused: Flatpak would merge it.
-pub fn parse_flatpakref(bytes: &[u8]) -> Result<LinuxSource, String> {
+pub(crate) fn parse_flatpakref(bytes: &[u8]) -> Result<LinuxSource, String> {
     if bytes.len() > MAX_FLATPAKREF {
         return Err("the Flatpak reference is too large".into());
     }

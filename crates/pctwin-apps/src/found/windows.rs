@@ -7,7 +7,7 @@
 //! is Windows' own, never a list of app names.
 //!
 //! **Who made it.** The maker is read from the old laptop's own copy by PCTwin's own signature
-//! reader (`pctwin_maker::windows_old_copy`), never by running anything: first the app's own
+//! reader (`pctwin_maker::windows_old_copy`, in the parser process), never by running anything: first the app's own
 //! program (the entry's icon, when it is a program outside Windows' own folder), then the
 //! installer package Windows keeps for a Windows Installer product, then the app's own
 //! uninstaller (outside Windows' folder: `msiexec` and `rundll32` are Microsoft's, not the
@@ -522,18 +522,15 @@ mod real {
         owner: &Owner,
         sid_for_msi: &str,
         win: &Path,
+        reader: &dyn pctwin_maker::OwnReader,
     ) {
         for e in entries.iter().filter(|e| e.shown()) {
             let cache = e
                 .product_code()
                 .and_then(|code| msi_cache(&code, sid_for_msi));
-            if let Some(app) = app_of(
-                e,
-                owner.clone(),
-                win,
-                cache,
-                &pctwin_maker::windows_old_copy,
-            ) {
+            if let Some(app) = app_of(e, owner.clone(), win, cache, &|p: &Path| {
+                pctwin_maker::windows_old_copy(p, reader)
+            }) {
                 c.add(app);
             }
         }
@@ -541,11 +538,12 @@ mod real {
 
     /// Every app Windows lists, for everyone and for each person in `people` (account IDs), and
     /// the packaged apps of `me`, the person PCTwin runs as. `runner` runs Windows PowerShell for
-    /// the packaged apps.
+    /// the packaged apps; `reader` (the parser process) reads the installers' signatures.
     pub fn read_windows_apps(
         people: &[String],
         me: &str,
         runner: &dyn Runner,
+        reader: &dyn pctwin_maker::OwnReader,
     ) -> pctwin_record::AppList {
         let mut c = Collector::default();
         let win = windows_folder();
@@ -555,7 +553,7 @@ mod real {
             (KEY_WOW64_32KEY, RegistryView::Machine32),
         ] {
             match entries(&hklm, UNINSTALL, flags, view) {
-                Ok(list) => add_list(&mut c, list, &Owner::Shared, "S-1-5-18", &win),
+                Ok(list) => add_list(&mut c, list, &Owner::Shared, "S-1-5-18", &win, reader),
                 Err(e) => c.not_read(
                     Owner::Shared,
                     AppPlace::WindowsMachineList,
@@ -583,7 +581,7 @@ mod real {
                 KEY_WOW64_64KEY,
                 RegistryView::Person,
             ) {
-                add_list(&mut c, list, &owner, sid, &win);
+                add_list(&mut c, list, &owner, sid, &win, reader);
             }
             if sid != me {
                 c.not_read(

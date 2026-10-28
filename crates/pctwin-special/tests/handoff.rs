@@ -369,6 +369,7 @@ fn an_export_tool_runs_only_when_it_is_the_makers_own() {
     let limits = Limits::default();
     let real = MakerCheck {
         expected: &expected,
+        reader: pctwin_parse::testing::parser(),
         checks: &NoChecks,
         limits: &limits,
     };

@@ -70,7 +70,7 @@ fn signed_msi() -> Option<PathBuf> {
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("msi")))
         .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() < 5_000_000))
-        .find(|p| pctwin_maker::check::windows_maker_of(p).is_ok())
+        .find(|p| pctwin_maker::windows_maker_of(p, &own()).is_ok())
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn a_package_changed_behind_a_folder_link_is_never_installed() {
         eprintln!("no signed installer package on this laptop: nothing to check");
         return;
     };
-    let maker = pctwin_maker::check::windows_maker_of(&good_src).unwrap();
+    let maker = pctwin_maker::windows_maker_of(&good_src, &own()).unwrap();
     let bytes = std::fs::read(&good_src).unwrap();
     let mut changed = bytes.clone();
     let at = changed.len() / 3;
@@ -111,7 +111,7 @@ fn a_package_changed_behind_a_folder_link_is_never_installed() {
         arch: Arch::X64,
         bytes: None,
     };
-    let v = check(&path, &expected, &sys, &Limits::default()).unwrap();
+    let v = check(&path, &expected, &own(), &sys, &Limits::default()).unwrap();
     let _ = std::process::Command::new("cmd")
         .args(["/d", "/c", "rmdir"])
         .arg(&link)
@@ -138,7 +138,7 @@ fn the_helpers_own_copy_is_checked_by_windows() {
         eprintln!("no signed installer package on this laptop: nothing to check");
         return;
     };
-    let maker = pctwin_maker::check::windows_maker_of(&good_src).unwrap();
+    let maker = pctwin_maker::windows_maker_of(&good_src, &own()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("setup.msi");
     std::fs::copy(&good_src, &copy).unwrap();
@@ -151,13 +151,20 @@ fn the_helpers_own_copy_is_checked_by_windows() {
     };
     let staged = Staged(copy.clone());
     let v =
-        pctwin_maker::check_staged(&staged, &expected, &os_checks(), &Limits::default()).unwrap();
+        pctwin_maker::check_staged(&staged, &expected, &own(), &os_checks(), &Limits::default())
+            .unwrap();
     assert_eq!(v.signature, Signature::Trusted, "{v:?}");
     // The same file outside the helper's copy: never trusted.
-    let v = check(&copy, &expected, &os_checks(), &Limits::default()).unwrap();
+    let v = check(&copy, &expected, &own(), &os_checks(), &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::NotChecked { .. }), "{v:?}");
     // No answers from Windows: never trusted either.
     let none = pctwin_maker::NativeChecks::default();
-    let v = pctwin_maker::check_staged(&staged, &expected, &none, &Limits::default()).unwrap();
+    let v =
+        pctwin_maker::check_staged(&staged, &expected, &own(), &none, &Limits::default()).unwrap();
     assert_ne!(v.signature, Signature::Trusted, "{v:?}");
+}
+
+/// PCTwin's own readers, run in the test's own process (only a parser crate's tests may).
+fn own() -> pctwin_maker::InThisProcess {
+    pctwin_maker::InThisProcess::new(pctwin_parse_seal::in_child())
 }

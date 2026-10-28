@@ -23,11 +23,17 @@
 //! still needs attention. A check of part of something says so ([`Coverage::Sample`]). What is
 //! missing becomes a focused repair request to the part of PCTwin that owns it
 //! ([`repair_requests`]); this part never edits a recipe or weakens a check to make it pass.
+//!
+//! The insides of a font, an archive or a database are read only in PCTwin's locked-down parser
+//! process (Phase 2 adoption, change 1), asked through [`FileReader`]: this part opens the file
+//! and hands it over, and a reader that could not answer makes the check "could not be
+//! checked", never a pass.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
+use pctwin_parse_seal::InChild;
 use pctwin_record::ItemId;
 use serde::{Deserialize, Serialize};
 
@@ -252,6 +258,8 @@ pub enum NotRun {
     OutsideTheProject,
     /// The file could not be read (no permission, say).
     CouldNotRead,
+    /// PCTwin's file checker could not finish reading it (it stopped or ran out of time).
+    CouldNotBeChecked,
 }
 
 /// How one check ended.
@@ -303,8 +311,65 @@ pub struct CheckResult {
     pub outcome: Outcome,
 }
 
-/// Runs every picked check, reading only.
-pub fn run(choices: &Choices) -> Vec<CheckResult> {
+/// What PCTwin's own reader found in a file's structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Shape {
+    /// Whole, as far as the check reads.
+    Sound,
+    /// Not whole: how.
+    Damaged(Damage),
+    /// A read of it failed.
+    Unreadable,
+}
+
+/// What PCTwin's own reader found in a file that may be a font.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FontNames {
+    /// A font of a kind PCTwin reads the names of, by its first bytes (never its name).
+    pub is_font: bool,
+    /// The family names inside it (none when it is not one, or they could not be read).
+    pub families: Vec<String>,
+}
+
+/// The most family names kept from one font file.
+pub const MAX_FAMILIES: usize = 4096;
+
+/// PCTwin's own reading of a file's insides, asked of the parser process (`pctwin-parse`'s
+/// `Parser`). `file` is opened by the caller, `size` its length. Err: it could not be checked
+/// (why).
+pub trait FileReader: Sync {
+    fn font(&self, file: &File, size: u64) -> Result<FontNames, String>;
+    fn archive(&self, file: &File, size: u64) -> Result<Shape, String>;
+    fn database(&self, file: &File, size: u64) -> Result<Shape, String>;
+}
+
+/// The readers, run in this process: only for the parser process and this crate's own tests
+/// (it takes an [`InChild`]).
+#[derive(Debug, Clone, Copy)]
+pub struct InThisProcess(InChild);
+
+impl InThisProcess {
+    pub fn new(seal: InChild) -> Self {
+        Self(seal)
+    }
+}
+
+impl FileReader for InThisProcess {
+    fn font(&self, mut file: &File, size: u64) -> Result<FontNames, String> {
+        Ok(font_names(self.0, &mut file, size))
+    }
+    fn archive(&self, mut file: &File, size: u64) -> Result<Shape, String> {
+        Ok(archive_shape(self.0, &mut file, size))
+    }
+    fn database(&self, mut file: &File, size: u64) -> Result<Shape, String> {
+        Ok(database_shape(self.0, &mut file, size))
+    }
+}
+
+/// Runs every picked check, reading only; the insides of files are read by `reader`.
+pub fn run(choices: &Choices, reader: &dyn FileReader) -> Vec<CheckResult> {
     choices
         .chosen
         .iter()
@@ -313,17 +378,17 @@ pub fn run(choices: &Choices) -> Vec<CheckResult> {
             index,
             item: c.item,
             generation: choices.generation,
-            outcome: run_one(&c.goal, choices.effect_approved[index]),
+            outcome: run_one(&c.goal, choices.effect_approved[index], reader),
         })
         .collect()
 }
 
-fn run_one(goal: &Goal, effect_approved: bool) -> Outcome {
+fn run_one(goal: &Goal, effect_approved: bool, reader: &dyn FileReader) -> Outcome {
     match goal {
         Goal::LinkedFiles { root, links } => linked_files(root, links),
-        Goal::Font { family, folders } => font(family, folders),
-        Goal::ArchiveOpens { file } => archive(file),
-        Goal::DatabaseOpens { file } => database(file),
+        Goal::Font { family, folders } => font(family, folders, reader),
+        Goal::ArchiveOpens { file } => shape_of(file, |f, n| reader.archive(f, n)),
+        Goal::DatabaseOpens { file } => shape_of(file, |f, n| reader.database(f, n)),
         Goal::PersonCheck { .. } => Outcome::NotRun {
             why: NotRun::WaitingForPerson,
         },
@@ -449,17 +514,14 @@ pub fn shipped_font_files() -> &'static Catalogue<FontFileRow> {
     ROWS.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/font-files.json")))
 }
 
-/// Whether a file is a font PCTwin reads the names of, by its first bytes (an OpenType or
-/// TrueType font, or a collection of them), never by its name.
-pub fn is_readable_font(path: &Path) -> bool {
-    let mut head = [0u8; 4];
-    File::open(path)
-        .and_then(|mut f| f.read_exact(&mut head))
-        .is_ok_and(|()| matches!(&head, [0, 1, 0, 0] | b"OTTO" | b"true" | b"typ1" | b"ttcf"))
+/// Whether the first bytes are those of a font PCTwin reads the names of (an OpenType or
+/// TrueType font, or a collection of them).
+fn is_font_head(head: &[u8; 4]) -> bool {
+    matches!(head, [0, 1, 0, 0] | b"OTTO" | b"true" | b"typ1" | b"ttcf")
 }
 
-fn font(family: &str, folders: &[PathBuf]) -> Outcome {
-    font_with(shipped_font_files(), family, folders)
+fn font(family: &str, folders: &[PathBuf], reader: &dyn FileReader) -> Outcome {
+    font_with(shipped_font_files(), family, folders, reader)
 }
 
 /// The font check with these rows. Every file in the folders is listed (names only); the first
@@ -468,7 +530,12 @@ fn font(family: &str, folders: &[PathBuf]) -> Outcome {
 /// whose names could not be read, and a file of a kind PCTwin reads that is not whole, are found,
 /// not checked, and said so; a family not found among only some of them is a sample, never "not
 /// installed" for certain.
-pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf]) -> Outcome {
+pub fn font_with(
+    rows: &Catalogue<FontFileRow>,
+    family: &str,
+    folders: &[PathBuf],
+    reader: &dyn FileReader,
+) -> Outcome {
     let want = plain_name(family);
     let mut files: Vec<PathBuf> = Vec::new();
     for folder in folders {
@@ -499,8 +566,22 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
             .unwrap_or_default()
     };
     for p in &files[..looked] {
-        if is_readable_font(p) {
-            let names = font_families(p);
+        let read = File::open(p).and_then(|f| {
+            let size = f.metadata()?.len();
+            Ok(reader.font(&f, size))
+        });
+        let names = match read {
+            // Not opened: not looked at, as before (a file that went away, say).
+            Err(_) => FontNames::default(),
+            Ok(Ok(names)) => names,
+            // The checker could not finish: a font file whose names could not be read.
+            Ok(Err(_)) => FontNames {
+                is_font: true,
+                families: Vec::new(),
+            },
+        };
+        if names.is_font {
+            let names = names.families;
             if names.is_empty() {
                 // A font by its first bytes whose names could not be read: not checked.
                 unread += 1;
@@ -553,7 +634,7 @@ pub const UNREADABLE_FONT: &str = "Font file PCTwin could not read";
 /// Shown after a kind PCTwin reads, for a file of it that is not whole.
 pub const DAMAGED_FONT: &str = "that is damaged";
 
-fn read_at(f: &mut File, at: u64, buf: &mut [u8]) -> std::io::Result<()> {
+fn read_at<R: Read + Seek>(f: &mut R, at: u64, buf: &mut [u8]) -> std::io::Result<()> {
     f.seek(SeekFrom::Start(at))?;
     f.read_exact(buf)
 }
@@ -566,21 +647,29 @@ fn be32(b: &[u8], at: usize) -> u32 {
     u32::from_be_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
 }
 
-/// The family names (name IDs 1 and 16) of the font file at `path`, read from its own name table:
-/// every font of a collection. Unreadable or unknown files give none.
-pub fn font_families(path: &Path) -> Vec<String> {
-    let Ok(mut f) = File::open(path) else {
-        return Vec::new();
-    };
+/// Reads a file of `size` bytes that may be a font: whether it is one PCTwin reads, by its first
+/// bytes, and the family names (name IDs 1 and 16) in its own name table, for every font of a
+/// collection. Unreadable or unknown files give none.
+pub fn font_names<R: Read + Seek>(_: InChild, f: &mut R, size: u64) -> FontNames {
     let mut head = [0u8; 12];
-    if read_at(&mut f, 0, &mut head).is_err() {
-        return Vec::new();
+    if size < 4 || read_at(f, 0, &mut head[..4]).is_err() {
+        return FontNames::default();
+    }
+    let is_font = is_font_head(&[head[0], head[1], head[2], head[3]]);
+    if !is_font || read_at(f, 0, &mut head).is_err() {
+        return FontNames {
+            is_font,
+            families: Vec::new(),
+        };
     }
     let starts: Vec<u64> = if &head[..4] == b"ttcf" {
         let n = be32(&head, 8).min(64);
         let mut offs = vec![0u8; n as usize * 4];
-        if read_at(&mut f, 12, &mut offs).is_err() {
-            return Vec::new();
+        if read_at(f, 12, &mut offs).is_err() {
+            return FontNames {
+                is_font,
+                families: Vec::new(),
+            };
         }
         (0..n as usize)
             .map(|i| u64::from(be32(&offs, i * 4)))
@@ -588,14 +677,15 @@ pub fn font_families(path: &Path) -> Vec<String> {
     } else {
         vec![0]
     };
-    let mut out = Vec::new();
+    let mut families = Vec::new();
     for start in starts {
-        out.extend(names_of_font(&mut f, start).unwrap_or_default());
+        families.extend(names_of_font(f, start).unwrap_or_default());
     }
-    out
+    families.truncate(MAX_FAMILIES);
+    FontNames { is_font, families }
 }
 
-fn names_of_font(f: &mut File, start: u64) -> std::io::Result<Vec<String>> {
+fn names_of_font<R: Read + Seek>(f: &mut R, start: u64) -> std::io::Result<Vec<String>> {
     let mut head = [0u8; 12];
     read_at(f, start, &mut head)?;
     let version = be32(&head, 0);
@@ -675,24 +765,14 @@ fn not_there_or_unreadable(e: &std::io::Error) -> Outcome {
 /// Checks a ZIP archive's index without unpacking anything: the end record must close the file
 /// exactly (its comment length reaches the last byte), name one part only, and point to a list
 /// of files that lies inside the file and starts with that list's own signature.
-fn archive(path: &Path) -> Outcome {
-    let mut f = match File::open(path) {
-        Ok(f) => f,
-        Err(e) => return not_there_or_unreadable(&e),
-    };
-    let len = match f.metadata() {
-        Ok(m) => m.len(),
-        Err(e) => return not_there_or_unreadable(&e),
-    };
+pub fn archive_shape<R: Read + Seek>(_: InChild, f: &mut R, len: u64) -> Shape {
     if len < ZIP_END {
-        return damaged(Damage::NoArchiveEnd);
+        return Shape::Damaged(Damage::NoArchiveEnd);
     }
     let tail_len = len.min(ZIP_TAIL);
     let mut tail = vec![0u8; tail_len as usize];
-    if read_at(&mut f, len - tail_len, &mut tail).is_err() {
-        return Outcome::NotRun {
-            why: NotRun::CouldNotRead,
-        };
+    if read_at(f, len - tail_len, &mut tail).is_err() {
+        return Shape::Unreadable;
     }
     let le16 = |b: &[u8], at: usize| u16::from_le_bytes([b[at], b[at + 1]]);
     let le32 = |b: &[u8], at: usize| u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]]);
@@ -702,7 +782,7 @@ fn archive(path: &Path) -> Outcome {
             && p + ZIP_END as usize + usize::from(le16(&tail, p + 20)) == tail.len()
     });
     let Some(p) = found else {
-        return damaged(Damage::NoArchiveEnd);
+        return Shape::Damaged(Damage::NoArchiveEnd);
     };
     let end_at = len - tail_len + p as u64;
     let (disk, cd_disk) = (le16(&tail, p + 4), le16(&tail, p + 6));
@@ -712,36 +792,55 @@ fn archive(path: &Path) -> Outcome {
         // ZIP64: its locator must sit just before the end record.
         let ok = p >= 20 && tail[p - 20..p - 16] == [0x50, 0x4b, 0x06, 0x07];
         return if ok {
-            Outcome::MachineChecked {
-                coverage: Coverage::Whole,
-            }
+            Shape::Sound
         } else {
-            damaged(Damage::NoArchiveEnd)
+            Shape::Damaged(Damage::NoArchiveEnd)
         };
     }
     if disk != 0 || cd_disk != 0 || on_disk != total {
-        return damaged(Damage::ArchiveInParts);
+        return Shape::Damaged(Damage::ArchiveInParts);
     }
     if u64::from(cd_offset) + u64::from(cd_size) > end_at {
-        return damaged(Damage::ArchiveIndexOutside);
+        return Shape::Damaged(Damage::ArchiveIndexOutside);
     }
     if total > 0 {
         let mut sig = [0u8; 4];
-        if read_at(&mut f, u64::from(cd_offset), &mut sig).is_err()
-            || sig != [0x50, 0x4b, 0x01, 0x02]
-        {
-            return damaged(Damage::ArchiveIndexOutside);
+        if read_at(f, u64::from(cd_offset), &mut sig).is_err() || sig != [0x50, 0x4b, 0x01, 0x02] {
+            return Shape::Damaged(Damage::ArchiveIndexOutside);
         }
     }
-    Outcome::MachineChecked {
-        coverage: Coverage::Whole,
-    }
+    Shape::Sound
 }
 
 /// Checks a SQLite database's header (sqlite.org/fileformat.html) and that the file is a whole
 /// number of its pages. The database is never opened by SQLite.
-fn database(path: &Path) -> Outcome {
-    let mut f = match File::open(path) {
+pub fn database_shape<R: Read + Seek>(_: InChild, f: &mut R, len: u64) -> Shape {
+    let mut h = [0u8; 100];
+    if len < 100 || read_at(f, 0, &mut h).is_err() || &h[..16] != b"SQLite format 3\0" {
+        return Shape::Damaged(Damage::NotADatabase);
+    }
+    let page = match be16(&h, 16) {
+        1 => 65_536u64,
+        p if p.is_power_of_two() && (512..=32_768).contains(&p) => u64::from(p),
+        _ => return Shape::Damaged(Damage::DatabaseHeader),
+    };
+    let versions_ok = matches!(h[18], 1 | 2) && matches!(h[19], 1 | 2);
+    let fractions_ok = h[21] == 64 && h[22] == 32 && h[23] == 32;
+    if !versions_ok || !fractions_ok || !len.is_multiple_of(page) {
+        return Shape::Damaged(Damage::DatabaseHeader);
+    }
+    // The page count in the header is in force only when its "valid for" number matches the
+    // change counter; then the file must hold at least that many pages.
+    let pages = u64::from(be32(&h, 28));
+    if be32(&h, 92) == be32(&h, 24) && pages * page > len {
+        return Shape::Damaged(Damage::DatabaseHeader);
+    }
+    Shape::Sound
+}
+
+/// Opens `path` and has `read` check its structure.
+fn shape_of(path: &Path, read: impl Fn(&File, u64) -> Result<Shape, String>) -> Outcome {
+    let f = match File::open(path) {
         Ok(f) => f,
         Err(e) => return not_there_or_unreadable(&e),
     };
@@ -749,28 +848,17 @@ fn database(path: &Path) -> Outcome {
         Ok(m) => m.len(),
         Err(e) => return not_there_or_unreadable(&e),
     };
-    let mut h = [0u8; 100];
-    if len < 100 || read_at(&mut f, 0, &mut h).is_err() || &h[..16] != b"SQLite format 3\0" {
-        return damaged(Damage::NotADatabase);
-    }
-    let page = match be16(&h, 16) {
-        1 => 65_536u64,
-        p if p.is_power_of_two() && (512..=32_768).contains(&p) => u64::from(p),
-        _ => return damaged(Damage::DatabaseHeader),
-    };
-    let versions_ok = matches!(h[18], 1 | 2) && matches!(h[19], 1 | 2);
-    let fractions_ok = h[21] == 64 && h[22] == 32 && h[23] == 32;
-    if !versions_ok || !fractions_ok || len % page != 0 {
-        return damaged(Damage::DatabaseHeader);
-    }
-    // The page count in the header is in force only when its "valid for" number matches the
-    // change counter; then the file must hold at least that many pages.
-    let pages = u64::from(be32(&h, 28));
-    if be32(&h, 92) == be32(&h, 24) && pages * page > len {
-        return damaged(Damage::DatabaseHeader);
-    }
-    Outcome::MachineChecked {
-        coverage: Coverage::Whole,
+    match read(&f, len) {
+        Ok(Shape::Sound) => Outcome::MachineChecked {
+            coverage: Coverage::Whole,
+        },
+        Ok(Shape::Damaged(what)) => damaged(what),
+        Ok(Shape::Unreadable) => Outcome::NotRun {
+            why: NotRun::CouldNotRead,
+        },
+        Err(_) => Outcome::NotRun {
+            why: NotRun::CouldNotBeChecked,
+        },
     }
 }
 

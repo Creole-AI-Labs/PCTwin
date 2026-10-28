@@ -41,6 +41,8 @@ sha2 = "0.10.9"
 libc = "0.2"
 
 [dev-dependencies]
+# The maker check of an export tool reads it through the real parser process.
+pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }
 # Tests keep journal keys beside their journals, never in the system's key store.
 pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }

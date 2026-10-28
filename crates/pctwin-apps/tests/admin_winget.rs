@@ -70,7 +70,9 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
         notes: vec![],
     };
     assert!(confirms(&manifest, &app).is_some());
-    let pctwin_maker::OldMaker::Signed(signer) = pctwin_maker::windows_old_copy(&msi).maker else {
+    let pctwin_maker::OldMaker::Signed(signer) =
+        pctwin_maker::windows_old_copy(&msi, pctwin_parse::testing::parser()).maker
+    else {
         panic!("the package is signed");
     };
     let packages = work.path().join("packages");

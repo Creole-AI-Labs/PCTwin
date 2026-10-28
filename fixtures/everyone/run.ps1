@@ -63,7 +63,7 @@ New-Item -ItemType Directory -Force $admin, $moverDir, $tools | Out-Null
 icacls $admin /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
 icacls $moverDir /inheritance:r /grant:r "${mover}:(OI)(CI)F" '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
 # The helper runs the hand-over program from its own folder, as in the app.
-Copy-Item (Join-Path $Bin 'pctwin-labmove.exe'), (Join-Path $Bin 'pctwin-helper.exe'), (Join-Path $Bin 'pctwin-handover.exe') $tools
+Copy-Item (Join-Path $Bin 'pctwin-labmove.exe'), (Join-Path $Bin 'pctwin-helper.exe'), (Join-Path $Bin 'pctwin-handover.exe'), (Join-Path $Bin 'pctwin-parser.exe') $tools
 icacls $tools /grant '*S-1-1-0:(OI)(CI)RX' | Out-Null
 $labmove = Join-Path $tools 'pctwin-labmove.exe'
 $helperExe = Join-Path $tools 'pctwin-helper.exe'

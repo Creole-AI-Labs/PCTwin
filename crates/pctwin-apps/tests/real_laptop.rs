@@ -31,6 +31,7 @@ fn this_laptops_apps_are_all_found_with_their_makers() {
         std::slice::from_ref(&me),
         &me,
         &pctwin_maker::run::SystemRunner,
+        pctwin_parse::testing::parser(),
     );
     list.validate().unwrap();
     let count =
@@ -138,7 +139,9 @@ fn a_winget_download_passes_the_helpers_own_maker_check_and_a_wrong_maker_fails(
     assert!(confirms(&manifest, &app).is_some());
     // The old laptop's maker: here, PuTTY's own signer (as an old laptop's copy of PuTTY would
     // carry), read by PCTwin's own reader.
-    let pctwin_maker::OldMaker::Signed(signer) = pctwin_maker::windows_old_copy(&msi).maker else {
+    let pctwin_maker::OldMaker::Signed(signer) =
+        pctwin_maker::windows_old_copy(&msi, pctwin_parse::testing::parser()).maker
+    else {
         panic!("PuTTY's package is signed");
     };
     let mut staging = pctwin_helper::broker::staging::Staging::new(

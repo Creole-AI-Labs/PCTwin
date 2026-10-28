@@ -17,6 +17,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Apps come back from their makers.** On Windows, PCTwin finds each app by who made it, downloads it as you, and installs it through its administrator helper, which asks Windows for permission once and makes a restore point first. An app is only called reinstalled when Windows shows it at your version or newer, with nothing else slipped in. Anything else says why and what to do.
 - **Settings follow you.** Your apps' settings are copied, and a setting that points at a moved file is pointed at its new place. Passwords, sign-ins, security settings and anything that would start a program stay behind.
 - **Undo keeps your changes.** Undo app settings puts the settings back, except any you changed after the move.
+- **Files from your old laptop or a download are opened by a separate checker.** When PCTwin looks inside an installer, a font, an archive or a database to check it, a small separate program does the reading, with strict limits on time and size. If that program stops or takes too long, the file is marked as not checked, never as fine.
 - **App data such as email and browsers is listed, not moved yet.** Each one says what to do: sign in again, use the app's export, or that it is still safe on your old laptop.
 
 ## 26 October 2026

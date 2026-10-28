@@ -3673,6 +3673,7 @@ dependencies = [
  "pctwin-move",
  "pctwin-orchestrate",
  "pctwin-pairing",
+ "pctwin-parse",
  "pctwin-power",
  "pctwin-quicksend",
  "pctwin-recipe",
@@ -3708,6 +3709,7 @@ dependencies = [
  "pctwin-helper",
  "pctwin-helper-os",
  "pctwin-maker",
+ "pctwin-parse",
  "pctwin-record",
  "pctwin-types",
  "plist",
@@ -3859,6 +3861,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-maker",
+ "pctwin-parse",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-staged-seal",
@@ -3995,6 +3998,7 @@ dependencies = [
  "libc",
  "object",
  "pctwin-helper-os",
+ "pctwin-parse-seal",
  "pctwin-staged-seal",
  "pctwin-types",
  "same-file",
@@ -4069,6 +4073,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-parse"
+version = "0.1.0"
+dependencies = [
+ "pctwin-maker",
+ "pctwin-parse",
+ "pctwin-parse-seal",
+ "pctwin-readiness",
+ "pctwin-record",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "pctwin-parse-seal"
+version = "0.1.0"
+
+[[package]]
 name = "pctwin-power"
 version = "0.1.0"
 dependencies = [
@@ -4100,6 +4124,7 @@ dependencies = [
  "pctwin-catalogue",
  "pctwin-journal",
  "pctwin-orchestrate",
+ "pctwin-parse-seal",
  "pctwin-record",
  "pctwin-types",
  "serde",
@@ -4206,6 +4231,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-maker",
+ "pctwin-parse",
  "pctwin-readiness",
  "pctwin-recipe",
  "pctwin-record",

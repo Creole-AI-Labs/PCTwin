@@ -1,0 +1,15 @@
+# The parser process reads only what the app hands it (src/lockdown.rs): this crate's code may
+# not open a file, a socket or a program, except the app's side, which holds the file and starts
+# the parser (src/client.rs allows those two by name).
+disallowed-methods = [
+  { path = "std::fs::File::open", reason = "the parser reads only what the app hands it" },
+  { path = "std::fs::File::create", reason = "the parser writes no file" },
+  { path = "std::fs::OpenOptions::open", reason = "the parser reads only what the app hands it" },
+  { path = "std::fs::read", reason = "the parser reads only what the app hands it" },
+  { path = "std::fs::read_to_string", reason = "the parser reads only what the app hands it" },
+  { path = "std::fs::write", reason = "the parser writes no file" },
+  { path = "std::net::TcpStream::connect", reason = "the parser has no network" },
+  { path = "std::net::TcpListener::bind", reason = "the parser has no network" },
+  { path = "std::net::UdpSocket::bind", reason = "the parser has no network" },
+  { path = "std::process::Command::new", reason = "the parser starts no program" },
+]

@@ -1,0 +1,44 @@
+[package]
+name = "pctwin-parse"
+description = "The locked-down parser process: PCTwin reads the insides of untrusted files (installers, fonts, archives, databases) only in a separate process, asked with typed requests, bounded in time and bytes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pctwin-parser"
+path = "src/bin/pctwin-parser.rs"
+
+# A stand-in that breaks the rules on purpose (stops, hangs, asks for too much), so the tests
+# prove the app's side treats each as "could not be checked". Never staged or shipped.
+[[bin]]
+name = "pctwin-parser-test-double"
+path = "src/bin/test-double.rs"
+test = false
+doc = false
+
+[features]
+# For other crates' tests: finds (and if needed builds) the real parser program.
+test-support = []
+
+[dependencies]
+# The readers themselves, and the seal that lets only this crate run them in its own process.
+pctwin-maker = { path = "../pctwin-maker" }
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
+pctwin-readiness = { path = "../pctwin-readiness" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# Its own tests use the test support (the fuzz on the stable compiler).
+pctwin-parse = { path = ".", features = ["test-support"] }
+pctwin-record = { path = "../pctwin-record" }
+proptest = "1"
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -149,13 +149,15 @@ pub struct MakerCheck<'a> {
     /// What the check must find: the old laptop's copy's maker, this laptop's system and
     /// architecture, the kinds of program accepted.
     pub expected: &'a Expected,
+    /// PCTwin's own reader of the tool's insides: the parser process (`pctwin-parse`).
+    pub reader: &'a dyn pctwin_maker::OwnReader,
     pub checks: &'a dyn SystemChecks,
     pub limits: &'a Limits,
 }
 
 impl ToolMaker for MakerCheck<'_> {
     fn verdict(&self, tool: &Path) -> Result<Verdict, String> {
-        pctwin_maker::check(tool, self.expected, self.checks, self.limits)
+        pctwin_maker::check(tool, self.expected, self.reader, self.checks, self.limits)
             .map_err(|e| e.to_string())
     }
 }

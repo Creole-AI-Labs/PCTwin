@@ -43,6 +43,8 @@ pctwin-helper = { path = "../pctwin-helper", features = ["test-staging"] }
 tokio = { version = "1.53.2", features = ["rt", "macros", "net", "io-util"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
+# The tests read installers' signatures through the real parser process.
+pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }
 
 [lints]
 workspace = true

@@ -18,6 +18,8 @@ pctwin-journal = { path = "../pctwin-journal" }
 # The 2.6 plan: child jobs, their checked results and what did not finish.
 pctwin-orchestrate = { path = "../pctwin-orchestrate" }
 pctwin-record = { path = "../pctwin-record" }
+# Its readers of a file's insides run only in the parser process (adoption change 1).
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 # The six result words and their reasons.
 pctwin-types = { path = "../pctwin-types" }
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +29,7 @@ tempfile = "3"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 # Tests keep journal keys beside their journals, never in the system's key store.
 pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }

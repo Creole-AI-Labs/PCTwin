@@ -1550,6 +1550,7 @@ dependencies = [
  "pctwin-gate",
  "pctwin-move",
  "pctwin-pairing",
+ "pctwin-parse",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-settings",
@@ -1601,6 +1602,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-maker",
+ "pctwin-parse",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-staged-seal",
@@ -1685,6 +1687,7 @@ dependencies = [
  "const-oid 0.9.6",
  "der",
  "libc",
+ "pctwin-parse-seal",
  "pctwin-staged-seal",
  "pctwin-types",
  "same-file",
@@ -1720,6 +1723,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-orchestrate"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "cap-fs-ext",
+ "cap-primitives",
+ "pctwin-catalogue",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-types",
+ "serde",
+ "sysinfo",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+ "winapi-util",
+]
+
+[[package]]
 name = "pctwin-pairing"
 version = "0.1.0"
 dependencies = [
@@ -1732,6 +1753,39 @@ dependencies = [
  "spake2",
  "thiserror 2.0.21",
  "zeroize",
+]
+
+[[package]]
+name = "pctwin-parse"
+version = "0.1.0"
+dependencies = [
+ "pctwin-maker",
+ "pctwin-parse-seal",
+ "pctwin-readiness",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "pctwin-parse-seal"
+version = "0.1.0"
+
+[[package]]
+name = "pctwin-readiness"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pctwin-catalogue",
+ "pctwin-journal",
+ "pctwin-orchestrate",
+ "pctwin-parse-seal",
+ "pctwin-record",
+ "pctwin-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

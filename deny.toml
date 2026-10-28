@@ -100,6 +100,9 @@ deny = [
   # The seal on the maker check's HelperStaged (fourth review): only the helper's staging may
   # vouch for a package as its own held copy, and the maker check's own tests.
   { crate = "pctwin-staged-seal", wrappers = ["pctwin-maker", "pctwin-helper"] },
+  # The seal on the readers of untrusted files (adoption change 1, 28 October 2026): only the
+  # parser process may run them, and the readers' own crates in their tests.
+  { crate = "pctwin-parse-seal", wrappers = ["pctwin-maker", "pctwin-readiness", "pctwin-parse"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
   # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
   { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },
