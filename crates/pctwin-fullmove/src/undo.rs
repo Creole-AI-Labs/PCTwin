@@ -99,6 +99,15 @@ pub fn preview(
             },
         })
         .collect();
+    // App data landed: removed again, each file only while it is still what PCTwin wrote.
+    for (app, _) in &book.landed {
+        if !out.iter().any(|l| l.name == *app) {
+            out.push(PlanLine {
+                name: app.clone(),
+                plan: UndoPlan::PutBack,
+            });
+        }
+    }
     out.extend(book.apps.iter().map(|a| PlanLine {
         name: a.clone(),
         plan: UndoPlan::RemoveYourself,
@@ -113,6 +122,7 @@ pub fn undo(
     rebuild: &Rebuild<'_>,
     book: &UndoBook,
     adapter: &mut dyn Adapter,
+    data: Option<(&pctwin_grant::CaptureKey, &pctwin_gate::Destination)>,
 ) -> std::result::Result<Vec<Line>, JournalError> {
     let journal = rebuild.journal();
     let scope = Scope(book.scope);
@@ -150,6 +160,27 @@ pub fn undo(
             },
         })
         .collect();
+    // App data landed (2.5): each file removed only while it is still what PCTwin wrote; one the
+    // person changed since is kept.
+    if let Some((key, home)) = data {
+        let rec = journal.imports(key);
+        for (app, effect) in &book.landed {
+            let result = match pctwin_special::api::undo(&rec, &permit, home, *effect) {
+                Ok(pctwin_special::land::Undone::Removed) => Result::Restored,
+                Ok(pctwin_special::land::Undone::AlreadyUndone) => Result::AsBefore,
+                Ok(pctwin_special::land::Undone::KeptChanged { kept }) => {
+                    Result::KeptChanged { kept: kept as u64 }
+                }
+                Ok(pctwin_special::land::Undone::NotDone(_)) | Err(_) => {
+                    Result::NotDoneYet { left: 1 }
+                }
+            };
+            out.push(Line {
+                name: app.clone(),
+                result,
+            });
+        }
+    }
     out.extend(book.apps.iter().map(|a| Line {
         name: a.clone(),
         result: Result::RemoveYourself,

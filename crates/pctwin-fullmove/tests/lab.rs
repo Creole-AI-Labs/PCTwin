@@ -380,7 +380,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             .is_some_and(|f| f.lines.iter().any(|s| s.name.contains("LabMail"))),
         "2.5 found the app's data: {found:#?}"
     );
-    extras.with_special(found);
+    extras.with_special(found.as_ref());
     let extras_bytes = extras.encode();
 
     // The new laptop: its folders, one of the apps already, and a value of its own.
@@ -455,6 +455,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
                 &old_live,
                 Arc::new(pctwin_transfer::FsOpener),
                 &mut back,
+                None,
             )
             .await
         },
@@ -517,7 +518,8 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             .any(|c| c.kind == Kind::Settings && c.undo == Promise::CanReverse),
         "{changes:#?}"
     );
-    // 2.5 looked: each component is on the plan with its step, never as copied.
+    // 2.5 looked: each component is on the plan with its step; one that copies says so (its
+    // landing is proven in tests/appdata.rs; here nothing is chosen, so it ends needs-action).
     assert!(
         !changes
             .iter()
@@ -527,7 +529,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         changes
             .iter()
             .filter(|c| c.kind == Kind::Special)
-            .all(|c| c.needs.is_some() && c.special.is_some()),
+            .all(|c| c.special.is_some()),
         "{changes:#?}"
     );
     // The token never left the plan's discovery as something to write.
@@ -570,6 +572,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
     let mut steps = Vec::new();
     let done = rebuild(
         &plan,
+        &pctwin_fullmove::run::DataDone::default(),
         &mut installer,
         &mut adapter,
         &rebuild_rec,
@@ -668,7 +671,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         Some(UndoPlan::RemoveYourself),
         "{preview:#?}"
     );
-    let lines = undo::undo(&rebuild_rec, &done.undo, &mut adapter).unwrap();
+    let lines = undo::undo(&rebuild_rec, &done.undo, &mut adapter, None).unwrap();
     assert!(
         lines
             .iter()

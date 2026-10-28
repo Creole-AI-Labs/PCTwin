@@ -127,6 +127,9 @@ pub struct SpecialLine {
     /// Secret material (keys, password stores): moved only if the person chooses it.
     #[serde(default)]
     pub secret: bool,
+    /// Its components' IDs (what the new laptop chooses by).
+    #[serde(default)]
+    pub ids: Vec<String>,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -294,23 +297,29 @@ pub fn special_here(
     let mut lines: Vec<SpecialLine> = Vec::new();
     for p in plan.components.iter().filter(|p| text_ok(&p.app)) {
         let step = match p.component.custody {
-            Custody::Portable => SpecialStep::NotYet,
+            Custody::Portable => SpecialStep::Copy,
             Custody::ServiceHeld => SpecialStep::SignIn,
             Custody::MachineBound => SpecialStep::Relink,
             Custody::NeedsExport => SpecialStep::ExportFirst,
             Custody::Unresolved => SpecialStep::LookAtIt,
         };
         let files = p.component.members.len() as u64;
-        match lines.iter_mut().find(|l| l.name == p.app && l.step == step) {
+        let id = crate::data::id_hex(&p.component);
+        // A secret is always its own line: the person ticks each one by itself (D07).
+        let same = |l: &&mut SpecialLine| {
+            !p.component.secret && !l.secret && l.name == p.app && l.step == step
+        };
+        match lines.iter_mut().find(same) {
             Some(l) => {
                 l.files += files;
-                l.secret |= p.component.secret;
+                l.ids.push(id);
             }
             None => lines.push(SpecialLine {
                 name: p.app.clone(),
                 step,
                 files,
                 secret: p.component.secret,
+                ids: vec![id],
             }),
         }
     }
@@ -326,17 +335,20 @@ pub fn special_here(
         lines,
         not_moved: plan.not_moved.len() as u64,
         not_checked: not_checked as u64,
+        planned: plan.components,
     }
 }
 
 /// What 2.5 found on the old laptop.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct SpecialFound {
     pub lines: Vec<SpecialLine>,
     /// Found and not moved (caches, the system's own).
     pub not_moved: u64,
     /// Places not fully checked (out of time, no answer, unreadable).
     pub not_checked: u64,
+    /// The components themselves, kept on the old laptop for capture (never sent).
+    pub planned: Vec<pctwin_special::api::Planned>,
 }
 
 /// The special-category scan, running beside the scan of files and people.
@@ -392,9 +404,9 @@ impl SpecialScan {
 
 impl Extras {
     /// Adds what the special-category scan found (`None`: it did not finish in time).
-    pub fn with_special(&mut self, found: Option<SpecialFound>) {
+    pub fn with_special(&mut self, found: Option<&SpecialFound>) {
         if let Some(f) = found {
-            self.special = f.lines;
+            self.special = f.lines.clone();
             self.special_searched = true;
             self.special_not_moved = f.not_moved;
             self.special_not_checked = f.not_checked;

@@ -64,6 +64,7 @@ async fn send_greeted(
         live,
         opener,
         &mut no_way_back,
+        None,
     )
     .await
 }

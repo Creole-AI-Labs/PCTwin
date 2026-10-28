@@ -423,6 +423,7 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
     live: &Live,
     opener: Arc<dyn Opener>,
     back: &mut B,
+    mut data: Option<&mut dyn extras::DataOut>,
 ) -> Result<(Sent, landing::LandingRules), MoveError> {
     // The link was tested when the laptops greeted.
     let version = link.greeting().version;
@@ -438,6 +439,18 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
             extras::send(link, who.extras).await?;
         }
         let rules = landing::receive_rules(link).await?;
+        // From move protocol 6: the app data the new laptop chose, captured now (read only) and
+        // sent before the files, inside the sealed link.
+        if version >= pctwin_transfer::EXTRAS_SINCE {
+            let choice = extras::receive_choice(link).await?;
+            match data.as_deref_mut() {
+                Some(out) => {
+                    out.chosen(choice);
+                    extras::send_data(link, out).await?;
+                }
+                None => extras::send_data(link, &mut extras::NoData).await?,
+            }
+        }
         // The plan is approved: the way back opens, for exactly this plan.
         let port = back.open(&resume::plan_print(&record.items, &rules)).await;
         resume::say_port(link, port).await?;
@@ -650,6 +663,12 @@ pub trait Steps {
     /// The other people whose things are in the move, by name, as the old laptop said (the app's
     /// way of moving), before anyone is placed.
     fn people(&mut self, _people: &[landing::NamedPerson]) {}
+
+    /// The full move's app data: what this laptop chose and where it goes (move protocol 6 and
+    /// later, the app's way of moving). None: nothing is chosen.
+    fn data_in(&mut self) -> Option<&mut dyn extras::DataIn> {
+        None
+    }
 
     /// The full move's extras as the old laptop sent them ([`extras`]; move protocol 6 and later,
     /// the app's way of moving), before anyone is placed: unread bytes from the other laptop,
@@ -1075,6 +1094,20 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
             Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?
                 .with_wholes(wholes);
         landing::send_rules(link, &rules).await?;
+        // From move protocol 6: the app data this laptop chose, received before the files.
+        if version >= pctwin_transfer::EXTRAS_SINCE {
+            match steps.data_in() {
+                Some(sink) => {
+                    let choice = sink.choice();
+                    extras::send_choice(link, &choice).await?;
+                    extras::receive_data(link, sink).await?;
+                }
+                None => {
+                    extras::send_choice(link, &[]).await?;
+                    extras::receive_data(link, &mut extras::NoData).await?;
+                }
+            }
+        }
         // The plan is approved and the rules said: both laptops make their resume keys for
         // exactly this plan, and the old laptop says where it waits for this one's return.
         let plan = resume::finish_print(approved.listed.clone(), &rules);
