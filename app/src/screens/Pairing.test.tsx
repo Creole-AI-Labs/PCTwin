@@ -33,7 +33,8 @@ const withText = (expected: string) => (content: string) => plain(content) === p
 const problem = (key: string, networks: string[] = []) => ({ key, networks }) as unknown as Error;
 
 const fox = { kind: "picked", colour: "blue", animal: "fox" } as const;
-const foxText = () => text("label-picked", { colour: text("label-colour-blue"), animal: text("label-animal-fox") });
+// A name is shown as one run of text, without the direction marks around each word.
+const foxText = () => text("label-picked", { colour: text("label-colour-blue"), animal: text("label-animal-fox") }).replace(/[⁦-⁩]/g, "");
 
 let warnings: string[] = [];
 let replies: Partial<Record<string, (args: unknown) => unknown>> = {};

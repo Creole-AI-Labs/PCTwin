@@ -55,10 +55,15 @@ export function labelText(l10n: ReactLocalization, label: Label): string {
     // noire"). Those files carry a `label-gender-<animal>` message; the colour words read it as $gender.
     const genderId = `label-gender-${label.animal}`;
     const gender = l10n.getBundle(genderId) ? l10n.getString(genderId) : "";
-    return l10n.getString("label-picked", {
-      colour: l10n.getString(`label-colour-${label.colour}`, { gender }),
-      animal: l10n.getString(`label-animal-${label.animal}`),
-    });
+    // The words of one name, without the direction marks Fluent puts around each word: a name is
+    // one run of text, and wherever it is shown its direction is set there (bdi). The marks were
+    // drawn as "�" on some pages (first real test, 28 October 2026).
+    return l10n
+      .getString("label-picked", {
+        colour: l10n.getString(`label-colour-${label.colour}`, { gender }),
+        animal: l10n.getString(`label-animal-${label.animal}`),
+      })
+      .replace(/[⁦-⁩]/g, "");
   }
   return label.name.trim() === "" ? l10n.getString("label-unnamed") : label.name;
 }

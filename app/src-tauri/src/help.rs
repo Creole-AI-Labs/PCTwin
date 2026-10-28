@@ -145,9 +145,10 @@ fn check(bytes: &[u8]) -> u8 {
     })
 }
 
-/// This app's version as three numbers (a part that does not fit is 255).
-fn this_version() -> (u8, u8, u8) {
-    let mut parts = env!("CARGO_PKG_VERSION")
+/// A version as three numbers (a part that does not fit is 255): this build's own, as the
+/// release set it (never the crate's placeholder, which said 0.1.0 on every build).
+fn this_version(version: &str) -> (u8, u8, u8) {
+    let mut parts = version
         .split(['.', '-', '+'])
         .map(|p| p.parse::<u8>().unwrap_or(u8::MAX));
     (
@@ -226,11 +227,15 @@ pub fn decode(code: &str) -> Option<Said> {
 /// A problem code for the screens' Get help: the kind of problem and the step, with this
 /// version of PCTwin and this laptop's system.
 #[tauri::command]
-pub fn help_code(topic: HelpTopic, step: HelpStep) -> String {
+pub fn help_code<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    topic: HelpTopic,
+    step: HelpStep,
+) -> String {
     encode(&Said {
         topic,
         step,
-        version: this_version(),
+        version: this_version(&app.package_info().version.to_string()),
         system: System::this(),
     })
 }
@@ -273,7 +278,12 @@ mod tests {
 
     #[test]
     fn a_mistyped_code_is_refused() {
-        let code = help_code(HelpTopic::ConnectionLost, HelpStep::Moving);
+        let app = tauri::test::mock_app();
+        let code = help_code(
+            app.handle().clone(),
+            HelpTopic::ConnectionLost,
+            HelpStep::Moving,
+        );
         assert!(decode(&code).is_some());
         let chars: Vec<char> = code.chars().collect();
         let mut caught = 0;
@@ -302,10 +312,20 @@ mod tests {
     fn the_code_holds_only_the_six_facts() {
         // Every topic and step is from a closed list, and the version and system are the app's
         // own: there is no input of the person's for a code to carry.
-        let said = decode(&help_code(HelpTopic::DriveProblem, HelpStep::Moving)).unwrap();
+        let app = tauri::test::mock_app();
+        let said = decode(&help_code(
+            app.handle().clone(),
+            HelpTopic::DriveProblem,
+            HelpStep::Moving,
+        ))
+        .unwrap();
         assert_eq!(said.topic, HelpTopic::DriveProblem);
         assert_eq!(said.step, HelpStep::Moving);
-        assert_eq!(said.version, this_version());
+        assert_eq!(
+            said.version,
+            this_version(&app.package_info().version.to_string())
+        );
+        assert_eq!(this_version("0.1.8"), (0, 1, 8));
         assert_eq!(said.system, System::this());
     }
 }

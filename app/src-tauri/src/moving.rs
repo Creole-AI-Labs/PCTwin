@@ -132,7 +132,9 @@ pub enum Versions {
 }
 
 /// This laptop, as it tells the other one: its power, and the free space in the home folder.
-fn about_here() -> pctwin_move::greeting::About {
+/// `version`: this build's own version (the app's, set by the release; never the engine crate's
+/// placeholder, which said 0.1.0 on every build: first real test, 28 October 2026).
+fn about_here(version: String) -> pctwin_move::greeting::About {
     use pctwin_move::greeting::Power;
     let now = pctwin_power::power_now();
     let power = match (now.on_battery, now.percent) {
@@ -147,7 +149,9 @@ fn about_here() -> pctwin_move::greeting::About {
     let free = std::env::home_dir()
         .and_then(|home| pctwin_gate::Destination::open(&home).ok())
         .and_then(|home| home.available_bytes());
-    pctwin_move::greeting::About::here(power, free)
+    let mut about = pctwin_move::greeting::About::here(power, free);
+    about.app = version;
+    about
 }
 
 /// Both laptops, the moment the move starts and before anything is looked for: each says what
@@ -159,7 +163,7 @@ async fn greet<'l, R: Runtime>(
     side: pctwin_move::greeting::Side,
     other: Option<LabelView>,
 ) -> Result<pctwin_move::greeting::Greeted<'l, pctwin_link::Link>, TransferError> {
-    let mine = about_here();
+    let mine = about_here(app.package_info().version.to_string());
     let peer = |theirs, versions, link| Peer {
         mine: mine.clone(),
         theirs,
