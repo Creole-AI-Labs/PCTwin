@@ -30,6 +30,21 @@
   ${EndIf}
 !macroend
 
+!macro NSIS_HOOK_PREINSTALL
+  ; A PCTwin still open (in the tray, or another person's on this laptop) holds its own files, and
+  ; the installer then stopped at "Error opening file for writing" (first real test, 28 October
+  ; 2026). Close PCTwin and its helpers first, for every account; each by its exact name, never a
+  ; pattern that could match this installer. A move that was running picks up again from its
+  ; journal the next time PCTwin opens.
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "${MAINBINARYNAME}.exe"'
+  Pop $R8
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-helper.exe"'
+  Pop $R8
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-handover.exe"'
+  Pop $R8
+  Sleep 500
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   ; An earlier version's rule is replaced, never doubled.
   nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${PCTWIN_FIREWALL_RULE}"'
