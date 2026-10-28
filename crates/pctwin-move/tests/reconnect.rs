@@ -1125,3 +1125,151 @@ async fn strangers_jamming_the_way_back_cannot_end_the_move() {
     assert_eq!(received.ended, Ended::Finished);
     assert_eq!(landed_true(&w, &received), FILES);
 }
+
+/// The new laptop's person with app data chosen: what arrives, and whether the link was lost.
+struct WithData {
+    person: Person,
+    files: Vec<Vec<u8>>,
+    lost: bool,
+}
+
+impl Steps for WithData {
+    async fn person(&mut self, r: &Record, a: &str) -> Result<PersonTarget, Stop> {
+        self.person.person(r, a).await
+    }
+    async fn approve(&mut self, r: &Record, p: &Preview) -> Result<(), Stop> {
+        self.person.approve(r, p).await
+    }
+    fn landing(&self, item: &Item) -> Option<LandingPlace> {
+        self.person.landing(item)
+    }
+    fn data_in(&mut self) -> Option<&mut dyn pctwin_move::extras::DataIn> {
+        Some(self)
+    }
+}
+
+impl pctwin_move::extras::DataIn for WithData {
+    fn choice(&mut self) -> Vec<u8> {
+        b"all".to_vec()
+    }
+    fn begin(&mut self, h: &[u8]) -> Result<(), String> {
+        self.files.push(h.to_vec());
+        Ok(())
+    }
+    fn chunk(&mut self, _: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+    fn end(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn lost(&mut self) {
+        self.lost = true;
+    }
+}
+
+/// The old laptop's app data: three files, the connection cut once the first is handed over.
+struct Three {
+    left: u32,
+    handed: Arc<AtomicBool>,
+}
+
+impl pctwin_move::extras::DataOut for Three {
+    fn chosen(&mut self, _: Vec<u8>) {}
+    fn next_within(&mut self, _: Duration) -> pctwin_move::extras::NextData {
+        if self.left == 0 {
+            return pctwin_move::extras::NextData::Done;
+        }
+        self.left -= 1;
+        self.handed.store(true, Ordering::SeqCst);
+        pctwin_move::extras::NextData::File(
+            b"app data".to_vec(),
+            Box::new(std::io::Cursor::new(vec![7u8; 200_000])),
+        )
+    }
+}
+
+/// A drop in the middle of the app data does not fail the move: the new laptop says the app data
+/// was lost on the way (it stays on the old laptop), the laptops come back on a new connection,
+/// and every file still lands once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_drop_during_the_app_data_loses_only_the_app_data_and_the_files_carry_on() {
+    let mut w = world();
+    let mut table = std::mem::take(&mut w.table);
+    let (mut back, mut dial, wire, _) = way_back(Way::Open);
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let handed = Arc::new(AtomicBool::new(false));
+    let cut_once = Arc::new(AtomicBool::new(false));
+    let cut = {
+        let (handed, cut_once) = (handed.clone(), cut_once.clone());
+        move || handed.load(Ordering::SeqCst) && !cut_once.swap(true, Ordering::SeqCst)
+    };
+    let (old, mut new) = mem_pair();
+    let mut old = Breaker::new(old, cut);
+    let mut steps = WithData {
+        person: Person {
+            rules: rules(),
+            at_approval: None,
+        },
+        files: Vec::new(),
+        lost: false,
+    };
+    let mut data = Three { left: 3, handed };
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            async {
+                let mut link = greeted(&mut old, pctwin_move::greeting::Side::Old).await?;
+                let who = Who {
+                    mover: "1000",
+                    people: &[],
+                    extras: &[],
+                };
+                pctwin_move::send_by_rules(
+                    &mut link,
+                    &w.record,
+                    &who,
+                    |i| Some(source_in(w.old.path(), i)),
+                    &old_live,
+                    Arc::new(pctwin_transfer::FsOpener),
+                    &mut back,
+                    Some(&mut data),
+                )
+                .await
+                .map(|(s, _)| s)
+            },
+            async {
+                let mut link = greeted(&mut new, pctwin_move::greeting::Side::New).await?;
+                pctwin_move::receive_by_rules(
+                    &mut link,
+                    &mut steps,
+                    |s, _| s.person.rules.clone(),
+                    &mut table,
+                    Here {
+                        journal: &w.journal,
+                        account: "1001",
+                    },
+                    &new_live,
+                    &mut dial,
+                )
+                .await
+            }
+        )
+    })
+    .await;
+    let (sent, received) = (sent.unwrap(), received.unwrap());
+    assert!(
+        cut_once.load(Ordering::SeqCst),
+        "the connection was cut in the app data"
+    );
+    assert!(
+        steps.lost,
+        "the new laptop was told the app data was lost on the way"
+    );
+    assert!(steps.files.len() < 3, "not every app data file arrived");
+    assert!(
+        wire.tries.load(Ordering::SeqCst) >= 1,
+        "the new laptop came back"
+    );
+    assert_eq!(sent.ended, Ended::Finished);
+    assert_eq!(received.ended, Ended::Finished);
+    assert_eq!(landed_true(&w, &received), FILES);
+}
