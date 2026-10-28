@@ -2092,3 +2092,6 @@ guard-undo-remove-yourself = Remova você mesmo, se quiser
 guard-undo-plan-remove-yourself = Você pode removê-lo nas configurações do notebook
 guard-undo-result-remove-yourself = Deixado para você remover nas configurações do notebook
 guard-undo-close = Pronto
+move-wait-appdata-title = Olhando os dados dos seus apps.
+move-wait-appdata-body = Seus arquivos foram encontrados. O PCTwin ainda está olhando os dados que seus apps guardam, como e-mail e navegadores. Isso leva no máximo dez minutos. Nada neste notebook é mudado.
+fullmove-special-not-checked = Dados de apps que o PCTwin não conseguiu verificar por completo

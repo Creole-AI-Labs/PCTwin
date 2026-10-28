@@ -29,5 +29,8 @@
   },
   {
     "kind": "rebuilding"
+  },
+  {
+    "kind": "app-data"
   }
 ]

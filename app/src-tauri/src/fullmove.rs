@@ -91,9 +91,9 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /* ---------- The old laptop ---------- */
 
-/// The old laptop: the extras for the person `mover` (home `home`), read only: their settings,
-/// their folders here, and their special categories.
-pub fn extras_here(mover: &str, home: Option<&std::path::Path>, record: &Record) -> Vec<u8> {
+/// The old laptop: the extras for the person `mover`, read only: their settings, their folders
+/// here, and their special categories as `special` found them (`None`: not in time).
+pub fn extras_here(special: Option<pctwin_fullmove::extras::SpecialFound>) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -104,17 +104,9 @@ pub fn extras_here(mover: &str, home: Option<&std::path::Path>, record: &Record)
             FolderLookup::Missing { .. } => None,
         })
         .collect();
-    let owner = Owner::Person {
-        account_id: mover.to_string(),
-    };
-    let apps: Vec<_> = record
-        .apps
-        .found
-        .iter()
-        .filter(|a| a.owner == owner || a.owner == Owner::Shared)
-        .cloned()
-        .collect();
-    pctwin_fullmove::extras::here(folders, &owner, home, &apps).encode()
+    let mut x = pctwin_fullmove::extras::here(folders);
+    x.with_special(special);
+    x.encode()
 }
 
 /* ---------- The plan (M23) ---------- */
@@ -549,6 +541,7 @@ pub fn rebuild_here<R: Runtime>(
                 apps: plan.apps.clone(),
                 special: plan.special.clone(),
                 special_searched: plan.special_searched,
+                special_not_checked: plan.special_not_checked,
                 from: plan.from,
                 ..FullPlan::default()
             };

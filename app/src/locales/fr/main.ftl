@@ -2097,3 +2097,6 @@ guard-undo-remove-yourself = Supprimez-la vous-même si vous voulez
 guard-undo-plan-remove-yourself = Vous pouvez la supprimer dans les paramètres de votre ordinateur
 guard-undo-result-remove-yourself = À supprimer vous-même dans les paramètres de votre ordinateur
 guard-undo-close = Terminé
+move-wait-appdata-title = Examen des données de vos applications.
+move-wait-appdata-body = Vos fichiers sont trouvés. PCTwin examine encore les données que gardent vos applications, comme les e-mails et les navigateurs. Cela prend dix minutes au plus. Rien n’est modifié sur cet ordinateur.
+fullmove-special-not-checked = Données d’applications que PCTwin n’a pas pu vérifier entièrement

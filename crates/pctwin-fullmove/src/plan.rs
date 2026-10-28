@@ -68,6 +68,9 @@ pub enum Title {
 /// The special categories this version does not move yet, as one line.
 pub const SPECIAL_NOT_YET: &str = "fullmove-special-not-yet";
 
+/// App data places 2.5 could not fully check, as one line.
+pub const SPECIAL_NOT_CHECKED: &str = "fullmove-special-not-checked";
+
 /// One change on the approval screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,6 +155,8 @@ pub struct FullPlan {
     pub special_searched: bool,
     /// Things 2.5 found there and does not move, counted.
     pub special_not_moved: u64,
+    /// Places 2.5 could not fully check there, counted.
+    pub special_not_checked: u64,
     /// The old laptop's kind of system; `None` when it sent no extras (an older PCTwin).
     pub from: Option<System>,
     /// The extras exactly as they arrived ([`crate::extras::digest`]).
@@ -307,6 +312,7 @@ impl FullPlan {
                 special: x.special.clone(),
                 special_searched: x.special_searched,
                 special_not_moved: x.special_not_moved,
+                special_not_checked: x.special_not_checked,
                 from: Some(x.system),
                 extras_digest: Some(digest),
                 ..Self::default()
@@ -363,6 +369,7 @@ impl FullPlan {
             special: x.special.clone(),
             special_searched: x.special_searched,
             special_not_moved: x.special_not_moved,
+            special_not_checked: x.special_not_checked,
             from: Some(x.system),
             extras_digest: Some(digest),
             settings,
@@ -428,6 +435,18 @@ impl FullPlan {
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
         // silent.
+        if self.special_not_checked > 0 {
+            out.push(Change {
+                title: Title::Key(SPECIAL_NOT_CHECKED),
+                kind: Kind::Special,
+                action: Action::LeaveAlone,
+                undo: Promise::MustKeep,
+                count: self.special_not_checked,
+                needs: Some(Reason::FinishByHand),
+                special: Some(SpecialStep::LookAtIt),
+                files: 0,
+            });
+        }
         if self.from.is_some() && !self.special_searched {
             out.push(Change {
                 title: Title::Key(SPECIAL_NOT_YET),

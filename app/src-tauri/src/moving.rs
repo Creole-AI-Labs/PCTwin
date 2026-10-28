@@ -517,6 +517,9 @@ pctwin_types::listed_enum! {
         /// The new laptop, after the files: apps, settings and special categories (the full
         /// move), with their progress in `move-rebuild`.
         Rebuilding,
+        /// The old laptop: the files are found; the app data scan is finishing (within its
+        /// time budget).
+        AppData,
     }
 }
 
@@ -1864,6 +1867,19 @@ async fn run_old<R: Runtime>(
     })
     .await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
+    // The full move: the signed-in person's app data (2.5) is looked at beside the files, read
+    // only, with its own time budget.
+    let special = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .and_then(|me| {
+            pctwin_fullmove::extras::SpecialScan::start(
+                &Owner::Person {
+                    account_id: me.account_id,
+                },
+                &me.home,
+            )
+        });
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
         let _ = app.emit(
@@ -1957,14 +1973,22 @@ async fn run_old<R: Runtime>(
     // Phase 2.1, discovery first: every app on this laptop, with who made each, and the
     // installers in this move its own maker signed. Read only; nothing is run.
     record.apps = old_laptop_apps(&sweep.census, &record, &roots);
-    // The full move: the mover's settings and special categories, read only, sent with the list.
-    let home = sweep
-        .census
-        .residents
-        .iter()
-        .find(|r| r.account_id.as_deref() == Some(mover.as_str()))
-        .and_then(|r| r.home.clone());
-    let extras = crate::fullmove::extras_here(&mover, home.as_deref(), &record);
+    // The full move: the mover's settings, and their app data once its scan is done (or its time
+    // is up), read only, sent with the list. Only the signed-in person's app data is looked at.
+    let special = match special {
+        Some(scan) => match scan.ready() {
+            Some(found) => Some(found),
+            None => {
+                let _ = app.emit(STAGE_EVENT, Stage::AppData);
+                scan.wait(&|| scan_stop.load(Ordering::Acquire))
+            }
+        },
+        None => None,
+    };
+    if scan_stop.load(Ordering::Acquire) {
+        return Err(Stop::Cancelled.into());
+    }
+    let extras = crate::fullmove::extras_here(special);
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,

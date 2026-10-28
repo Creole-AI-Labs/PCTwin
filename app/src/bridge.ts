@@ -254,7 +254,7 @@ export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed"
 export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 
 /** What the move is at before files move (`Stage`): `administrator` while the system's approval prompt is up (M25). */
-export type WaitStage = "scanning" | "waiting" | "moving" | "administrator";
+export type WaitStage = "scanning" | "waiting" | "moving" | "administrator" | "app-data";
 
 /** Why the other people ticked were not moved this time (`OthersWhy`). */
 export const OTHERS_WHY = ["not-approved", "failed", "not-here", "allow-in-settings"] as const;
@@ -426,7 +426,7 @@ export function parseMoveStage(value: unknown): MoveStage | null {
     return f && oneOf(f.why, OTHERS_WHY) ? { kind, why: f.why } : null;
   }
   if (kind === "rebuilding") return exactly(value, ["kind"]) ? { kind } : null;
-  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator"] as const);
+  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator", "app-data"] as const);
 }
 
 export function parsePeopleHere(value: unknown): PeopleHere | null {

@@ -1793,3 +1793,6 @@ guard-undo-remove-yourself = 如有需要请自行删除
 guard-undo-plan-remove-yourself = 你可以在电脑的设置中删除它
 guard-undo-result-remove-yourself = 留给你在电脑的设置中删除
 guard-undo-close = 完成
+move-wait-appdata-title = 正在查看你的应用数据。
+move-wait-appdata-body = 已找到你的文件。PCTwin 仍在查看你的应用保存的数据，例如邮件和浏览器。最多需要十分钟。这台电脑上不会做任何更改。
+fullmove-special-not-checked = PCTwin 未能完全检查的应用数据

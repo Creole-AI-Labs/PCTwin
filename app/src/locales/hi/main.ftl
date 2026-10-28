@@ -2028,3 +2028,6 @@ guard-undo-remove-yourself = चाहें तो इसे खुद हट�
 guard-undo-plan-remove-yourself = आप इसे अपने लैपटॉप की सेटिंग्स में हटा सकते हैं
 guard-undo-result-remove-yourself = आपके हटाने के लिए छोड़ा गया, लैपटॉप की सेटिंग्स में
 guard-undo-close = हो गया
+move-wait-appdata-title = आपके ऐप डेटा को देखा जा रहा है।
+move-wait-appdata-body = आपकी फ़ाइलें मिल गई हैं। PCTwin अभी आपके ऐप्स का रखा डेटा देख रहा है, जैसे ईमेल और ब्राउज़र। इसमें ज़्यादा से ज़्यादा दस मिनट लगते हैं। इस लैपटॉप पर कुछ नहीं बदलता।
+fullmove-special-not-checked = ऐप डेटा जिसे PCTwin पूरी तरह जाँच नहीं सका

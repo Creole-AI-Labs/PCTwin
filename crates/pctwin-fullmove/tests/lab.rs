@@ -371,15 +371,16 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             path: old_docs.display().to_string(),
         }],
     );
-    let (special, special_not_moved) =
-        pctwin_fullmove::extras::special_here(&mover(), old.path(), &record.apps.found);
+    // The 2.5 scan runs beside the files' scan, with its own budget.
+    let scan = pctwin_fullmove::extras::SpecialScan::start(&mover(), old.path()).unwrap();
+    let found = scan.wait(&|| false);
     assert!(
-        special.iter().any(|s| s.name.contains("LabMail")),
-        "2.5 found the app's data: {special:#?}"
+        found
+            .as_ref()
+            .is_some_and(|f| f.lines.iter().any(|s| s.name.contains("LabMail"))),
+        "2.5 found the app's data: {found:#?}"
     );
-    extras.special = special;
-    extras.special_searched = true;
-    extras.special_not_moved = special_not_moved;
+    extras.with_special(found);
     let extras_bytes = extras.encode();
 
     // The new laptop: its folders, one of the apps already, and a value of its own.

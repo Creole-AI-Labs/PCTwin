@@ -467,6 +467,12 @@ pub fn rebuild(
             (Title::Name(s.name.clone()), r)
         })
         .collect();
+    if plan.special_not_checked > 0 {
+        special.push((
+            Title::Key(crate::plan::SPECIAL_NOT_CHECKED),
+            ItemResult::because(Reason::FinishByHand),
+        ));
+    }
     if plan.from.is_some() && !plan.special_searched {
         special.push((
             Title::Key(SPECIAL_NOT_YET),

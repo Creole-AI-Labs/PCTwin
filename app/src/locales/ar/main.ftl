@@ -2311,3 +2311,6 @@ guard-undo-remove-yourself = أزله بنفسك إن أردت
 guard-undo-plan-remove-yourself = يمكنك إزالته من إعدادات حاسوبك
 guard-undo-result-remove-yourself = متروك لك لإزالته من إعدادات حاسوبك
 guard-undo-close = تم
+move-wait-appdata-title = جارٍ الاطلاع على بيانات تطبيقاتك.
+move-wait-appdata-body = عُثر على ملفاتك. ما زال PCTwin يطّلع على البيانات التي تحفظها تطبيقاتك، مثل البريد والمتصفحات. يستغرق ذلك عشر دقائق على الأكثر. لا يتغيّر شيء على هذا الحاسوب.
+fullmove-special-not-checked = بيانات تطبيقات لم يتمكن PCTwin من فحصها بالكامل

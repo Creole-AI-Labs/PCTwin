@@ -148,6 +148,9 @@ pub struct Extras {
     /// Things 2.5 found and does not move (caches, the system's own), counted.
     #[serde(default)]
     pub special_not_moved: u64,
+    /// Places 2.5 could not fully check, counted.
+    #[serde(default)]
+    pub special_not_checked: u64,
 }
 
 /// Why the old laptop's extras were refused.
@@ -177,6 +180,7 @@ impl Extras {
             special: Vec::new(),
             special_searched: false,
             special_not_moved: 0,
+            special_not_checked: 0,
         }
     }
 
@@ -266,6 +270,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         special: Vec::new(),
         special_searched: false,
         special_not_moved: 0,
+        special_not_checked: 0,
     }
 }
 
@@ -277,7 +282,7 @@ pub fn special_here(
     owner: &pctwin_record::Owner,
     home: &std::path::Path,
     apps: &[pctwin_record::FoundApp],
-) -> (Vec<SpecialLine>, u64) {
+) -> SpecialFound {
     use pctwin_special::component::Custody;
     let system = pctwin_special::roots::System::here();
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
@@ -302,7 +307,91 @@ pub fn special_here(
         })
         .collect();
     lines.truncate(MAX_SPECIAL);
-    (lines, plan.not_moved.len() as u64)
+    // What 2.5 could not fully check (out of time, no answer, unreadable) is said, never dropped.
+    let not_checked = plan
+        .not_moved
+        .iter()
+        .filter(|n| n.why.contains("not fully checked"))
+        .count()
+        + plan.coverage.unreadable.len();
+    SpecialFound {
+        lines,
+        not_moved: plan.not_moved.len() as u64,
+        not_checked: not_checked as u64,
+    }
+}
+
+/// What 2.5 found on the old laptop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpecialFound {
+    pub lines: Vec<SpecialLine>,
+    /// Found and not moved (caches, the system's own).
+    pub not_moved: u64,
+    /// Places not fully checked (out of time, no answer, unreadable).
+    pub not_checked: u64,
+}
+
+/// The special-category scan, running beside the scan of files and people.
+pub struct SpecialScan {
+    rx: std::sync::mpsc::Receiver<SpecialFound>,
+    until: std::time::Instant,
+}
+
+impl SpecialScan {
+    /// Starts looking at `owner`'s app data in `home` (read only), on a thread of its own, with
+    /// [`SPECIAL_BUDGET`] in all from now.
+    pub fn start(owner: &pctwin_record::Owner, home: &std::path::Path) -> Option<Self> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (owner, home) = (owner.clone(), home.to_path_buf());
+        std::thread::Builder::new()
+            .name("pctwin-special-scan".into())
+            .spawn(move || {
+                let _ = tx.send(special_here(&owner, &home, &[]));
+            })
+            .ok()?;
+        Some(Self {
+            rx,
+            until: std::time::Instant::now() + SPECIAL_BUDGET,
+        })
+    }
+
+    /// Whether it has finished (never waits).
+    pub fn ready(&self) -> Option<SpecialFound> {
+        self.rx.try_recv().ok()
+    }
+
+    /// Its answer, waiting at most until its budget runs out (`None`: not in time; the reading
+    /// carries on, read only, and its answer is not used). `stopped` ends the wait early.
+    pub fn wait(self, stopped: &dyn Fn() -> bool) -> Option<SpecialFound> {
+        loop {
+            let left = self
+                .until
+                .saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() || stopped() {
+                return self.rx.try_recv().ok();
+            }
+            match self
+                .rx
+                .recv_timeout(left.min(std::time::Duration::from_millis(500)))
+            {
+                Ok(found) => return Some(found),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return None,
+            }
+        }
+    }
+}
+
+impl Extras {
+    /// Adds what the special-category scan found (`None`: it did not finish in time).
+    pub fn with_special(&mut self, found: Option<SpecialFound>) {
+        if let Some(f) = found {
+            self.special = f.lines;
+            self.special_searched = true;
+            self.special_not_moved = f.not_moved;
+            self.special_not_checked = f.not_checked;
+        }
+    }
 }
 
 /// This laptop's kind of system, as settings know it.
@@ -317,13 +406,9 @@ pub fn this_system() -> System {
 }
 
 /// The old laptop: reads (only reads) every setting in the signed-in person's own settings
-/// stores, with the person's `folders` here.
-pub fn here(
-    folders: Vec<OldFolder>,
-    owner: &pctwin_record::Owner,
-    home: Option<&std::path::Path>,
-    apps: &[pctwin_record::FoundApp],
-) -> Extras {
+/// stores, with the person's `folders` here. The special categories are added from their own
+/// scan ([`SpecialScan`], [`Extras::with_special`]).
+pub fn here(folders: Vec<OldFolder>) -> Extras {
     let system = this_system();
     #[cfg(windows)]
     let found = pctwin_settings::found::discover_registry(
@@ -337,32 +422,12 @@ pub fn here(
     let found = pctwin_settings::found::discover_dconf(
         &mut pctwin_settings::mechanism::Mechanisms::real(System::Gnome),
     );
-    let mut x = from_discovery(system, found, folders);
-    if let Some(home) = home {
-        // Looking for the special categories reads app data folders, which can be large: it gets
-        // a time budget. If it does not finish in time, nothing is listed from it and the plan
-        // says the special categories were not moved (the reading carries on, read only, and its
-        // answer is not used).
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (owner, home, apps) = (owner.clone(), home.to_path_buf(), apps.to_vec());
-        let spawned = std::thread::Builder::new()
-            .name("pctwin-special-scan".into())
-            .spawn(move || {
-                let _ = tx.send(special_here(&owner, &home, &apps));
-            });
-        if spawned.is_ok()
-            && let Ok((special, not_moved)) = rx.recv_timeout(SPECIAL_BUDGET)
-        {
-            x.special = special;
-            x.special_searched = true;
-            x.special_not_moved = not_moved;
-        }
-    }
-    x
+    from_discovery(system, found, folders)
 }
 
-/// How long looking for the special categories may take on the old laptop.
-pub const SPECIAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(90);
+/// How long looking for the special categories may take on the old laptop in all, from when the
+/// move starts (2.5's own budgets: 10 s per read, 120 s per app folder, 600 s per kind of root).
+pub const SPECIAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(600);
 
 #[cfg(test)]
 mod tests {

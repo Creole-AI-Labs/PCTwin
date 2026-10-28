@@ -153,6 +153,7 @@ fn stages() -> Vec<Stage> {
             why: OthersWhy::AllowInSettings,
         },
         Stage::Rebuilding,
+        Stage::AppData,
     ]
 }
 
