@@ -25,6 +25,7 @@ export default function History({
   exported,
   onOpen,
   onContinue,
+  onUndo,
   onExport,
   onStart,
   onBack,
@@ -33,6 +34,8 @@ export default function History({
   exported?: ExportResult;
   onOpen: (id: string) => void;
   onContinue: (id: string) => void;
+  /** Undo a past move's apps and settings, by its undo book. */
+  onUndo?: (undoId: string) => void;
   onExport: () => void;
   onStart: () => void;
   onBack: () => void;
@@ -88,6 +91,17 @@ export default function History({
                       }}
                     >
                       {l10n.getString("history-continue")}
+                    </Button>
+                  )}
+                  {e.undoId && onUndo && (
+                    <Button
+                      variant="quiet"
+                      aria-label={l10n.getString("history-open-name", { what: l10n.getString("history-undo"), title: title(e) })}
+                      onClick={() => {
+                        if (e.undoId) onUndo(e.undoId);
+                      }}
+                    >
+                      {l10n.getString("history-undo")}
                     </Button>
                   )}
                   <Button

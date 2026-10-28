@@ -1306,6 +1306,7 @@ history-status-steps-left =
 history-status-paused = 已暂停
 history-status-stopped = 已安全停止
 history-open-report = 报告
+history-undo = 撤销
 history-continue = 继续
 history-export = 导出历史记录
 history-exported = 历史记录已保存为{ $path }。

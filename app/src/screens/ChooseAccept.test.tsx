@@ -14,6 +14,7 @@ import { violations } from "../testing/a11y";
 import AcceptMove from "./AcceptMove";
 import { RouteStrip } from "./ProgressParts";
 import Outcome from "./Outcome";
+import History from "./History";
 import outcomes from "../contract/move-outcome.json";
 import { parseMoveOutcome } from "../bridge";
 import ChooseWhat, { choiceOf, keyOf, stateOf } from "./ChooseWhat";
@@ -143,6 +144,31 @@ describe("where things landed", () => {
     inApp(<Outcome outcome={outcome} onReport={vi.fn()} />);
     expect(screen.getByText(text("outcome-landed-title"))).toBeTruthy();
     expect(screen.getByText(outcome.landed[0].folder)).toBeTruthy();
+  });
+});
+
+describe("undo from the history", () => {
+  it("a past move that can be undone offers Undo, by its own undo book; one that cannot, does not", () => {
+    const onUndo = vi.fn();
+    const base = { kind: "move", when: "2026-10-28T20:22:00Z", from: "Amun", to: "Ada", state: "finished" } as const;
+    inApp(
+      <History
+        entries={[
+          { ...base, id: "1", undoId: "0123456789abcdef0123456789abcdef" },
+          { ...base, id: "2", when: "2026-10-27T20:22:00Z" },
+        ]}
+        onOpen={vi.fn()}
+        onContinue={vi.fn()}
+        onUndo={onUndo}
+        onExport={vi.fn()}
+        onStart={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    const undo = screen.getAllByRole("button", { name: (n) => n.includes(text("history-undo")) });
+    expect(undo).toHaveLength(1);
+    fireEvent.click(undo[0]);
+    expect(onUndo).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
   });
 });
 

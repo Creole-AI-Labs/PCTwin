@@ -1048,19 +1048,22 @@ export type HistoryEntryRaw = {
   other: Label | null;
   /** The new laptop's name, when known. */
   newName: Label | null;
+  /** The move's undo book, when its apps and settings can be undone. */
+  undoId: string | null;
   state: "finished" | "steps-left" | "stopped";
   stepsLeft: number;
 };
 
 export function parseHistoryEntry(value: unknown): HistoryEntryRaw | null {
-  const f = exactly(value, ["id", "kind", "when", "other", "newName", "state", "stepsLeft"]);
+  const f = exactly(value, ["id", "kind", "when", "other", "newName", "undoId", "state", "stepsLeft"]);
   if (!f || typeof f.id !== "string" || typeof f.when !== "string" || !isCount(f.stepsLeft)) return null;
   if (!oneOf(f.kind, ["move"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped"] as const)) return null;
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
   const newName = f.newName === null ? null : parseLabelView(f.newName);
   if (f.newName !== null && newName === null) return null;
-  return { id: f.id, kind: f.kind, when: f.when, other, newName, state: f.state, stepsLeft: f.stepsLeft };
+  if (f.undoId !== null && !(typeof f.undoId === "string" && /^[0-9a-f]{32}$/.test(f.undoId))) return null;
+  return { id: f.id, kind: f.kind, when: f.when, other, newName, undoId: f.undoId, state: f.state, stepsLeft: f.stepsLeft };
 }
 
 /** What an entry kept: the move's report. */

@@ -1724,6 +1724,7 @@ history-status-steps-left =
 history-status-paused = متوقف مؤقتًا
 history-status-stopped = أُوقف بأمان
 history-open-report = التقرير
+history-undo = تراجع
 history-continue = متابعة
 history-export = تصدير السجل
 history-exported = حُفظ السجل في { $path }.

@@ -1521,6 +1521,7 @@ history-status-steps-left =
 history-status-paused = रुका हुआ
 history-status-stopped = सुरक्षित रूप से बंद
 history-open-report = रिपोर्ट
+history-undo = पहले जैसा करें
 history-continue = आगे बढ़ें
 history-export = इतिहास फ़ाइल में सहेजें
 history-exported = इतिहास { $path } में सहेजा गया।

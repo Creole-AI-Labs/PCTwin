@@ -1561,6 +1561,7 @@ history-status-steps-left =
 history-status-paused = En pausa
 history-status-stopped = Parado sin riesgo
 history-open-report = Informe
+history-undo = Deshacer
 history-continue = Continuar
 history-export = Exportar historial
 history-exported = Historial guardado como { $path }.

@@ -32,6 +32,10 @@ pub struct Entry {
     /// The new laptop's name, when known (entries before 28 October 2026 have none).
     #[serde(default)]
     pub new_name: Option<serde_json::Value>,
+    /// The new laptop: the move's undo book, when its apps and settings can be undone from the
+    /// history (asked for in the first real test, 28 October 2026).
+    #[serde(default)]
+    pub undo_id: Option<String>,
     /// "finished", "steps-left" or "stopped".
     pub state: String,
     /// A move with steps left: how many things still need the person.
@@ -117,8 +121,9 @@ pub fn rfc3339(secs: u64) -> String {
 pub fn add<R: Runtime>(
     app: &AppHandle<R>,
     kind: &str,
-    other: Option<&LabelView>,
-    new: Option<&LabelView>,
+    // The old laptop's name and the new laptop's, when known.
+    (other, new): (Option<&LabelView>, Option<&LabelView>),
+    undo_id: Option<&str>,
     state: &str,
     steps_left: u64,
     kept: &Kept,
@@ -148,6 +153,7 @@ pub fn add<R: Runtime>(
         when: now(),
         other: other.and_then(|l| serde_json::to_value(l).ok()),
         new_name: new.and_then(|l| serde_json::to_value(l).ok()),
+        undo_id: undo_id.map(str::to_string),
         state: state.to_string(),
         steps_left,
     });
@@ -298,6 +304,7 @@ mod tests {
             when: "2026-10-25T00:00:00Z".into(),
             other: None,
             new_name: None,
+            undo_id: None,
             state: "finished".into(),
             steps_left: 0,
         };
@@ -340,6 +347,7 @@ mod tests {
             when: "2026-10-25T00:00:00Z".into(),
             other: None,
             new_name: None,
+            undo_id: None,
             state: "finished".into(),
             steps_left: 0,
         };
@@ -376,6 +384,7 @@ mod tests {
             when: "2026-10-22T00:00:00Z".into(),
             other: None,
             new_name: None,
+            undo_id: None,
             state: "finished".into(),
             steps_left: 0,
         };

@@ -2917,8 +2917,8 @@ fn spawn_run<R: Runtime>(
                     crate::history::add(
                         &app,
                         "move",
-                        label.as_ref(),
-                        new_name.as_ref(),
+                        (label.as_ref(), new_name.as_ref()),
+                        outcome.rebuilt.as_ref().and_then(|r| r.undo_id.as_deref()),
                         state,
                         left,
                         &crate::history::report_kept(&report),

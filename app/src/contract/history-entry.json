@@ -10,6 +10,7 @@
     },
     "state": "steps-left",
     "stepsLeft": 2,
+    "undoId": null,
     "when": "2026-10-22T00:00:00Z"
   },
   {
@@ -19,6 +20,7 @@
     "other": null,
     "state": "finished",
     "stepsLeft": 0,
+    "undoId": null,
     "when": "2026-10-22T00:05:00Z"
   }
 ]

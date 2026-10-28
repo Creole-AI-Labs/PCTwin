@@ -1396,6 +1396,7 @@ history-status-steps-left =
 history-status-paused = Paused
 history-status-stopped = Stopped safely
 history-open-report = Report
+history-undo = Undo
 history-continue = Continue
 history-export = Export history
 history-exported = History saved as { $path }.
