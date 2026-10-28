@@ -14,7 +14,8 @@
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+#[cfg(not(windows))]
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -94,8 +95,18 @@ impl Limits {
 /// One frame from the parser, or why there was none.
 type FromChild = io::Result<Option<(u8, Vec<u8>)>>;
 
+/// The parser process itself: ended by [`Running::end`].
+enum Proc {
+    /// Started as a plain child (Linux and macOS: the parser walls itself in first thing).
+    #[cfg(not(windows))]
+    Plain(Child),
+    /// Started walled in by the system (Windows); dropping the guard ends it.
+    #[cfg(windows)]
+    Contained(pctwin_helper_os::contain::Guard),
+}
+
 struct Running {
-    child: Child,
+    child: Proc,
     to_child: Sender<(u8, Vec<u8>)>,
     from_child: Receiver<FromChild>,
     confinement: Confinement,
@@ -109,9 +120,17 @@ impl Running {
             .is_err_and(|e| e == mpsc::TryRecvError::Empty)
     }
 
-    fn end(mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    fn end(self) {
+        match self.child {
+            #[cfg(not(windows))]
+            Proc::Plain(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            // The job's last handle closes: the system ends the process.
+            #[cfg(windows)]
+            Proc::Contained(guard) => drop(guard),
+        }
     }
 }
 
@@ -244,54 +263,41 @@ impl Parser {
 
     fn start(&self) -> Result<Running, NotChecked> {
         let program = self.program.clone().map_err(NotChecked::CouldNotStart)?;
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the app's side starts the parser: the one program this crate starts"
-        )]
-        // No console window of its own (pctwin_types::process::quiet, as every program PCTwin
-        // starts).
-        let mut command = pctwin_types::process::quiet(&program);
-        command
-            .env_clear()
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        if let Some(dir) = program.parent() {
-            command.current_dir(dir);
-        }
         self.started
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut child = command
-            .spawn()
-            .map_err(|e| NotChecked::CouldNotStart(e.to_string()))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(NotChecked::CouldNotStart("no pipes".into()));
-        };
+        let (child, stdin, stdout, mut set_here) = spawn(&program)?;
         let to_child = writer(stdin);
         let from_child = reader(stdout);
         let hello = match from_child.recv_timeout(self.limits.start) {
             Ok(Ok(Some((TAG_HELLO, body)))) => json::<Hello>(&body).ok(),
             _ => None,
         };
-        let hello = match hello {
-            Some(h) if h.protocol == PROTOCOL => h,
-            other => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(NotChecked::CouldNotStart(match other {
-                    Some(_) => "it speaks another version".into(),
-                    None => "it did not say hello".into(),
-                }));
-            }
-        };
-        Ok(Running {
+        let running = |confinement| Running {
             child,
             to_child,
             from_child,
-            confinement: hello.confinement,
-        })
+            confinement,
+        };
+        match hello {
+            Some(h) if h.protocol == PROTOCOL => {
+                let mut confinement = h.confinement;
+                for wall in set_here.drain(..) {
+                    confinement.add(wall);
+                }
+                Ok(running(confinement))
+            }
+            other => {
+                running(Confinement {
+                    in_place: Vec::new(),
+                    not_yet: Vec::new(),
+                })
+                .end();
+                Err(NotChecked::CouldNotStart(match other {
+                    Some(_) => "it speaks another version".into(),
+                    None => "it did not say hello".into(),
+                }))
+            }
+        }
     }
 
     fn exchange(
@@ -390,6 +396,66 @@ impl Drop for Parser {
     }
 }
 
+type Spawned = (
+    Proc,
+    Box<dyn std::io::Write + Send>,
+    Box<dyn std::io::Read + Send>,
+    Vec<crate::lockdown::Wall>,
+);
+
+/// Windows: the parser started walled in by the system ([`pctwin_helper_os::contain`]): an
+/// AppContainer with no capabilities, a restricted token, no programs of its own, in a job that
+/// ends it with the app, allows one process and caps its memory. Never started without them:
+/// if they cannot be put up, the file is not checked. Returns the walls set here that the
+/// system accepted (the memory cap; the rest the parser reads back from its own token).
+#[cfg(windows)]
+fn spawn(program: &Path) -> Result<Spawned, NotChecked> {
+    let contained =
+        pctwin_helper_os::contain::start_contained(program, crate::lockdown::MEMORY_CAP).map_err(
+            |e| NotChecked::CouldNotStart(format!("its walls could not be put up ({e})")),
+        )?;
+    let (stdin, stdout, guard) = contained.split();
+    Ok((
+        Proc::Contained(guard),
+        Box::new(stdin),
+        Box::new(stdout),
+        vec![crate::lockdown::Wall::MemoryCap],
+    ))
+}
+
+/// Linux and macOS: the parser started plainly, with an empty environment; it walls itself in
+/// first thing, before it reads anything ([`crate::lockdown::confine_self`]).
+#[cfg(not(windows))]
+fn spawn(program: &Path) -> Result<Spawned, NotChecked> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the app's side starts the parser: the one program this crate starts"
+    )]
+    let mut command = pctwin_types::process::quiet(program);
+    command
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Some(dir) = program.parent() {
+        command.current_dir(dir);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| NotChecked::CouldNotStart(e.to_string()))?;
+    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(NotChecked::CouldNotStart("no pipes".into()));
+    };
+    Ok((
+        Proc::Plain(child),
+        Box::new(stdin),
+        Box::new(stdout),
+        Vec::new(),
+    ))
+}
+
 /// What the parser is handed: a file held open by the caller, or bytes it copied (bounded).
 #[derive(Debug, Clone, Copy)]
 pub enum Source<'a> {
@@ -453,7 +519,7 @@ fn read_piece(file: &File, offset: u64, len: usize) -> io::Result<Vec<u8>> {
 
 /// The thread that writes to the parser, so a parser that stops reading can never hold the app
 /// past its time: the app only ever waits on [`reader`]'s channel, with a deadline.
-fn writer(mut stdin: ChildStdin) -> Sender<(u8, Vec<u8>)> {
+fn writer(mut stdin: Box<dyn std::io::Write + Send>) -> Sender<(u8, Vec<u8>)> {
     let (tx, rx) = mpsc::channel::<(u8, Vec<u8>)>();
     std::thread::spawn(move || {
         for (tag, body) in rx {
@@ -467,7 +533,7 @@ fn writer(mut stdin: ChildStdin) -> Sender<(u8, Vec<u8>)> {
 
 /// The thread that reads the parser's frames, each at most [`MAX_FRAME`] (a JSON frame at most
 /// [`MAX_JSON`]).
-fn reader(mut stdout: ChildStdout) -> Receiver<FromChild> {
+fn reader(mut stdout: Box<dyn std::io::Read + Send>) -> Receiver<FromChild> {
     let (tx, rx) = mpsc::channel::<FromChild>();
     std::thread::spawn(move || {
         loop {

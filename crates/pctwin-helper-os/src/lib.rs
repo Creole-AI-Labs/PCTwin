@@ -77,6 +77,8 @@ pub mod holding;
 pub mod signin;
 
 #[cfg(windows)]
+pub mod contain;
+#[cfg(windows)]
 mod win;
 #[cfg(windows)]
 pub use win::{
@@ -114,6 +116,8 @@ mod linux;
 
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+pub use mac::{PARSER_PROFILE, sandbox_parser};
 
 /// Why a call could not be done.
 #[derive(Debug)]

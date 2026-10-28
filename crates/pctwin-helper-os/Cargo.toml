@@ -23,6 +23,8 @@ pctwin-types = { path = "../pctwin-types" }
 getrandom = "0.4.3"
 
 [target.'cfg(windows)'.dependencies]
+# The parser's AppContainer: its profile, its SID and letting it read a test build (MIT).
+rappct = "0.13.3"
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_NetManagement",
@@ -34,6 +36,7 @@ windows = { version = "0.62.2", features = [
     "Win32_Security_WinTrust",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    "Win32_System_JobObjects",
     "Win32_System_Ioctl",
     "Win32_System_Pipes",
     "Win32_System_Registry",

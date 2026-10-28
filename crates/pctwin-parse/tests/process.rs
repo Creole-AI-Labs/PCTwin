@@ -143,16 +143,75 @@ fn the_process_says_how_it_is_locked_down() {
     let c = p.confinement().unwrap();
     for wall in [
         Wall::OwnProcess,
-        Wall::EmptyEnvironment,
         Wall::ReadsOnlyWhatItIsHanded,
         Wall::BoundedRequests,
+        Wall::NoChildProcesses,
     ] {
-        assert!(c.in_place.contains(&wall), "{wall:?} in place");
+        assert!(c.in_place.contains(&wall), "{wall:?} in place: {c:?}");
     }
-    // What waits for approval is said, never claimed.
-    for wall in [Wall::NoNetwork, Wall::NoFileSystem, Wall::LowRights] {
-        assert!(c.not_yet.contains(&wall) && !c.in_place.contains(&wall));
+    #[cfg(windows)]
+    for wall in [
+        Wall::NoNetwork,
+        Wall::NoPersonalFiles,
+        Wall::LowRights,
+        Wall::MemoryCap,
+    ] {
+        assert!(c.in_place.contains(&wall), "{wall:?} in place: {c:?}");
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    for wall in [Wall::NoNetwork, Wall::NoFileSystem, Wall::NoPersonalFiles] {
+        assert!(c.in_place.contains(&wall), "{wall:?} in place: {c:?}");
+    }
+    // Every wall is either in place or said not to be, never both.
+    for wall in pctwin_parse::lockdown::SYSTEM_WALLS {
+        assert!(
+            c.in_place.contains(&wall) != c.not_yet.contains(&wall),
+            "{wall:?}: {c:?}"
+        );
+    }
+    // Windows: the container needs Windows' own environment values, so it is not empty and
+    // the parser does not say it is.
+    #[cfg(windows)]
+    assert!(!c.in_place.contains(&Wall::EmptyEnvironment));
+}
+
+/// The walls hold: code inside the parser process that tries to open one of the person's files,
+/// reach a server on this laptop, or start a program, is refused by the system (the test double
+/// runs the same walls and tries each; size 8).
+#[test]
+fn inside_the_walls_no_file_no_socket_no_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let secret = dir.path().join("secret.txt");
+    std::fs::write(&secret, b"the person's own file").unwrap();
+    assert!(std::fs::read(&secret).is_ok(), "the app itself can read it");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(),
+        "the app itself can reach it"
+    );
+    let ask = format!("{}\n{port}\n", secret.display());
+    let padded = ask.into_bytes();
+    assert!(padded.len() >= 8);
+    let (_, f) = file_of(&dir, "ask", &padded);
+    let p = double();
+    let Answer::Font(tried) = p
+        .ask(
+            Request::Font {
+                size: padded.len() as u64,
+            },
+            &f,
+        )
+        .unwrap()
+    else {
+        panic!("a font answer");
+    };
+    assert_eq!(
+        tried.families,
+        ["file refused", "socket refused", "program refused"],
+        "what the parser could do inside its walls"
+    );
+    drop(listener);
 }
 
 #[test]

@@ -906,6 +906,11 @@ version = "1.0.1"
 criteria = "safe-to-deploy"
 notes = "Not reviewed yet: new in Phase 2, pctwin-journal keeps the journal's tag key in the system's own credential store through it (Windows Credential Manager, macOS Keychain). Exempted so cargo vet passes; review before the Phase 2 release."
 
+[[exemptions.landlock]]
+version = "0.4.7"
+criteria = "safe-to-deploy"
+notes = "Not reviewed yet: new in Phase 2. The parser process walls itself in on Linux with it: Landlock with no rule (approved by the user, 28 October 2026). Maintained by the Landlock project; MIT or Apache-2.0. Exempted so cargo vet passes; review before the Phase 2 release."
+
 [[exemptions.lazycell]]
 version = "1.3.0"
 criteria = "safe-to-deploy"
@@ -1246,6 +1251,11 @@ criteria = "safe-to-deploy"
 version = "6.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rappct]]
+version = "0.13.3"
+criteria = "safe-to-deploy"
+notes = "Not reviewed yet: new in Phase 2. The parser process on Windows: its AppContainer profile and SID, and reading its own token back (approved by the user, 28 October 2026). MIT. The start itself is PCTwin own fenced call in pctwin-helper-os."
+
 [[exemptions.redb]]
 version = "4.4.0"
 criteria = "safe-to-deploy"
@@ -1371,6 +1381,11 @@ criteria = "safe-to-deploy"
 [[exemptions.scopeguard]]
 version = "1.2.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.seccompiler]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Not reviewed yet: new in Phase 2. The parser process walls itself in on Linux with it: a seccomp filter refusing socket, connect, execve and execveat (approved by the user, 28 October 2026). From the Firecracker project; Apache-2.0."
 
 [[exemptions.selectors]]
 version = "0.38.0"

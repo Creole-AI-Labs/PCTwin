@@ -20,6 +20,24 @@ path = "src/bin/test-double.rs"
 test = false
 doc = false
 
+# The parser's walls (approved by the user, 28 October 2026; src/lockdown.rs).
+[target.'cfg(windows)'.dependencies]
+# Started in an AppContainer, with a restricted token, in a job (the fenced system calls).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+# Its own token, read from inside: whether it really is in the container, with no capabilities.
+rappct = "0.13.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# No file system at all (no rules), after no_new_privs.
+landlock = "0.4"
+# No sockets and no programs started.
+seccompiler = "0.5"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Seatbelt (the fenced sandbox_init).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+
 [features]
 # For other crates' tests: finds (and if needed builds) the real parser program.
 test-support = []

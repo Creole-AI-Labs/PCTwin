@@ -26,7 +26,7 @@ use pctwin_special::roots::{System, find_folders, roots_of};
 
 fn cks(s: (u32, u32), data: &[u8]) -> (u32, u32) {
     let (mut s0, mut s1) = s;
-    for w in data.chunks_exact(8) {
+    for w in data.as_chunks::<8>().0 {
         s0 = s0
             .wrapping_add(u32::from_le_bytes(w[..4].try_into().unwrap()))
             .wrapping_add(s1);
