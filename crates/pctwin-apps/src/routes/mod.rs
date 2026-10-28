@@ -391,6 +391,13 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
                 plan.flags.push(Flag::OlderHere {
                     version: version.clone(),
                 });
+                // The routes the person may choose to update it by ("Update it"): worked out as
+                // for an app that is not here, never used unless they choose; the app stays as
+                // it is by default.
+                let fresh = self::plan(app, target, &Here::Absent, hints);
+                if fresh.disposition == Disposition::Install {
+                    plan.routes = fresh.routes;
+                }
             } else {
                 plan.flags.push(Flag::AlreadyHere {
                     version: version.clone(),
