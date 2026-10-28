@@ -489,12 +489,18 @@ fn f3_an_inherited_or_shared_access_list_is_not_private() {
     // made for such a person reads back naming `LA` / `LG` (GitHub's runners run as `LA`).
     let admin = "S-1-5-21-1-2-3-500";
     assert!(private_sddl("D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", admin));
-    assert!(private_sddl("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LG)", "S-1-5-21-1-2-3-501"));
+    assert!(private_sddl(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LG)",
+        "S-1-5-21-1-2-3-501"
+    ));
     // ... and never for anyone else: not for a person with another number, not twice, not as a
     // group's short name.
     assert!(!private_sddl("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", me));
     assert!(!private_sddl("D:P(A;OICI;FA;;;LG)(A;OICI;FA;;;SY)", admin));
-    assert!(!private_sddl("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", "S-1-5-32-500"));
+    assert!(!private_sddl(
+        "D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)",
+        "S-1-5-32-500"
+    ));
     assert!(!private_sddl(
         &format!("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;{admin})(A;OICI;FA;;;SY)"),
         admin
