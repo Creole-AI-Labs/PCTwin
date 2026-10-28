@@ -4,6 +4,7 @@ import { Attention, Check } from "../icons";
 import { KINDS, formatBytes, pageLocale, type MoveOutcome } from "../move";
 import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
+import { RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import { shownName } from "../names";
@@ -20,7 +21,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * documents) that the plan held, with how many arrived copied and checked, counted the way the
  * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
-export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void }) {
+export default function Outcome({ outcome, onReport, onHome, onUndo }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   // A move that ended early on its own (something went wrong between the laptops) never says the person stopped it.
@@ -48,7 +49,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
       <Metrics
         items={[
           { value: formatBytes(outcome.bytesChecked, pageLocale()), label: l10n.getString("outcome-metric-size") },
-          { value: needsAction.toLocaleString(pageLocale()), label: l10n.getString("outcome-metric-action") },
+          { value: (needsAction + rebuiltNeedsAction(outcome.rebuilt)).toLocaleString(pageLocale()), label: l10n.getString("outcome-metric-action") },
         ]}
       />
       <RowList>
@@ -98,6 +99,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
         </div>
       )}
       <AfterMoveCheck outcome={outcome} />
+      {outcome.rebuilt && <RebuiltSection rebuilt={outcome.rebuilt} onUndo={onUndo} />}
       <FrameFooter>
         {onHome && (
           <Button variant="quiet" onClick={onHome}>

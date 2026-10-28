@@ -17,6 +17,8 @@ mod contract;
 // exercised by their tests only.
 #[allow(dead_code)]
 mod guard;
+// The full move: apps, settings and special categories joined to the move (Phase 2 joining).
+mod fullmove;
 #[cfg(test)]
 mod guard_examples;
 #[allow(dead_code)]
@@ -247,6 +249,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         laptop_name::laptop_name_type,
         guard::guard_view,
         guard::guard_intent,
+        fullmove::fullmove_undo,
     ]
 }
 
@@ -281,6 +284,8 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .manage(quicksend::new_state())
         .manage(laptop_name::new_state())
         .manage(guard::new_state())
+        // The Phase 2 role keys, made once as the program starts (pctwin-grant).
+        .manage(fullmove::new_state().expect("the role keys are made once, as PCTwin starts"))
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens

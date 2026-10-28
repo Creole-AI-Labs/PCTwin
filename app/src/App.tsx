@@ -158,9 +158,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
           setScreen((s) => (s.id === "help" ? s : { id: "help", from: s }));
         };
   const startMove = () => {
-    // The full move opens only in builds made with it switched on (VITE_PCTWIN_FULL_MOVE=1);
-    // until it is ready for people to use, it is a coming-soon page like restore and rescue.
-    setScreen(import.meta.env.VITE_PCTWIN_FULL_MOVE === "1" ? { id: "role" } : { id: "soon", which: "move" });
+    // The full move: files, people, apps, settings and app data (switched on for everyone, 28 October 2026).
+    setScreen({ id: "role" });
   };
 
   const choose = (code: LanguageCode) => {

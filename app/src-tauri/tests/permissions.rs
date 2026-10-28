@@ -32,7 +32,7 @@ use tauri::{App, WebviewUrl, WebviewWindow};
 /// Exactly what the screens may call, 46 names: the app's forty-three commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 58] = [
+const SCREENS_MAY_CALL: [&str; 59] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -88,6 +88,7 @@ const SCREENS_MAY_CALL: [&str; 58] = [
     "laptop_name_type",
     "guard_view",
     "guard_intent",
+    "fullmove_undo",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",

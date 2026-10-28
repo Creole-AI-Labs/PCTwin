@@ -2,6 +2,7 @@ import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
 import { useSettle } from "../motion/screen";
 import {
+  fullmoveUndo,
   helpCode,
   listenMove,
   moveApprove,
@@ -54,6 +55,9 @@ import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
+import { Rebuilding } from "./FullMoveParts";
+import UndoHost from "./UndoHost";
+import type { RebuildStep } from "../fullmove";
 import StopMove from "./StopMove";
 
 /** What the move page shows now. */
@@ -75,7 +79,11 @@ type View =
   /** The laptops could not find each other again: the move ended, what moved is kept (C10). */
   | { kind: "link-ended"; link: LinkEnded }
   /** What moved before the connection ended for good, from the C10 dialog. */
-  | { kind: "moved"; link: LinkEnded; items: ReportItem[] };
+  | { kind: "moved"; link: LinkEnded; items: ReportItem[] }
+  /** The new laptop, after the files: apps, settings and special categories being set up. */
+  | { kind: "rebuilding"; step: RebuildStep | null }
+  /** Undo of the full move's apps and settings, through the flow guard (R05, R06). */
+  | { kind: "undo"; outcome: MoveOutcome };
 
 type Waiting = Extract<ConnectionView, { kind: "waiting" }>;
 type LinkEnded = Extract<ConnectionView, { kind: "ended" }>;
@@ -133,13 +141,23 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "reconnecting":
     case "link-ended":
     case "moved":
+    case "rebuilding":
       return "moving";
+    case "undo":
+      return "finished";
   }
 }
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
-  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved") return view;
+  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo") return view;
+  // After the files, the full move sets up apps and settings: only its own steps, the outcome or a problem move the page on.
+  if (view.kind === "rebuilding") {
+    if (event.kind === "rebuild") return { kind: "rebuilding", step: event.step };
+    if (event.kind === "finished") return { kind: "outcome", outcome: event.outcome };
+    if (event.kind === "problem") return { kind: "end", end: { kind: "ended", why: event.problem } };
+    return view;
+  }
   switch (event.kind) {
     case "link":
       // Waiting for the other laptop takes the page until connected again (then the progress
@@ -150,6 +168,7 @@ export function next(view: View, event: MoveEvent): View {
     case "stage":
       // Others not moved is a note, not a page of its own.
       if (event.stage.kind === "others-not-moved") return view;
+      if (event.stage.kind === "rebuilding") return { kind: "rebuilding", step: null };
       return view.kind === "wait" ? { kind: "wait", stage: event.stage.kind } : view;
     case "plan":
       return { kind: "plan", plan: event.plan };
@@ -167,6 +186,8 @@ export function next(view: View, event: MoveEvent): View {
       return { kind: "outcome", outcome: event.outcome };
     case "problem":
       return { kind: "end", end: { kind: "ended", why: event.problem } };
+    case "rebuild":
+      return { kind: "rebuilding", step: event.step };
   }
 }
 
@@ -563,6 +584,29 @@ export default function MoveHost({
             );
           }}
           onHome={onHome}
+          onUndo={
+            view.outcome.rebuilt?.canUndo
+              ? () => {
+                  const outcome = view.outcome;
+                  fullmoveUndo().then(
+                    () => {
+                      setView({ kind: "undo", outcome });
+                    },
+                    () => undefined,
+                  );
+                }
+              : undefined
+          }
+        />
+      );
+    case "rebuilding":
+      return <Rebuilding step={view.step} />;
+    case "undo":
+      return (
+        <UndoHost
+          onClosed={() => {
+            setView({ kind: "outcome", outcome: view.outcome });
+          }}
         />
       );
     case "report":

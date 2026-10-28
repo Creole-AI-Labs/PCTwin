@@ -59,6 +59,7 @@
     "allow-laptop-name-type",
     "allow-guard-view",
     "allow-guard-intent",
+    "allow-fullmove-undo",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     {

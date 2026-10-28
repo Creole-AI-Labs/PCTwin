@@ -1,0 +1,15 @@
+[
+  {
+    "step": "permission"
+  },
+  {
+    "done": 1,
+    "step": "apps",
+    "total": 3
+  },
+  {
+    "done": 40,
+    "step": "settings",
+    "total": 120
+  }
+]

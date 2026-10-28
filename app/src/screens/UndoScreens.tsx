@@ -67,6 +67,7 @@ export function UndoPreview({ screen }: { screen: Extract<ScreenView, { kind: "u
 }
 
 export function UndoDone({ screen }: { screen: Extract<ScreenView, { kind: "undo-done" }> }) {
+  const { l10n } = useLocalization();
   const { view } = useGuard();
   const details = screen.lines.filter((l) => l.detail !== null);
   const working = view.display === "working" || view.display === "applying";
@@ -94,6 +95,9 @@ export function UndoDone({ screen }: { screen: Extract<ScreenView, { kind: "undo
           </ul>
         </MoreDetails>
       )}
+      <div className="fm-undo">
+        <IntentButton intent={{ kind: "back" }} variant="primary" label={l10n.getString("guard-undo-close")} />
+      </div>
     </>
   );
 }

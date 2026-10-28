@@ -8,6 +8,17 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** the last pieces of this stage, independent reviews of the newest parts, then one full test run before it is merged.
 
+## 28 October 2026
+
+**In progress (first test on two real Windows laptops)**
+
+- **Start a full move is on.** It no longer opens a coming-soon page.
+- **One plan, one approval.** Before anything moves, the new laptop shows your files and, on the same page, the apps PCTwin will install, the app settings it will copy, what you will need to do yourself, and what stays behind. Each change says what Undo can do for it.
+- **Apps come back from their makers.** On Windows, PCTwin finds each app by who made it, downloads it as you, and installs it through its administrator helper, which asks Windows for permission once and makes a restore point first. An app is only called reinstalled when Windows shows it at your version or newer, with nothing else slipped in. Anything else says why and what to do.
+- **Settings follow you.** Your apps' settings are copied, and a setting that points at a moved file is pointed at its new place. Passwords, sign-ins, security settings and anything that would start a program stay behind.
+- **Undo keeps your changes.** Undo app settings puts the settings back, except any you changed after the move.
+- **App data such as email and browsers is listed, not moved yet.** Each one says what to do: sign in again, use the app's export, or that it is still safe on your old laptop.
+
 ## 26 October 2026
 
 **In progress**

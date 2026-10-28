@@ -9,7 +9,8 @@
 //! |---|---|---|---|
 //! | 2.1 install apps | [`InstallKey`] | [`InstallGrant`] | one verified package |
 //! | 2.4 settings | [`SettingKey`] | [`SettingGrant`] | one named setting |
-//! | 2.5 private data | [`CaptureKey`] | [`CaptureGrant`] | read or import, in named roots |
+//! | 2.5 private data | [`CaptureKey`] | [`CaptureGrant`] | read, import or the app's own export, in named roots |
+//! | 2.5 secrets | [`CaptureKey`] | [`SecretGrant`] | read or land the exact secret components the person chose |
 //! | 2.3 undo | [`UndoKey`] | [`UndoGrant`] | reverse, reconcile, a restore point |
 //! | 2.7 clean-up | [`CleanupKey`] | [`CleanupGrant`] | remove PCTwin's own things, sanitise |
 //! | 2.8 screens | none | none | nothing privileged |
@@ -114,6 +115,70 @@
 //! use pctwin_grant::*;
 //! let keys = RoleKeys::mint().unwrap();
 //! let _second = keys.capture.clone();
+//! ```
+//!
+//! A 2.5 secret is read only with a secret grant, which names the exact components the person
+//! chose; an ordinary 2.5 grant (one for a mail archive, say) is not one (acceptance case T25-005):
+//!
+//! ```compile_fail
+//! use pctwin_grant::*;
+//! use std::time::Duration;
+//! fn reads_secret(_: SecretGrant) {}
+//! let keys = RoleKeys::mint().unwrap();
+//! let mail = keys.capture
+//!     .grant(PlanSeal::new(1, [7; 32]), vec![RootRef::new(1)], CaptureEffect::ReadPrivate,
+//!         Duration::from_secs(60), Now::real())
+//!     .unwrap();
+//! reads_secret(mail);
+//! ```
+//!
+//! nor can one be turned into it:
+//!
+//! ```compile_fail
+//! use pctwin_grant::*;
+//! use std::time::Duration;
+//! let keys = RoleKeys::mint().unwrap();
+//! let mail = keys.capture
+//!     .grant(PlanSeal::new(1, [7; 32]), vec![RootRef::new(1)], CaptureEffect::ReadPrivate,
+//!         Duration::from_secs(60), Now::real())
+//!     .unwrap();
+//! let _s: SecretGrant = mail.into();
+//! ```
+//!
+//! and no other role's key makes one (the 2.5 key does, below):
+//!
+//! ```compile_fail
+//! use pctwin_grant::*;
+//! use std::time::Duration;
+//! let keys = RoleKeys::mint().unwrap();
+//! let _s = CaptureKey::secret(&keys.install, PlanSeal::new(1, [7; 32]),
+//!     vec![ObjectRef::new(1, [9; 32])], SecretEffect::Read, Duration::from_secs(60), Now::real());
+//! ```
+//!
+//! ```
+//! use pctwin_grant::*;
+//! use std::time::Duration;
+//! fn reads_secret(_: SecretGrant) {}
+//! let keys = RoleKeys::mint().unwrap();
+//! let s = keys.capture.secret(PlanSeal::new(1, [7; 32]), vec![ObjectRef::new(1, [9; 32])],
+//!     SecretEffect::Read, Duration::from_secs(60), Now::real()).unwrap();
+//! reads_secret(s);
+//! ```
+//!
+//! A secret grant cannot be copied or written out by hand:
+//!
+//! ```compile_fail
+//! use pctwin_grant::*;
+//! use std::time::Duration;
+//! let keys = RoleKeys::mint().unwrap();
+//! let s = keys.capture.secret(PlanSeal::new(1, [7; 32]), vec![ObjectRef::new(1, [9; 32])],
+//!     SecretEffect::Read, Duration::from_secs(60), Now::real()).unwrap();
+//! let _again = s.clone();
+//! ```
+//!
+//! ```compile_fail
+//! use pctwin_grant::*;
+//! let _s = SecretGrant { seal: PlanSeal::new(1, [7; 32]), components: vec![], effect: SecretEffect::Read, expiry: todo!() };
 //! ```
 //!
 //! An undo grant carries undo's effects only; a clean-up effect does not fit:
@@ -257,6 +322,18 @@ pub enum CaptureEffect {
     ReadPrivate,
     /// Import it on the new laptop.
     Import,
+    /// Run the app's own export (its export screen, or its own export tool named by a signed
+    /// catalogue row) for data in the named roots, as the person.
+    NativeExport,
+}
+
+/// What a 2.5 secret grant allows, for the exact components it names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SecretEffect {
+    /// Read the chosen secret files on the old laptop.
+    Read,
+    /// Land them on the new laptop, owner-only.
+    Land,
 }
 
 /// What a 2.3 grant allows.
@@ -454,6 +531,37 @@ impl CaptureGrant {
     }
 }
 
+/// 2.5's grant for secrets: read or land exactly the secret components the person chose (each
+/// named by its identity and the generation approved), nothing else. An ordinary 2.5 grant never
+/// reaches a secret.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SecretGrant {
+    seal: PlanSeal,
+    components: Vec<ObjectRef>,
+    effect: SecretEffect,
+    expiry: Expiry,
+}
+
+impl SecretGrant {
+    pub const AUDIENCE: Audience = Audience::Data;
+
+    pub fn seal(&self) -> PlanSeal {
+        self.seal
+    }
+
+    pub fn components(&self) -> &[ObjectRef] {
+        &self.components
+    }
+
+    pub fn effect(&self) -> SecretEffect {
+        self.effect
+    }
+
+    pub fn expiry(&self) -> Expiry {
+        self.expiry
+    }
+}
+
 /// 2.3's grant: reverse, reconcile or make a restore point, for the named things only.
 #[derive(Debug, PartialEq, Eq)]
 pub struct UndoGrant {
@@ -574,6 +682,23 @@ impl CaptureKey {
         Ok(CaptureGrant {
             seal,
             roots: exact(roots)?,
+            effect,
+            expiry: Expiry::after(lifetime, now)?,
+        })
+    }
+
+    /// A grant for exactly the secret `components` the person chose.
+    pub fn secret(
+        &self,
+        seal: PlanSeal,
+        components: Vec<ObjectRef>,
+        effect: SecretEffect,
+        lifetime: Duration,
+        now: Now,
+    ) -> Result<SecretGrant, GrantError> {
+        Ok(SecretGrant {
+            seal,
+            components: exact(components)?,
             effect,
             expiry: Expiry::after(lifetime, now)?,
         })
@@ -724,6 +849,33 @@ mod tests {
         assert_eq!(c.effect(), CaptureEffect::Import);
         assert_eq!(c.seal(), seal());
         assert_eq!(CaptureGrant::AUDIENCE, Audience::Data);
+
+        let x = keys
+            .capture
+            .secret(
+                seal(),
+                vec![a, a, ObjectRef::new(1, [2; 32])],
+                SecretEffect::Land,
+                MINUTE,
+                now,
+            )
+            .unwrap();
+        assert_eq!(x.components(), &[ObjectRef::new(1, [2; 32]), a]);
+        assert_eq!((x.seal(), x.effect()), (seal(), SecretEffect::Land));
+        assert!(!x.expiry().is_over(now));
+        assert_eq!(SecretGrant::AUDIENCE, Audience::Data);
+        assert_eq!(
+            keys.capture
+                .secret(seal(), vec![], SecretEffect::Read, MINUTE, now)
+                .unwrap_err(),
+            GrantError::Objects
+        );
+        assert_eq!(
+            keys.capture
+                .secret(seal(), vec![a], SecretEffect::Read, Duration::ZERO, now)
+                .unwrap_err(),
+            GrantError::Lifetime
+        );
 
         let u = keys
             .undo

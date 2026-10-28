@@ -514,6 +514,12 @@ pctwin_types::listed_enum! {
         /// The other people ticked are not moved this time, and why; the mover's things still
         /// move.
         OthersNotMoved { why: OthersWhy },
+        /// The new laptop, after the files: apps, settings and special categories (the full
+        /// move), with their progress in `move-rebuild`.
+        Rebuilding,
+        /// The old laptop: the files are found; the app data scan is finishing (within its
+        /// time budget).
+        AppData,
     }
 }
 
@@ -642,6 +648,10 @@ pub struct PlanView {
     /// The groups whose things move first ("we'll move these first"), in the order they start,
     /// from the very order the move sends in ([`pctwin_move::move_order`]).
     pub first: Vec<FolderRole>,
+    /// The full move: every app, setting and special category, with what undo can do for each
+    /// (absent when the old laptop sent none of them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rebuild: Option<crate::fullmove::RebuildPlanView>,
 }
 
 /// Whether `item` is the mover's to see by name: their own and the shared things, never another
@@ -733,6 +743,7 @@ fn plan_view(
     }
     PlanView {
         first,
+        rebuild: None,
         revision: record.revision,
         fingerprint: record.fingerprint().to_hex(),
         groups: groups
@@ -1001,6 +1012,10 @@ pub struct MoveOutcome {
     /// The after-move check: the mover's photos, videos, music and documents in the plan, and how
     /// many of each are copied and checked.
     pub after_move: AfterMove,
+    /// The full move's apps, settings and special categories, each with its result (the new
+    /// laptop; absent when there were none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rebuilt: Option<crate::fullmove::RebuiltView>,
 }
 
 /// One kind of file in the after-move check: how many the approved plan held, and how many of
@@ -1442,6 +1457,10 @@ struct AppSteps<R: Runtime> {
     /// Other people's holding places, so their writes are journaled there, never in the mover's
     /// journal.
     held_places: pctwin_move::held_journal::HeldPlaces,
+    /// The full move's extras as the old laptop sent them (unread bytes until the plan).
+    extras: Option<Vec<u8>>,
+    /// The full move's plan, made once when the plan is first shown.
+    full: Option<pctwin_fullmove::plan::FullPlan>,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -1663,7 +1682,21 @@ impl<R: Runtime> Steps for AppSteps<R> {
     }
 
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
-        let view = plan_view(record, preview, &self.rules, &self.shown);
+        let mut view = plan_view(record, preview, &self.rules, &self.shown);
+        // The full move: every app, setting and special category, planned once, shown on the same
+        // screen, and named in what the person approves.
+        if self.full.is_none() {
+            self.full = Some(crate::fullmove::plan_here(
+                record,
+                &self.rules.mover,
+                self.extras.as_deref(),
+                &self.me,
+            ));
+        }
+        if let Some(full) = &self.full {
+            view.rebuild = Some(crate::fullmove::plan_view(full));
+            view.fingerprint = crate::fullmove::approved_fingerprint(&view.fingerprint, full);
+        }
         {
             let mut names = lock(&self.names);
             for item in &record.items {
@@ -1720,6 +1753,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     fn people(&mut self, people: &[pctwin_move::landing::NamedPerson]) {
         self.named = people.to_vec();
+    }
+
+    fn extras(&mut self, bytes: Vec<u8>) {
+        self.extras = Some(bytes);
     }
 }
 
@@ -1830,6 +1867,19 @@ async fn run_old<R: Runtime>(
     })
     .await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
+    // The full move: the signed-in person's app data (2.5) is looked at beside the files, read
+    // only, with its own time budget.
+    let special = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .and_then(|me| {
+            pctwin_fullmove::extras::SpecialScan::start(
+                &Owner::Person {
+                    account_id: me.account_id,
+                },
+                &me.home,
+            )
+        });
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
         let _ = app.emit(
@@ -1923,10 +1973,27 @@ async fn run_old<R: Runtime>(
     // Phase 2.1, discovery first: every app on this laptop, with who made each, and the
     // installers in this move its own maker signed. Read only; nothing is run.
     record.apps = old_laptop_apps(&sweep.census, &record, &roots);
+    // The full move: the mover's settings, and their app data once its scan is done (or its time
+    // is up), read only, sent with the list. Only the signed-in person's app data is looked at.
+    let special = match special {
+        Some(scan) => match scan.ready() {
+            Some(found) => Some(found),
+            None => {
+                let _ = app.emit(STAGE_EVENT, Stage::AppData);
+                scan.wait(&|| scan_stop.load(Ordering::Acquire))
+            }
+        },
+        None => None,
+    };
+    if scan_stop.load(Ordering::Acquire) {
+        return Err(Stop::Cancelled.into());
+    }
+    let extras = crate::fullmove::extras_here(special);
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,
         people: &named,
+        extras: &extras,
     };
     let sent = pctwin_move::send_by_rules(
         &mut link,
@@ -2090,6 +2157,8 @@ async fn run_new<R: Runtime>(
         live_control: live.control.clone(),
         chosen: BTreeMap::new(),
         held_places: held_places.clone(),
+        extras: None,
+        full: None,
     };
     // The pairing's keys, for the way back after a drop once the plan is approved.
     let mut redial =
@@ -2119,6 +2188,15 @@ async fn run_new<R: Runtime>(
     let received = received?;
     let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
     outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
+    // The full move, once every file is in: apps, settings and special categories, each with its
+    // result. A move that was stopped or broke off changes nothing more.
+    if received.ended == Ended::Finished
+        && let Some(full) = steps.full.take()
+    {
+        let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
+        // Counted on their own lines: the files' counts stay the files'.
+        outcome.rebuilt = Some(crate::fullmove::rebuild_here(app, &full, &journal, &me));
+    }
     Ok(Ran {
         outcome,
         report,
