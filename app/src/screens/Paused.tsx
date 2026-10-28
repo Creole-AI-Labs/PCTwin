@@ -42,6 +42,11 @@ export default function Paused({ progress, onResume, onStop }: { progress: MoveP
           <Banner tone="attention">{l10n.getString(progress.notice.paused ? "progress-battery-paused" : "progress-low-battery")}</Banner>
         </div>
       )}
+      {progress.notice?.kind === "may-sleep" && (
+        <div className="mv-note">
+          <Banner tone="attention">{l10n.getString("progress-may-sleep")}</Banner>
+        </div>
+      )}
       <div className="mv-note">
         <Banner tone="info">{l10n.getString("pause-note")}</Banner>
       </div>

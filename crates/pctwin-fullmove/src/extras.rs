@@ -130,6 +130,11 @@ pub struct SpecialLine {
     /// Its components' IDs (what the new laptop chooses by).
     #[serde(default)]
     pub ids: Vec<String>,
+    /// It holds saved sign-ins to websites or accounts (cookies, session tokens): they are tied
+    /// to the old laptop, so the person signs in again on the new one. Found by the stores'
+    /// shape, the same for every app.
+    #[serde(default)]
+    pub sites: bool,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -154,6 +159,9 @@ pub struct Extras {
     /// Places 2.5 could not fully check, counted.
     #[serde(default)]
     pub special_not_checked: u64,
+    /// Links and junctions found among the person's files: counted, never followed, never moved.
+    #[serde(default)]
+    pub links: u64,
 }
 
 /// Why the old laptop's extras were refused.
@@ -184,6 +192,7 @@ impl Extras {
             special_searched: false,
             special_not_moved: 0,
             special_not_checked: 0,
+            links: 0,
         }
     }
 
@@ -344,6 +353,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         special_searched: false,
         special_not_moved: 0,
         special_not_checked: 0,
+        links: 0,
     }
 }
 
@@ -394,6 +404,13 @@ pub fn special_of(
         };
         let files = p.component.members.len() as u64;
         let id = crate::data::id_hex(&p.component);
+        let sites = p.component.evidence.iter().any(|e| {
+            matches!(
+                e,
+                pctwin_special::component::Evidence::SessionStore
+                    | pctwin_special::component::Evidence::CredentialValues
+            )
+        });
         // A secret is always its own line: the person ticks each one by itself (D07).
         let same = |l: &&mut SpecialLine| {
             !p.component.secret && !l.secret && l.name == p.app && l.step == step
@@ -402,6 +419,7 @@ pub fn special_of(
             Some(l) => {
                 l.files += files;
                 l.ids.push(id);
+                l.sites |= sites;
             }
             None => lines.push(SpecialLine {
                 name: p.app.clone(),
@@ -409,6 +427,7 @@ pub fn special_of(
                 files,
                 secret: p.component.secret,
                 ids: vec![id],
+                sites,
             }),
         }
     }

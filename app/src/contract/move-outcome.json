@@ -83,10 +83,33 @@
     ],
     "rebuilt": {
       "canUndo": true,
+      "fresh": true,
+      "here": [
+        {
+          "name": "Paint",
+          "older": null
+        },
+        {
+          "name": "Notes",
+          "older": "2.0"
+        }
+      ],
+      "hereMore": 0,
       "lines": [
         {
           "count": 0,
           "kind": "app",
+          "notes": [
+            {
+              "note": "licence-key"
+            },
+            {
+              "company": null,
+              "note": "registration",
+              "owner": "Ada",
+              "productId": "12345-OEM"
+            }
+          ],
           "reason": "manual-install",
           "status": "needs-action",
           "title": {
@@ -95,8 +118,30 @@
           }
         },
         {
+          "count": 0,
+          "kind": "app",
+          "notes": [
+            {
+              "note": "sign-in"
+            },
+            {
+              "apps": [
+                "Writer Helper"
+              ],
+              "note": "extras"
+            }
+          ],
+          "reason": "sign-in",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Writer"
+          }
+        },
+        {
           "count": 12,
           "kind": "settings",
+          "notes": [],
           "reason": null,
           "status": "converted",
           "title": {
@@ -107,6 +152,184 @@
         {
           "count": 0,
           "kind": "special",
+          "notes": [
+            {
+              "note": "sites"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Browser"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "lost"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "did-not-arrive"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "app-open"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "changing"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "unreadable"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "not-read"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "not-whole"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "not-landed"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "folder": "Mail (from old laptop)",
+              "note": "data",
+              "why": "beside"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "folder": "Mail",
+              "note": "data",
+              "why": "placed"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [],
           "reason": "finish-by-hand",
           "status": "needs-action",
           "title": {

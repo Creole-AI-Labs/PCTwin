@@ -83,6 +83,7 @@
           "files": 0,
           "kind": "app",
           "needs": null,
+          "note": null,
           "secret": null,
           "source": "Example.Writer",
           "special": null,
@@ -98,6 +99,7 @@
           "files": 0,
           "kind": "app",
           "needs": "manual-install",
+          "note": null,
           "secret": null,
           "source": null,
           "special": null,
@@ -113,6 +115,7 @@
           "files": 0,
           "kind": "settings",
           "needs": null,
+          "note": null,
           "secret": null,
           "source": null,
           "special": null,
@@ -125,9 +128,47 @@
         {
           "action": "leave-alone",
           "count": 0,
+          "files": 0,
+          "kind": "app",
+          "needs": null,
+          "note": {
+            "note": "older-here",
+            "version": "2.0"
+          },
+          "secret": null,
+          "source": null,
+          "special": null,
+          "title": {
+            "kind": "name",
+            "value": "Notes"
+          },
+          "undo": "must-keep"
+        },
+        {
+          "action": "leave-alone",
+          "count": 0,
+          "files": 1,
+          "kind": "special",
+          "needs": "sign-in",
+          "note": {
+            "note": "sites"
+          },
+          "secret": null,
+          "source": null,
+          "special": "relink",
+          "title": {
+            "kind": "name",
+            "value": "Browser"
+          },
+          "undo": "must-keep"
+        },
+        {
+          "action": "leave-alone",
+          "count": 0,
           "files": 3,
           "kind": "special",
           "needs": "sign-in",
+          "note": null,
           "secret": null,
           "source": null,
           "special": "sign-in",
@@ -143,6 +184,7 @@
           "files": 12,
           "kind": "special",
           "needs": null,
+          "note": null,
           "secret": null,
           "source": null,
           "special": "copy",
@@ -158,6 +200,7 @@
           "files": 2,
           "kind": "special",
           "needs": null,
+          "note": null,
           "secret": 2,
           "source": null,
           "special": "copy",
@@ -173,6 +216,7 @@
           "files": 0,
           "kind": "special",
           "needs": "finish-by-hand",
+          "note": null,
           "secret": null,
           "source": null,
           "special": "not-yet",
@@ -183,6 +227,7 @@
           "undo": "must-keep"
         }
       ],
+      "links": 4,
       "more": 0,
       "notMoved": [
         {

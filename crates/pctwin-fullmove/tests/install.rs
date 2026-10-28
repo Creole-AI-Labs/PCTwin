@@ -29,7 +29,7 @@ use pctwin_maker::run::{Call, Ran, RunError, Runner};
 use pctwin_record::{
     AppArch, AppMaker, AppSystem, FoundApp, FoundWhere, Owner, RegistryView, SignerId,
 };
-use pctwin_types::{ItemStatus, Reason};
+use pctwin_types::{ItemResult, ItemStatus, Reason};
 use sha2::Digest;
 
 const CODE: &str = "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}";
@@ -259,7 +259,11 @@ struct Run {
     winget: FakeWinget,
 }
 
-fn run(winget: FakeWinget, mut helper: FakeHelper) -> Run {
+fn run(winget: FakeWinget, helper: FakeHelper) -> Run {
+    run_entry(winget, helper, entry(app()))
+}
+
+fn run_entry(winget: FakeWinget, mut helper: FakeHelper, e: AppEntry) -> Run {
     let work = tempfile::tempdir().unwrap();
     let machine = FakeMachine(helper.shows.clone());
     let mut n = 0u8;
@@ -267,7 +271,7 @@ fn run(winget: FakeWinget, mut helper: FakeHelper) -> Run {
         n += 1;
         Some([n; 16])
     };
-    let apps = [entry(app())];
+    let apps = [e];
     let refs: Vec<&AppEntry> = apps.iter().collect();
     let (results, point) = {
         let mut chain = WingetInstaller::new(
@@ -337,6 +341,43 @@ fn one_prompt_for_the_sealed_plan_the_exact_bytes_staged_and_reinstalled_only_wh
     let download = &r.winget.calls.lock().unwrap()[0];
     assert!(download.contains(&OsString::from("Lab.Writer")));
     assert!(download.contains(&OsString::from("x64")));
+}
+
+/// Gap 1 (complications audit): an app the catalogue knows needs a sign-in or its licence after
+/// installing is installed and checked, but never a bare "reinstalled": it needs the person, with
+/// the step on its to-do list, and undo still lists it as installed by PCTwin.
+#[test]
+fn an_installed_app_that_needs_a_sign_in_or_its_licence_says_so_and_is_not_a_bare_reinstalled() {
+    let good = || FakeWinget {
+        manifest: manifest(CODE, Some(sha(INSTALLER))),
+        bytes: INSTALLER.to_vec(),
+        calls: Default::default(),
+    };
+    let mut signs_in = entry(app());
+    signs_in.plan.card.sign_in = true;
+    let r = run_entry(good(), FakeHelper::default(), signs_in);
+    let done = &r.results[0];
+    assert_eq!(done.result, ItemResult::because(Reason::SignIn), "{done:?}");
+    assert!(done.todo.contains(&Todo::SignIn), "{done:?}");
+    assert!(done.installed);
+
+    let mut licensed = entry(app());
+    licensed.plan.card.sign_in = true;
+    licensed.plan.card.licence_key = true;
+    let r = run_entry(good(), FakeHelper::default(), licensed);
+    let done = &r.results[0];
+    assert_eq!(
+        done.result,
+        ItemResult::because(Reason::Activation),
+        "{done:?}"
+    );
+    assert!(done.todo.contains(&Todo::LicenceKey) && done.todo.contains(&Todo::SignIn));
+    assert!(done.installed);
+
+    // With nothing known after, it is reinstalled, with nothing to do.
+    let r = run(good(), FakeHelper::default());
+    assert_eq!(r.results[0].result.status(), ItemStatus::Reinstalled);
+    assert!(r.results[0].todo.is_empty() && r.results[0].installed);
 }
 
 #[test]

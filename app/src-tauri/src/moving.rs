@@ -891,6 +891,9 @@ pub enum Notice {
     /// This laptop is low on battery; at the safe limit the move was paused for it (the person
     /// carries on once it is plugged in).
     LowBattery { paused: bool },
+    /// The system did not accept PCTwin's request to stay awake: this laptop may sleep during the
+    /// move, so the person keeps it plugged in and open.
+    MaySleep,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -932,6 +935,12 @@ fn group_name(label: &str) -> GroupName {
             name: label.to_string(),
         },
     }
+}
+
+/// The notice to show: the battery's first (it may pause the move), else a laptop that may
+/// sleep because the system did not accept the stay-awake request (`sleepy`).
+fn awake_notice(battery: Option<Notice>, sleepy: bool) -> Option<Notice> {
+    battery.or(sleepy.then_some(Notice::MaySleep))
 }
 
 /// What this laptop's battery means for the move: nothing, a warning, or a safe pause.
@@ -1839,6 +1848,7 @@ fn tick<R: Runtime>(
     laptops: Laptops,
     names: Arc<Mutex<HashMap<ItemId, String>>>,
     done: Arc<AtomicBool>,
+    sleepy: Arc<AtomicBool>,
 ) {
     tauri::async_runtime::spawn(async move {
         let mut last = None;
@@ -1890,7 +1900,7 @@ fn tick<R: Runtime>(
                 &live.meter.snapshot(),
                 live.control.paused(),
                 live.control.braked(),
-                battery.clone(),
+                awake_notice(battery.clone(), sleepy.load(Ordering::Acquire)),
                 &laptops,
                 &lock(&names),
             );
@@ -2060,7 +2070,7 @@ async fn run_old<R: Runtime>(
     if scan_stop.load(Ordering::Acquire) {
         return Err(Stop::Cancelled.into());
     }
-    let extras = crate::fullmove::extras_here(special.as_ref());
+    let extras = crate::fullmove::extras_here(special.as_ref(), sweep.links);
     // The app data the new laptop chooses is captured from these (read only), after its approval.
     let mut source = crate::fullmove::data_source(app, moving, special.as_ref());
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
@@ -2333,12 +2343,14 @@ fn spawn_run<R: Runtime>(
     let label = laptops.old.clone();
     let names = Arc::new(Mutex::new(HashMap::new()));
     let done = Arc::new(AtomicBool::new(false));
+    let sleepy = Arc::new(AtomicBool::new(false));
     tick(
         app.clone(),
         live.clone(),
         laptops,
         names.clone(),
         done.clone(),
+        sleepy.clone(),
     );
     std::thread::Builder::new()
         .name("pctwin-move".into())
@@ -2350,6 +2362,8 @@ fn spawn_run<R: Runtime>(
                 "Moving files with PCTwin",
                 pctwin_power::power_now().on_battery,
             );
+            // A request the system did not accept is said, never silent: the laptop may sleep.
+            sleepy.store(_awake.held().is_err(), Ordering::Release);
             let ran = runtime.block_on(async {
                 match side {
                     ThisSide::New(setup) => {
@@ -3471,6 +3485,16 @@ mod tests {
         record.personal = vec![record.items[0].id];
         let view = plan_view(&record, &preview(), &rules(), &shown);
         assert_eq!(view.first.first(), Some(&FolderRole::Music));
+    }
+
+    /// Gap 10b: a stay-awake request the system did not accept is shown (the laptop may sleep),
+    /// after the battery's own notice, which can pause the move.
+    #[test]
+    fn a_refused_stay_awake_is_said_after_the_battery() {
+        assert_eq!(awake_notice(None, false), None);
+        assert_eq!(awake_notice(None, true), Some(Notice::MaySleep));
+        let low = Some(Notice::LowBattery { paused: false });
+        assert_eq!(awake_notice(low.clone(), true), low);
     }
 
     #[test]

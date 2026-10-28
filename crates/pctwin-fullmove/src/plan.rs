@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use pctwin_apps::routes::{self, AppPlan, Disposition, Here, Hints, Route, Target, WingetBy};
+use pctwin_apps::routes::{self, AppPlan, Disposition, Flag, Here, Hints, Route, Target, WingetBy};
 use pctwin_recipe::SettingValue;
 use pctwin_record::{AppList, FolderRole, FoundApp, FoundWhere, Owner, Record};
 use pctwin_settings::System;
@@ -96,6 +96,27 @@ pub struct Change {
     /// Where PCTwin gets an app it installs: the package's own name in its catalog (winget's ID),
     /// shown beside the old laptop's name for it.
     pub source: Option<String>,
+    /// What else the person should know about it, in a word the screens translate.
+    pub note: Option<ChangeNote>,
+}
+
+/// What else the person should know about a change, beside what it does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "note", rename_all = "kebab-case")]
+pub enum ChangeNote {
+    /// An older version of the app is on this laptop (this one): PCTwin leaves it as it is.
+    OlderHere { version: String },
+    /// Saved sign-ins to websites or accounts in it are tied to the old laptop: the person signs
+    /// in again here.
+    Sites,
+}
+
+/// The version of an app on this laptop that is older than the old laptop's, if it is.
+pub fn older_here(plan: &AppPlan) -> Option<String> {
+    plan.flags.iter().find_map(|f| match f {
+        Flag::OlderHere { version } => Some(version.clone().unwrap_or_default()),
+        _ => None,
+    })
 }
 
 /// What a special category's step ends as: a component that would copy is not joined to the
@@ -173,6 +194,9 @@ pub struct FullPlan {
     /// The old laptop sent extras this laptop refused (broken, or past a limit): its settings and
     /// app data are not moved, and the plan says so, never silently.
     pub extras_refused: bool,
+    /// Links and junctions among the person's files on the old laptop: never followed, never
+    /// moved, and said.
+    pub links: u64,
 }
 
 /// Whether `app` belongs in the mover's plan: theirs, or everyone's.
@@ -327,6 +351,7 @@ impl FullPlan {
                 special_not_checked: x.special_not_checked,
                 from: Some(x.system),
                 extras_digest: Some(digest),
+                links: x.links,
                 ..Self::default()
             };
         };
@@ -386,6 +411,7 @@ impl FullPlan {
             extras_digest: Some(digest),
             settings,
             extras_refused: false,
+            links: x.links,
         }
     }
 
@@ -415,6 +441,7 @@ impl FullPlan {
                 source: (action == Action::Install)
                     .then(|| e.winget().map(str::to_string))
                     .flatten(),
+                note: older_here(&e.plan).map(|version| ChangeNote::OlderHere { version }),
             });
         }
         for g in &self.groups {
@@ -429,6 +456,7 @@ impl FullPlan {
                 files: 0,
                 secret: None,
                 source: None,
+                note: None,
             });
         }
         for (at, s) in self.special.iter().enumerate() {
@@ -452,6 +480,7 @@ impl FullPlan {
                 files: s.files,
                 secret: s.secret.then_some(at as u32),
                 source: None,
+                note: s.sites.then_some(ChangeNote::Sites),
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -468,6 +497,7 @@ impl FullPlan {
                 files: 0,
                 secret: None,
                 source: None,
+                note: None,
             });
         }
         if self.special_not_checked > 0 {
@@ -482,6 +512,7 @@ impl FullPlan {
                 files: 0,
                 secret: None,
                 source: None,
+                note: None,
             });
         }
         if self.from.is_some() && !self.special_searched {
@@ -496,6 +527,7 @@ impl FullPlan {
                 files: 0,
                 secret: None,
                 source: None,
+                note: None,
             });
         }
         out
@@ -637,6 +669,53 @@ mod tests {
         assert!(changes.iter().all(|c| c.kind == Kind::App));
     }
 
+    /// Gap 6 and U1 (complications audit): an older version already here is left as it is and
+    /// said with its version; an app the mover installed for themselves alone on this laptop (in
+    /// Windows' per-person list) counts as here, so it is never installed twice.
+    #[test]
+    fn an_older_version_here_is_said_and_a_per_person_install_counts_as_here() {
+        let mut record =
+            Record::new(LaptopId::from_hex("01010101010101010101010101010101").unwrap());
+        let mut notes = app("Notes", Owner::Shared, signed(), Some("{C}"));
+        notes.version = Some("3.0".into());
+        record.apps.found = vec![
+            notes,
+            app("Mine Only", person("1000"), signed(), Some("{D}")),
+        ];
+        let mut older = app("Notes", Owner::Shared, signed(), Some("{c}"));
+        older.version = Some("2.0".into());
+        let mut mine = app("Mine Only", person("S-1-5-21-9"), signed(), None);
+        mine.found = FoundWhere::WindowsEntry {
+            view: RegistryView::Person,
+            key: "Mine Only".into(),
+            product_code: Some("{d}".into()),
+        };
+        let installed = AppList {
+            found: vec![older, mine],
+            not_read: vec![],
+        };
+        let none = |_: &FoundApp| vec![];
+        let here = NewLaptop {
+            system: System::Windows,
+            target: target(),
+            installed: &installed,
+            folders: vec![],
+            winget: &none,
+        };
+        let plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
+        let changes = plan.changes();
+        assert_eq!(changes[0].action, Action::LeaveAlone);
+        assert_eq!(
+            changes[0].note,
+            Some(ChangeNote::OlderHere {
+                version: "2.0".into()
+            })
+        );
+        assert_eq!(changes[1].action, Action::LeaveAlone);
+        assert_eq!(changes[1].note, None);
+        assert!(plan.to_install().is_empty(), "nothing installed twice");
+    }
+
     #[test]
     fn settings_are_grouped_said_as_adding_or_replacing_and_the_digest_binds_them() {
         let record = Record::new(LaptopId::from_hex("01010101010101010101010101010101").unwrap());
@@ -649,7 +728,7 @@ mod tests {
             label: "FakeVendor Writer".into(),
             value: SettingValue::Text(v.into()),
         };
-        let x = from_discovery(
+        let mut x = from_discovery(
             System::Windows,
             Discovery {
                 found: vec![s("Theme", "ocean"), s("Font", "serif")],
@@ -660,6 +739,9 @@ mod tests {
                 path: "C:\\Users\\ada\\Documents".into(),
             }],
         );
+        // Gap 8: links and junctions the old laptop counted cross with its extras, to be said.
+        x.links = 4;
+        let x = Extras::decode(&x.encode()).unwrap();
         let installed = AppList::default();
         let none = |_: &FoundApp| vec![];
         let here = NewLaptop {
@@ -673,6 +755,7 @@ mod tests {
         let fresh = FullPlan::build(&record, "1000", Some((&x, d)), &here, &mut |_, _| {
             Some(None)
         });
+        assert_eq!(fresh.links, 4);
         assert_eq!(fresh.groups.len(), 1);
         assert_eq!(fresh.groups[0].count, 2);
         assert_eq!(fresh.groups[0].action, Action::Merge);

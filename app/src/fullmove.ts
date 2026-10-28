@@ -33,23 +33,56 @@ export type ChangeView = {
   secret: number | null;
   /** Where PCTwin gets an app it installs: the package's own ID in its catalog. */
   source: string | null;
+  /** What else the person should know: an older version already here, or saved sign-ins to websites. */
+  note: ChangeNote | null;
 };
+
+export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" };
+
+/** Why an app's data needs the person (`DataWhy`). */
+export const DATA_WHYS = ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed", "beside", "placed"] as const;
+export type DataWhy = (typeof DATA_WHYS)[number];
+
+/** One thing to know or do for an outcome line (`LineNote`). */
+export type LineNote =
+  | { note: "sign-in" }
+  | { note: "licence-key" }
+  | { note: "registration"; owner: string | null; company: string | null; productId: string | null }
+  | { note: "extras"; apps: string[] }
+  | { note: "sites" }
+  | { note: "data"; why: DataWhy; folder?: string };
+
+/** An app already on this laptop, left as it is (`HereLine`). */
+export type HereLine = { name: string; older: string | null };
 
 export type RebuildPlan = {
   changes: ChangeView[];
   more: number;
   notMoved: { group: NotMovedGroup; count: number }[];
   specialNotMoved: number;
+  /** Shortcuts (links and junctions) among the person's files: never followed, never moved. */
+  links: number;
   prompt: boolean;
   restorePoint: boolean;
 };
 
-export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null };
+export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[] };
 
 export const RESTORE_WORDS = ["made", "earlier-exists", "not-made", "not-windows", "not-asked"] as const;
 export type RestoreWord = (typeof RESTORE_WORDS)[number];
 
-export type Rebuilt = { lines: RebuiltLine[]; more: number; restorePoint: RestoreWord; stopped: boolean; canUndo: boolean };
+export type Rebuilt = {
+  lines: RebuiltLine[];
+  more: number;
+  /** Apps already on this laptop, left as they are: not items of the move, so outside the result words. */
+  here: HereLine[];
+  hereMore: number;
+  /** PCTwin installed at least one app (fresh installs start signed out). */
+  fresh: boolean;
+  restorePoint: RestoreWord;
+  stopped: boolean;
+  canUndo: boolean;
+};
 
 export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number };
 
@@ -89,8 +122,46 @@ function parseTitle(v: unknown): Title | null {
   return null;
 }
 
+function nameOrNull(v: unknown): v is string | null {
+  return v === null || typeof v === "string";
+}
+
+function parseChangeNote(v: unknown): ChangeNote | null | undefined {
+  if (v === null) return null;
+  const kind = typeof v === "object" ? (v as Fields).note : undefined;
+  if (kind === "sites") return exactly(v, ["note"]) ? { note: kind } : undefined;
+  if (kind === "older-here") {
+    const f = exactly(v, ["note", "version"]);
+    return f && typeof f.version === "string" ? { note: kind, version: f.version } : undefined;
+  }
+  return undefined;
+}
+
+function parseLineNote(v: unknown): LineNote | null {
+  const kind = typeof v === "object" && v !== null ? (v as Fields).note : undefined;
+  if (kind === "sign-in" || kind === "licence-key" || kind === "sites") return exactly(v, ["note"]) ? { note: kind } : null;
+  if (kind === "registration") {
+    const f = exactly(v, ["note", "owner", "company", "productId"]);
+    return f && nameOrNull(f.owner) && nameOrNull(f.company) && nameOrNull(f.productId) ? { note: kind, owner: f.owner, company: f.company, productId: f.productId } : null;
+  }
+  if (kind === "extras") {
+    const f = exactly(v, ["note", "apps"]);
+    const apps = f ? listOf(f.apps, (x) => (typeof x === "string" ? x : null)) : null;
+    return apps ? { note: kind, apps } : null;
+  }
+  if (kind === "data") {
+    const why = (v as Fields).why;
+    if (why === "beside" || why === "placed") {
+      const f = exactly(v, ["note", "why", "folder"]);
+      return f && typeof f.folder === "string" ? { note: kind, why, folder: f.folder } : null;
+    }
+    return oneOf(why, DATA_WHYS) && exactly(v, ["note", "why"]) ? { note: kind, why } : null;
+  }
+  return null;
+}
+
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "source"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "source", "note"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
@@ -98,42 +169,49 @@ function parseChange(v: unknown): ChangeView | null {
   if (f.special !== null && !oneOf(f.special, SPECIAL_STEPS)) return null;
   if (f.secret !== null && !isCount(f.secret)) return null;
   if (f.source !== null && typeof f.source !== "string") return null;
+  const note = parseChangeNote(f.note);
+  if (note === undefined) return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, source: f.source };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, source: f.source, note };
 }
 
 /** The plan section (`RebuildPlanView`). */
 export function parseRebuildPlan(v: unknown): RebuildPlan | null {
-  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "prompt", "restorePoint"]);
-  if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
+  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint"]);
+  if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || !isCount(f.links) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
   const changes = listOf(f.changes, parseChange);
   const notMoved = listOf(f.notMoved, (x) => {
     const n = exactly(x, ["group", "count"]);
     return n && oneOf(n.group, NOT_MOVED_GROUPS) && isCount(n.count) ? { group: n.group, count: n.count } : null;
   });
-  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, prompt: f.prompt, restorePoint: f.restorePoint } : null;
+  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint } : null;
 }
 
 function parseLine(v: unknown): RebuiltLine | null {
-  const f = exactly(v, ["title", "kind", "count", "status", "reason"]);
+  const f = exactly(v, ["title", "kind", "count", "status", "reason", "notes"]);
   if (!f || !oneOf(f.kind, CHANGE_KINDS) || !isCount(f.count) || !oneOf(f.status, ITEM_STATUSES)) return null;
   const title = parseTitle(f.title);
   const result = parseResult(f.reason === null ? { status: f.status } : { status: f.status, reason: f.reason });
-  if (!title || !result) return null;
-  return { title, kind: f.kind, count: f.count, status: result.status, reason: "reason" in result ? (result.reason ?? null) : null };
+  const notes = listOf(f.notes, parseLineNote);
+  if (!title || !result || !notes) return null;
+  return { title, kind: f.kind, count: f.count, status: result.status, reason: "reason" in result ? (result.reason ?? null) : null, notes };
 }
 
 /** The outcome section (`RebuiltView`). */
 export function parseRebuilt(v: unknown): Rebuilt | null {
-  const f = exactly(v, ["lines", "more", "restorePoint", "stopped", "canUndo"]);
-  if (!f || !isCount(f.more) || !oneOf(f.restorePoint, RESTORE_WORDS) || typeof f.stopped !== "boolean" || typeof f.canUndo !== "boolean") return null;
+  const f = exactly(v, ["lines", "more", "here", "hereMore", "fresh", "restorePoint", "stopped", "canUndo"]);
+  if (!f || !isCount(f.more) || !isCount(f.hereMore) || typeof f.fresh !== "boolean" || !oneOf(f.restorePoint, RESTORE_WORDS) || typeof f.stopped !== "boolean" || typeof f.canUndo !== "boolean") return null;
   const lines = listOf(f.lines, parseLine);
-  return lines ? { lines, more: f.more, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo } : null;
+  const here = listOf(f.here, (x) => {
+    const h = exactly(x, ["name", "older"]);
+    return h && typeof h.name === "string" && nameOrNull(h.older) ? { name: h.name, older: h.older } : null;
+  });
+  return lines && here ? { lines, more: f.more, here, hereMore: f.hereMore, fresh: f.fresh, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo } : null;
 }
 
 /** Where rebuilding is (`Progress`, event `move-rebuild`). */

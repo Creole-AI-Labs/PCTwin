@@ -36,6 +36,9 @@ pub struct AppResult {
     pub result: ItemResult,
     /// What the person still has to do (sign in, a licence key, restart...).
     pub todo: Vec<pctwin_apps::after::Todo>,
+    /// PCTwin installed it here (the laptop's own list shows it), whatever is left to do: undo
+    /// lists it for the person to remove if they do not want it.
+    pub installed: bool,
 }
 
 impl AppResult {
@@ -43,6 +46,28 @@ impl AppResult {
         Self {
             result: ItemResult::because(reason),
             todo: Vec::new(),
+            installed: false,
+        }
+    }
+
+    /// An app installed and checked, with what is left to do: an app that still needs a licence
+    /// or a sign-in is never a bare "reinstalled", it needs the person (the licence first, as it
+    /// is the step that keeps the app working).
+    pub fn installed(result: ItemResult, todo: Vec<pctwin_apps::after::Todo>) -> Self {
+        use pctwin_apps::after::Todo;
+        let result = if result.status() != ItemStatus::Reinstalled {
+            result
+        } else if todo.iter().any(|t| matches!(t, Todo::LicenceKey)) {
+            ItemResult::because(Reason::Activation)
+        } else if todo.iter().any(|t| matches!(t, Todo::SignIn)) {
+            ItemResult::because(Reason::SignIn)
+        } else {
+            result
+        };
+        Self {
+            result,
+            todo,
+            installed: true,
         }
     }
 }
@@ -121,14 +146,40 @@ pub struct UndoBook {
     pub home: Option<String>,
 }
 
+/// How one line of app data (an app's components with one step) ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpecialDone {
+    pub title: Title,
+    pub result: ItemResult,
+    /// Why it needs the person, when the landing knows (its first component not done).
+    pub why: Option<crate::data::DataWhy>,
+    /// It holds saved sign-ins to websites or accounts: the person signs in again here.
+    pub sites: bool,
+}
+
+impl SpecialDone {
+    fn of(title: Title, result: ItemResult) -> Self {
+        Self {
+            title,
+            result,
+            why: None,
+            sites: false,
+        }
+    }
+}
+
 /// How the apps, settings and special categories of a move ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rebuilt {
     /// Every app in the plan PCTwin did not leave alone, in plan order.
     pub apps: Vec<(String, AppResult)>,
+    /// The apps already on this laptop, left as they are, in plan order: each with the version
+    /// here when it is older than the old laptop's. Not an item of the move, so outside the six
+    /// result words and their counts, but every one is said.
+    pub here: Vec<(String, Option<String>)>,
     /// Each group of settings: its label, how many settings, and its result.
     pub settings: Vec<(String, u64, ItemResult)>,
-    pub special: Vec<(Title, ItemResult)>,
+    pub special: Vec<SpecialDone>,
     pub restore_point: Option<RestorePoint>,
     /// Why the settings stopped part way, if they did (the journal could not be written).
     pub stopped: Option<String>,
@@ -144,7 +195,7 @@ impl Rebuilt {
             .iter()
             .map(|(_, a)| a.result)
             .chain(self.settings.iter().map(|(_, _, r)| *r))
-            .chain(self.special.iter().map(|(_, r)| *r));
+            .chain(self.special.iter().map(|s| s.result));
         for r in all {
             match by.iter_mut().find(|(s, _)| *s == r.status()) {
                 Some((_, n)) => *n += 1,
@@ -378,6 +429,8 @@ fn settings_system(os: Os) -> System {
 pub struct DataDone {
     pub picked: Vec<u32>,
     pub landed: BTreeMap<String, ItemResult>,
+    /// Why each component that needs the person does, by its ID.
+    pub why: BTreeMap<String, crate::data::DataWhy>,
     /// Each landing in the journal, by its app's name (for undo).
     pub effects: Vec<(String, u64)>,
     pub home: Option<String>,
@@ -425,14 +478,28 @@ pub fn rebuild(
         .zip(installed)
         .collect();
     let mut apps = Vec::new();
+    let mut here = Vec::new();
     for e in &plan.apps {
         if let Some(reason) = needs_of(&e.plan) {
-            apps.push((e.app.name.clone(), AppResult::because(reason)));
+            // The person installs it; what the catalogue and the old laptop's list know about
+            // after (a sign-in, a licence key, its registration) goes with it.
+            let card = &e.plan.card;
+            let mut r = AppResult::because(reason);
+            r.todo = pctwin_apps::after::checklist(
+                &e.app,
+                card.sign_in,
+                card.licence_key,
+                pctwin_apps::after::Installed::Failed,
+                &[],
+            );
+            apps.push((e.app.name.clone(), r));
         } else if let Some(at) = by_name.iter().position(|(n, _)| *n == e.app.name) {
             let (_, r) = by_name.remove(at);
             apps.push((e.app.name.clone(), r));
+        } else if e.plan.disposition == pctwin_apps::routes::Disposition::AlreadyHere {
+            // Already here: left as it is, and said (with the older version here, if it is).
+            here.push((e.app.name.clone(), crate::plan::older_here(&e.plan)));
         }
-        // An app already here (or part of the system) is left alone: not an item of the move.
     }
     // An install the installer gave no answer for is never counted as done.
     for e in &to_install {
@@ -476,55 +543,64 @@ pub fn rebuild(
         ran.lines
     };
     // Special categories.
-    let mut special: Vec<(Title, ItemResult)> = plan
+    let not_arrived = || {
+        (
+            ItemResult::because(Reason::FinishByHand),
+            Some(crate::data::DataWhy::DidNotArrive),
+        )
+    };
+    let mut special: Vec<SpecialDone> = plan
         .special
         .iter()
         .enumerate()
         .map(|(at, s)| {
-            let r = match special_reason(s.step) {
-                Some(reason) => ItemResult::because(reason),
+            let (result, why) = match special_reason(s.step) {
+                Some(reason) => (ItemResult::because(reason), None),
                 // A secret not ticked stays on the old laptop, by the person's choice.
                 None if s.secret && !data.picked.contains(&(at as u32)) => {
-                    ItemResult::skipped_by_user()
+                    (ItemResult::skipped_by_user(), None)
                 }
                 // Copied only when every component of the line landed copied, by 2.5's own word;
-                // one never landed (or not proven) ends needs-action.
+                // one never landed (or not proven) ends needs-action, with why.
                 None => {
-                    let results: Vec<ItemResult> = s
+                    let results: Vec<(ItemResult, Option<crate::data::DataWhy>)> = s
                         .ids
                         .iter()
-                        .map(|id| {
-                            data.landed
-                                .get(id)
-                                .copied()
-                                .unwrap_or(ItemResult::because(Reason::FinishByHand))
+                        .map(|id| match data.landed.get(id) {
+                            Some(r) => (*r, data.why.get(id).cloned()),
+                            None => not_arrived(),
                         })
                         .collect();
                     results
                         .iter()
-                        .find(|r| r.status() != pctwin_types::ItemStatus::Copied)
-                        .copied()
-                        .or(results.first().copied())
-                        .unwrap_or(ItemResult::because(Reason::FinishByHand))
+                        .find(|(r, _)| r.status() != ItemStatus::Copied)
+                        .or(results.first())
+                        .cloned()
+                        .unwrap_or_else(not_arrived)
                 }
             };
-            (Title::Name(s.name.clone()), r)
+            SpecialDone {
+                title: Title::Name(s.name.clone()),
+                result,
+                why,
+                sites: s.sites,
+            }
         })
         .collect();
     if plan.extras_refused {
-        special.push((
+        special.push(SpecialDone::of(
             Title::Key(crate::plan::EXTRAS_REFUSED),
             ItemResult::because(Reason::FinishByHand),
         ));
     }
     if plan.special_not_checked > 0 {
-        special.push((
+        special.push(SpecialDone::of(
             Title::Key(crate::plan::SPECIAL_NOT_CHECKED),
             ItemResult::because(Reason::FinishByHand),
         ));
     }
     if plan.from.is_some() && !plan.special_searched {
-        special.push((
+        special.push(SpecialDone::of(
             Title::Key(SPECIAL_NOT_YET),
             ItemResult::because(Reason::FinishByHand),
         ));
@@ -542,7 +618,7 @@ pub fn rebuild(
         labels,
         apps: apps
             .iter()
-            .filter(|(_, a)| a.result.status() == ItemStatus::Reinstalled)
+            .filter(|(_, a)| a.installed || a.result.status() == ItemStatus::Reinstalled)
             .map(|(n, _)| n.clone())
             .collect(),
         landed: data.effects.clone(),
@@ -550,6 +626,7 @@ pub fn rebuild(
     };
     Rebuilt {
         apps,
+        here,
         settings: settings_lines,
         special,
         restore_point: ran.point.or(point),

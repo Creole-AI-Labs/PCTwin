@@ -544,6 +544,7 @@ function parseNotice(value: unknown): MoveProgress["notice"] | null {
     const n = exactly(value, ["kind", "paused"]);
     return n && typeof n.paused === "boolean" ? { kind, paused: n.paused } : null;
   }
+  if (kind === "may-sleep") return exactly(value, ["kind"]) ? { kind } : null;
   return null;
 }
 

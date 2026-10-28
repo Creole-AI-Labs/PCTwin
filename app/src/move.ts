@@ -213,7 +213,7 @@ export type MoveProgress = {
    * Something the person may need to act on: this laptop is low on battery (`paused`: at the safe
    * limit, so the move was paused for it), the connection dropped, or a drive is not keeping files.
    */
-  notice?: { kind: "low-battery"; paused: boolean } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
+  notice?: { kind: "low-battery"; paused: boolean } | { kind: "may-sleep" } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
 };
 
 /** A count of zero for every status, to fill in. */
