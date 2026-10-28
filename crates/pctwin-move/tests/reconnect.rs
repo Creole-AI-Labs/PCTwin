@@ -378,6 +378,7 @@ async fn old_side<C: Channel, B: Comeback>(
     let who = Who {
         mover: "1000",
         people: &[],
+        extras: &[],
     };
     let (sent, _) = pctwin_move::send_by_rules(
         &mut link,

@@ -62,6 +62,7 @@ fn moved() -> (
             left_on_old_laptop: &[],
             steps_not_finished: &[],
             undo_open: true,
+            special: &[],
         },
         None,
         T0 + 100,

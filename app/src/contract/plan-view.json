@@ -37,5 +37,127 @@
       "tooBig": 0
     },
     "revision": 2
+  },
+  {
+    "fingerprint": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+    "first": [
+      "documents"
+    ],
+    "groups": [
+      {
+        "id": "documents",
+        "path": "",
+        "role": "documents",
+        "size": {
+          "bytes": 1200000,
+          "files": 34,
+          "kind": "known"
+        },
+        "toDrive": "",
+        "toFolder": "documents"
+      }
+    ],
+    "leftOut": [
+      {
+        "count": 3,
+        "reason": "cloud-only"
+      }
+    ],
+    "preview": {
+      "fits": true,
+      "minutes": {
+        "high": 8,
+        "low": 4
+      },
+      "refused": 0,
+      "renamed": 1,
+      "runsAtSignIn": 1,
+      "shortBytes": 0,
+      "tooBig": 0
+    },
+    "rebuild": {
+      "changes": [
+        {
+          "action": "install",
+          "count": 0,
+          "files": 0,
+          "kind": "app",
+          "needs": null,
+          "special": null,
+          "title": {
+            "kind": "name",
+            "value": "Writer"
+          },
+          "undo": "remove-yourself"
+        },
+        {
+          "action": "leave-alone",
+          "count": 0,
+          "files": 0,
+          "kind": "app",
+          "needs": "manual-install",
+          "special": null,
+          "title": {
+            "kind": "name",
+            "value": "Sketch Tool"
+          },
+          "undo": "must-keep"
+        },
+        {
+          "action": "replace",
+          "count": 12,
+          "files": 0,
+          "kind": "settings",
+          "needs": null,
+          "special": null,
+          "title": {
+            "kind": "name",
+            "value": "Writer settings"
+          },
+          "undo": "can-reverse"
+        },
+        {
+          "action": "leave-alone",
+          "count": 0,
+          "files": 3,
+          "kind": "special",
+          "needs": "sign-in",
+          "special": "sign-in",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          },
+          "undo": "must-keep"
+        },
+        {
+          "action": "leave-alone",
+          "count": 0,
+          "files": 0,
+          "kind": "special",
+          "needs": "finish-by-hand",
+          "special": "not-yet",
+          "title": {
+            "kind": "key",
+            "value": "fullmove-special-not-yet"
+          },
+          "undo": "must-keep"
+        }
+      ],
+      "more": 0,
+      "notMoved": [
+        {
+          "count": 40,
+          "group": "private"
+        },
+        {
+          "count": 3,
+          "group": "could-run"
+        }
+      ],
+      "prompt": false,
+      "restorePoint": false,
+      "specialNotMoved": 7
+    },
+    "revision": 2
   }
 ]

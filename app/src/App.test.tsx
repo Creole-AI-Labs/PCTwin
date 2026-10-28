@@ -346,15 +346,13 @@ describe("screens", () => {
     expect(within(screen.getByRole("contentinfo")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Help"]);
   });
 
-  it("in a build without the full move switched on, Start a full move opens its coming-soon page and Back returns", () => {
+  it("Start a full move opens the move in every build, with no coming-soon page", () => {
     vi.stubEnv("VITE_PCTWIN_FULL_MOVE", "");
     try {
       render(<App initialLanguage="en" />);
       fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Full move");
-      expect(screen.getByText(/use Quick Send to send files/)).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-      expect(screen.getByRole("button", { name: /Quick Send/ })).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Which laptop is this?");
+      expect(screen.queryByText(/use Quick Send to send files/)).toBeNull();
     } finally {
       vi.unstubAllEnvs();
     }

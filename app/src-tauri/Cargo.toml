@@ -46,6 +46,12 @@ pctwin-grant = { path = "../../crates/pctwin-grant" }
 # The broker request's one-use number.
 getrandom = "0.4.3"
 pctwin-journal = { path = "../../crates/pctwin-journal" }
+# The full move: apps, settings and special categories joined to the move (src/fullmove.rs).
+pctwin-fullmove = { path = "../../crates/pctwin-fullmove" }
+pctwin-settings = { path = "../../crates/pctwin-settings" }
+pctwin-executor = { path = "../../crates/pctwin-executor" }
+pctwin-recipe = { path = "../../crates/pctwin-recipe" }
+blake3 = "1.8"
 pctwin-journey = { path = "../../crates/pctwin-journey" }
 pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-move = { path = "../../crates/pctwin-move" }

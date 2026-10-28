@@ -17,6 +17,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
+import { parseRebuildPlan, parseRebuilt, parseRebuildStep, type RebuildStep } from "./fullmove";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -253,13 +254,13 @@ export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed"
 export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 
 /** What the move is at before files move (`Stage`): `administrator` while the system's approval prompt is up (M25). */
-export type WaitStage = "scanning" | "waiting" | "moving" | "administrator";
+export type WaitStage = "scanning" | "waiting" | "moving" | "administrator" | "app-data";
 
 /** Why the other people ticked were not moved this time (`OthersWhy`). */
 export const OTHERS_WHY = ["not-approved", "failed", "not-here", "allow-in-settings"] as const;
 export type OthersWhy = (typeof OTHERS_WHY)[number];
 
-export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
+export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy } | { kind: "rebuilding" };
 
 /** How much of the mover's own things the scan has found so far (only ever grows). */
 /** What a laptop said it is when the move started (C06, `About`). `freeBytes`: its free space, when read. */
@@ -371,6 +372,8 @@ export type PlanKey = { revision: number; fingerprint: string };
  * other key must be there. The contract test reads this to know which keys may be missing.
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
+  "plan-view": ["rebuild"],
+  "move-outcome": ["rebuilt"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
   "report-item": ["destination", "reason", "evidence", "note"],
   "qs-picked": ["problem"],
@@ -422,7 +425,8 @@ export function parseMoveStage(value: unknown): MoveStage | null {
     const f = exactly(value, ["kind", "why"]);
     return f && oneOf(f.why, OTHERS_WHY) ? { kind, why: f.why } : null;
   }
-  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator"] as const);
+  if (kind === "rebuilding") return exactly(value, ["kind"]) ? { kind } : null;
+  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator", "app-data"] as const);
 }
 
 export function parsePeopleHere(value: unknown): PeopleHere | null {
@@ -482,14 +486,21 @@ function parsePlanPreview(value: unknown): PlanPreview | null {
 
 /** The plan for the person to approve (`PlanView`, event `move-plan`). */
 export function parsePlanView(value: unknown): PlanView | null {
-  const f = exactly(value, ["revision", "fingerprint", "groups", "leftOut", "preview", "first"]);
+  const f = shaped(value, ["revision", "fingerprint", "groups", "leftOut", "preview", "first"], OPTIONAL_KEYS["plan-view"] ?? []);
   if (!f || !isCount(f.revision) || typeof f.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(f.fingerprint)) return null;
   const groups = listOf(f.groups, parsePlanGroup);
   const leftOut = listOf(f.leftOut, parseLeftOut);
   const preview = parsePlanPreview(f.preview);
   const first = listOf(f.first, (r) => (oneOf(r, FOLDER_ROLES) ? r : null));
   if (first && new Set(first).size !== first.length) return null;
-  return groups && leftOut && preview && first ? { revision: f.revision, fingerprint: f.fingerprint, groups, leftOut, preview, first } : null;
+  if (!groups || !leftOut || !preview || !first) return null;
+  const plan: PlanView = { revision: f.revision, fingerprint: f.fingerprint, groups, leftOut, preview, first };
+  if ("rebuild" in f) {
+    const rebuild = parseRebuildPlan(f.rebuild);
+    if (!rebuild) return null;
+    plan.rebuild = rebuild;
+  }
+  return plan;
 }
 
 const COUNT_KEYS = ["total", "waiting", "copying", "checking", "done", "needsAction", "failed", "skippedByUser"] as const;
@@ -576,7 +587,7 @@ function parsePersonOutcome(value: unknown): PersonOutcome | null {
 }
 
 export function parseMoveOutcome(value: unknown): MoveOutcome | null {
-  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "brokeOff", "checkedFromMemory", "afterMove"]);
+  const f = shaped(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "brokeOff", "checkedFromMemory", "afterMove"], OPTIONAL_KEYS["move-outcome"] ?? []);
   if (!f || !isCount(f.notCopied) || !isCount(f.bytesChecked) || typeof f.stopped !== "boolean" || typeof f.brokeOff !== "boolean" || !isCount(f.checkedFromMemory)) return null;
   const by = exactly(f.byStatus, ITEM_STATUSES);
   if (!by || !ITEM_STATUSES.every((s) => isCount(by[s]))) return null;
@@ -585,7 +596,13 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
   if (!people) return null;
   const afterMove = parseAfterMove(f.afterMove);
   if (!afterMove) return null;
-  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, brokeOff: f.brokeOff, checkedFromMemory: f.checkedFromMemory, afterMove };
+  const outcome: MoveOutcome = { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, brokeOff: f.brokeOff, checkedFromMemory: f.checkedFromMemory, afterMove };
+  if ("rebuilt" in f) {
+    const rebuilt = parseRebuilt(f.rebuilt);
+    if (!rebuilt) return null;
+    outcome.rebuilt = rebuilt;
+  }
+  return outcome;
 }
 
 /** The after-move check: every kind, each with whole counts, and never more copied than planned. */
@@ -689,6 +706,13 @@ export function parseConnectionView(value: unknown): ConnectionView | null {
   return null;
 }
 export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportItem));
+/** Opens undo for the last move's apps and settings: the flow guard shows the preview (R05), then the result (R06). */
+export const fullmoveUndo = () => run("fullmove_undo");
+/** The undo the screens opened is over (the person went back). */
+export const listenUndoClosed = (handler: () => void): Promise<UnlistenFn> =>
+  listen<unknown>("move-undo-closed", () => {
+    handler();
+  });
 
 /** Every move event in one place. A payload that does not parse ends the move on screen as a problem, never shown as sent. */
 export type MoveEvent =
@@ -701,7 +725,8 @@ export type MoveEvent =
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly }
-  | { kind: "link"; link: ConnectionView };
+  | { kind: "link"; link: ConnectionView }
+  | { kind: "rebuild"; step: RebuildStep };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -722,6 +747,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
     on("move-link", parseConnectionView, (link) => ({ kind: "link", link })),
+    on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
   ]);
   return () => {
     for (const stop of all) stop();

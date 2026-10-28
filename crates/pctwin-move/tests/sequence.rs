@@ -49,7 +49,12 @@ async fn send_greeted(
     opener: std::sync::Arc<dyn pctwin_transfer::Opener>,
 ) -> Result<(pctwin_move::Sent, pctwin_move::landing::LandingRules), MoveError> {
     let mut link = greeted(link, pctwin_move::greeting::Side::Old).await?;
-    let who = pctwin_move::Who { mover, people };
+    let extras = sample_extras();
+    let who = pctwin_move::Who {
+        mover,
+        people,
+        extras: &extras,
+    };
     let mut no_way_back = pctwin_move::resume::NoComeback;
     pctwin_move::send_by_rules(
         &mut link,
@@ -61,6 +66,11 @@ async fn send_greeted(
         &mut no_way_back,
     )
     .await
+}
+
+/// The full move's extras every old laptop here sends: more than one page.
+fn sample_extras() -> Vec<u8> {
+    (0..70_000u32).map(|n| (n % 253) as u8).collect()
 }
 
 /// The new laptop's side with the app: greets first, then receives by its rules.
@@ -765,6 +775,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         rules: LandingRules,
         told: Option<String>,
         named: Vec<String>,
+        extras: Option<Vec<u8>>,
     }
     impl Steps for ByRules {
         async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
@@ -784,11 +795,15 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         fn people(&mut self, people: &[pctwin_move::landing::NamedPerson]) {
             self.named = people.iter().map(|p| p.name.clone()).collect();
         }
+        fn extras(&mut self, bytes: Vec<u8>) {
+            self.extras = Some(bytes);
+        }
     }
     let mut steps = ByRules {
         rules: rules.clone(),
         told: None,
         named: Vec::new(),
+        extras: None,
     };
     let (mut old, mut new) = mem_pair();
     let (old_live, new_live) = (Live::default(), Live::default());
@@ -823,6 +838,11 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     let (sent, got) = sent.unwrap();
     assert_eq!(steps.told.as_deref(), Some("1000"), "told who is moving");
     assert_eq!(steps.named, ["Bea"], "told the other people's names");
+    assert_eq!(
+        steps.extras,
+        Some(sample_extras()),
+        "the full move's extras arrived exactly as sent, before the approval"
+    );
     assert_eq!(
         got, rules,
         "the old laptop placed by the new laptop's rules"
