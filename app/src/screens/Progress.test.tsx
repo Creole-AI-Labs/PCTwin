@@ -315,6 +315,11 @@ describe("X01 Move progress, compact", () => {
       }
     });
 
+    it("a stay-awake request the system did not accept is said, never silent", () => {
+      compact(sample.maySleep, { old: false, onBattery: false, slow: false });
+      expect(screen.getByText(text("progress-may-sleep"))).toBeTruthy();
+    });
+
     it("the battery warning stays pinned in the notices while the tips go on without a battery tip", () => {
       compact(sample.lowBattery, { old: false, onBattery: true, slow: false });
       expect(screen.getByText(text("progress-low-battery"))).toBeTruthy();

@@ -463,6 +463,10 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     let done = DataDone {
         picked: person.picked.clone(),
         landed: landed.iter().map(|l| (l.id.clone(), l.result)).collect(),
+        why: landed
+            .iter()
+            .filter_map(|l| Some((l.id.clone(), l.why.clone()?)))
+            .collect(),
         effects: landed
             .iter()
             .filter_map(|l| Some((l.app.clone(), l.effect?)))
@@ -505,9 +509,9 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         .map(|l| &l.app)
         .collect();
     assert!(!copied.is_empty(), "{landed:#?}");
-    for (title, r) in &rebuilt.special {
-        if r.status() == ItemStatus::Copied {
-            let pctwin_fullmove::plan::Title::Name(n) = title else {
+    for s in &rebuilt.special {
+        if s.result.status() == ItemStatus::Copied {
+            let pctwin_fullmove::plan::Title::Name(n) = &s.title else {
                 panic!()
             };
             assert!(copied.contains(&n), "{n} claimed copied: {landed:#?}");
@@ -563,8 +567,39 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         rebuilt
             .special
             .iter()
-            .all(|(_, r)| r.status() != ItemStatus::Failed || r.reason().is_some())
+            .all(|s| s.result.status() != ItemStatus::Failed || s.result.reason().is_some())
     );
+    // R1: saved sign-ins to websites (cookies) are tied to the old laptop, so for each browser
+    // the outcome says to sign in to websites again, on a line that needs the person: never only
+    // "copied", as if the sign-ins came across.
+    for browser in ["Chromey", "Mozilla"] {
+        let sites: Vec<_> = rebuilt
+            .special
+            .iter()
+            .filter(|s| {
+                matches!(&s.title, pctwin_fullmove::plan::Title::Name(n) if n.contains(browser))
+                    && s.sites
+            })
+            .collect();
+        assert!(
+            !sites.is_empty(),
+            "{browser}: no line says to sign in to websites again: {:#?}",
+            rebuilt.special
+        );
+        assert!(
+            sites
+                .iter()
+                .all(|s| s.result.status() == ItemStatus::NeedsAction),
+            "{sites:#?}"
+        );
+    }
+    // A line copied whole carries no reason to act; one that needs the person and landed is said
+    // with why (never the generic "follow the steps" with no steps).
+    for s in &rebuilt.special {
+        if s.result.status() == ItemStatus::Copied {
+            assert_eq!(s.why, None, "{s:?}");
+        }
+    }
 
     // The person edits a landed file afterwards; undo removes the rest and keeps theirs.
     let prefs = on_new.iter().find(|f| f.ends_with("prefs.js")).cloned();
@@ -635,11 +670,17 @@ async fn stream(source: &mut Source, sink: &mut Sink) {
 /// data then comes; told "go on without", it ends needs-action, never copied.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
-    for close_it in [true, false] {
+    // Gap 2: also with the app's folder already on the new laptop (`taken`): it lands beside it,
+    // and the result says so with the folder's new name, never a bare "needs action".
+    for (close_it, taken) in [(true, false), (false, false), (true, true)] {
         let t = tempfile::tempdir().unwrap();
         let old = t.path().join("old");
         let new = t.path().join("new");
         std::fs::create_dir_all(new.join("AppData/Local")).unwrap();
+        if taken {
+            std::fs::create_dir_all(new.join("AppData/Local/Chromey")).unwrap();
+            std::fs::write(new.join("AppData/Local/Chromey/mine.txt"), b"already here").unwrap();
+        }
         chromium(&old);
         let mover = Owner::Person {
             account_id: MOVER.into(),
@@ -711,7 +752,24 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
             .iter()
             .filter(|l| l.result.status() == ItemStatus::Copied)
             .count();
-        if close_it {
+        if taken {
+            assert_eq!(
+                copied, 0,
+                "never over the folder already there: {landed:#?}"
+            );
+            assert!(
+                landed.iter().any(|l| matches!(
+                    &l.why,
+                    Some(pctwin_fullmove::data::DataWhy::Beside { folder })
+                        if folder.contains("(from old laptop)")
+                )),
+                "{landed:#?}"
+            );
+            assert_eq!(
+                std::fs::read(new.join("AppData/Local/Chromey/mine.txt")).unwrap(),
+                b"already here"
+            );
+        } else if close_it {
             assert!(copied > 0, "{landed:#?}");
             assert!(
                 new.join("AppData/Local/Chromey/User Data/Default/History")
@@ -723,7 +781,8 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
                 landed
                     .iter()
                     .all(|l| l.result.status() == ItemStatus::NeedsAction
-                        && l.words.contains("open")),
+                        && l.words.contains("open")
+                        && l.why == Some(pctwin_fullmove::data::DataWhy::AppOpen)),
                 "{landed:#?}"
             );
         }

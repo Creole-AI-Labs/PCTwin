@@ -8,7 +8,7 @@
  */
 import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Section } from "../components/kit";
-import type { ChangeView, DataProgress, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
+import type { ChangeView, DataProgress, LineNote, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
 import { shownName } from "../names";
 import FrameFooter from "./FrameFooter";
 import { Attention, Check } from "../icons";
@@ -26,6 +26,8 @@ function TitleText({ title }: { title: Title }) {
 
 /** What a change still needs from the person, or what it does, in words. */
 function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
+  if (c.note?.note === "sites") return l10n.getString("fullmove-step-sites");
+  if (c.note?.note === "older-here") return l10n.getString("fullmove-here-older", { version: shownName(c.note.version) });
   if (c.special) return l10n.getString(`fullmove-step-${c.special}`);
   if (c.kind === "settings") {
     return [l10n.getString("fullmove-settings-count", { count: c.count }), l10n.getString(c.action === "replace" ? "fullmove-settings-replace" : "fullmove-settings-merge")].join(" ");
@@ -105,6 +107,7 @@ export function RebuildPlanSection({ rebuild, picked = [], onPick }: { rebuild: 
           </RowList>
         </PlanBox>
       )}
+      {rebuild.links > 0 && <p className="subhead">{l10n.getString("fullmove-links", { count: rebuild.links })}</p>}
       {rebuild.prompt && (
         <div className="mv-note">
           <Banner tone="info">{l10n.getString(rebuild.restorePoint ? "fullmove-prompt-restore" : "fullmove-prompt")}</Banner>
@@ -137,17 +140,42 @@ export function Rebuilding({ step }: { step: RebuildStep | null }) {
   );
 }
 
-function lineDetail(l: RebuiltLine, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
+type L10n = ReturnType<typeof useLocalization>["l10n"];
+
+/** One note in words; a note the line's own reason already says is left out. */
+function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
+  switch (n.note) {
+    case "sign-in":
+      return l.reason === "sign-in" ? "" : l10n.getString("fullmove-note-sign-in");
+    case "licence-key":
+      return l.reason === "activation" ? "" : l10n.getString("fullmove-note-licence-key");
+    case "registration": {
+      const who = [n.owner, n.company].filter((w): w is string => w !== null).map(shownName).join(", ");
+      return [who ? l10n.getString("fullmove-note-registration", { who }) : "", n.productId ? l10n.getString("fullmove-note-product-id", { id: shownName(n.productId) }) : ""].filter(Boolean).join(" ");
+    }
+    case "extras":
+      return l10n.getString("fullmove-note-extras", { apps: n.apps.map(shownName).join(", ") });
+    case "sites":
+      return l10n.getString("fullmove-step-sites");
+    case "data":
+      return l10n.getString(`fullmove-data-${n.why}`, n.folder === undefined ? {} : { folder: shownName(n.folder) });
+  }
+}
+
+function lineDetail(l: RebuiltLine, l10n: L10n): string {
   const parts: string[] = [];
   if (l.kind === "settings") parts.push(l10n.getString("fullmove-settings-count", { count: l.count }));
-  if (l.reason) parts.push(l10n.getString(l.kind === "special" && l.reason === "finish-by-hand" ? "fullmove-special-finish" : `reason-${l.reason}`));
-  return parts.join(" ");
+  // App data that says why it needs the person says that instead of the general reason.
+  const why = l.notes.some((n) => n.note === "data");
+  if (l.reason && !why) parts.push(l10n.getString(l.kind === "special" && l.reason === "finish-by-hand" ? "fullmove-special-finish" : `reason-${l.reason}`));
+  for (const n of l.notes) parts.push(noteText(n, l, l10n));
+  return parts.filter(Boolean).join(" ");
 }
 
 /** R01's section for the full move: each app, group of settings and special category with its result, and Undo. */
 export function RebuiltSection({ rebuilt, onUndo }: { rebuilt: Rebuilt; onUndo?: () => void }) {
   const { l10n } = useLocalization();
-  if (rebuilt.lines.length === 0 && !rebuilt.stopped) return null;
+  if (rebuilt.lines.length === 0 && rebuilt.here.length === 0 && !rebuilt.stopped) return null;
   return (
     <Section title={l10n.getString("fullmove-outcome-title")}>
       {rebuilt.stopped && (
@@ -173,6 +201,23 @@ export function RebuiltSection({ rebuilt, onUndo }: { rebuilt: Rebuilt; onUndo?:
         })}
       </RowList>
       {rebuilt.more > 0 && <p className="subhead">{l10n.getString("fullmove-more", { count: rebuilt.more })}</p>}
+      {rebuilt.fresh && <p className="subhead">{l10n.getString("fullmove-outcome-fresh")}</p>}
+      {rebuilt.here.length > 0 && (
+        <>
+          <h3 className="plan-box-title">{l10n.getString("fullmove-outcome-here-title", { count: rebuilt.here.length + rebuilt.hereMore })}</h3>
+          <RowList>
+            {rebuilt.here.map((h, i) => (
+              <Row
+                key={i}
+                title={<Name>{h.name}</Name>}
+                detail={h.older === null ? l10n.getString("fullmove-outcome-here") : l10n.getString("fullmove-outcome-here-older", { version: shownName(h.older) })}
+                end={<Badge>{l10n.getString("fullmove-outcome-here-badge")}</Badge>}
+              />
+            ))}
+          </RowList>
+          {rebuilt.hereMore > 0 && <p className="subhead">{l10n.getString("fullmove-more", { count: rebuilt.hereMore })}</p>}
+        </>
+      )}
       {rebuilt.restorePoint !== "not-asked" && <p className="subhead">{l10n.getString(`fullmove-restore-${rebuilt.restorePoint}`)}</p>}
       {rebuilt.canUndo && onUndo && (
         <div className="fm-undo">

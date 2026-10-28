@@ -175,6 +175,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         files,
         secret: None,
         source: None,
+        note: None,
     };
     crate::fullmove::RebuildPlanView {
         changes: vec![
@@ -211,6 +212,34 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                 None,
                 0,
             ),
+            ChangeView {
+                note: Some(pctwin_fullmove::plan::ChangeNote::OlderHere {
+                    version: "2.0".into(),
+                }),
+                ..change(
+                    Title::Name("Notes".into()),
+                    Kind::App,
+                    ChangeAction::LeaveAlone,
+                    UndoPromise::MustKeep,
+                    0,
+                    None,
+                    None,
+                    0,
+                )
+            },
+            ChangeView {
+                note: Some(pctwin_fullmove::plan::ChangeNote::Sites),
+                ..change(
+                    Title::Name("Browser".into()),
+                    Kind::Special,
+                    ChangeAction::LeaveAlone,
+                    UndoPromise::MustKeep,
+                    0,
+                    Some(Reason::SignIn),
+                    Some(SpecialStep::Relink),
+                    1,
+                )
+            },
             change(
                 Title::Name("Mail".into()),
                 Kind::Special,
@@ -267,6 +296,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             },
         ],
         special_not_moved: 7,
+        links: 4,
         prompt: false,
         restore_point: false,
     }
@@ -274,33 +304,109 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
 
 /// The full move's outcome section.
 fn rebuilt() -> crate::fullmove::RebuiltView {
-    use crate::fullmove::{RebuiltLine, RestoreWord};
+    use crate::fullmove::{HereLine, LineNote, RebuiltLine, RestoreWord};
+    use pctwin_fullmove::data::DataWhy;
     use pctwin_fullmove::plan::{Kind, Title};
+    let line = |title, kind, count, status, reason, notes| RebuiltLine {
+        title,
+        kind,
+        count,
+        status,
+        reason,
+        notes,
+    };
+    let data = |why| {
+        line(
+            Title::Name("Mail".into()),
+            Kind::Special,
+            0,
+            ItemStatus::NeedsAction,
+            Some(Reason::FinishByHand),
+            vec![LineNote::Data(why)],
+        )
+    };
     crate::fullmove::RebuiltView {
         lines: vec![
-            RebuiltLine {
-                title: Title::Name("Sketch Tool".into()),
-                kind: Kind::App,
-                count: 0,
-                status: ItemStatus::NeedsAction,
-                reason: Some(Reason::ManualInstall),
-            },
-            RebuiltLine {
-                title: Title::Name("Writer settings".into()),
-                kind: Kind::Settings,
-                count: 12,
-                status: ItemStatus::Converted,
-                reason: None,
-            },
-            RebuiltLine {
-                title: Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
-                kind: Kind::Special,
-                count: 0,
-                status: ItemStatus::NeedsAction,
-                reason: Some(Reason::FinishByHand),
-            },
+            line(
+                Title::Name("Sketch Tool".into()),
+                Kind::App,
+                0,
+                ItemStatus::NeedsAction,
+                Some(Reason::ManualInstall),
+                vec![
+                    LineNote::LicenceKey,
+                    LineNote::Registration {
+                        owner: Some("Ada".into()),
+                        company: None,
+                        product_id: Some("12345-OEM".into()),
+                    },
+                ],
+            ),
+            line(
+                Title::Name("Writer".into()),
+                Kind::App,
+                0,
+                ItemStatus::NeedsAction,
+                Some(Reason::SignIn),
+                vec![
+                    LineNote::SignIn,
+                    LineNote::Extras {
+                        apps: vec!["Writer Helper".into()],
+                    },
+                ],
+            ),
+            line(
+                Title::Name("Writer settings".into()),
+                Kind::Settings,
+                12,
+                ItemStatus::Converted,
+                None,
+                vec![],
+            ),
+            line(
+                Title::Name("Browser".into()),
+                Kind::Special,
+                0,
+                ItemStatus::NeedsAction,
+                Some(Reason::FinishByHand),
+                vec![LineNote::Sites],
+            ),
+            data(DataWhy::Lost),
+            data(DataWhy::DidNotArrive),
+            data(DataWhy::AppOpen),
+            data(DataWhy::Changing),
+            data(DataWhy::Unreadable),
+            data(DataWhy::NotRead),
+            data(DataWhy::NotWhole),
+            data(DataWhy::NotLanded),
+            data(DataWhy::Beside {
+                folder: "Mail (from old laptop)".into(),
+            }),
+            data(DataWhy::Placed {
+                folder: "Mail".into(),
+            }),
+            line(
+                Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
+                Kind::Special,
+                0,
+                ItemStatus::NeedsAction,
+                Some(Reason::FinishByHand),
+                vec![],
+            ),
         ],
         more: 0,
+        here: vec![
+            HereLine {
+                name: "Paint".into(),
+                older: None,
+            },
+            HereLine {
+                name: "Notes".into(),
+                older: Some("2.0".into()),
+            },
+        ],
+        here_more: 0,
+        fresh: true,
         restore_point: RestoreWord::NotAsked,
         stopped: false,
         can_undo: true,
@@ -516,6 +622,10 @@ fn progress() -> Vec<MoveProgress> {
         MoveProgress {
             notice: Some(Notice::LowBattery { paused: true }),
             ..quiet(RunState::Pausing, None)
+        },
+        MoveProgress {
+            notice: Some(Notice::MaySleep),
+            ..quiet(RunState::Running, None)
         },
         quiet(RunState::Paused, Some(named())),
     ]

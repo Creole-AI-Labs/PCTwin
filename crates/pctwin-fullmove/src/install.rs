@@ -349,7 +349,8 @@ impl<'a> WingetInstaller<'a> {
     }
 
     /// Installs one prepared download through the helper, then looks at what is really there.
-    fn install_one(&mut self, p: &Prepared, app: &FoundApp) -> AppResult {
+    fn install_one(&mut self, p: &Prepared, entry: &AppEntry) -> AppResult {
+        let app = &entry.app;
         let Some(plan) = self.plan.clone() else {
             // The helper never ran (declined, or it could not start, such as a packages folder
             // it would not trust): nothing was installed; the person installs it.
@@ -385,10 +386,14 @@ impl<'a> WingetInstaller<'a> {
         let probe = after::probe(app, pkg.scope, &now);
         let extra = after::extras(&before, &now, probe.key.as_deref());
         let result: ItemResult = after::result(app, installed, &probe, &extra, Opened::NotChecked);
-        AppResult {
-            result,
-            todo: after::checklist(app, false, false, installed, &extra),
-        }
+        // What the catalogue knows the app needs after (a sign-in, a licence key) goes with it.
+        let card = &entry.plan.card;
+        let todo = after::checklist(app, card.sign_in, card.licence_key, installed, &extra);
+        let mut done = AppResult::installed(result, todo);
+        // Installed by PCTwin only when it ran and the laptop's own list shows it (not refused,
+        // failed, missing, or there already).
+        done.installed = probe.found && matches!(installed, Installed::Done { .. });
+        done
     }
 }
 
@@ -419,7 +424,7 @@ impl Installer for WingetInstaller<'_> {
         if !ready.is_empty() {
             self.start(ready.iter().map(|p| p.op.clone()).collect());
             for p in &ready {
-                results[p.at] = Some(self.install_one(p, &apps[p.at].app));
+                results[p.at] = Some(self.install_one(p, apps[p.at]));
                 done();
             }
             self.helper.bye();

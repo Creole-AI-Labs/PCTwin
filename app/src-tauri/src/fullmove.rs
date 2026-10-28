@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pctwin_fullmove::extras::{Extras, NotMovedCount, OldFolder, SpecialStep};
-use pctwin_fullmove::plan::{Action, FullPlan, Kind, NewLaptop, Promise, Title};
+use pctwin_fullmove::plan::{Action, ChangeNote, FullPlan, Kind, NewLaptop, Promise, Title};
 use pctwin_fullmove::run::{Installer, NoInstaller, Progress, UndoBook};
 use pctwin_journal::{Actor, Journal, Permission, Rebuild, RestorePoint, Scope};
 use pctwin_record::{AppArch, AppSystem, LaptopId, Owner, Record};
@@ -109,8 +109,9 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /* ---------- The old laptop ---------- */
 
 /// The old laptop: the extras for the person `mover`, read only: their settings, their folders
-/// here, and their special categories as `special` found them (`None`: not in time).
-pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>) -> Vec<u8> {
+/// here, their special categories as `special` found them (`None`: not in time), and how many
+/// links and junctions the scan found among their files (`links`: never followed, never moved).
+pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>, links: u64) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -123,6 +124,7 @@ pub fn extras_here(special: Option<&pctwin_fullmove::extras::SpecialFound>) -> V
         .collect();
     let mut x = pctwin_fullmove::extras::here(folders);
     x.with_special(special);
+    x.links = links;
     x.encode()
 }
 
@@ -143,6 +145,8 @@ pub struct ChangeView {
     /// A secret the person may tick to bring: its line (none unless ticked).
     pub secret: Option<u32>,
     pub source: Option<String>,
+    /// What else the person should know (an older version here, saved sign-ins to websites).
+    pub note: Option<ChangeNote>,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -153,6 +157,8 @@ pub struct RebuildPlanView {
     pub more: u64,
     pub not_moved: Vec<NotMovedCount>,
     pub special_not_moved: u64,
+    /// Links and junctions among the person's files: never followed, never moved.
+    pub links: u64,
     /// The system's administrator prompt is asked once for the move.
     pub prompt: bool,
     /// A Windows restore point is asked for before the first change.
@@ -296,6 +302,12 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             files: c.files,
             secret: c.secret,
             source: c.source.map(|n| name(&n)),
+            note: c.note.map(|n| match n {
+                ChangeNote::OlderHere { version } => ChangeNote::OlderHere {
+                    version: name(&version),
+                },
+                n => n,
+            }),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -313,6 +325,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         more,
         not_moved: plan.not_moved.clone(),
         special_not_moved: plan.special_not_moved,
+        links: plan.links,
         prompt: asks,
         restore_point: asks && cfg!(windows),
     }
@@ -459,6 +472,88 @@ pub struct RebuiltLine {
     pub count: u64,
     pub status: ItemStatus,
     pub reason: Option<Reason>,
+    /// What else the person should know or do for it, each a word the screens translate.
+    pub notes: Vec<LineNote>,
+}
+
+/// One thing to know or do for an outcome line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "note", rename_all = "kebab-case")]
+pub enum LineNote {
+    /// Sign in to the app.
+    SignIn,
+    /// Enter the app's licence key, or activate it.
+    LicenceKey,
+    /// What the old laptop's own list held about its licence, to activate it again.
+    #[serde(rename_all = "camelCase")]
+    Registration {
+        owner: Option<String>,
+        company: Option<String>,
+        product_id: Option<String>,
+    },
+    /// Other programs appeared with it; the person can remove them.
+    Extras { apps: Vec<String> },
+    /// Saved sign-ins to websites or accounts in it stayed tied to the old laptop.
+    Sites,
+    /// Why its app data needs the person.
+    Data(pctwin_fullmove::data::DataWhy),
+}
+
+/// An app already on this laptop, left as it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HereLine {
+    pub name: String,
+    /// The version here, when it is older than the old laptop's.
+    pub older: Option<String>,
+}
+
+/// The notes for an app's to-do list (a restart is said by the line's own reason).
+fn todo_notes(todo: &[pctwin_apps::after::Todo]) -> Vec<LineNote> {
+    use pctwin_apps::after::Todo;
+    let text = |t: &Option<String>| t.as_deref().map(name);
+    todo.iter()
+        .filter_map(|t| match t {
+            Todo::SignIn => Some(LineNote::SignIn),
+            Todo::LicenceKey => Some(LineNote::LicenceKey),
+            Todo::Registration {
+                owner,
+                company,
+                product_id,
+            } if owner.is_some() || company.is_some() || product_id.is_some() => {
+                Some(LineNote::Registration {
+                    owner: text(owner),
+                    company: text(company),
+                    product_id: text(product_id),
+                })
+            }
+            Todo::Registration { .. } | Todo::Restart => None,
+            Todo::Extras(apps) => Some(LineNote::Extras {
+                apps: bounded(apps.iter().map(|a| name(a)).collect()).0,
+            }),
+        })
+        .collect()
+}
+
+/// The notes for an app data line.
+fn data_notes(s: &pctwin_fullmove::run::SpecialDone) -> Vec<LineNote> {
+    use pctwin_fullmove::data::DataWhy;
+    let mut out = Vec::new();
+    if s.sites {
+        out.push(LineNote::Sites);
+    }
+    if let Some(why) = &s.why {
+        out.push(LineNote::Data(match why {
+            DataWhy::Beside { folder } => DataWhy::Beside {
+                folder: name(folder),
+            },
+            DataWhy::Placed { folder } => DataWhy::Placed {
+                folder: name(folder),
+            },
+            w => w.clone(),
+        }));
+    }
+    out
 }
 
 /// The restore point's honest answer.
@@ -479,6 +574,12 @@ pub enum RestoreWord {
 pub struct RebuiltView {
     pub lines: Vec<RebuiltLine>,
     pub more: u64,
+    /// The apps already on this laptop, left as they are (not items of the move: outside the
+    /// result words, each said).
+    pub here: Vec<HereLine>,
+    pub here_more: u64,
+    /// PCTwin installed at least one app: fresh installs start signed out.
+    pub fresh: bool,
     pub restore_point: RestoreWord,
     /// The settings stopped part way (the journal could not be written).
     pub stopped: bool,
@@ -501,6 +602,9 @@ pub fn rebuild_here<R: Runtime>(
         return RebuiltView {
             lines: Vec::new(),
             more: 0,
+            here: Vec::new(),
+            here_more: 0,
+            fresh: false,
             restore_point: RestoreWord::NotAsked,
             stopped: true,
             can_undo: false,
@@ -623,6 +727,7 @@ pub fn rebuild_here<R: Runtime>(
             count: 0,
             status: a.result.status(),
             reason: a.result.reason(),
+            notes: todo_notes(&a.todo),
         });
     }
     for (label, count, r) in &done.settings {
@@ -632,20 +737,32 @@ pub fn rebuild_here<R: Runtime>(
             count: *count,
             status: r.status(),
             reason: r.reason(),
+            notes: Vec::new(),
         });
     }
-    for (t, r) in &done.special {
+    for s in &done.special {
         lines.push(RebuiltLine {
-            title: match t {
+            title: match &s.title {
                 Title::Name(n) => Title::Name(name(n)),
                 k => k.clone(),
             },
             kind: Kind::Special,
             count: 0,
-            status: r.status(),
-            reason: r.reason(),
+            status: s.result.status(),
+            reason: s.result.reason(),
+            notes: data_notes(s),
         });
     }
+    let (here, here_more) = bounded(
+        done.here
+            .iter()
+            .map(|(n, older)| HereLine {
+                name: name(n),
+                older: older.as_deref().map(name),
+            })
+            .collect(),
+    );
+    let fresh = done.apps.iter().any(|(_, a)| a.installed);
     // Needs the person first, then failed, then done: what to act on comes first.
     lines.sort_by_key(|l| match l.status {
         ItemStatus::NeedsAction => 0,
@@ -671,6 +788,9 @@ pub fn rebuild_here<R: Runtime>(
     RebuiltView {
         lines,
         more,
+        here,
+        here_more,
+        fresh,
         restore_point,
         stopped: done.stopped.is_some(),
         can_undo,
@@ -740,6 +860,10 @@ fn land_data(
         &names,
     );
     done.landed = landed.iter().map(|l| (l.id.clone(), l.result)).collect();
+    done.why = landed
+        .iter()
+        .filter_map(|l| Some((l.id.clone(), l.why.clone()?)))
+        .collect();
     done.effects = landed
         .iter()
         .filter_map(|l| Some((l.app.clone(), l.effect?)))
@@ -1109,6 +1233,44 @@ mod tests {
     use super::*;
     use crate::guard_views::MAX_LINES;
     use pctwin_settings::System;
+
+    /// Gap 1: an app's to-do list reaches the outcome as notes (a restart is the line's own
+    /// reason; a registration with nothing in it says nothing).
+    #[test]
+    fn an_apps_to_do_list_becomes_its_outcome_notes() {
+        use pctwin_apps::after::Todo;
+        let notes = todo_notes(&[
+            Todo::SignIn,
+            Todo::LicenceKey,
+            Todo::Registration {
+                owner: Some("Ada".into()),
+                company: None,
+                product_id: Some("12345".into()),
+            },
+            Todo::Registration {
+                owner: None,
+                company: None,
+                product_id: None,
+            },
+            Todo::Restart,
+            Todo::Extras(vec!["Helper".into()]),
+        ]);
+        assert_eq!(
+            notes,
+            vec![
+                LineNote::SignIn,
+                LineNote::LicenceKey,
+                LineNote::Registration {
+                    owner: Some("Ada".into()),
+                    company: None,
+                    product_id: Some("12345".into()),
+                },
+                LineNote::Extras {
+                    apps: vec!["Helper".into()],
+                },
+            ]
+        );
+    }
 
     #[test]
     fn the_approved_fingerprint_names_both_the_record_and_the_full_plan() {

@@ -769,6 +769,34 @@ pub struct Landing<'a> {
     pub system: System,
 }
 
+/// Why a component of app data needs the person, in a word the screens translate (never the
+/// engine's own words shown raw).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "why", rename_all = "kebab-case")]
+pub enum DataWhy {
+    /// The connection was lost before it arrived; it is still on the old laptop.
+    Lost,
+    /// It did not arrive.
+    DidNotArrive,
+    /// Its app was open on the old laptop, so it was not read.
+    AppOpen,
+    /// It kept changing on the old laptop while it was read.
+    Changing,
+    /// It could not be read on the old laptop.
+    Unreadable,
+    /// It was not read (the move stopped first).
+    NotRead,
+    /// Not every file of it arrived checked.
+    NotWhole,
+    /// It arrived, but PCTwin could not put it in place here.
+    NotLanded,
+    /// The app's folder was already on this laptop: it landed beside it, as `folder`, and the app
+    /// keeps using its own folder until the person swaps them.
+    Beside { folder: String },
+    /// It landed in `folder`, but the app needs a step before it can use it.
+    Placed { folder: String },
+}
+
 /// How one component ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Landed {
@@ -778,6 +806,8 @@ pub struct Landed {
     /// Its landing in the journal (for undo).
     pub effect: Option<u64>,
     pub words: String,
+    /// Why it needs the person, when it does.
+    pub why: Option<DataWhy>,
 }
 
 /// Lands every component that arrived whole, secrets first; anything chosen that did not arrive
@@ -813,32 +843,43 @@ pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -
     let mut out = Vec::new();
     for (step, (id, secret)) in ids.into_iter().enumerate() {
         let app = apps.get(id).cloned().unwrap_or_default();
-        let needs = |words: &str| Landed {
+        let needs = |words: &str, why: DataWhy| Landed {
             id: id.clone(),
             app: app.clone(),
             result: ItemResult::because(Reason::FinishByHand),
             effect: None,
             words: words.into(),
+            why: Some(why),
         };
         let Some(a) = sink.arrived.get(id) else {
-            out.push(needs(if sink.lost {
-                "the connection was lost before it arrived; it is still safe on your old laptop"
+            out.push(if sink.lost {
+                needs(
+                    "the connection was lost before it arrived; it is still safe on your old laptop",
+                    DataWhy::Lost,
+                )
             } else {
-                "it did not arrive"
-            }));
+                needs("it did not arrive", DataWhy::DidNotArrive)
+            });
             continue;
         };
         if let Some(why) = a.not_captured {
-            out.push(needs(match why {
-                NotCaptured::AppOpen => "its app was open on the old laptop",
-                NotCaptured::Changing => "it kept changing on the old laptop",
-                NotCaptured::Unreadable => "it could not be read on the old laptop",
-                NotCaptured::Stopped => "it was not read",
-            }));
+            out.push(match why {
+                NotCaptured::AppOpen => {
+                    needs("its app was open on the old laptop", DataWhy::AppOpen)
+                }
+                NotCaptured::Changing => {
+                    needs("it kept changing on the old laptop", DataWhy::Changing)
+                }
+                NotCaptured::Unreadable => needs(
+                    "it could not be read on the old laptop",
+                    DataWhy::Unreadable,
+                ),
+                NotCaptured::Stopped => needs("it was not read", DataWhy::NotRead),
+            });
             continue;
         }
         let Some(r) = &a.record else {
-            out.push(needs("its record did not arrive"));
+            out.push(needs("its record did not arrive", DataWhy::NotWhole));
             continue;
         };
         let whole = !a.refused
@@ -847,7 +888,7 @@ pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -
                 .iter()
                 .all(|f| a.files.get(&f.rel).copied() == Some(true));
         if !whole || r.component.secret != secret {
-            out.push(needs("not every file arrived checked"));
+            out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
         }
         out.push(laptop.land(id, r, step as u32, secret, &sink.folder(id)));
@@ -914,6 +955,7 @@ impl NewLaptopOf<'_, '_> {
                 result: ItemResult::because(Reason::FinishByHand),
                 effect: None,
                 words: "it was not landed".into(),
+                why: Some(DataWhy::NotLanded),
             };
         };
         let (Some(item), Ok(recipe)) = (
@@ -926,6 +968,7 @@ impl NewLaptopOf<'_, '_> {
                 result: ItemResult::because(Reason::FinishByHand),
                 effect: None,
                 words: "it was not landed".into(),
+                why: Some(DataWhy::NotLanded),
             };
         };
         let planned = PlannedEffect {
@@ -960,12 +1003,35 @@ impl NewLaptopOf<'_, '_> {
             Conflict::KeepBoth,
             now,
         );
+        let why = why_of(&applied);
         Landed {
             id: id.into(),
             app: r.app.clone(),
             result: applied.result,
             effect: applied.landed.as_ref().map(|l| l.effect),
             words: applied.words,
+            why,
         }
     }
+}
+
+/// Why a landed (or not landed) component needs the person, from how it was applied: nothing when
+/// it is done or the person left it out.
+pub fn why_of(applied: &api::Applied) -> Option<DataWhy> {
+    use pctwin_types::ItemStatus;
+    if matches!(
+        applied.result.status(),
+        ItemStatus::Copied | ItemStatus::Converted | ItemStatus::SkippedByUser
+    ) {
+        return None;
+    }
+    Some(match &applied.landed {
+        Some(l) if l.beside => DataWhy::Beside {
+            folder: l.folder.clone(),
+        },
+        Some(l) if l.verified => DataWhy::Placed {
+            folder: l.folder.clone(),
+        },
+        _ => DataWhy::NotLanded,
+    })
 }

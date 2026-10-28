@@ -79,6 +79,8 @@ export const withFailures: MoveProgress = {
 
 export const linkLost: MoveProgress = { ...running, notice: { kind: "link-lost" } };
 export const lowBattery: MoveProgress = { ...running, notice: { kind: "low-battery", paused: false } };
+/** The system did not accept the stay-awake request: the laptop may sleep. */
+export const maySleep: MoveProgress = { ...running, notice: { kind: "may-sleep" } };
 
 export const pausing: MoveProgress = { ...running, state: "pausing", counts: counts({ done: 4210, copying: 1, waiting: 1789 }) };
 export const paused: MoveProgress = { ...running, state: "paused", counts: counts({ done: 4211, waiting: 1789 }), current: undefined, speed: undefined, minutesLeft: undefined };

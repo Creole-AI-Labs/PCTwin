@@ -229,6 +229,7 @@ impl Installer for FakeInstaller {
                 AppResult {
                     result: pctwin_types::ItemResult::done(ItemStatus::Reinstalled).unwrap(),
                     todo: vec![],
+                    installed: true,
                 }
             })
             .collect()
@@ -612,6 +613,10 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         None,
         "already here: left alone"
     );
+    // Gap 7: an app already here is still said in the results ("already on this laptop, left
+    // as it is"), outside the six words: never counted as reinstalled.
+    assert_eq!(done.here, vec![("Lab Already Here".to_string(), None)]);
+    assert!(!done.undo.apps.contains(&"Lab Already Here".to_string()));
     for (label, _, r) in &done.settings {
         assert_eq!(r.status(), ItemStatus::Converted, "{label}: {r:?}");
     }
@@ -619,7 +624,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
     assert!(
         done.special
             .iter()
-            .all(|(_, r)| r.status() == ItemStatus::NeedsAction),
+            .all(|s| s.result.status() == ItemStatus::NeedsAction),
         "special categories are never claimed copied until their files move: {:?}",
         done.special
     );

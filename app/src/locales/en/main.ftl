@@ -1920,3 +1920,30 @@ fullmove-close-again = Try again
 fullmove-close-without = Go on without them
 fullmove-extras-refused = Settings and app data from the old laptop could not be read here, so none were moved. They are still on your old laptop.
 fullmove-app-from = PCTwin installs the winget package { $id } from its maker, after checking it is this app and the same maker.
+
+## The full move: what each app and its data still needs (28 October 2026)
+
+fullmove-here-older = An older version ({ $version }) is on this laptop. PCTwin leaves it as it is.
+fullmove-step-sites = Saved sign-ins to websites stay tied to the old laptop. Sign in to the websites again on this laptop.
+fullmove-links = Shortcuts to other places among your files, which PCTwin does not follow or move: { $count }
+fullmove-note-sign-in = Open it and sign in to your account.
+fullmove-note-licence-key = Open it and enter your licence key, or sign in to the account that holds your licence.
+fullmove-note-registration = Your old laptop listed it as registered to { $who }.
+fullmove-note-product-id = Its product ID on your old laptop was { $id }.
+fullmove-note-extras = Other programs came with it: { $apps }. Remove them in your laptop’s settings if you do not want them.
+fullmove-data-lost = The connection was lost before this data arrived. It is still safe on your old laptop. Start a new move to bring it.
+fullmove-data-did-not-arrive = This data did not arrive. It is still safe on your old laptop. Start a new move to bring it.
+fullmove-data-app-open = The app was open on your old laptop, so its data was not copied. Close the app there, then start a new move to bring it.
+fullmove-data-changing = This data kept changing on your old laptop while PCTwin read it. Close the app there, then start a new move to bring it.
+fullmove-data-unreadable = PCTwin could not read this data on your old laptop. It is still there.
+fullmove-data-not-read = The move stopped before this data was read. It is still safe on your old laptop.
+fullmove-data-not-whole = Not all of this data arrived, so PCTwin put none of it in place. It is still safe on your old laptop.
+fullmove-data-not-landed = This data arrived, but PCTwin could not put it in place on this laptop. It is still safe on your old laptop.
+fullmove-data-beside = The app already had its own folder on this laptop, so PCTwin put the old laptop’s copy beside it, in { $folder }. The app still uses its own folder. To use the old copy instead, close the app and swap the two folders.
+fullmove-data-placed = The data is in { $folder }, but the app needs a step before it can use it. Open the app and check it.
+fullmove-outcome-here-title = Apps already on this laptop: { $count }
+fullmove-outcome-here = Already on this laptop, left as it is.
+fullmove-outcome-here-older = An older version ({ $version }) is on this laptop. PCTwin left it as it is. Update it from its maker if you want the newer one.
+fullmove-outcome-here-badge = Left as it is
+fullmove-outcome-fresh = Apps PCTwin installed start fresh. Open each one and sign in if it asks.
+progress-may-sleep = This laptop may go to sleep during the move. Keep it plugged in and open.

@@ -59,7 +59,7 @@ describe("the approval screen's apps, settings and app data", () => {
     expect(body).toContain(text("fullmove-plan-title"));
     expect(body).toContain(plain(text("fullmove-group-install", { count: 1 })));
     expect(body).toContain(plain(text("fullmove-group-settings", { count: 1 })));
-    expect(body).toContain(plain(text("fullmove-group-needs", { count: 3 })));
+    expect(body).toContain(plain(text("fullmove-group-needs", { count: 4 })));
     // The app installed: PCTwin does not remove apps yet, and says so before the approval.
     expect(body).toContain(text("guard-undo-remove-yourself"));
     // Settings: how many, and that some replace what is here, with undo.
@@ -73,6 +73,17 @@ describe("the approval screen's apps, settings and app data", () => {
     expect(body).toContain(plain(text("fullmove-not-moved-private", { count: 40 })));
     expect(body).toContain(plain(text("fullmove-special-not-moved", { count: 7 })));
     expect(await violations()).toEqual([]);
+  });
+
+  it("says an older version here is left as it is, that saved website sign-ins stay behind, and counts shortcuts not followed", () => {
+    const { container } = inApp(<RebuildPlanSection rebuild={fullPlan()} />);
+    const body = plain(container.textContent);
+    // Gap 6: an older version already here, with its version, left as it is.
+    expect(body).toContain(plain(text("fullmove-here-older", { version: "2.0" })));
+    // R1: a browser's saved sign-ins to websites are tied to the old laptop.
+    expect(body).toContain(text("fullmove-step-sites"));
+    // Gap 8: links and junctions are counted and said, never silently left.
+    expect(body).toContain(plain(text("fullmove-links", { count: 4 })));
   });
 
   it("a secret is brought only when the person ticks it, one by one, and none is ticked to begin with", () => {
@@ -136,10 +147,51 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(text("status-converted"));
     expect(body).toContain(text("reason-manual-install"));
     expect(body).toContain(text("fullmove-special-finish"));
-    expect(rebuiltNeedsAction(rebuilt)).toBe(2);
+    expect(rebuiltNeedsAction(rebuilt)).toBe(14);
     fireEvent.click(screen.getByRole("button", { name: text("fullmove-outcome-undo") }));
     expect(onUndo).toHaveBeenCalledOnce();
     expect(await violations()).toEqual([]);
+  });
+
+  it("an installed app with a step left says the step, and app data says why it needs the person", () => {
+    const { rebuilt } = fullOutcome();
+    const { container } = inApp(<RebuiltSection rebuilt={rebuilt} />);
+    const body = plain(container.textContent);
+    // Gap 1: a sign-in or licence is said with what to do (and the old laptop's licence details).
+    expect(body).toContain(text("reason-sign-in"));
+    expect(body).toContain(text("fullmove-note-licence-key"));
+    expect(body).toContain(plain(text("fullmove-note-registration", { who: "Ada" })));
+    expect(body).toContain(plain(text("fullmove-note-product-id", { id: "12345-OEM" })));
+    expect(body).toContain(plain(text("fullmove-note-extras", { apps: "Writer Helper" })));
+    expect(body).toContain(text("fullmove-outcome-fresh"));
+    // Gap 2: each reason in words, with the folder for app data landed beside.
+    for (const why of ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed"]) {
+      expect(body).toContain(text(`fullmove-data-${why}`));
+    }
+    expect(body).toContain(plain(text("fullmove-data-beside", { folder: "Mail (from old laptop)" })));
+    expect(body).toContain(plain(text("fullmove-data-placed", { folder: "Mail" })));
+    // R1: website sign-ins are said on the browser's line.
+    expect(body).toContain(text("fullmove-step-sites"));
+    // Gap 7: apps already here are listed, left as they are, never counted as reinstalled.
+    expect(body).toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
+    expect(body).toContain(text("fullmove-outcome-here"));
+    expect(body).toContain(plain(text("fullmove-outcome-here-older", { version: "2.0" })));
+    expect(body).not.toContain(text("status-reinstalled"));
+  });
+
+  it("a line with no step to take says nothing more", () => {
+    const { rebuilt } = fullOutcome();
+    const bare = { ...rebuilt, lines: rebuilt.lines.map((l) => ({ ...l, notes: [] })), here: [], fresh: false };
+    const { container } = inApp(<RebuiltSection rebuilt={bare} />);
+    const body = plain(container.textContent);
+    expect(body).not.toContain(text("fullmove-outcome-fresh"));
+    expect(body).not.toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
+  });
+
+  it("refuses an outcome line with an unknown note", () => {
+    const bad = structuredClone(outcomes[1]) as { rebuilt: { lines: { notes: unknown[] }[] } };
+    bad.rebuilt.lines[0].notes.push({ note: "all-done" });
+    expect(parseMoveOutcome(bad)).toBeNull();
   });
 
   it("offers no Undo when nothing can be put back", () => {

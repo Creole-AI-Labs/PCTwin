@@ -120,6 +120,30 @@
     },
     "groups": [],
     "laptops": {
+      "old": null
+    },
+    "notice": {
+      "kind": "may-sleep"
+    },
+    "state": "running"
+  },
+  {
+    "bytes": {
+      "checked": 0,
+      "total": 0
+    },
+    "counts": {
+      "checking": 0,
+      "copying": 0,
+      "done": 0,
+      "failed": 0,
+      "needsAction": 0,
+      "skippedByUser": 0,
+      "total": 0,
+      "waiting": 0
+    },
+    "groups": [],
+    "laptops": {
       "old": {
         "kind": "named",
         "name": "Kitchen laptop"

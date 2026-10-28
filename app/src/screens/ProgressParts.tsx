@@ -188,6 +188,11 @@ export function Notices({ progress, onSeeNeedsAction }: { progress: MoveProgress
           <p>{l10n.getString(progress.notice.paused ? "progress-battery-paused" : "progress-low-battery")}</p>
         </Banner>
       )}
+      {progress.notice?.kind === "may-sleep" && (
+        <Banner tone="attention">
+          <p>{l10n.getString("progress-may-sleep")}</p>
+        </Banner>
+      )}
       {needs > 0 && (
         <Banner tone="info">
           <p>{l10n.getString("progress-needs-action", { count: needs })}</p>
