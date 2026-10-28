@@ -95,9 +95,9 @@ export function UndoDone({ screen }: { screen: Extract<ScreenView, { kind: "undo
           </ul>
         </MoreDetails>
       )}
-      <FrameFooter>
+      <div className="fm-undo">
         <IntentButton intent={{ kind: "back" }} variant="primary" label={l10n.getString("guard-undo-close")} />
-      </FrameFooter>
+      </div>
     </>
   );
 }

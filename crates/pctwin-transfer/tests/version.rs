@@ -116,10 +116,10 @@ fn a_range_must_start_at_one_or_later_and_not_run_backwards() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_laptops_on_this_release_agree_on_version_five() {
+async fn two_laptops_on_this_release_agree_on_version_six() {
     let (a, b) = agree(MOVE_PROTOCOL, MOVE_PROTOCOL).await;
-    assert_eq!(a.unwrap(), 5);
-    assert_eq!(b.unwrap(), 5);
+    assert_eq!(a.unwrap(), 6);
+    assert_eq!(b.unwrap(), 6);
 }
 
 #[tokio::test(start_paused = true)]
@@ -213,9 +213,9 @@ async fn the_message_form_is_fixed_for_every_release() {
     // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33, 35).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
-    // A later laptop that speaks versions 1 to 6 still agrees with this one on 5, and one that
+    // A later laptop that speaks versions 1 to 7 still agrees with this one on 6, and one that
     // speaks 1 to 4 on 4.
-    assert_eq!(receive(&[kind, 0, 1, 0, 6]).await.unwrap(), 5);
+    assert_eq!(receive(&[kind, 0, 1, 0, 7]).await.unwrap(), 6);
     assert_eq!(receive(&[kind, 0, 1, 0, 4]).await.unwrap(), 4);
 }
 
@@ -305,6 +305,6 @@ async fn a_laptop_that_never_answers_is_given_up_on() {
         tokio::time::sleep(VERSION_WAIT - Duration::from_secs(1)).await;
         agree_version(&mut y, MOVE_PROTOCOL).await
     });
-    assert_eq!(a.unwrap(), 5);
-    assert_eq!(b.unwrap(), 5);
+    assert_eq!(a.unwrap(), 6);
+    assert_eq!(b.unwrap(), 6);
 }

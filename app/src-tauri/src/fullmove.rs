@@ -61,6 +61,10 @@ pub fn new_state() -> Option<AppFullMove> {
 }
 
 fn made() -> Option<AppFullMove> {
+    // Windows' own list of dangerous file types adds caution to the settings judge; set before
+    // anything reads the system's facts.
+    #[cfg(windows)]
+    pctwin_settings::judge::use_system_danger_check(pctwin_helper_os::file_type_is_dangerous);
     // What this laptop says can run is read once (a few seconds), as PCTwin starts, never per
     // setting.
     let _ = std::thread::Builder::new()
