@@ -421,3 +421,12 @@
   font-size: 1rem;
   margin: 0;
 }
+
+/* F09: the mini box floats in the corner; the person drags it by its body. */
+.mini-box {
+  padding: 12px 14px;
+  cursor: grab;
+}
+.mini-box button {
+  cursor: pointer;
+}

@@ -125,7 +125,7 @@ impl Fetcher {
                 .map(PathBuf::from)
                 .ok_or_else(|| ProcessError::Prepare("Windows' folder is not known".into()))?;
             let icacls = system.join("System32").join("icacls.exe");
-            let out = Command::new(&icacls)
+            let out = pctwin_types::process::quiet(&icacls)
                 .arg(&copy)
                 .args(["/setintegritylevel", "low"])
                 .env_clear()
@@ -156,12 +156,12 @@ impl Fetcher {
     fn command(&self, program: &Path, args: &[&std::ffi::OsStr]) -> Command {
         #[cfg(target_os = "macos")]
         let mut c = {
-            let mut c = Command::new("/usr/bin/sandbox-exec");
+            let mut c = pctwin_types::process::quiet("/usr/bin/sandbox-exec");
             c.arg("-p").arg(mac_profile(&self.home)).arg(program);
             c
         };
         #[cfg(not(target_os = "macos"))]
-        let mut c = Command::new(program);
+        let mut c = pctwin_types::process::quiet(program);
         c.args(args)
             .env_clear()
             .current_dir(&self.home)
@@ -248,7 +248,7 @@ fn mark_here(file: &Path, from: &str) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        let _ = Command::new("/usr/bin/xattr")
+        let _ = pctwin_types::process::quiet("/usr/bin/xattr")
             .args([
                 "-w",
                 "com.apple.quarantine",
@@ -261,7 +261,7 @@ fn mark_here(file: &Path, from: &str) {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let _ = Command::new("/usr/bin/setfattr")
+        let _ = pctwin_types::process::quiet("/usr/bin/setfattr")
             .args(["-n", "user.xdg.origin.url", "-v", from])
             .arg(file)
             .env_clear()

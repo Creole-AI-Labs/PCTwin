@@ -19,6 +19,7 @@ unsafe_code = "deny"
 all = { level = "deny", priority = -1 }
 
 [dependencies]
+pctwin-types = { path = "../pctwin-types" }
 getrandom = "0.4.3"
 
 [target.'cfg(windows)'.dependencies]

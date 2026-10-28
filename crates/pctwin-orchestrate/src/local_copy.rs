@@ -581,7 +581,7 @@ impl CloudFiles for WindowsCloudFiles {
 /// `attrib` by its full path in `system32`, started in that folder, with none of this process's
 /// environment, no window and nothing in or out.
 pub fn attrib_command(system32: &Path, path: &Path) -> std::process::Command {
-    let mut command = std::process::Command::new(system32.join("attrib.exe"));
+    let mut command = pctwin_types::process::quiet(system32.join("attrib.exe"));
     command
         .env_clear()
         .current_dir(system32)

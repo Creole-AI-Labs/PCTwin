@@ -2,6 +2,7 @@
   {
     "id": "1792627200000-0",
     "kind": "move",
+    "newName": null,
     "other": {
       "animal": "ant",
       "colour": "blue",
@@ -14,6 +15,7 @@
   {
     "id": "1792627200000-1",
     "kind": "move",
+    "newName": null,
     "other": null,
     "state": "finished",
     "stepsLeft": 0,

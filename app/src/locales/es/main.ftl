@@ -168,6 +168,7 @@ check-internet-unknown = PCTwin no pudo saber si este portátil está en línea.
 check-again = Comprobar de nuevo
 check-estimate-note = El tiempo calculado es aproximado, no una promesa.
 check-continue = Elegir qué trasladar
+check-continue-new = Continuar
 # Added 23 October 2026: the short checklist both laptops show before the move.
 check-before-title = Antes de que empiece el traslado
 check-before-lids-title = Deja las dos tapas abiertas
@@ -1024,6 +1025,7 @@ soon-move-body = Pasa todo de tu portátil antiguo a uno nuevo: tus archivos, ap
 
 progress-eyebrow = Tu traslado
 progress-title = Preparando tu nuevo portátil.
+progress-title-old = Enviando tus cosas a tu nuevo portátil.
 progress-title-paused = Traslado en pausa
 progress-paired = Vinculados
 progress-percent =
@@ -1156,6 +1158,7 @@ outcome-kind-documents = Documentos
 outcome-kind-count = { $copied } de { $planned } copiados y comprobados
 outcome-next-title = Qué hacer ahora
 outcome-old-safe = Lo que no terminó sigue en esta lista. No se quitó nada de tu portátil antiguo.
+outcome-landed-title = Dónde están ahora tus cosas
 outcome-report = Ver el informe completo
 outcome-home = Volver al inicio
 outcome-person-copied =
@@ -2069,6 +2072,7 @@ fullmove-step-relink = Configúrala de nuevo en esta laptop o vuelve a vincularl
 fullmove-step-not-yet = PCTwin todavía no mueve los datos de esta app. Siguen a salvo en tu laptop anterior.
 fullmove-step-look-at-it = PCTwin no pudo saber qué es esto. Revísalo en tu laptop anterior.
 fullmove-special-not-yet = Datos de apps como correo, navegadores y juegos
+fullmove-left-by-person = Aplicaciones, ajustes y datos de aplicaciones: se quedan en tu portátil antiguo, como elegiste
 fullmove-special-finish = PCTwin no movió esto. Sigue a salvo en tu laptop anterior.
 fullmove-more = Y { $count } más.
 fullmove-not-moved-title = Ajustes que PCTwin deja en la laptop anterior
@@ -2137,3 +2141,61 @@ fullmove-outcome-here-older = En esta laptop hay una versión anterior ({ $versi
 fullmove-outcome-here-badge = Se deja como está
 fullmove-outcome-fresh = Las apps que instaló PCTwin empiezan desde cero. Abre cada una e inicia sesión si te lo pide.
 progress-may-sleep = Esta laptop podría suspenderse durante el traslado. Mantenla conectada y abierta.
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = ¿Qué quieres mover?
+choose-body = Elige aquí, en el portátil donde están tus cosas. Tu nuevo portátil te mostrará lo que llega y te pedirá que lo aceptes.
+choose-mode = Qué mover
+choose-everything = Todo
+choose-except = Todo excepto
+choose-only = Solo lo que elija
+choose-except-hint = Marca lo que quieras dejar.
+choose-only-hint = Marca lo que quieras llevar.
+choose-apps = Aplicaciones, ajustes y datos de aplicaciones
+choose-apps-count =
+    { $count ->
+        [one] 1 aplicación, con sus ajustes
+        [many] { $count } aplicaciones, con sus ajustes
+       *[other] { $count } aplicaciones, con sus ajustes
+    }
+choose-group-size =
+    { $files ->
+        [one] 1 archivo
+        [many] { $files } archivos
+       *[other] { $files } archivos
+    } · { $size }
+choose-left-title = Se quedan de todos modos
+choose-left-badge = Se queda
+choose-left-caches = Cachés y archivos temporales
+choose-left-chosen-by-user = Lo que elegiste dejar
+choose-left-work-managed = Archivos de tu trabajo o escuela
+choose-left-device-bound = Cosas ligadas a este portátil, como las llaves de acceso
+choose-left-unreadable = Archivos que PCTwin no pudo leer
+choose-left-cloud-only = Archivos guardados solo en línea
+choose-left-system = Partes del propio Windows
+choose-left-too-many-files = Carpetas demasiado grandes para un solo traslado
+choose-left-rebuildable = Cosas que tu nuevo portátil puede volver a crear, como paquetes descargados
+choose-nothing = Elige al menos una cosa para mover.
+choose-continue = Continuar
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } quiere enviarte esto.
+accept-body = Se eligió en tu portátil antiguo. Acéptalo y PCTwin lo trae aquí.
+accept-files =
+    { $count ->
+        [one] 1 archivo
+        [many] { $count } archivos
+       *[other] { $count } archivos
+    }
+accept-apps =
+    { $count ->
+        [one] 1 aplicación, instalada para ti
+        [many] { $count } aplicaciones, instaladas para ti
+       *[other] { $count } aplicaciones, instaladas para ti
+    }
+accept-settings = Ajustes y datos de aplicaciones
+accept-fits = Cabe en este portátil.
+accept-needs = Algo necesita tu atención primero. Mira los detalles.
+accept-not-now = Ahora no
+accept-details = Ver los detalles
+accept-accept = Aceptar

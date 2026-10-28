@@ -1,0 +1,29 @@
+[
+  {
+    "apps": 12,
+    "groups": [
+      {
+        "bytes": 3200000000,
+        "files": 1240,
+        "role": "documents"
+      },
+      {
+        "bytes": 41000000000,
+        "files": 8400,
+        "role": "pictures"
+      }
+    ],
+    "leftBehind": [
+      {
+        "bytes": 900000000,
+        "items": 3,
+        "why": "rebuildable"
+      }
+    ]
+  },
+  {
+    "apps": 0,
+    "groups": [],
+    "leftBehind": []
+  }
+]

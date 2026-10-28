@@ -3,6 +3,7 @@
 /// capabilities/ grants its `allow-<name>` permission (lockdown.rs keeps the lists equal).
 const COMMANDS: &[&str] = &[
     "set_window_mode",
+    "window_drag",
     "set_tray_labels",
     "pairing_old_start",
     "pairing_old_pick",
@@ -59,6 +60,7 @@ const COMMANDS: &[&str] = &[
     "guard_intent",
     "fullmove_undo",
     "move_appdata_answer",
+    "move_choose_what",
 ];
 
 fn main() {

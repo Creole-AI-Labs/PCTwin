@@ -76,7 +76,7 @@ fn read_native() -> Option<Chip> {
 
 #[cfg(target_os = "macos")]
 fn read_native() -> Option<Chip> {
-    let out = std::process::Command::new("/usr/sbin/sysctl")
+    let out = pctwin_types::process::quiet("/usr/sbin/sysctl")
         .args(["-n", "hw.optional.arm64"])
         .output()
         .ok()?;

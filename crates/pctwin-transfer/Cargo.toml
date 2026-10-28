@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+pctwin-types = { path = "../pctwin-types" }
 blake3 = "1.8"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 getrandom = "0.4.3"

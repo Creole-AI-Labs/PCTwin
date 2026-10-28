@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-set-window-mode",
+    "allow-window-drag",
     "allow-set-tray-labels",
     "allow-pairing-old-start",
     "allow-pairing-old-pick",
@@ -61,6 +62,7 @@
     "allow-guard-intent",
     "allow-fullmove-undo",
     "allow-move-appdata-answer",
+    "allow-move-choose-what",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     {

@@ -1052,12 +1052,12 @@ mod tests {
 
     fn long_tool() -> std::process::Command {
         if cfg!(windows) {
-            let mut c = std::process::Command::new("ping");
+            let mut c = pctwin_types::process::quiet("ping");
             c.args(["-n", "30", "127.0.0.1"])
                 .stdout(std::process::Stdio::null());
             c
         } else {
-            let mut c = std::process::Command::new("sleep");
+            let mut c = pctwin_types::process::quiet("sleep");
             c.arg("30");
             c
         }
@@ -1075,11 +1075,11 @@ mod tests {
         );
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
         let mut quick = if cfg!(windows) {
-            let mut c = std::process::Command::new("cmd");
+            let mut c = pctwin_types::process::quiet("cmd");
             c.args(["/c", "exit"]);
             c
         } else {
-            std::process::Command::new("true")
+            pctwin_types::process::quiet("true")
         };
         let mut quick = ToolRun::spawn(&mut quick).unwrap();
         assert!(
@@ -1096,7 +1096,7 @@ mod tests {
     fn what_a_tool_started_is_ended_with_it() {
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("grandchild");
-        let mut tool = ToolRun::spawn(std::process::Command::new("sh").args([
+        let mut tool = ToolRun::spawn(pctwin_types::process::quiet("sh").args([
             "-c",
             &format!("sleep 30 & echo $! > '{}'; wait", pidfile.display()),
         ]))

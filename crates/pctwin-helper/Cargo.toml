@@ -17,6 +17,7 @@ workspace = true
 test-staging = []
 
 [dependencies]
+pctwin-types = { path = "../pctwin-types" }
 # Privileged setting rows: their shape and loader (the rows in use are compiled in).
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-gate = { path = "../pctwin-gate" }

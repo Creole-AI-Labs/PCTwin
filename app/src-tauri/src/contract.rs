@@ -468,6 +468,7 @@ fn peers() -> Vec<crate::moving::Peer> {
         app: app.into(),
         power,
         free_bytes,
+        label: None,
     };
     vec![
         Peer {
@@ -486,6 +487,10 @@ fn peers() -> Vec<crate::moving::Peer> {
                 Some(52_000_000_000),
             ),
             other: Some(picked()),
+            mine_name: Some(LabelView::Named {
+                name: "Ada's new laptop".into(),
+            }),
+            theirs_name: Some(picked()),
             versions: Versions::Same,
             link: Some(LinkView {
                 bytes_per_second: 62_000_000,
@@ -496,6 +501,8 @@ fn peers() -> Vec<crate::moving::Peer> {
             mine: about(System::Linux, "x86_64", "0.1.0", Power::Unknown, None),
             theirs: about(System::Other, "riscv64", "0.1.0", Power::Plugged, None),
             other: None,
+            mine_name: None,
+            theirs_name: None,
             versions: Versions::Same,
             link: Some(LinkView {
                 bytes_per_second: 1_200_000,
@@ -506,6 +513,8 @@ fn peers() -> Vec<crate::moving::Peer> {
             mine: about(System::Windows, "x86_64", "0.1.0", Power::Plugged, None),
             theirs: about(System::Mac, "aarch64", "0.2.0", Power::Plugged, None),
             other: None,
+            mine_name: None,
+            theirs_name: None,
             versions: Versions::UpdateHere,
             link: None,
         },
@@ -671,9 +680,14 @@ fn outcomes() -> Vec<MoveOutcome> {
             ..Default::default()
         },
         rebuilt: None,
+        landed: Vec::new(),
     };
     let full = MoveOutcome {
         rebuilt: Some(rebuilt()),
+        landed: vec![crate::moving::LandedPlace {
+            name: crate::moving::group_name("documents"),
+            folder: r"C:\Users\Ada\Documents".into(),
+        }],
         ..files_only.clone()
     };
     vec![files_only, full]
@@ -814,6 +828,7 @@ fn qs_progress() -> Vec<crate::quicksend::ProgressView> {
             low: 2_000_000,
             high: 2_000_000,
         }),
+        minutes_left: Some(Range { low: 4, high: 4 }),
     }]
 }
 
@@ -883,6 +898,36 @@ fn families() -> Vec<(&'static str, Value)> {
             }]),
         ),
         (
+            "move-choose",
+            json([
+                crate::moving::ChoiceView {
+                    groups: vec![
+                        crate::moving::ChoiceGroup {
+                            role: FolderRole::Documents,
+                            files: 1_240,
+                            bytes: 3_200_000_000,
+                        },
+                        crate::moving::ChoiceGroup {
+                            role: FolderRole::Pictures,
+                            files: 8_400,
+                            bytes: 41_000_000_000,
+                        },
+                    ],
+                    apps: 12,
+                    left_behind: vec![crate::moving::LeftBehind {
+                        why: pctwin_record::LeftOutReason::Rebuildable,
+                        items: 3,
+                        bytes: 900_000_000,
+                    }],
+                },
+                crate::moving::ChoiceView {
+                    groups: Vec::new(),
+                    apps: 0,
+                    left_behind: Vec::new(),
+                },
+            ]),
+        ),
+        (
             "move-rebuild",
             json([
                 pctwin_fullmove::run::Progress::Permission,
@@ -906,6 +951,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     kind: "move".into(),
                     when: "2026-10-22T00:00:00Z".into(),
                     other: Some(json(picked())),
+                    new_name: None,
                     state: "steps-left".into(),
                     steps_left: 2,
                 },
@@ -914,6 +960,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     kind: "move".into(),
                     when: "2026-10-22T00:05:00Z".into(),
                     other: None,
+                    new_name: None,
                     state: "finished".into(),
                     steps_left: 0,
                 },
@@ -1176,6 +1223,7 @@ fn calls() -> Value {
     json!({
         "commands": [
             { "name": "set_window_mode", "args": [["mode", "mini"]] },
+            { "name": "window_drag", "args": [] },
             { "name": "set_tray_labels", "args": [["show", "Show"], ["quit", "Quit"]] },
             { "name": "pairing_old_start", "args": [["network", "Wi-Fi"]] },
             { "name": "pairing_old_pick", "args": [["round", 1], ["number", 42]] },
@@ -1232,6 +1280,7 @@ fn calls() -> Value {
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
             { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
+            { "name": "move_choose_what", "args": [["choice", { "groups": ["documents"], "apps": true }]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -1250,6 +1299,7 @@ fn calls() -> Value {
             "moveUndoClosed": crate::fullmove::UNDO_CLOSED_EVENT,
             "moveAppdata": crate::fullmove::APPDATA_EVENT,
             "moveAppdataOpen": crate::fullmove::APPDATA_OPEN_EVENT,
+            "moveChoose": crate::moving::CHOOSE_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

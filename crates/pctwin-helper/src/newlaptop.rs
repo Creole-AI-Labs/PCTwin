@@ -146,7 +146,7 @@ impl NewLaptop for System {
             Account::Sid(sid) => sid.as_str().to_string(),
             Account::Uid(uid) => uid.to_string(),
         };
-        let mut command = std::process::Command::new(&program);
+        let mut command = pctwin_types::process::quiet(&program);
         command
             .arg("--holding")
             .arg(folder)

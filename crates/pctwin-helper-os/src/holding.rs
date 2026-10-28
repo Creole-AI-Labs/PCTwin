@@ -233,7 +233,7 @@ pub fn home_folder(account: &Account, name: &str) -> Result<PathBuf, Error> {
 pub fn passwd_entry(uid: u32) -> Result<(u32, PathBuf), Error> {
     #[cfg(target_os = "macos")]
     {
-        let user = std::process::Command::new("/usr/bin/dscl")
+        let user = pctwin_types::process::quiet("/usr/bin/dscl")
             .args([".", "-search", "/Users", "UniqueID", &uid.to_string()])
             .output()?;
         let name = String::from_utf8_lossy(&user.stdout)
@@ -242,7 +242,7 @@ pub fn passwd_entry(uid: u32) -> Result<(u32, PathBuf), Error> {
             .map(str::to_string)
             .ok_or(Error::NotSupported("no such account"))?;
         let read = |key: &str| -> Result<String, Error> {
-            let out = std::process::Command::new("/usr/bin/dscl")
+            let out = pctwin_types::process::quiet("/usr/bin/dscl")
                 .args([".", "-read", &format!("/Users/{name}"), key])
                 .output()?;
             String::from_utf8_lossy(&out.stdout)

@@ -233,4 +233,18 @@ describe("the app data before the files", () => {
     expect(next(coming, { kind: "progress", progress: {} as never }).kind).toBe("progress");
     expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"] } })).toEqual({ kind: "close-apps", apps: ["Mail"] });
   });
+
+  // Found by the first real test (28 October 2026): progress before approval took both laptops
+  // off the plan and onto "Settling you in".
+  it("a page waiting on the person is never left for a progress word", () => {
+    const progress = { kind: "progress", progress: {} as never } as const;
+    const waiting = [
+      { kind: "plan", plan: {} as never },
+      { kind: "who", here: {} as never },
+      { kind: "people", toPlace: {} as never },
+      { kind: "privacy", places: 1 },
+    ] as const;
+    for (const view of waiting) expect(next(view, progress)).toBe(view);
+    expect(next({ kind: "wait", stage: "moving" }, progress).kind).toBe("progress");
+  });
 });

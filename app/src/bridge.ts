@@ -281,12 +281,17 @@ export type Peer = {
   mine: About;
   theirs: About;
   other: Label | null;
+  /** This laptop's own name, and the name the other laptop said it has (checked by the engine). */
+  mineName: Label | null;
+  theirsName: Label | null;
   versions: "same" | "update-here" | "update-there";
   link: { bytesPerSecond: number; slow: boolean } | null;
 };
 
 function parseAbout(value: unknown): About | null {
-  const f = exactly(value, ["system", "chip", "app", "power", "freeBytes"]);
+  // The name a laptop says it has travels in its greeting too; the screens read it, checked, from Peer.
+  const keys = typeof value === "object" && value !== null && "label" in value ? ["system", "chip", "app", "power", "freeBytes", "label"] : ["system", "chip", "app", "power", "freeBytes"];
+  const f = exactly(value, keys);
   if (!f || !oneOf(f.system, ["windows", "mac", "linux", "other"] as const) || typeof f.chip !== "string" || typeof f.app !== "string") return null;
   const kind = typeof f.power === "object" && f.power !== null ? (f.power as Fields).kind : undefined;
   let power: About["power"] | null = null;
@@ -300,19 +305,22 @@ function parseAbout(value: unknown): About | null {
 }
 
 export function parsePeer(value: unknown): Peer | null {
-  const f = exactly(value, ["mine", "theirs", "other", "versions", "link"]);
+  const f = exactly(value, ["mine", "theirs", "other", "mineName", "theirsName", "versions", "link"]);
   if (!f || !oneOf(f.versions, ["same", "update-here", "update-there"] as const)) return null;
   const mine = parseAbout(f.mine);
   const theirs = parseAbout(f.theirs);
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
+  const mineName = f.mineName === null ? null : parseLabelView(f.mineName);
+  const theirsName = f.theirsName === null ? null : parseLabelView(f.theirsName);
+  if ((f.mineName !== null && mineName === null) || (f.theirsName !== null && theirsName === null)) return null;
   let link: Peer["link"] = null;
   if (f.link !== null) {
     const l = exactly(f.link, ["bytesPerSecond", "slow"]);
     if (!l || !isCount(l.bytesPerSecond) || typeof l.slow !== "boolean") return null;
     link = { bytesPerSecond: l.bytesPerSecond, slow: l.slow };
   }
-  return mine && theirs && { mine, theirs, other, versions: f.versions, link };
+  return mine && theirs && { mine, theirs, other, mineName, theirsName, versions: f.versions, link };
 }
 
 export function parseFound(value: unknown): { bytes: number } | null {
@@ -373,7 +381,7 @@ export type PlanKey = { revision: number; fingerprint: string };
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "plan-view": ["rebuild"],
-  "move-outcome": ["rebuilt"],
+  "move-outcome": ["rebuilt", "landed"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
   "report-item": ["destination", "reason", "evidence", "note"],
   "qs-picked": ["problem"],
@@ -608,6 +616,15 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
     if (!rebuilt) return null;
     outcome.rebuilt = rebuilt;
   }
+  if ("landed" in f) {
+    const landed = listOf(f.landed, (x) => {
+      const l = exactly(x, ["name", "folder"]);
+      const name = l && parseGroupName(l.name);
+      return name && typeof l.folder === "string" ? { name, folder: l.folder } : null;
+    });
+    if (!landed) return null;
+    outcome.landed = landed;
+  }
   return outcome;
 }
 
@@ -717,6 +734,29 @@ export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportI
 export const fullmoveUndo = (id: string | null) => run("fullmove_undo", { id });
 /** The old laptop: the person's answer about the apps to close (true: try again). */
 export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", { retry });
+
+/** The old laptop: what it found, for the person to choose what moves (`ChoiceView`, event `move-choose`). */
+export type ChoiceGroup = { role: FolderRole; files: number; bytes: number };
+export type LeftBehind = { why: (typeof LEFT_OUT_REASONS)[number]; items: number; bytes: number };
+export type ChoiceView = { groups: ChoiceGroup[]; apps: number; leftBehind: LeftBehind[] };
+/** The person's choice: the groups that move, and whether apps, settings and app data do. */
+export type Choice = { groups: FolderRole[]; apps: boolean };
+
+export function parseChoiceView(v: unknown): ChoiceView | null {
+  const f = exactly(v, ["groups", "apps", "leftBehind"]);
+  if (!f || !isCount(f.apps)) return null;
+  const groups = listOf(f.groups, (x) => {
+    const g = exactly(x, ["role", "files", "bytes"]);
+    return g && oneOf(g.role, FOLDER_ROLES) && isCount(g.files) && isCount(g.bytes) ? { role: g.role, files: g.files, bytes: g.bytes } : null;
+  });
+  const leftBehind = listOf(f.leftBehind, (x) => {
+    const l = exactly(x, ["why", "items", "bytes"]);
+    return l && oneOf(l.why, LEFT_OUT_REASONS) && isCount(l.items) && isCount(l.bytes) ? { why: l.why, items: l.items, bytes: l.bytes } : null;
+  });
+  return groups && leftBehind ? { groups, apps: f.apps, leftBehind } : null;
+}
+/** The old laptop: the person's choice of what moves. */
+export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });
 /** The undo the screens opened is over (the person went back). */
 export const listenUndoClosed = (handler: () => void): Promise<UnlistenFn> =>
   listen<unknown>("move-undo-closed", () => {
@@ -737,7 +777,8 @@ export type MoveEvent =
   | { kind: "link"; link: ConnectionView }
   | { kind: "rebuild"; step: RebuildStep }
   | { kind: "appdata"; progress: DataProgress }
-  | { kind: "appdata-open"; open: AppsOpen };
+  | { kind: "appdata-open"; open: AppsOpen }
+  | { kind: "choose"; choice: ChoiceView };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -761,6 +802,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
     on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
     on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
+    on("move-choose", parseChoiceView, (choice) => ({ kind: "choose", choice })),
   ]);
   return () => {
     for (const stop of all) stop();
@@ -909,14 +951,16 @@ export function parseQsReceipt(value: unknown): QsReceipt | null {
 const QS_PHASES = ["copying", "paused", "checking", "needs-action", "lost", "complete"] as const;
 
 export function parseQsProgress(value: unknown): SendProgress | null {
-  const f = exactly(value, ["phase", "filesDone", "filesTotal", "bytesDone", "bytesTotal", "current", "failed", "speed"]);
+  const f = exactly(value, ["phase", "filesDone", "filesTotal", "bytesDone", "bytesTotal", "current", "failed", "speed", "minutesLeft"]);
   if (!f || !oneOf(f.phase, QS_PHASES)) return null;
   const { filesDone, filesTotal, bytesDone, bytesTotal, failed } = f;
   if (!isCount(filesDone) || !isCount(filesTotal) || !isCount(bytesDone) || !isCount(bytesTotal) || !isCount(failed)) return null;
   if (!(f.current === null || typeof f.current === "string")) return null;
   const speed = f.speed === null ? null : parseRange(f.speed);
   if (f.speed !== null && speed === null) return null;
-  return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed };
+  const minutesLeft = f.minutesLeft === null ? null : parseRange(f.minutesLeft);
+  if (f.minutesLeft !== null && minutesLeft === null) return null;
+  return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed, minutesLeft };
 }
 
 /** Where received files go: the folder's own name, the whole folder (for More details), and its free space. */
@@ -995,17 +1039,21 @@ export type HistoryEntryRaw = {
   kind: "move";
   when: string;
   other: Label | null;
+  /** The new laptop's name, when known. */
+  newName: Label | null;
   state: "finished" | "steps-left" | "stopped";
   stepsLeft: number;
 };
 
 export function parseHistoryEntry(value: unknown): HistoryEntryRaw | null {
-  const f = exactly(value, ["id", "kind", "when", "other", "state", "stepsLeft"]);
+  const f = exactly(value, ["id", "kind", "when", "other", "newName", "state", "stepsLeft"]);
   if (!f || typeof f.id !== "string" || typeof f.when !== "string" || !isCount(f.stepsLeft)) return null;
   if (!oneOf(f.kind, ["move"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped"] as const)) return null;
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
-  return { id: f.id, kind: f.kind, when: f.when, other, state: f.state, stepsLeft: f.stepsLeft };
+  const newName = f.newName === null ? null : parseLabelView(f.newName);
+  if (f.newName !== null && newName === null) return null;
+  return { id: f.id, kind: f.kind, when: f.when, other, newName, state: f.state, stepsLeft: f.stepsLeft };
 }
 
 /** What an entry kept: the move's report. */
@@ -1061,6 +1109,8 @@ async function runInApp(command: string, args: Record<string, unknown>): Promise
 export type WindowMode = "everyday" | "mini" | "expanded";
 
 export const setWindowMode = (mode: WindowMode): Promise<void> => runInApp("set_window_mode", { mode });
+/** The mini box has no frame: dragging its body moves it (the app starts the drag). */
+export const windowDrag = (): Promise<void> => runInApp("window_drag", {});
 
 /** The tray menu speaks the person's language too. */
 export const setTrayLabels = (show: string, quit: string): Promise<void> => runInApp("set_tray_labels", { show, quit });

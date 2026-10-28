@@ -196,7 +196,7 @@ pub fn facts_from_clouds(home: PathBuf, found: Vec<FoundCloud>) -> Facts {
 /// Every `name` value under `key` and its subkeys, with the subkey it is in, read with the
 /// system's own `reg` tool.
 pub(crate) fn registry_values(key: &str, name: &str) -> Vec<(String, PathBuf)> {
-    let Ok(out) = std::process::Command::new("reg")
+    let Ok(out) = pctwin_types::process::quiet("reg")
         .args(["query", key, "/s", "/v", name])
         .output()
     else {
@@ -239,7 +239,7 @@ fn icloud_desktop_and_documents(home: &Path) -> bool {
     if !cfg!(target_os = "macos") {
         return false;
     }
-    let setting = std::process::Command::new("defaults")
+    let setting = pctwin_types::process::quiet("defaults")
         .args(["read", "com.apple.finder", "FXICloudDriveDesktop"])
         .output()
         .ok()

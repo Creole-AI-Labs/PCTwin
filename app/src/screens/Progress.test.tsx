@@ -589,11 +589,11 @@ describe("F09 Mini panel", () => {
     expect(screen.getByRole("group", { name: text("pause-title-finishing") })).toBeTruthy();
   });
 
-  it("its Open button sits in the footer with the free note", () => {
+  it("its Open button sits in the footer, with no note: the box shows only what matters now", () => {
     const onOpen = vi.fn();
     inFrame(<MiniPanel progress={sample.running} onPause={noop} onResume={noop} onOpen={onOpen} />);
     const footer = footerEl();
-    expect(within(footer).getByText(text("footer-note-move"))).toBeTruthy();
+    expect(within(footer).queryByText(text("footer-note-move"))).toBeNull();
     fireEvent.click(within(footer).getByRole("button", { name: text("mini-open") }));
     expect(onOpen).toHaveBeenCalledOnce();
     // The panel itself holds only Pause.

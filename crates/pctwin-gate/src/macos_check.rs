@@ -114,7 +114,7 @@ mod tests {
             for _ in 0..3 {
                 s.spawn(|| {
                     while !stop.load(Ordering::Relaxed) {
-                        let _ = std::process::Command::new("/usr/bin/true").status();
+                        let _ = pctwin_types::process::quiet("/usr/bin/true").status();
                     }
                 });
             }
@@ -152,7 +152,7 @@ mod tests {
         std::fs::write(&path, b"theirs").unwrap();
         let script =
             "import sys, time\nf = open(sys.argv[1])\nprint('open', flush=True)\ntime.sleep(60)\n";
-        let Ok(mut child) = std::process::Command::new("python3")
+        let Ok(mut child) = pctwin_types::process::quiet("python3")
             .arg("-c")
             .arg(script)
             .arg(&path)

@@ -145,7 +145,7 @@ fn open_pctwin() {
         &["PCTwin", "pctwin", "pctwin-app"]
     };
     if let Some(app) = names.iter().map(|n| dir.join(n)).find(|p| p.is_file()) {
-        let _ = std::process::Command::new(app)
+        let _ = pctwin_types::process::quiet(app)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

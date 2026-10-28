@@ -1158,7 +1158,7 @@ pub fn minimal_env() -> Result<Vec<(OsString, OsString)>, Error> {
 
 /// A command for `program` with nothing of this process's environment but [`minimal_env`].
 pub fn clean_command(program: &std::path::Path) -> Result<std::process::Command, Error> {
-    let mut command = std::process::Command::new(program);
+    let mut command = pctwin_types::process::quiet(program);
     command.env_clear().envs(minimal_env()?);
     Ok(command)
 }

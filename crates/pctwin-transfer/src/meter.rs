@@ -409,6 +409,13 @@ impl MoveMeter {
         self.files().loaded = true;
     }
 
+    /// Whether the approved plan is loaded, so the files are on their way: before that (the old
+    /// laptop finding things, the new laptop's person reading the plan) there is no progress to
+    /// show.
+    pub fn plan_is_loaded(&self) -> bool {
+        self.files().loaded
+    }
+
     /// A fresh attempt at `group`'s file starts: what an earlier one wrote counts no more.
     pub(crate) fn attempt(&self, group: Group) {
         self.files().forget_written(group);
@@ -649,6 +656,21 @@ mod tests {
         c.carry_on();
         assert!(!c.is_braked("me") && !c.is_braked("photos"));
         assert_eq!(c.braked(), None);
+    }
+
+    /// No progress before the approved plan is loaded, and none again between a reset and the
+    /// next plan (found by the first real test, 28 October 2026: progress before approval took
+    /// both laptops off the plan).
+    #[test]
+    fn the_plan_is_loaded_only_once_the_approved_files_are() {
+        let m = MoveMeter::new();
+        assert!(!m.plan_is_loaded());
+        let (m2, _) = planned(&[10]);
+        assert!(m2.plan_is_loaded());
+        m2.reset();
+        assert!(!m2.plan_is_loaded());
+        m.plan_loaded();
+        assert!(m.plan_is_loaded(), "a plan with no files is loaded too");
     }
 
     /// A new laptop's meter with the plan `sizes` loaded, each in group "me".

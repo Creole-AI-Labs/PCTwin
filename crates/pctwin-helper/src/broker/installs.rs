@@ -198,7 +198,7 @@ pub fn install_from_store(action: &InstallFromMacAppStore) -> Effect {
                 native: NativeText::new("no root-owned mas"),
             };
         };
-        let status = std::process::Command::new(mas)
+        let status = pctwin_types::process::quiet(mas)
             .arg("install")
             .arg(action.adam_id.to_string())
             .env_clear()

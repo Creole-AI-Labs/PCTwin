@@ -26,7 +26,7 @@
 //! ```
 
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Child;
 
 /// Proof that this program runs as the person, without an administrator's full rights. Made only
 /// by [`AsPerson::here`].
@@ -78,7 +78,7 @@ impl AsPerson {
 /// inherits this program's own rights, which `as_person` proves are the person's.
 pub fn launch(as_person: &AsPerson, program: &Path) -> std::io::Result<Child> {
     let _ = as_person;
-    Command::new(program).spawn()
+    pctwin_types::process::quiet(program).spawn()
 }
 
 /// The 2.1 launch check (step 5): starts `program` as the person and says whether it opened. It

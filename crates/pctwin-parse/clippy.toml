@@ -12,4 +12,5 @@ disallowed-methods = [
   { path = "std::net::TcpListener::bind", reason = "the parser has no network" },
   { path = "std::net::UdpSocket::bind", reason = "the parser has no network" },
   { path = "std::process::Command::new", reason = "the parser starts no program" },
+  { path = "pctwin_types::process::quiet", reason = "the parser starts no program" },
 ]

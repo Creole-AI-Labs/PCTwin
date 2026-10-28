@@ -14,7 +14,7 @@
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -205,7 +205,9 @@ impl Parser {
             clippy::disallowed_methods,
             reason = "the app's side starts the parser: the one program this crate starts"
         )]
-        let mut command = Command::new(&program);
+        // No console window of its own (pctwin_types::process::quiet, as every program PCTwin
+        // starts).
+        let mut command = pctwin_types::process::quiet(&program);
         command
             .env_clear()
             .stdin(Stdio::piped())
@@ -213,13 +215,6 @@ impl Parser {
             .stderr(Stdio::null());
         if let Some(dir) = program.parent() {
             command.current_dir(dir);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            // No console window for a program started by a windowed app.
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = command
             .spawn()

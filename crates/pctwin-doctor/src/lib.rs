@@ -556,7 +556,7 @@ pub mod probe {
             });
             rx.recv_timeout(WINDOWS_PROBE_TIMEOUT).ok().flatten()
         } else if cfg!(target_os = "macos") {
-            let out = std::process::Command::new("/usr/sbin/networksetup")
+            let out = pctwin_types::process::quiet("/usr/sbin/networksetup")
                 .arg("-listallhardwareports")
                 .output()
                 .ok()?;
@@ -699,7 +699,7 @@ pub mod probe {
     /// Runs a system check and returns what it printed, or `None` if it failed or took longer than
     /// `limit` (then it is stopped, never left running).
     pub fn run_check(program: &str, args: &[&str], limit: Duration) -> Option<String> {
-        let mut command = std::process::Command::new(program);
+        let mut command = pctwin_types::process::quiet(program);
         command
             .args(args)
             .stdin(std::process::Stdio::null())
