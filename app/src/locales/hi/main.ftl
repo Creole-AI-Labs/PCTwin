@@ -1004,6 +1004,7 @@ soon-move-body = अपने पुराने लैपटॉप से स�
 
 progress-eyebrow = आपका स्थानांतरण
 progress-title = आपका नया लैपटॉप तैयार हो रहा है।
+progress-title-old = आपकी चीज़ें आपके नए लैपटॉप पर भेजी जा रही हैं।
 progress-title-paused = स्थानांतरण रुका हुआ है
 progress-paired = जोड़ा गया
 progress-percent =

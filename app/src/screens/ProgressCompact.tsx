@@ -9,7 +9,7 @@ import { Eyebrow, GroupRows, Heading, MeasuredBar, Notices, NowLine, PercentValu
 export type ProgressHandlers = {
   onPause: () => void;
   onResume: () => void;
-  /** Open the stop dialog (X10), from the paused screen. */
+  /** Open the stop dialog (X10), from the running and the paused screen. */
   onStop?: () => void;
   /** Open the list of items that need the person (the expanded view or the report). */
   onSeeNeedsAction: () => void;
@@ -38,7 +38,8 @@ export default function ProgressCompact({
       <div className="mv-head">
         <div>
           <Eyebrow id="progress-eyebrow" />
-          <Heading id="progress-title" />
+          {/* The old laptop sends; the new laptop is being set up: each says its own part. */}
+          <Heading id={tips?.old ? "progress-title-old" : "progress-title"} />
         </div>
         <PercentValue pct={measuredPercent(progress)} />
       </div>
@@ -52,6 +53,12 @@ export default function ProgressCompact({
         <Button variant="quiet" onClick={onPause}>
           {l10n.getString("progress-pause")}
         </Button>
+        {/* Stop is never hidden behind Pause (found by the first real test, 28 October 2026). */}
+        {onStop && (
+          <Button variant="quiet" onClick={onStop}>
+            {l10n.getString("move-stop")}
+          </Button>
+        )}
         <Button variant="quiet" onClick={onMinimise}>
           {l10n.getString("progress-compact")}
         </Button>

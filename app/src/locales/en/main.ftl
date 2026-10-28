@@ -879,6 +879,7 @@ soon-move-body = Move everything from your old laptop to a new one: your files, 
 
 progress-eyebrow = Your move
 progress-title = Settling you in.
+progress-title-old = Sending your things to your new laptop.
 progress-title-paused = Move paused
 progress-paired = Paired
 progress-percent =

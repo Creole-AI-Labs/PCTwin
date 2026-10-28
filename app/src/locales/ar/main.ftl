@@ -1127,6 +1127,7 @@ soon-move-body = انقل كل شيء من حاسوبك المحمول القد�
 
 progress-eyebrow = عملية النقل
 progress-title = نهيّئ لك مكانك الجديد.
+progress-title-old = نرسل أغراضك إلى حاسوبك الجديد.
 progress-title-paused = النقل متوقف مؤقتًا
 progress-paired = تم الربط
 progress-percent =

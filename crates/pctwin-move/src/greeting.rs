@@ -249,9 +249,12 @@ async fn about(ch: &mut impl Channel, mine: &About) -> Result<About, TransferErr
     ch.send(&msg)
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
-    let got = tokio::time::timeout(VERSION_WAIT, ch.recv())
+    // No time limit: the old laptop may first ask its person who is moving (M06), and that is
+    // the person's time. A laptop that went away is noticed by the link itself, and Stop ends
+    // the wait at once.
+    let got = ch
+        .recv()
         .await
-        .map_err(|_| TransferError::NoAnswer("it did not say what it is".into()))?
         .map_err(|_| TransferError::ConnectionDropped)?;
     parse_about(&got)
 }
@@ -446,6 +449,34 @@ mod tests {
         };
         let (got, _old) = tokio::join!(wait_for_list(&mut new), late);
         got.unwrap();
+    }
+
+    /// The old laptop may ask its person who is moving before it starts (M06), so its first words
+    /// can come long after the new laptop's: the new laptop waits for them as long as that takes,
+    /// and both still greet (found by the first real test, 28 October 2026).
+    #[tokio::test(start_paused = true)]
+    async fn the_new_laptop_waits_for_the_old_laptops_first_words_as_long_as_it_takes() {
+        let (mut old, mut new) = pair();
+        let windows = about(System::Windows, Power::Plugged);
+        let late = async {
+            tokio::time::sleep(VERSION_WAIT * 120).await;
+            greet(&mut old, &windows, Side::Old).await.map(|_| ())
+        };
+        let (got, late) = tokio::join!(greet(&mut new, &windows, Side::New), late);
+        assert!(got.is_ok(), "{:?}", got.err().map(|n| n.error));
+        late.unwrap();
+    }
+
+    /// Waiting with no time limit still ends at once when the other laptop's link goes.
+    #[tokio::test]
+    async fn a_laptop_that_goes_before_its_first_words_ends_the_greeting() {
+        let (old, mut new) = pair();
+        drop(old);
+        let got = greet(&mut new, &about(System::Windows, Power::Plugged), Side::New).await;
+        assert!(matches!(
+            got.err().map(|n| n.error),
+            Some(TransferError::ConnectionDropped)
+        ));
     }
 
     #[tokio::test]

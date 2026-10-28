@@ -1033,6 +1033,7 @@ soon-move-body = Transférez tout de votre ancien ordinateur portable vers le no
 
 progress-eyebrow = Votre transfert
 progress-title = Nous préparons votre arrivée.
+progress-title-old = Envoi de vos affaires vers votre nouveau portable.
 progress-title-paused = Transfert en pause
 progress-paired = Associés
 progress-percent =

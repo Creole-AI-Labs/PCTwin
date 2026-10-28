@@ -2005,6 +2005,13 @@ fn tick<R: Runtime>(
                 }
                 _ => {}
             }
+            // No progress before the approved files are on their way: until then the old laptop
+            // is finding and waiting, and the new laptop's person is reading the plan, and a
+            // progress page would take both off their own pages.
+            if !live.meter.plan_is_loaded() {
+                tokio::time::sleep(TICK).await;
+                continue;
+            }
             let view = progress_view(
                 &live.meter.snapshot(),
                 live.control.paused(),

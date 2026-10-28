@@ -193,6 +193,9 @@ export function next(view: View, event: MoveEvent): View {
       // A count, and the two laptops, for the waiting page: not pages of their own.
       return view;
     case "progress":
+      // A page waiting on the person (the plan, who is moving, where others go, privacy) is only
+      // left by their answer, never by a progress word.
+      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy") return view;
       return view.kind === "reconnecting" ? view : { kind: "progress", progress: event.progress };
     case "finished":
       return { kind: "outcome", outcome: event.outcome };

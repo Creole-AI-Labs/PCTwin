@@ -1024,6 +1024,7 @@ soon-move-body = Pasa todo de tu portátil antiguo a uno nuevo: tus archivos, ap
 
 progress-eyebrow = Tu traslado
 progress-title = Preparando tu nuevo portátil.
+progress-title-old = Enviando tus cosas a tu nuevo portátil.
 progress-title-paused = Traslado en pausa
 progress-paired = Vinculados
 progress-percent =

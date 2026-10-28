@@ -1028,6 +1028,7 @@ soon-move-body = Leve tudo do seu notebook antigo para um novo: seus arquivos, a
 
 progress-eyebrow = Sua mudança
 progress-title = Preparando tudo para você.
+progress-title-old = Enviando suas coisas para o novo notebook.
 progress-title-paused = Mudança pausada
 progress-paired = Pareados
 progress-percent =

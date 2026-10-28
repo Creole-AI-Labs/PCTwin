@@ -822,6 +822,7 @@ soon-move-body = 把旧笔记本电脑上的一切搬到新电脑上：文件、
 
 progress-eyebrow = 你的迁移
 progress-title = 正在帮你安顿下来。
+progress-title-old = 正在把你的东西发送到新的笔记本电脑。
 progress-title-paused = 迁移已暂停
 progress-paired = 已配对
 progress-percent =
