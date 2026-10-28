@@ -42,9 +42,6 @@ use crate::sniff::{self, Shape};
 pub const MAX_DEPTH: usize = 24;
 /// The most files read in one app data folder; past it, the rest is reported, not read.
 pub const MAX_FILES: usize = 20_000;
-/// The largest text file read for credential-shaped values (settings-sized; larger text is
-/// logs and documents).
-const MAX_TEXT: u64 = 256 * 1024;
 /// The most time one app data folder's walk may take; the rest is "not fully checked".
 pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(60);
 /// How many app folders are classified at once.
@@ -79,6 +76,8 @@ pub enum Skip {
     /// A browser add-on (a folder with a WebExtension manifest): code, installed again from its
     /// store through 2.1, never copied.
     AddOn,
+    /// A log the app writes again (text whose lines start with dates or times).
+    Log,
     /// Kept online by a cloud app (or offline): opening it would download it, so it is never
     /// opened here.
     OnlineOnly,
@@ -96,6 +95,7 @@ impl Skip {
             Skip::Program => "a program or add-on: apps are installed again, never copied",
             Skip::Link => "a link to somewhere else: links are not followed",
             Skip::AddOn => "a browser add-on: it is installed again from its store, never copied",
+            Skip::Log => "a log the app writes again: not moved",
             Skip::NotRead => {
                 "found, not fully checked: too deep, too many files, or out of time here"
             }
@@ -143,6 +143,8 @@ struct Found {
     shape: Shape,
     /// For bytes of no known format: whether they look encrypted (near-random).
     random: bool,
+    /// For text: whether it is a log by its shape.
+    log: bool,
 }
 
 /// Whether bytes look encrypted: near-random (Shannon entropy at least 7.5 bits per byte) over
@@ -201,6 +203,8 @@ fn whole(path: &Path, max: u64) -> Result<Vec<u8>, String> {
 const NO_ANSWER: &str = "it did not answer in time: not fully checked";
 /// Why a file was not looked into.
 const OUT_OF_TIME: &str = "not fully checked: the time for this folder ran out";
+/// A JSON file too large to read as one: it is scanned for credentials as a stream instead.
+const TOO_LARGE: &str = "too large to read as one";
 
 /// Runs `f` on `path` within [`guard::READ_LIMIT`].
 fn within<T: Send + 'static>(
@@ -337,12 +341,14 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
             Ok((head, tail)) => {
                 let shape = sniff::shape(&head, &tail, len);
                 let random = shape == Shape::Binary && near_random(&head);
+                let log = shape == Shape::Text && log_shaped(&head);
                 w.files.push(Found {
                     rel: child,
                     path,
                     len,
                     shape,
                     random,
+                    log,
                 })
             }
             Err(why) => w.unreadable.push((child, why)),
@@ -367,26 +373,118 @@ fn parent(rel: &str) -> &str {
     rel.rsplit_once('/').map_or("", |(p, _)| p)
 }
 
-/// Whether a text file's values look like credentials (`key=value`, `key: value`, or a whole
-/// line).
-fn text_has_credentials(path: &Path, len: u64) -> bool {
-    if len > MAX_TEXT {
+/// Whether a file holds a credential-shaped word (a token, a key), read streaming in bounded
+/// memory from start to end, whatever its size, with the same rules as every setting
+/// (`looks_secret`). `Some(true)`: one was found; `Some(false)`: the whole file was read and none
+/// was; `None`: it could not be read through by `until` (it is then "not fully checked").
+fn stream_has_credentials(path: &Path, until: std::time::Instant) -> Option<bool> {
+    // The scan keeps to its own time, before the reader's limit.
+    let until = until
+        .min(std::time::Instant::now() + guard::READ_LIMIT - std::time::Duration::from_secs(2));
+    within(path, move |p| scan_words(p, until)).flatten()
+}
+
+/// Splits a file into words (between spaces, quotes, `=`, `:`, commas and brackets) and asks of
+/// each long one whether it is a credential. A word longer than [`MAX_WORD`] is judged by its
+/// first [`MAX_WORD`] bytes.
+fn scan_words(p: &Path, until: std::time::Instant) -> Option<bool> {
+    let mut f = guard::open(p).ok()?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut word: Vec<u8> = Vec::with_capacity(256);
+    let check = |w: &[u8]| -> bool {
+        if w.starts_with(b"-----BEGIN") {
+            return true;
+        }
+        w.len() >= 16
+            && std::str::from_utf8(w)
+                .is_ok_and(|t| pctwin_settings::classify::looks_secret(t).is_some())
+    };
+    loop {
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        for &c in &buf[..n] {
+            let split = c.is_ascii_whitespace()
+                || matches!(
+                    c,
+                    b'"' | b'\''
+                        | b'='
+                        | b':'
+                        | b','
+                        | b';'
+                        | b'['
+                        | b']'
+                        | b'{'
+                        | b'}'
+                        | b'('
+                        | b')'
+                        | b'<'
+                        | b'>'
+                        | b'`'
+                );
+            if split {
+                if check(&word) {
+                    return Some(true);
+                }
+                word.clear();
+            } else if word.len() < MAX_WORD {
+                word.push(c);
+            }
+        }
+    }
+    Some(check(&word))
+}
+
+/// The longest word judged whole.
+const MAX_WORD: usize = 4096;
+
+/// Whether text is a log by its shape: most of its first lines start with a date or a time
+/// (`2026-10-28`, `2026/10/28`, `12:00:01`, perhaps after a `[`), the way logs are written by
+/// every kind of app. Never by the file's name.
+pub fn log_shaped(head: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(head);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(20)
+        .collect();
+    // The last line of the head may be cut short: it does not count.
+    let lines = &lines[..lines.len().saturating_sub(1)];
+    if lines.len() < 3 {
         return false;
     }
-    let Ok(bytes) = whole(path, MAX_TEXT) else {
-        return false;
-    };
-    let Ok(text) = String::from_utf8(bytes) else {
-        return false;
-    };
-    text.lines().any(|l| {
-        let v = l
-            .split_once('=')
-            .or_else(|| l.split_once(':'))
-            .map_or(l, |(_, v)| v)
-            .trim()
-            .trim_matches(['"', '\'']);
-        pctwin_settings::classify::looks_secret(v).is_some()
+    let stamped = lines.iter().filter(|l| starts_with_time(l)).count();
+    stamped * 5 >= lines.len() * 4
+}
+
+fn starts_with_time(line: &str) -> bool {
+    let b: Vec<u8> = line.bytes().take(40).collect();
+    let digit = |i: usize| b.get(i).is_some_and(u8::is_ascii_digit);
+    let at = |i: usize, c: &[u8]| b.get(i).is_some_and(|x| c.contains(x));
+    (0..b.len().min(24)).any(|i| {
+        // A date: four digits, a separator, two digits, the same separator, two digits.
+        let date = (0..4).all(|k| digit(i + k))
+            && at(i + 4, b"-/.")
+            && digit(i + 5)
+            && digit(i + 6)
+            && b.get(i + 7) == b.get(i + 4)
+            && digit(i + 8)
+            && digit(i + 9);
+        // A time: two digits, a colon, two digits, a colon, two digits.
+        let time = digit(i)
+            && digit(i + 1)
+            && at(i + 2, b":")
+            && digit(i + 3)
+            && digit(i + 4)
+            && at(i + 5, b":")
+            && digit(i + 6)
+            && digit(i + 7);
+        (i == 0 || !b[i - 1].is_ascii_digit()) && (date || time)
     })
 }
 
@@ -649,6 +747,7 @@ fn classify_within(
                     len: m.len(),
                     shape: sniff::shape(&h, &t, m.len()),
                     random: false,
+                    log: false,
                 });
             } else {
                 w.unreadable
@@ -745,7 +844,7 @@ fn classify_within(
         .filter(|f| f.shape == Shape::Json && !used.contains(&f.rel))
         .map(|f| {
             let facts = if f.len as usize > content::MAX_JSON {
-                Err("too large to read".to_string())
+                Err(TOO_LARGE.to_string())
             } else if late() {
                 Err(OUT_OF_TIME.to_string())
             } else {
@@ -1103,6 +1202,25 @@ fn classify_within(
                     }
                 }
                 Some(Err(why)) if why == OUT_OF_TIME => unchecked.push(f.rel.clone()),
+                Some(Err(why)) if why == TOO_LARGE => {
+                    match if late() {
+                        None
+                    } else {
+                        stream_has_credentials(&f.path, deadline)
+                    } {
+                        Some(true) => {
+                            sessions = true;
+                            b.push(
+                                one,
+                                Custody::MachineBound,
+                                false,
+                                vec![Evidence::CredentialValues],
+                            )
+                        }
+                        Some(false) => plain.push(f.rel.clone()),
+                        None => unchecked.push(f.rel.clone()),
+                    }
+                }
                 Some(Err(why)) => b.push(
                     one,
                     Custody::Unresolved,
@@ -1112,15 +1230,31 @@ fn classify_within(
                 None => plain.push(f.rel.clone()),
             },
             // Not looked into in time: it may hold sign-ins, so it is never simply copied.
-            Shape::Ini | Shape::Text if late() => unchecked.push(f.rel.clone()),
-            Shape::Ini | Shape::Text if text_has_credentials(&f.path, f.len) => {
-                sessions = true;
-                b.push(
-                    one,
-                    Custody::MachineBound,
-                    false,
-                    vec![Evidence::CredentialValues],
-                )
+            Shape::Text if f.log => not_moved.push(NotMoved {
+                rel: f.rel.clone(),
+                why: Skip::Log,
+            }),
+            // Read through for credentials, whatever its size; what cannot be read through in
+            // time is never copied unchecked.
+            Shape::Ini | Shape::Text => {
+                let found = if late() {
+                    None
+                } else {
+                    stream_has_credentials(&f.path, deadline)
+                };
+                match found {
+                    Some(true) => {
+                        sessions = true;
+                        b.push(
+                            one,
+                            Custody::MachineBound,
+                            false,
+                            vec![Evidence::CredentialValues],
+                        )
+                    }
+                    Some(false) => plain.push(f.rel.clone()),
+                    None => unchecked.push(f.rel.clone()),
+                }
             }
             Shape::SessionData => {
                 sessions = true;
@@ -1480,6 +1614,7 @@ mod tests {
             Skip::NotRead,
             Skip::OnlineOnly,
             Skip::NotAFile,
+            Skip::Log,
         ];
         let words: std::collections::BTreeSet<&str> = all.iter().map(Skip::words).collect();
         assert_eq!(words.len(), all.len());
@@ -1513,17 +1648,46 @@ mod tests {
     }
 
     #[test]
-    fn credentials_are_looked_for_through_the_whole_text_up_to_its_limit() {
+    fn credentials_are_looked_for_through_the_whole_file_whatever_its_size() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("settings.ini");
-        let mut text = "a=1\n".repeat(2000);
+        let far_off = || std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // A token buried past 256 KB, as a value and as a word in a line.
+        let mut text = "a=1\n".repeat(80_000);
         text.push_str("token=ghp_0123456789abcdefABCDEF0123456789abcd\n");
         std::fs::write(&p, &text).unwrap();
-        assert!(text_has_credentials(&p, text.len() as u64));
-        assert!(!text_has_credentials(&p, MAX_TEXT + 1));
-        assert!(text_has_credentials(&p, MAX_TEXT));
-        std::fs::write(&p, "a=1\nb: plain words\n").unwrap();
-        assert!(!text_has_credentials(&p, 20));
+        assert!(text.len() > 256 * 1024);
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        let mut words = "plain words here ".repeat(30_000);
+        words.push_str(
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl",
+        );
+        std::fs::write(&p, &words).unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        std::fs::write(&p, "-----BEGIN PRIVATE KEY-----\nAAAA\n").unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(true));
+        // Plain text all the way through: none.
+        std::fs::write(&p, "a=1\nb: plain words\n".repeat(50_000)).unwrap();
+        assert_eq!(stream_has_credentials(&p, far_off()), Some(false));
+        // No time to read it through: not fully checked.
+        assert_eq!(stream_has_credentials(&p, std::time::Instant::now()), None);
+    }
+
+    #[test]
+    fn logs_are_told_by_their_lines_never_by_their_name() {
+        let log = b"2026-10-28 03:01:02 INFO started\n2026-10-28 03:01:03 WARN slow\n[2026/10/28 03:01:04] done\n12:00:01 tick\n12:00:02 tick\npartial line";
+        assert!(log_shaped(log));
+        assert!(!log_shaped(b"[General]\nname=x\nother=y\nmore=z\n"));
+        assert!(!log_shaped(b"2026-10-28 one\nplain\nplain\nplain\nplain\n"));
+        // Too few lines to tell.
+        assert!(!log_shaped(
+            b"2026-10-28 03:01:02 a\n2026-10-28 03:01:03 b\n"
+        ));
+        // A version number is not a date.
+        assert!(!log_shaped(b"v1.2.3 a\nv1.2.4 b\nv1.2.5 c\nv1.2.6 d\n"));
+        assert!(starts_with_time("2026.10.28 x"));
+        assert!(!starts_with_time("2026-10/28 x"));
+        assert!(!starts_with_time("123:45:67 x"));
     }
 
     #[test]

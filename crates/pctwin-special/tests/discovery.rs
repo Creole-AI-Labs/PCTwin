@@ -453,3 +453,38 @@ fn an_encrypted_store_beside_a_key_bound_to_this_laptop_is_never_copied() {
         Custody::Portable
     );
 }
+
+#[test]
+fn a_token_buried_deep_in_a_large_file_is_never_copied_as_plain_data() {
+    let t = temp();
+    let home = home_of(&t);
+    let d = home.join("AppData/Roaming/Deep");
+    let mut text = "name=value\n".repeat(40_000);
+    text.push_str("refresh=ghp_0123456789abcdefABCDEF0123456789abcd\n");
+    put(&d.join("big.conf"), text.as_bytes());
+    // JSON too large to read as one, with a token near its end.
+    let mut json = String::from("{\"items\":[");
+    for i in 0..300_000 {
+        json.push_str(&format!("{{\"n\":{i},\"v\":\"plain\"}},"));
+    }
+    json.push_str("{\"token\":\"ghp_0123456789abcdefABCDEF0123456789abcd\"}]}");
+    assert!(json.len() > 4 * 1024 * 1024);
+    put(&d.join("state.json"), json.as_bytes());
+    // A log, by its lines: not moved, whatever is in it.
+    let mut log = String::new();
+    for i in 0..1000 {
+        log.push_str(&format!(
+            "2026-10-28 03:{:02}:{:02} INFO step {i}\n",
+            (i / 60) % 60,
+            i % 60
+        ));
+    }
+    put(&d.join("output.txt"), log.as_bytes());
+    put(&d.join("small.conf"), b"theme=dark\n");
+    let r = discover(&home, &Catalogue::shipped(SHIPPED));
+    let f = folder(&r, "Deep");
+    assert_eq!(holding(f, "big.conf").custody, Custody::MachineBound);
+    assert_eq!(holding(f, "state.json").custody, Custody::MachineBound);
+    assert_eq!(holding(f, "small.conf").custody, Custody::Portable);
+    assert_eq!(skipped(f, "output.txt"), Skip::Log);
+}
