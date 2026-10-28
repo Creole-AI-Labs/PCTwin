@@ -129,12 +129,20 @@ pub fn plan(
             });
         }
         for n in &r.not_moved {
+            // (Each folder's own entries; the roots' skipped folders follow below.)
             not_moved.push(NotMovedItem {
                 app: app.clone(),
                 rel: n.rel.clone(),
                 why: n.why.words().to_string(),
             });
         }
+    }
+    for (path, why) in &coverage.skipped {
+        not_moved.push(NotMovedItem {
+            app: String::new(),
+            rel: path.to_string_lossy().into_owned(),
+            why: why.clone(),
+        });
     }
     Plan {
         components,

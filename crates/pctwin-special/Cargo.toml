@@ -35,6 +35,10 @@ tempfile = "3"
 # Files named by their own SHA-256 (model libraries) are checked against it.
 sha2 = "0.10.9"
 
+[target.'cfg(unix)'.dependencies]
+# Opening a file never follows a link or waits on a pipe (O_NOFOLLOW, O_NONBLOCK).
+libc = "0.2"
+
 [dev-dependencies]
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 

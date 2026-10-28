@@ -34,6 +34,7 @@ use pctwin_catalogue::Catalogue;
 use crate::catalogue::SpecialRow;
 use crate::component::{Component, Custody, Evidence};
 use crate::content::{self, DbKind, JsonFacts};
+use crate::guard;
 use crate::roots::{AppDataFolder, RootKind, System};
 use crate::sniff::{self, Shape};
 
@@ -43,6 +44,8 @@ pub const MAX_DEPTH: usize = 24;
 pub const MAX_FILES: usize = 100_000;
 /// The largest text file read for credential-shaped values.
 const MAX_TEXT: u64 = 1024 * 1024;
+/// The most time one app data folder's walk may take; the rest is "not fully checked".
+pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(120);
 /// How much of a GGUF file's start is read for its split facts.
 const GGUF_HEADER: u64 = 4 * 1024 * 1024;
 
@@ -73,6 +76,11 @@ pub enum Skip {
     /// A browser add-on (a folder with a WebExtension manifest): code, installed again from its
     /// store through 2.1, never copied.
     AddOn,
+    /// Kept online by a cloud app (or offline): opening it would download it, so it is never
+    /// opened here.
+    OnlineOnly,
+    /// A pipe, socket, device or other entry that is not a file.
+    NotAFile,
     /// Past the walk's depth or count limit: found, not read.
     NotRead,
 }
@@ -85,7 +93,13 @@ impl Skip {
             Skip::Program => "a program or add-on: apps are installed again, never copied",
             Skip::Link => "a link to somewhere else: links are not followed",
             Skip::AddOn => "a browser add-on: it is installed again from its store, never copied",
-            Skip::NotRead => "found, not read: too deep or too many files here",
+            Skip::NotRead => {
+                "found, not fully checked: too deep, too many files, or out of time here"
+            }
+            Skip::OnlineOnly => {
+                "kept online by a cloud app: not downloaded or moved here; it stays in its cloud"
+            }
+            Skip::NotAFile => "not a file (a pipe, socket or device): nothing to move",
         }
     }
 }
@@ -152,7 +166,7 @@ fn near_random(b: &[u8]) -> bool {
 }
 
 fn read_ends(path: &Path, len: u64) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
-    let mut f = std::fs::File::open(path)?;
+    let mut f = guard::open(path)?;
     let mut head = vec![0u8; (len as usize).min(sniff::HEAD)];
     f.read_exact(&mut head)?;
     let mut tail = Vec::new();
@@ -164,6 +178,34 @@ fn read_ends(path: &Path, len: u64) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
     Ok((head, tail))
 }
 
+/// What a file holds at its ends, read within [`guard::READ_LIMIT`].
+fn ends(path: &Path, len: u64) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let p = path.to_path_buf();
+    guard::bounded(guard::READ_LIMIT, move || read_ends(&p, len))
+        .ok_or_else(|| NO_ANSWER.to_string())?
+        .map_err(|e| e.kind().to_string())
+}
+
+/// Reads a whole file of at most `max` bytes within [`guard::READ_LIMIT`].
+fn whole(path: &Path, max: u64) -> Result<Vec<u8>, String> {
+    let p = path.to_path_buf();
+    guard::bounded(guard::READ_LIMIT, move || guard::read_all(&p, max))
+        .ok_or_else(|| NO_ANSWER.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Why a file was not read through.
+const NO_ANSWER: &str = "it did not answer in time: not fully checked";
+
+/// Runs `f` on `path` within [`guard::READ_LIMIT`].
+fn within<T: Send + 'static>(
+    path: &Path,
+    f: impl FnOnce(&Path) -> T + Send + 'static,
+) -> Option<T> {
+    let p = path.to_path_buf();
+    guard::bounded(guard::READ_LIMIT, move || f(&p))
+}
+
 /// A folder holding a WebExtension manifest (`manifest.json` with a `manifest_version`): the
 /// standard format of browser add-ons, the same for every browser.
 fn is_add_on(dir: &Path) -> bool {
@@ -171,10 +213,10 @@ fn is_add_on(dir: &Path) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(&m) else {
         return false;
     };
-    if !meta.is_file() || meta.len() > 1024 * 1024 {
+    if guard::kind_of(&meta) != guard::Kind::File || meta.len() > 1024 * 1024 {
         return false;
     }
-    let Ok(bytes) = std::fs::read(&m) else {
+    let Ok(bytes) = whole(&m, 1024 * 1024) else {
         return false;
     };
     let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
@@ -193,9 +235,11 @@ fn is_cache_folder(name: &str, path: &Path) -> bool {
     }
     // A cache tag, by its signature line (the file's name is the standard's, its bytes decide).
     let tag = path.join("CACHEDIR.TAG");
-    std::fs::symlink_metadata(&tag).is_ok_and(|m| m.is_file())
-        && read_ends(&tag, std::fs::metadata(&tag).map(|m| m.len()).unwrap_or(0))
-            .is_ok_and(|(h, t)| sniff::shape(&h, &t, h.len() as u64) == Shape::CacheTag)
+    std::fs::symlink_metadata(&tag).is_ok_and(|m| {
+        guard::kind_of(&m) == guard::Kind::File
+            && ends(&tag, m.len())
+                .is_ok_and(|(h, t)| sniff::shape(&h, &t, h.len() as u64) == Shape::CacheTag)
+    })
 }
 
 struct Walk {
@@ -206,6 +250,8 @@ struct Walk {
     /// The deepest folder and most files read ([`MAX_DEPTH`], [`MAX_FILES`]; smaller in tests).
     max_depth: usize,
     max_files: usize,
+    /// Past this moment, nothing more is read: the rest is reported "not fully checked".
+    deadline: std::time::Instant,
 }
 
 fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
@@ -234,11 +280,18 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
             w.unreadable.push((child, "could not be looked at".into()));
             continue;
         };
-        if meta.file_type().is_symlink() {
-            w.not_moved.push(NotMoved {
-                rel: child,
-                why: Skip::Link,
-            });
+        // What it is from its attributes alone: nothing that is not a plain local file or
+        // folder is ever opened or listed.
+        let skip = match guard::kind_of(&meta) {
+            guard::Kind::Link => Some(Skip::Link),
+            guard::Kind::OnlineOnly => Some(Skip::OnlineOnly),
+            guard::Kind::NotAFile => Some(Skip::NotAFile),
+            guard::Kind::File | guard::Kind::Folder => None,
+        };
+        let skip =
+            skip.or_else(|| (std::time::Instant::now() >= w.deadline).then_some(Skip::NotRead));
+        if let Some(why) = skip {
+            w.not_moved.push(NotMoved { rel: child, why });
             continue;
         }
         if meta.is_dir() {
@@ -275,7 +328,7 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
             continue;
         }
         let len = meta.len();
-        match read_ends(&path, len) {
+        match ends(&path, len) {
             Ok((head, tail)) => {
                 let shape = sniff::shape(&head, &tail, len);
                 let random = shape == Shape::Binary && near_random(&head);
@@ -287,7 +340,7 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
                     random,
                 })
             }
-            Err(e) => w.unreadable.push((child, e.kind().to_string())),
+            Err(why) => w.unreadable.push((child, why)),
         }
     }
 }
@@ -315,7 +368,10 @@ fn text_has_credentials(path: &Path, len: u64) -> bool {
     if len > MAX_TEXT {
         return false;
     }
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(bytes) = whole(path, MAX_TEXT) else {
+        return false;
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
         return false;
     };
     text.lines().any(|l| {
@@ -331,10 +387,13 @@ fn text_has_credentials(path: &Path, len: u64) -> bool {
 
 /// A GGUF file's split facts (`split.no`, `split.count`), read from its header.
 pub fn gguf_split(path: &Path) -> Option<(u16, u16)> {
-    let f = std::fs::File::open(path).ok()?;
-    let mut buf = Vec::new();
-    f.take(GGUF_HEADER).read_to_end(&mut buf).ok()?;
-    gguf_split_in(&buf)
+    within(path, |p| {
+        let f = guard::open(p).ok()?;
+        let mut buf = Vec::new();
+        f.take(GGUF_HEADER).read_to_end(&mut buf).ok()?;
+        gguf_split_in(&buf)
+    })
+    .flatten()
 }
 
 fn gguf_split_in(b: &[u8]) -> Option<(u16, u16)> {
@@ -519,12 +578,18 @@ fn classify_within(
         unreadable: Vec::new(),
         max_depth,
         max_files,
+        deadline: std::time::Instant::now() + FOLDER_TIME,
     };
     let base = folder.path();
     match std::fs::symlink_metadata(&base) {
         Ok(m) if m.is_file() => {
             // A folder that is one file (a Mac preferences list).
-            if let Ok((h, t)) = read_ends(&base, m.len()) {
+            if guard::kind_of(&m) != guard::Kind::File {
+                w.not_moved.push(NotMoved {
+                    rel: String::new(),
+                    why: Skip::OnlineOnly,
+                });
+            } else if let Ok((h, t)) = ends(&base, m.len()) {
                 w.files.push(Found {
                     rel: String::new(),
                     path: base.clone(),
@@ -554,7 +619,7 @@ fn classify_within(
         || w.files.iter().any(|f| {
             f.shape == Shape::Json
                 && f.len as usize <= content::MAX_JSON
-                && std::fs::read(&f.path)
+                && whole(&f.path, content::MAX_JSON as u64)
                     .ok()
                     .and_then(|b| content::json_facts(&b).ok())
                     .is_some_and(|j| j.machine_bound_key)
@@ -632,8 +697,7 @@ fn classify_within(
             let facts = if f.len as usize > content::MAX_JSON {
                 Err("too large to read".to_string())
             } else {
-                std::fs::read(&f.path)
-                    .map_err(|e| e.kind().to_string())
+                whole(&f.path, content::MAX_JSON as u64)
                     .and_then(|bytes| content::json_facts(&bytes).map_err(|e| e.to_string()))
             };
             (f.rel.clone(), facts)
@@ -661,9 +725,13 @@ fn classify_within(
         if members.len() > 1 {
             ev.push(Evidence::SqliteCompanion);
         }
-        match content::sqlite_tables(&f.path).map(|t| content::db_kind(&t)) {
+        let kind = within(&f.path, |p| {
+            content::sqlite_tables(p).map(|t| content::db_kind(&t))
+        })
+        .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())));
+        match kind {
             Ok(DbKind::Ordinary) => {
-                if let Ok(paths) = content::sqlite_paths(&f.path) {
+                if let Some(Ok(paths)) = within(&f.path, |p| content::sqlite_paths(p)) {
                     ev.extend(link_evidence(&base, &paths));
                 }
                 b.push(members, Custody::Portable, false, ev)
@@ -1149,6 +1217,8 @@ mod tests {
             Skip::Link,
             Skip::AddOn,
             Skip::NotRead,
+            Skip::OnlineOnly,
+            Skip::NotAFile,
         ];
         let words: std::collections::BTreeSet<&str> = all.iter().map(Skip::words).collect();
         assert_eq!(words.len(), all.len());
