@@ -49,6 +49,13 @@ export function UndoPreview({ screen }: { screen: Extract<ScreenView, { kind: "u
       <Localized id="guard-undo-preview-body">
         <p className="subhead" />
       </Localized>
+      {screen.when !== null ? (
+        <p className="subhead">{l10n.getString("guard-undo-preview-which", { when: new Date(screen.when * 1000) })}</p>
+      ) : (
+        <Localized id="guard-undo-preview-which-earlier">
+          <p className="subhead" />
+        </Localized>
+      )}
       <StateLine />
       <RefusalLine />
       <UndoLegend />

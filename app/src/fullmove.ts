@@ -49,7 +49,7 @@ export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; statu
 export const RESTORE_WORDS = ["made", "earlier-exists", "not-made", "not-windows", "not-asked"] as const;
 export type RestoreWord = (typeof RESTORE_WORDS)[number];
 
-export type Rebuilt = { lines: RebuiltLine[]; more: number; restorePoint: RestoreWord; stopped: boolean; canUndo: boolean };
+export type Rebuilt = { lines: RebuiltLine[]; more: number; restorePoint: RestoreWord; stopped: boolean; canUndo: boolean; undoId: string | null };
 
 export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number };
 
@@ -130,10 +130,11 @@ function parseLine(v: unknown): RebuiltLine | null {
 
 /** The outcome section (`RebuiltView`). */
 export function parseRebuilt(v: unknown): Rebuilt | null {
-  const f = exactly(v, ["lines", "more", "restorePoint", "stopped", "canUndo"]);
+  const f = exactly(v, ["lines", "more", "restorePoint", "stopped", "canUndo", "undoId"]);
   if (!f || !isCount(f.more) || !oneOf(f.restorePoint, RESTORE_WORDS) || typeof f.stopped !== "boolean" || typeof f.canUndo !== "boolean") return null;
+  if (f.undoId !== null && !(typeof f.undoId === "string" && /^[0-9a-f]{32}$/.test(f.undoId))) return null;
   const lines = listOf(f.lines, parseLine);
-  return lines ? { lines, more: f.more, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo } : null;
+  return lines ? { lines, more: f.more, restorePoint: f.restorePoint, stopped: f.stopped, canUndo: f.canUndo, undoId: f.undoId } : null;
 }
 
 /** Where rebuilding is (`Progress`, event `move-rebuild`). */

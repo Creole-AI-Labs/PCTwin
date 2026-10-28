@@ -25,6 +25,7 @@
       }
     ],
     "preview": {
+      "estimatedBytes": 0,
       "fits": true,
       "minutes": {
         "high": 8,
@@ -34,6 +35,12 @@
       "renamed": 1,
       "runsAtSignIn": 1,
       "shortBytes": 0,
+      "synced": [
+        {
+          "folder": "C:\\Users\\ada\\OneDrive\\Documents",
+          "service": "OneDrive"
+        }
+      ],
       "tooBig": 0
     },
     "revision": 2
@@ -64,6 +71,7 @@
       }
     ],
     "preview": {
+      "estimatedBytes": 0,
       "fits": true,
       "minutes": {
         "high": 8,
@@ -73,6 +81,12 @@
       "renamed": 1,
       "runsAtSignIn": 1,
       "shortBytes": 0,
+      "synced": [
+        {
+          "folder": "C:\\Users\\ada\\OneDrive\\Documents",
+          "service": "OneDrive"
+        }
+      ],
       "tooBig": 0
     },
     "rebuild": {

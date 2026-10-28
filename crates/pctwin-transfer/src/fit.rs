@@ -24,7 +24,23 @@ pub struct PlaceFit {
     pub needed: u64,
     /// The space free there, as its drive reports it (`None`: not known).
     pub free: Option<u64>,
+    /// How much of `needed` is an estimate, not a measured size ([`AlsoNeeded`]): the place's
+    /// fit is then said with "about".
+    pub estimated: u64,
 }
+
+/// Space the move uses on this laptop beyond its files, at `at` (a folder there), estimated
+/// before it starts: the installers downloaded and the apps installed, the app data staged and
+/// then landed (gap 10a of the complications audit, 28 October 2026). Counted on the drive that
+/// holds `at`, together with the places of the move on that drive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlsoNeeded {
+    pub at: std::path::PathBuf,
+    pub bytes: u64,
+}
+
+/// The place an estimate is shown under when no place of the move is on its drive.
+pub const WORK_PLACE: &str = "pctwin-work";
 
 impl PlaceFit {
     /// Whether it fits with [`KEEP_FREE`] to spare (`None`: the free space is not known).
@@ -72,10 +88,53 @@ impl Fit {
                     destination: destination.clone(),
                     needed: together.max(*own),
                     free: dest.and_then(|d| d.available_bytes()),
+                    estimated: 0,
                 }
             })
             .collect();
         Self { places }
+    }
+
+    /// With the space the move uses beyond its files (`also`): each estimate is added to every
+    /// place on its drive (they share its free space); one whose drive holds no place of the move
+    /// is a place of its own ([`WORK_PLACE`]). A folder that cannot be opened is counted against
+    /// every place, the cautious way.
+    pub fn with_also(mut self, table: &Destinations, also: &[AlsoNeeded]) -> Self {
+        for a in also.iter().filter(|a| a.bytes > 0) {
+            let at = pctwin_gate::Destination::open(&a.at).ok();
+            let mut counted = false;
+            for p in &mut self.places {
+                let same = match (&at, table.get(&p.destination).ok()) {
+                    (Some(at), Some(d)) => d.same_drive_as(at) != Some(false),
+                    _ => true,
+                };
+                if same {
+                    p.needed = p.needed.saturating_add(a.bytes);
+                    p.estimated = p.estimated.saturating_add(a.bytes);
+                    counted = true;
+                }
+            }
+            if !counted {
+                match self.places.iter_mut().find(|p| p.destination == WORK_PLACE) {
+                    Some(p) => {
+                        p.needed = p.needed.saturating_add(a.bytes);
+                        p.estimated = p.estimated.saturating_add(a.bytes);
+                    }
+                    None => self.places.push(PlaceFit {
+                        destination: WORK_PLACE.into(),
+                        needed: a.bytes,
+                        free: at.as_ref().and_then(|d| d.available_bytes()),
+                        estimated: a.bytes,
+                    }),
+                }
+            }
+        }
+        self
+    }
+
+    /// Whether any place's need holds an estimate (said with "about").
+    pub fn estimated(&self) -> u64 {
+        self.places.iter().map(|p| p.estimated).max().unwrap_or(0)
     }
 
     /// `Some(true)` when every place fits, `Some(false)` when any does not, `None` when none is
@@ -130,12 +189,51 @@ mod tests {
 
     const GB: u64 = 1024 * 1024 * 1024;
 
+    /// Gap 10a (28 October 2026): the space the move uses beyond its files (installers, apps,
+    /// app data) is counted on the drive it lands on, with the files there, and said as an
+    /// estimate; on a drive with no place of the move it is a place of its own.
+    #[test]
+    fn installers_and_app_data_count_against_the_drive_they_land_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path();
+        let mut table = Destinations::new();
+        table
+            .approve("documents", pctwin_gate::Approved::MyFolders, docs)
+            .unwrap();
+        let needed: BTreeMap<String, u64> = [("documents".to_string(), 3 * GB)].into();
+        let files_only = Fit::check(&needed, &table);
+        assert_eq!(files_only.estimated(), 0);
+        let also = [
+            AlsoNeeded {
+                at: dir.path().to_path_buf(),
+                bytes: 2 * GB,
+            },
+            AlsoNeeded {
+                at: dir.path().to_path_buf(),
+                bytes: 0,
+            },
+        ];
+        let fit = Fit::check(&needed, &table).with_also(&table, &also);
+        assert_eq!(fit.places.len(), 1);
+        assert_eq!(fit.places[0].needed, 5 * GB);
+        assert_eq!(fit.places[0].estimated, 2 * GB);
+        assert_eq!(fit.estimated(), 2 * GB);
+        assert!(fit.places[0].short_by() >= files_only.places[0].short_by());
+        // Nothing of the move on any drive: the estimate is a place of its own.
+        let none = Fit::check(&BTreeMap::new(), &table).with_also(&table, &also);
+        assert_eq!(none.places.len(), 1);
+        assert_eq!(none.places[0].destination, WORK_PLACE);
+        assert_eq!(none.places[0].needed, 2 * GB);
+        assert!(none.places[0].free.is_some());
+    }
+
     #[test]
     fn a_place_fits_only_with_room_to_spare() {
         let at = |needed, free| PlaceFit {
             destination: "me".into(),
             needed,
             free,
+            estimated: 0,
         };
         assert_eq!(at(10 * GB, Some(12 * GB)).fits(), Some(true));
         assert_eq!(at(10 * GB, Some(11 * GB)).fits(), Some(true));
@@ -152,6 +250,7 @@ mod tests {
             destination: "x".into(),
             needed,
             free,
+            estimated: 0,
         };
         let fit = |places| Fit { places };
         assert_eq!(

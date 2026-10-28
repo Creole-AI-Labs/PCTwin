@@ -107,7 +107,7 @@ export type ScreenView =
   | { kind: "permission"; stage: PermissionStage; reasons: PermissionReason[]; restorePoint: RestorePoint | null }
   | { kind: "rescue"; stage: RescueStage }
   | { kind: "report"; lines: ReportLine[]; more: number; safeIn: SafeInLine[] }
-  | { kind: "undo-preview"; lines: UndoPlanLine[]; more: number }
+  | { kind: "undo-preview"; lines: UndoPlanLine[]; more: number; when: number | null }
   | { kind: "undo-done"; lines: UndoLine[]; more: number };
 
 export type Projection = {
@@ -346,7 +346,7 @@ export function parseScreenView(v: unknown): ScreenView | null {
       return lines && safeIn && isCount(f.more) ? { kind, lines, more: f.more, safeIn } : null;
     }
     case "undo-preview": {
-      const f = exactly(v, ["kind", "lines", "more"]);
+      const f = exactly(v, ["kind", "lines", "more", "when"]);
       const lines = f
         ? all(f.lines, (x) => {
             const g = exactly(x, ["name", "plan"]);
@@ -354,7 +354,7 @@ export function parseScreenView(v: unknown): ScreenView | null {
             return g && plan && isText(g.name) ? { name: g.name, plan } : null;
           })
         : null;
-      return f && lines && isCount(f.more) ? { kind, lines, more: f.more } : null;
+      return f && lines && isCount(f.more) && orNull(f.when, isCount) ? { kind, lines, more: f.more, when: f.when } : null;
     }
     case "undo-done": {
       const f = exactly(v, ["kind", "lines", "more"]);

@@ -148,6 +148,22 @@ pub struct NewLaptop<'a> {
     pub winget: &'a dyn Fn(&FoundApp) -> Vec<(String, WingetBy)>,
 }
 
+/// Room for the largest installer download held at once (each is removed once installed).
+pub const INSTALLER_DOWNLOAD: u64 = 1024 * 1024 * 1024;
+/// Room for each app PCTwin installs, once installed.
+pub const INSTALLED_APP: u64 = 500 * 1024 * 1024;
+/// Room for each file of the app data that copies (a margin: its size is not sent).
+pub const APP_DATA_FILE: u64 = 4 * 1024 * 1024;
+
+/// About how much space the move uses beyond its files ([`FullPlan::room_needed`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RoomNeeded {
+    /// Installer downloads and the apps installed.
+    pub installs: u64,
+    /// The app data, where it is staged and again where it lands (each).
+    pub app_data: u64,
+}
+
 /// The full move's plan.
 #[derive(Debug, Clone, Default)]
 pub struct FullPlan {
@@ -173,6 +189,10 @@ pub struct FullPlan {
     /// The old laptop sent extras this laptop refused (broken, or past a limit): its settings and
     /// app data are not moved, and the plan says so, never silently.
     pub extras_refused: bool,
+    /// The person's folders on the old laptop, by role, as the old laptop said: where each moved
+    /// file was there, so a setting that points at one is pointed at where it really landed
+    /// ([`crate::run::DataDone::files`]).
+    pub old_folders: Vec<(FolderRole, String)>,
 }
 
 /// Whether `app` belongs in the mover's plan: theirs, or everyone's.
@@ -386,6 +406,7 @@ impl FullPlan {
             extras_digest: Some(digest),
             settings,
             extras_refused: false,
+            old_folders: x.folders.iter().map(|f| (f.role, f.path.clone())).collect(),
         }
     }
 
@@ -507,6 +528,32 @@ impl FullPlan {
             .iter()
             .filter(|e| e.plan.disposition == Disposition::Install && needs_of(&e.plan).is_none())
             .collect()
+    }
+
+    /// About how much space the move uses on this laptop beyond its files, before it starts
+    /// (gap 10a, 28 October 2026). No route carries an installer's size and the old laptop says
+    /// only how many files each app's data holds, so both are honest margins, always said with
+    /// "about": installing takes room for the largest download held at once
+    /// ([`INSTALLER_DOWNLOAD`]) and each app installed ([`INSTALLED_APP`]); the app data that
+    /// copies takes room for each of its files ([`APP_DATA_FILE`]) once where it is staged and
+    /// once where it lands.
+    pub fn room_needed(&self) -> RoomNeeded {
+        let apps = self.to_install().len() as u64;
+        let installs = if apps == 0 {
+            0
+        } else {
+            INSTALLER_DOWNLOAD.saturating_add(apps.saturating_mul(INSTALLED_APP))
+        };
+        let files: u64 = self
+            .special
+            .iter()
+            .filter(|s| s.step == SpecialStep::Copy)
+            .map(|s| s.files)
+            .fold(0, u64::saturating_add);
+        RoomNeeded {
+            installs,
+            app_data: files.saturating_mul(APP_DATA_FILE),
+        }
     }
 
     /// Whether the move changes anything here beyond the files (so the administrator prompt and

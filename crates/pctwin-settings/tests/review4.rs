@@ -298,6 +298,7 @@ fn forged(address: Address, value: &str) -> FoundPlan {
             label: "Forged".into(),
             value: SettingValue::Text(value.into()),
             rewritten: false,
+            from: None,
         }],
         ..FoundPlan::default()
     }

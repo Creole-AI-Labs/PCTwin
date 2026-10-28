@@ -696,6 +696,13 @@ pub trait Steps {
     fn left_out(&self, _record: &Record) -> Vec<ItemId> {
         Vec::new()
     }
+
+    /// The space the move uses on this laptop beyond the files of `record` (installers, apps,
+    /// app data), estimated before the person approves: counted in the preview's fit, said as an
+    /// estimate ([`pctwin_transfer::AlsoNeeded`]). None by default.
+    fn also_needed(&mut self, _record: &Record) -> Vec<pctwin_transfer::AlsoNeeded> {
+        Vec::new()
+    }
 }
 
 /// What the person sees before approving: whether the plan fits on this laptop, and about how
@@ -945,7 +952,9 @@ async fn receive_plan_told<C: Channel, S: Steps>(
         let target = steps.person(&record, &account_id).await?;
         record.mapping.people.insert(account_id, target);
     }
-    let shown = preview(&record, |i| steps.landing(i), table, speed);
+    let also = steps.also_needed(&record);
+    let mut shown = preview(&record, |i| steps.landing(i), table, speed);
+    shown.fit = shown.fit.with_also(table, &also);
     steps.approve(&record, &shown).await?;
     leave_out(steps, &mut record);
     let approval = record.approve()?;
@@ -1088,7 +1097,9 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         // ones approved (another person's with their place chosen, their files and size shown),
         // but if where they land now leaves a place shorter of space than the person saw, they
         // see the plan as it will run and approve it again (or stop, with nothing written).
-        let placed = preview(&approved.record, |i| rules.landing(i), table, measured);
+        let also = steps.also_needed(&approved.record);
+        let mut placed = preview(&approved.record, |i| rules.landing(i), table, measured);
+        placed.fit = placed.fit.with_also(table, &also);
         if most_short(&placed) > approved.short {
             steps.approve(&approved.record, &placed).await?;
             approved.short = most_short(&placed);

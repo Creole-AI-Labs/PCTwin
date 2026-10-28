@@ -579,9 +579,25 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         permission: Permission::OwnFolders,
     };
     let mut steps = Vec::new();
+    // What landed where, from the move's own results: a setting points only at a file there.
+    let files = pctwin_fullmove::run::files_landed(
+        &plan,
+        received.files.iter().filter_map(|f| {
+            let item = received.record.items.iter().find(|i| i.id == f.item)?;
+            let stored = match &f.outcome {
+                Some(ReceiveOutcome::Finished(d)) => d.final_path.clone(),
+                Some(ReceiveOutcome::AlreadyThere(s)) => s.clone(),
+                _ => return None,
+            };
+            Some((item, folder(new.path(), item.place.role).join(stored)))
+        }),
+    );
     let done = rebuild(
         &plan,
-        &pctwin_fullmove::run::DataDone::default(),
+        &pctwin_fullmove::run::DataDone {
+            files,
+            ..Default::default()
+        },
         &mut installer,
         &mut adapter,
         &rebuild_rec,

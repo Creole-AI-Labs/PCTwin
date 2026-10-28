@@ -744,14 +744,18 @@ plan-place-free = 那里还有 { $size } 可用空间
 plan-place-no-room = 那里的可用空间不够。请选择其他位置，或取消勾选此文件夹。
 plan-place-no-safe-name = PCTwin 无法在该驱动器上安全地保存文件。请选择其他位置。
 plan-place-cannot-open = PCTwin 无法打开该文件夹。请选择其他位置。
+plan-place-locked = 该硬盘已锁定。请先解锁，然后重新选择它。
 plan-version = 方案版本{ $revision }
 plan-details = 更多详情
 plan-preview-title = 开始之前
 plan-preview-fits = 这台笔记本电脑有足够的可用空间。
+plan-preview-fits-about = 这台笔记本电脑应该有足够的可用空间。其中为 PCTwin 安装的应用及其数据计入了约 { $extra }。
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
 plan-preview-first = 我们会先迁移这些，让你的新笔记本电脑更快可以使用：{ $places }。
 plan-preview-short = 这台笔记本电脑还需要 { $size } 可用空间。请在开始前释放一些空间，否则硬盘满时移动会停止。
+plan-preview-short-about = 这台笔记本电脑还需要约 { $size } 可用空间，其中为 PCTwin 安装的应用及其数据计入了约 { $extra }。请在开始前释放一些空间，否则硬盘满时移动会停止。
 plan-preview-space-unknown = PCTwin 无法读取这台笔记本电脑的可用空间。
+plan-preview-synced = 在这台笔记本电脑上，{ $folder } 保存在 { $service } 中。移到那里的文件会上传到 { $service }，并占用你在那里的空间。
 plan-preview-time-one =
     { NUMBER($minutes) ->
        *[other] 大约 { $minutes } 分钟。
@@ -1125,6 +1129,7 @@ reason-refused-by-safety-check = 由于名称、位置或大小的原因，新�
 reason-name-not-allowed = 这个名称在新笔记本电脑上不能使用，而且无法生成安全的新名称。请在旧电脑上重命名，然后开始一次包含它的新迁移。
 reason-install-failed = 这个应用没有安装成功。请从开发者的官网安装。
 reason-no-equivalent = 这个应用没有适用于新笔记本电脑系统的版本。请找一个能在那里使用的类似应用。
+reason-drive-locked = 目标硬盘已锁定。请先解锁（例如用它的 BitLocker 密码或恢复密钥），然后再移动一次。
 reason-sign-in = 已放到位，但你需要登录。请打开它并登录。
 reason-activation = 应用已放到位，但需要在新笔记本电脑上使用许可证。请打开它，用你的许可证或账户激活。
 reason-permission = 新笔记本电脑需要先授予权限。请打开这个项目，在询问时选择“允许”。
@@ -1133,6 +1138,7 @@ reason-manual-install = 这个应用必须从开发者的官网获取。请到�
 reason-restart = 新笔记本电脑需要重启才能完成。准备好后请重启。
 reason-finish-by-hand = PCTwin无法替你完成这一步。请按照这份报告中为它列出的步骤操作。
 reason-parts-missing = 这个文件夹里有些文件没有到达，所以它在新电脑上并不完整。这份报告列出了这些文件及原因。请再次发送它们，或用其他方式复制这个文件夹。
+reason-moved-file-missing = 这个设置指向的文件或文件夹不在新笔记本电脑上（不在迁移给它的名称下），所以 PCTwin 没有改动这个设置。请打开该应用，重新选择这个文件。
 
 ## Item results (every item ends with one of these)
 
@@ -1728,6 +1734,8 @@ guard-rescue-use = 使用能读取到的内容
 
 guard-undo-preview-title = 撤销会做什么
 guard-undo-preview-body = PCTwin 刚刚查看了每一项更改。迁移之后你改动过的内容都会保留。在你选择“撤销”之前，什么都不会发生。
+guard-undo-preview-which = 这会撤销在 { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") } 完成的那次迁移。你的其他迁移不会改变。
+guard-undo-preview-which-earlier = 这会撤销用旧版 PCTwin 完成的那次迁移。你的其他迁移不会改变。
 guard-undo-plan-put-back = 恢复原样
 guard-undo-plan-remove-app = 应用已删除，你的工作已保留
 guard-undo-plan-keep-changed = 保留：你改动过它

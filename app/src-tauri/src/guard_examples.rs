@@ -258,6 +258,7 @@ fn screens() -> Vec<ScreenView> {
             })
             .collect(),
             more: 0,
+            when: Some(1_793_000_000),
         },
         ScreenView::UndoDone {
             lines: vec![

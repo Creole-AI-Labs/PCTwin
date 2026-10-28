@@ -375,6 +375,10 @@ export interface PlanPreview {
   refused: number;
   /** Would land where the new laptop starts programs by itself at sign-in. */
   runsAtSignIn: number;
+  /** How much of what is counted is an estimate (installers, apps, app data): the fit is said with "about". */
+  estimatedBytes: number;
+  /** Places the files land in that this laptop keeps synced online: files there upload and use that service's space. */
+  synced: { folder: string; service: string }[];
 }
 
 /** One revision of the plan, exactly as it will run. Anything that changes it is a new revision and a new fingerprint. */

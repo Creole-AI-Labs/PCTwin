@@ -475,13 +475,18 @@ function parseLeftOut(value: unknown): LeftOut | null {
 }
 
 function parsePlanPreview(value: unknown): PlanPreview | null {
-  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn"]);
+  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn", "estimatedBytes", "synced"]);
   if (!f || !(f.fits === null || typeof f.fits === "boolean")) return null;
   const minutes = f.minutes === null ? null : parseRange(f.minutes);
   if (f.minutes !== null && minutes === null) return null;
   const { shortBytes, renamed, tooBig, refused, runsAtSignIn } = f;
-  if (!isCount(shortBytes) || !isCount(renamed) || !isCount(tooBig) || !isCount(refused) || !isCount(runsAtSignIn)) return null;
-  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn };
+  if (!isCount(shortBytes) || !isCount(renamed) || !isCount(tooBig) || !isCount(refused) || !isCount(runsAtSignIn) || !isCount(f.estimatedBytes)) return null;
+  const synced = listOf(f.synced, (s) => {
+    const g = exactly(s, ["folder", "service"]);
+    return g && typeof g.folder === "string" && typeof g.service === "string" ? { folder: g.folder, service: g.service } : null;
+  });
+  if (!synced) return null;
+  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn, estimatedBytes: f.estimatedBytes, synced };
 }
 
 /** The plan for the person to approve (`PlanView`, event `move-plan`). */
@@ -655,7 +660,7 @@ export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others:
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
 /** What came of choosing another place for a group of folders (M05). */
-export type PlaceAnswer = { kind: "chosen"; path: string; freeBytes: number | null } | { kind: "not-chosen" | "no-safe-name" | "cannot-open" };
+export type PlaceAnswer = { kind: "chosen"; path: string; freeBytes: number | null } | { kind: "not-chosen" | "no-safe-name" | "cannot-open" | "locked" };
 
 export function parsePlaceAnswer(value: unknown): PlaceAnswer | null {
   if (typeof value !== "object" || value === null) return null;
@@ -665,7 +670,7 @@ export function parsePlaceAnswer(value: unknown): PlaceAnswer | null {
     return f && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { kind, path: f.path, freeBytes: f.freeBytes } : null;
   }
   const f = exactly(value, ["kind"]);
-  return f && oneOf(f.kind, ["not-chosen", "no-safe-name", "cannot-open"] as const) ? { kind: f.kind } : null;
+  return f && oneOf(f.kind, ["not-chosen", "no-safe-name", "cannot-open", "locked"] as const) ? { kind: f.kind } : null;
 }
 
 /** While the plan waits: the person chooses another folder for the folders of `role`, in the system's picker. */
@@ -707,8 +712,8 @@ export function parseConnectionView(value: unknown): ConnectionView | null {
   return null;
 }
 export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportItem));
-/** Opens undo for the last move's apps and settings: the flow guard shows the preview (R05), then the result (R06). */
-export const fullmoveUndo = () => run("fullmove_undo");
+/** Opens undo for one move's apps and settings (its ID from that move's result; none: the newest move): the flow guard shows the preview (R05), saying which move, then the result (R06). */
+export const fullmoveUndo = (id: string | null) => run("fullmove_undo", { id });
 /** The old laptop: the person's answer about the apps to close (true: try again). */
 export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", { retry });
 /** The undo the screens opened is over (the person went back). */

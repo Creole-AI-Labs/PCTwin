@@ -47,6 +47,10 @@ pub enum Why {
     HardwarePath,
     PathNotMoved,
     RecentMissing,
+    /// It points at a file or folder of the move that is not on the new laptop under the name
+    /// it landed with (it did not arrive, or it landed under another name than planned): the
+    /// setting is not written, so it never points at the wrong file.
+    NotLanded,
     TooLarge,
     HiddenText,
     /// It points at another computer or a web address (opening it would fetch something, and
@@ -86,6 +90,7 @@ impl Why {
             Why::HardwarePath => "it points at a device on the old laptop".into(),
             Why::PathNotMoved => "it points at a file or folder that was not moved".into(),
             Why::RecentMissing => "a recent file that was not moved".into(),
+            Why::NotLanded => "it points at a file or folder that is not on the new laptop where the move put it, so the setting was not changed; choose the file again in its app".into(),
             Why::TooLarge => "too large to move as a setting".into(),
             Why::HiddenText => "it holds hidden characters".into(),
             Why::Fetches => "it points at another computer or a web address: kept for you to look at, not written".into(),
@@ -152,6 +157,57 @@ impl Relocate for FolderMap {
                 .collect();
             Some(format!("{to}{rest}"))
         })
+    }
+}
+
+/// Where the move's files really are now (gap 5 of the complications audit, 28 October 2026):
+/// every file that arrived, as (its full path on the old laptop, its full path where it is
+/// stored here), and `there`, which says whether a full path here is really there now. A path
+/// is pointed at only when it is one of these files, or a folder holding one of them (found by
+/// that file's own place, so a folder that landed as "Name (2)" is pointed at as itself), and it
+/// is there; anything else is `None`, never a guess by the folder's name.
+pub struct Landed<'a> {
+    pub files: &'a [(String, String)],
+    pub there: &'a dyn Fn(&str) -> bool,
+}
+
+/// `p` as it is compared: separators as `/`, no trailing one, letters in one case for a Windows
+/// path (whose names do not tell case apart).
+fn comparable(p: &str) -> String {
+    let windows = p.as_bytes().get(1) == Some(&b':');
+    let s: String = p
+        .trim_end_matches(['\\', '/'])
+        .chars()
+        .map(|c| if c == '\\' { '/' } else { c })
+        .collect();
+    if windows { s.to_ascii_lowercase() } else { s }
+}
+
+impl Relocate for Landed<'_> {
+    fn new_path(&self, old: &str) -> Option<String> {
+        if !full_path(old) {
+            return None;
+        }
+        let want = comparable(old);
+        let mut found = None;
+        for (from, to) in self.files {
+            let from = comparable(from);
+            if from == want {
+                found = Some(to.trim_end_matches(['\\', '/']).to_string());
+                break;
+            }
+            // A folder holding this file: the same path below it here, cut off. (Settings move
+            // only between the same systems, so both paths are compared the same way.)
+            let Some(rest) = from.strip_prefix(&want).filter(|r| r.starts_with('/')) else {
+                continue;
+            };
+            let to = to.trim_end_matches(['\\', '/']);
+            if comparable(to).ends_with(rest) && to.is_char_boundary(to.len() - rest.len()) {
+                found = Some(to[..to.len() - rest.len()].to_string());
+                break;
+            }
+        }
+        found.filter(|p| (self.there)(p))
     }
 }
 

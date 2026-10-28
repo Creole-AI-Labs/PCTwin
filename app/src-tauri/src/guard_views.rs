@@ -755,7 +755,13 @@ pctwin_types::listed_enum! {
         },
         /// What undo would do, looked at now (R05).
         #[serde(rename_all = "camelCase")]
-        UndoPreview { lines: Vec<UndoPlanLine>, more: u64 },
+        UndoPreview {
+            lines: Vec<UndoPlanLine>,
+            more: u64,
+            /// When the move it undoes finished, in seconds since 1970 (`None`: a move kept by
+            /// PCTwin 0.1.x, whose time was not kept).
+            when: Option<u64>,
+        },
         /// What undo did (R06).
         #[serde(rename_all = "camelCase")]
         UndoDone { lines: Vec<UndoLine>, more: u64 },

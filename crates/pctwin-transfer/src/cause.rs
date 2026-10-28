@@ -39,6 +39,8 @@ pub enum Cause {
     NameNotAllowed,
     /// The new laptop could not write it.
     CouldNotWrite,
+    /// The drive it lands on is locked (BitLocker): unlock it, then move it again.
+    DriveLocked,
     /// It was copied, then removed or changed at once, often by security software.
     RemovedAfterCopy,
     /// The person stopped the move before it finished.
@@ -239,6 +241,7 @@ impl Cause {
         match side {
             Side::Old if e.kind() == io::ErrorKind::NotFound => Self::NoLongerThere,
             Side::Old => Self::Unreadable,
+            Side::New if pctwin_gate::is_drive_locked(e) => Self::DriveLocked,
             Side::New => match e.kind() {
                 io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::NoSpace,
                 io::ErrorKind::FileTooLarge => Self::TooBigForDrive,
@@ -252,6 +255,26 @@ impl Cause {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gap 9 (28 October 2026): a locked drive on the new laptop is said as locked (unlock it
+    /// first), never as a generic write failure.
+    #[test]
+    fn a_locked_drive_on_the_new_laptop_is_said_as_locked() {
+        let locked = io::Error::from_raw_os_error(0x8031_0000_u32 as i32);
+        let expected = if cfg!(windows) {
+            Cause::DriveLocked
+        } else {
+            Cause::CouldNotWrite
+        };
+        assert_eq!(Cause::of_io(&locked, Side::New), expected);
+        assert_eq!(
+            Cause::of_gate(&GateError::Io(io::Error::from_raw_os_error(
+                0x8031_0000_u32 as i32
+            ))),
+            expected
+        );
+        assert_eq!(Cause::of_io(&locked, Side::Old), Cause::Unreadable);
+    }
 
     #[test]
     fn a_full_drive_on_the_new_laptop_is_no_space_and_on_the_old_one_a_read() {

@@ -935,14 +935,18 @@ plan-place-free = { $size } libres à cet endroit
 plan-place-no-room = Il n'y a pas assez d'espace libre à cet endroit. Choisissez un autre endroit, ou décochez ce dossier.
 plan-place-no-safe-name = PCTwin ne peut pas enregistrer de fichiers en toute sécurité sur ce disque. Choisissez un autre endroit.
 plan-place-cannot-open = PCTwin n'a pas pu ouvrir ce dossier. Choisissez un autre endroit.
+plan-place-locked = Ce disque est verrouillé. Déverrouillez-le d’abord, puis choisissez-le à nouveau.
 plan-version = Version du plan { $revision }
 plan-details = Plus de détails
 plan-preview-title = Avant de commencer
 plan-preview-fits = Ce portable a assez d’espace libre.
+plan-preview-fits-about = Ce portable devrait avoir assez d’espace libre. Environ { $extra } sont comptés pour les applis que PCTwin installe et leurs données.
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
 plan-preview-first = Nous transférons d’abord ceci, pour que votre nouvel ordinateur portable soit prêt plus tôt : { $places }.
 plan-preview-short = Ce portable a besoin de { $size } d’espace libre en plus. Libérez de l’espace avant de commencer, sinon le transfert s’arrêtera quand le disque sera plein.
+plan-preview-short-about = Ce portable a besoin d’environ { $size } d’espace libre en plus, en comptant environ { $extra } pour les applis que PCTwin installe et leurs données. Libérez de l’espace avant de commencer, sinon le transfert s’arrêtera quand le disque sera plein.
 plan-preview-space-unknown = PCTwin n’a pas pu lire l’espace libre de ce portable.
+plan-preview-synced = Sur ce portable, { $folder } est conservé dans { $service }. Les fichiers transférés là seront envoyés vers { $service } et utiliseront votre espace là-bas.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Environ { $minutes } minute.
@@ -1368,6 +1372,7 @@ reason-refused-by-safety-check = Le contrôle de sécurité du nouvel ordinateur
 reason-name-not-allowed = Ce nom ne peut pas être utilisé sur le nouvel ordinateur portable, et aucun nouveau nom sûr n’était possible. Renommez-le sur l’ancien ordinateur, puis lancez un nouveau transfert qui l’inclut.
 reason-install-failed = L’appli ne s’est pas installée. Installez-la depuis le site de son éditeur.
 reason-no-equivalent = Cette appli n’existe pas pour le système du nouvel ordinateur portable. Cherchez une appli similaire qui fonctionne dessus.
+reason-drive-locked = Le disque de destination est verrouillé. Déverrouillez-le (par exemple avec son mot de passe ou sa clé de récupération BitLocker), puis transférez-le à nouveau.
 reason-sign-in = C’est en place, mais vous devez vous connecter. Ouvrez l’élément et connectez-vous.
 reason-activation = L’appli est en place, mais elle a besoin de sa licence sur le nouvel ordinateur portable. Ouvrez-la et activez-la avec votre licence ou votre compte.
 reason-permission = Le nouvel ordinateur portable doit d’abord donner son autorisation. Ouvrez l’élément et choisissez Autoriser quand c’est demandé.
@@ -1376,6 +1381,7 @@ reason-manual-install = Cette appli doit venir du site de son éditeur. Téléch
 reason-restart = Le nouvel ordinateur portable doit redémarrer pour terminer. Redémarrez-le quand vous le souhaitez.
 reason-finish-by-hand = PCTwin ne peut pas faire cette étape à votre place. Suivez les étapes indiquées pour elle dans ce rapport.
 reason-parts-missing = Certains fichiers de ce dossier ne sont pas arrivés, il n’est donc pas complet sur le nouvel ordinateur. Ils sont listés dans ce rapport avec la raison. Envoyez-les à nouveau, ou copiez le dossier autrement.
+reason-moved-file-missing = Ce réglage désigne un fichier ou un dossier qui n’est pas sur le nouvel ordinateur sous le nom que le transfert lui a donné, donc PCTwin a laissé le réglage tel quel. Ouvrez l’appli et choisissez à nouveau le fichier.
 
 ## Item results (every item ends with one of these)
 
@@ -2032,6 +2038,8 @@ guard-rescue-use = Utiliser ce qui a pu être lu
 
 guard-undo-preview-title = Ce que l’annulation va faire
 guard-undo-preview-body = PCTwin vient de regarder chaque changement. Tout ce que vous avez modifié après le transfert est gardé. Rien ne se passe tant que vous ne choisissez pas Annuler.
+guard-undo-preview-which = Ceci annule le transfert terminé le { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") }. Vos autres transferts ne changent pas.
+guard-undo-preview-which-earlier = Ceci annule le transfert fait avec une version précédente de PCTwin. Vos autres transferts ne changent pas.
 guard-undo-plan-put-back = Remis comme avant
 guard-undo-plan-remove-app = Appli supprimée, votre travail gardé
 guard-undo-plan-keep-changed = Gardé : vous l’avez modifié

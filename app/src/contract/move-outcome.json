@@ -117,7 +117,8 @@
       ],
       "more": 0,
       "restorePoint": "not-asked",
-      "stopped": false
+      "stopped": false,
+      "undoId": "01010101010101010101010101010101"
     },
     "stopped": false
   }

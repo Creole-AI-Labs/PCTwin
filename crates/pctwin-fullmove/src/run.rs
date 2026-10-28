@@ -119,6 +119,17 @@ pub struct UndoBook {
     /// The person's home folder on this laptop, where app data landed.
     #[serde(default)]
     pub home: Option<String>,
+    /// When the move finished, in seconds since 1970 (so undo can say which move it undoes);
+    /// `None` in a book kept by PCTwin 0.1.x.
+    #[serde(default)]
+    pub when: Option<u64>,
+}
+
+impl UndoBook {
+    /// The book's ID: its move's scope, as hex (one book per move).
+    pub fn id(&self) -> String {
+        self.scope.iter().map(|b| format!("{b:02x}")).collect()
+    }
 }
 
 /// How the apps, settings and special categories of a move ended.
@@ -381,6 +392,80 @@ pub struct DataDone {
     /// Each landing in the journal, by its app's name (for undo).
     pub effects: Vec<(String, u64)>,
     pub home: Option<String>,
+    /// Every file of the move that is on this laptop now (copied and checked, or found already
+    /// there), as (its full path on the old laptop, its full path where it is stored here): the
+    /// move's own record of what landed where, by which a setting that points at a moved file is
+    /// pointed at it ([`pctwin_settings::generic::FoundPlan::point_at_landed`]).
+    pub files: Vec<(String, String)>,
+}
+
+/// The move's own record of what landed where, for [`DataDone::files`]: each file on this laptop
+/// now (`here`: the item, and the full path where it is stored here, as the move's results say),
+/// with its full path on the old laptop worked out from its folder there (`plan.old_folders`) and
+/// its path inside it. A file whose folder the old laptop did not name, or whose name is not
+/// plain text, is left out (no setting can name it).
+pub fn files_landed<'a>(
+    plan: &FullPlan,
+    here: impl IntoIterator<Item = (&'a Item, std::path::PathBuf)>,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (item, stored) in here {
+        let Some((_, folder)) = plan.old_folders.iter().find(|(r, _)| *r == item.place.role) else {
+            continue;
+        };
+        if item.path.parts().iter().any(|p| p.exact().is_some()) {
+            continue;
+        }
+        let sep = if folder.as_bytes().get(1) == Some(&b':') {
+            '\\'
+        } else {
+            '/'
+        };
+        let mut old = folder.trim_end_matches(['\\', '/']).to_string();
+        for part in item.path.parts() {
+            old.push(sep);
+            old.push_str(part.display());
+        }
+        // As this laptop writes its paths (a Windows path never with a `/` inside).
+        let mut stored = stored.display().to_string();
+        if stored.as_bytes().get(1) == Some(&b':') {
+            stored = stored.replace('/', "\\");
+        }
+        out.push((old, stored));
+    }
+    out
+}
+
+/// Points each setting whose paths were pointed at the moved files at where they really landed
+/// (`files`, checked on this laptop's drives now); returns the plan to apply and the settings
+/// taken out of it because their file is not there, counted by group.
+fn settings_at_landed(
+    plan: &FullPlan,
+    files: &[(String, String)],
+) -> (FullPlan, Vec<(String, u64)>) {
+    let mut now = plan.clone();
+    if !now.settings.moves.iter().any(|m| m.rewritten) {
+        return (now, Vec::new());
+    }
+    let there = |p: &str| std::fs::symlink_metadata(p).is_ok();
+    let landed = pctwin_settings::classify::Landed {
+        files,
+        there: &there,
+    };
+    let ctx = pctwin_settings::classify::Ctx {
+        paths: &landed,
+        same_screens: false,
+        hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
+    };
+    let mut gone: Vec<(String, u64)> = Vec::new();
+    for n in now.settings.point_at_landed(&ctx) {
+        match gone.iter_mut().find(|(l, _)| *l == n.label) {
+            Some((_, c)) => *c += 1,
+            None => gone.push((n.label, 1)),
+        }
+    }
+    (now, gone)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -395,6 +480,10 @@ pub fn rebuild(
     laptop: LaptopId,
     progress: &mut dyn FnMut(Progress),
 ) -> Rebuilt {
+    // A setting pointed at a moved file is written only once that file is known to be where it
+    // points: the plan as it applies, with the move's own record of what landed where.
+    let (plan, not_landed) = settings_at_landed(plan, &data.files);
+    let plan = &plan;
     if plan.changes_anything() {
         progress(Progress::Permission);
     }
@@ -461,20 +550,27 @@ pub fn rebuild(
     );
     // A run that could not start says so for every group; one that stopped part way already
     // said "not verified" for each group it did not reach.
-    let settings_lines = if ran.lines.is_empty() && !plan.groups.is_empty() {
-        plan.groups
-            .iter()
-            .map(|g| {
-                (
-                    g.label.clone(),
-                    g.count,
-                    ItemResult::because(Reason::NotVerified),
-                )
-            })
-            .collect()
-    } else {
-        ran.lines
-    };
+    let mut settings_lines =
+        if ran.lines.is_empty() && !plan.groups.is_empty() && !plan.settings.moves.is_empty() {
+            plan.groups
+                .iter()
+                .map(|g| {
+                    (
+                        g.label.clone(),
+                        g.count,
+                        ItemResult::because(Reason::NotVerified),
+                    )
+                })
+                .collect()
+        } else {
+            ran.lines
+        };
+    // Each setting whose file is not where it would point: left as it was, said so.
+    settings_lines.extend(
+        not_landed
+            .into_iter()
+            .map(|(label, n)| (label, n, ItemResult::because(Reason::MovedFileMissing))),
+    );
     // Special categories.
     let mut special: Vec<(Title, ItemResult)> = plan
         .special
@@ -547,6 +643,10 @@ pub fn rebuild(
             .collect(),
         landed: data.effects.clone(),
         home: data.home.clone(),
+        when: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs()),
     };
     Rebuilt {
         apps,
