@@ -53,7 +53,7 @@ jobs:
       security: ${{ steps.decide.outputs.security }}
       codeql: ${{ steps.decide.outputs.codeql }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
@@ -112,7 +112,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
@@ -320,7 +320,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
@@ -391,7 +391,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Make the drives (Linux)
         if: runner.os == 'Linux'
         timeout-minutes: 10
@@ -497,7 +497,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           # Audit only: these tests send to the local multicast group (device discovery), which a
           # blocking policy refuses.
@@ -522,7 +522,7 @@ jobs:
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # Its own cache: the full Linux job's holds a release build this one never needs.
           key: quick
@@ -553,7 +553,7 @@ jobs:
       - name: Fence canary
         run: bash scripts/clippy-canary.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest@0.9.148
       - name: Tests
@@ -591,7 +591,7 @@ jobs:
     # Windows also builds the release installer and installs it for real; the Intel Mac is slow.
     timeout-minutes: ${{ (matrix.os == 'macos-15-intel' || matrix.os == 'windows-latest') && 90 || 60 }}
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           # Audit only: these tests send to the local multicast group (device discovery), which a
@@ -632,7 +632,7 @@ jobs:
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # The app's Rust build embeds the built screens, so build them first.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -673,7 +673,7 @@ jobs:
       # test in its own process and tries a failed test once more: a test that then passes is
       # still named FLAKY in the summary (.config/nextest.toml).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest@0.9.148
       - name: Tests
@@ -869,7 +869,7 @@ jobs:
     # Two whole-disk sweeps of a Mac runner (with and without an administrator) take most of an hour.
     timeout-minutes: 120
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -924,7 +924,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the lab tools
         run: cargo build --locked -p pctwin-lab -p pctwin-labmove
       # The administrator helper's system calls with a real second account, and the real prompt
@@ -1012,7 +1012,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -1059,7 +1059,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Make a lab laptop and pack it
         shell: bash
         run: |
@@ -1089,7 +1089,7 @@ jobs:
     runs-on: ${{ matrix.to }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -1136,7 +1136,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lab-package-${{ matrix.from }}
@@ -1176,7 +1176,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
@@ -1206,7 +1206,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the lab tools
         run: cargo build --locked -p pctwin-lab -p pctwin-labmove
       - name: Two machines, a poor cable and a drop
