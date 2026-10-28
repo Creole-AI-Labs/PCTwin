@@ -538,6 +538,9 @@ pub struct Landing<'a> {
     pub owner_only: &'a dyn OwnerOnly,
     pub scope: Scope,
     pub actor: Actor,
+    /// How this laptop lays out a person's home: its own system ([`System::here`]); tests that
+    /// build a Windows home name Windows on every system they run on.
+    pub system: System,
 }
 
 /// How one component ended.
@@ -711,7 +714,7 @@ impl NewLaptopOf<'_, '_> {
             home_path: self.n.home_path,
             root: self.root,
             seal: self.seal,
-            system: System::here(),
+            system: self.n.system,
             owner_only: self.n.owner_only,
             stop: self.stop,
             made: self.made,

@@ -450,6 +450,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             owner_only: &AppOwnerOnly,
             scope,
             actor: actor.clone(),
+            system: pctwin_special::roots::System::Windows,
         },
         &apps_by_id,
     );
