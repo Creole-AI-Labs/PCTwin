@@ -42,10 +42,13 @@ use crate::sniff::{self, Shape};
 pub const MAX_DEPTH: usize = 24;
 /// The most files read in one app data folder; past it, the rest is reported, not read.
 pub const MAX_FILES: usize = 20_000;
-/// The largest text file read for credential-shaped values.
-const MAX_TEXT: u64 = 1024 * 1024;
+/// The largest text file read for credential-shaped values (settings-sized; larger text is
+/// logs and documents).
+const MAX_TEXT: u64 = 256 * 1024;
 /// The most time one app data folder's walk may take; the rest is "not fully checked".
 pub const FOLDER_TIME: std::time::Duration = std::time::Duration::from_secs(60);
+/// How many app folders are classified at once.
+pub const PLAN_THREADS: usize = 4;
 /// How much of a GGUF file's start is read for its split facts.
 const GGUF_HEADER: u64 = 4 * 1024 * 1024;
 
@@ -788,23 +791,24 @@ fn classify_within(
         if members.len() > 1 {
             ev.push(Evidence::SqliteCompanion);
         }
-        let kind = if late() {
+        // One opening: its kind, and for ordinary data the paths it links to. SQLite stops its own
+        // scan before the reader's limit or the folder's time.
+        let until = deadline
+            .min(std::time::Instant::now() + guard::READ_LIMIT - std::time::Duration::from_secs(2));
+        let facts = if late() {
             Err(content::ContentError::Damaged(OUT_OF_TIME.into()))
         } else {
-            within(&f.path, |p| {
-                content::sqlite_tables(p).map(|t| content::db_kind(&t))
-            })
-            .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
+            within(&f.path, move |p| content::sqlite_facts(p, until))
+                .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
+        };
+        let (kind, db_paths) = match facts {
+            Ok((k, paths)) => (Ok(k), paths),
+            Err(e) => (Err(e), None),
         };
         match kind {
             Ok(DbKind::Ordinary) => {
-                // SQLite stops its own scan before the reader's limit or the folder's time.
-                let until = deadline.min(
-                    std::time::Instant::now() + guard::READ_LIMIT
-                        - std::time::Duration::from_secs(2),
-                );
-                match within(&f.path, move |p| content::sqlite_paths(p, until)) {
-                    Some(Ok((paths, complete))) => {
+                match db_paths {
+                    Some((paths, complete)) => {
                         ev.extend(links(&paths));
                         if !complete {
                             ev.push(Evidence::MissingPart {
@@ -812,7 +816,7 @@ fn classify_within(
                             });
                         }
                     }
-                    _ => ev.push(Evidence::MissingPart {
+                    None => ev.push(Evidence::MissingPart {
                         what: "the files it links to could not be checked".into(),
                     }),
                 }
@@ -1271,30 +1275,56 @@ pub fn classify_newest_first(
         .collect();
     keyed.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     let order: Vec<usize> = keyed.into_iter().map(|(_, i)| i).collect();
-    let mut out = Vec::with_capacity(all.len());
-    for i in order {
-        let (f, row) = all[i];
-        let now = std::time::Instant::now();
-        if now >= deadline {
-            out.push(FolderReport {
-                folder: f.clone(),
-                row: row.cloned(),
-                components: Vec::new(),
-                not_moved: vec![NotMoved {
-                    rel: String::new(),
-                    why: Skip::NotRead,
-                }],
+    // Several folders at once (each its own reader), results kept in newest-first order.
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .clamp(1, PLAN_THREADS);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<Option<FolderReport>>> =
+        order.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|s| {
+        for _ in 0..workers {
+            s.spawn(|| {
+                loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(&i) = order.get(k) else {
+                        break;
+                    };
+                    let (f, row) = all[i];
+                    let now = std::time::Instant::now();
+                    let report = if now >= deadline {
+                        FolderReport {
+                            folder: f.clone(),
+                            row: row.cloned(),
+                            components: Vec::new(),
+                            not_moved: vec![NotMoved {
+                                rel: String::new(),
+                                why: Skip::NotRead,
+                            }],
+                        }
+                    } else {
+                        classify_within(
+                            f,
+                            row,
+                            MAX_DEPTH,
+                            MAX_FILES,
+                            deadline.min(now + FOLDER_TIME),
+                        )
+                    };
+                    *slots[k]
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(report);
+                }
             });
-        } else {
-            out.push(classify_within(
-                f,
-                row,
-                MAX_DEPTH,
-                MAX_FILES,
-                deadline.min(now + FOLDER_TIME),
-            ));
         }
-    }
+    });
+    let out: Vec<FolderReport> = slots
+        .into_iter()
+        .filter_map(|m| {
+            m.into_inner()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+        .collect();
     all.clear();
     out
 }

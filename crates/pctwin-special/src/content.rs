@@ -19,7 +19,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 
 /// The largest JSON file read for its facts.
-pub const MAX_JSON: usize = 16 * 1024 * 1024;
+pub const MAX_JSON: usize = 4 * 1024 * 1024;
 /// The most file names one JSON file's references are kept for.
 const MAX_NAMES: usize = 10_000;
 
@@ -383,6 +383,36 @@ pub fn sqlite_paths(
     until: std::time::Instant,
 ) -> Result<(Vec<String>, bool), ContentError> {
     let (mut db, _snapshot) = open_read(path)?;
+    paths_in(&mut db, until)
+}
+
+/// A database's kind and, for ordinary data, the full local paths its place-named columns hold
+/// (see [`sqlite_paths`]), from one opening of it.
+pub fn sqlite_facts(
+    path: &Path,
+    until: std::time::Instant,
+) -> Result<(DbKind, Option<(Vec<String>, bool)>), ContentError> {
+    let (mut db, _snapshot) = open_read(path)?;
+    let tables: Vec<Table> = tables_as_named(&db)?
+        .into_iter()
+        .map(|t| Table {
+            name: t.name.to_ascii_lowercase(),
+            columns: t.columns.iter().map(|c| c.to_ascii_lowercase()).collect(),
+        })
+        .collect();
+    let kind = db_kind(&tables);
+    let paths = if kind == DbKind::Ordinary {
+        Some(paths_in(&mut db, until)?)
+    } else {
+        None
+    };
+    Ok((kind, paths))
+}
+
+fn paths_in(
+    db: &mut rusqlite::Connection,
+    until: std::time::Instant,
+) -> Result<(Vec<String>, bool), ContentError> {
     db.progress_handler(10_000, Some(move || std::time::Instant::now() >= until))
         .map_err(|e| ContentError::Damaged(e.to_string()))?;
     let interrupted = |e: &rusqlite::Error| {
@@ -392,7 +422,7 @@ pub fn sqlite_paths(
     let bad = |e: rusqlite::Error| ContentError::Damaged(e.to_string());
     let mut out = Vec::new();
     let mut read = 0usize;
-    'tables: for t in tables_as_named(&db)? {
+    'tables: for t in tables_as_named(db)? {
         // Only columns whose names say they hold places (paths, files, folders, locations,
         // addresses): the same words for every app; other columns are not read.
         for c in t.columns.iter().filter(|c| place_column(c)) {

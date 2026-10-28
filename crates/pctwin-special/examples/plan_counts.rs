@@ -31,12 +31,24 @@ fn main() {
             .entry(format!("{:?}", c.component.custody))
             .or_default() += 1;
     }
-    let mut by_reason: BTreeMap<String, usize> = BTreeMap::new();
+    let mut by_reason: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     for n in &p.not_moved {
-        *by_reason.entry(n.why.clone()).or_default() += 1;
+        let e = by_reason.entry(n.why.clone()).or_default();
+        e.0 += 1;
+        e.1 += n.count;
     }
+    let not_reached = p
+        .reports
+        .iter()
+        .filter(|r| {
+            r.components.is_empty() && r.not_moved.len() == 1 && r.not_moved[0].rel.is_empty()
+        })
+        .count();
     println!("planned in {took:?}");
-    println!("app folders: {}", p.reports.len());
+    println!(
+        "app folders: {} (not reached in time: {not_reached})",
+        p.reports.len()
+    );
     println!(
         "components: {} (secrets {}, proposed {})",
         p.components.len(),
@@ -46,9 +58,13 @@ fn main() {
     for (k, v) in by_class {
         println!("  {k}: {v}");
     }
-    println!("found, not moved: {}", p.not_moved.len());
-    for (k, v) in by_reason {
-        println!("  {v} x {k}");
+    println!(
+        "found, not moved: {} lines covering {} entries",
+        p.not_moved.len(),
+        p.not_moved.iter().map(|n| n.count).sum::<usize>()
+    );
+    for (k, (lines, entries)) in by_reason {
+        println!("  {lines} lines / {entries} entries: {k}");
     }
     let c = &p.coverage;
     println!(
