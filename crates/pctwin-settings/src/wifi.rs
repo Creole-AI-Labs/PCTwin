@@ -16,9 +16,14 @@
 //!   organisation; their profile moves without any secret ([`Security::Enterprise`]).
 //! - **Applied on Windows** with `netsh wlan add profile user=current`, from a file in a fresh
 //!   owner-only folder, deleted at once; then read back (the profile is there) before it counts.
-//! - **Mac and Linux:** reading and adding are not built yet. Every system tool found takes the
-//!   password on its command line (`networksetup`, `nmcli`), where other programs on the laptop
-//!   can read it; a native route is needed first. Until then these networks are a guided step.
+//! - **Linux** (NetworkManager, 28 October 2026): read with `nmcli --show-secrets`, the password
+//!   only on its standard output; added with `nmcli connection add` without the password, which
+//!   then goes to `nmcli`'s own editor on its standard input ([`export_nm`], [`import_nm`]).
+//!   NetworkManager's own permission check (polkit) decides who may see or add each one.
+//! - **Mac:** not built yet. `networksetup` takes the password on its command line; the route
+//!   that keeps it off is `networksetup` without the password and the System keychain item
+//!   added through `security`'s own command reader on its standard input, which needs the
+//!   administrator helper. Until then these networks are a guided step.
 
 use std::path::{Path, PathBuf};
 
@@ -535,6 +540,200 @@ pub fn import(
     // Read back, without any password.
     let now = export_all(runner, folders, parent, false)?;
     if now.iter().any(|x| x.name == n.name && x.ssid == n.ssid) {
+        Ok(())
+    } else {
+        Err(WifiError::NotThere)
+    }
+}
+
+/* ---------- Linux: NetworkManager ---------- */
+
+/// One field of a profile as `nmcli --terse --escape no` prints it in its "field:value" lines.
+fn nm_field<'a>(text: &'a str, field: &str) -> Option<&'a str> {
+    text.lines()
+        .find_map(|l| l.strip_prefix(field)?.strip_prefix(':'))
+}
+
+/// A name or network name that can go into an `nmcli` line safely: no line breaks, no NUL, not
+/// read as one of its options, and no spaces at its ends (its editor trims them).
+fn nm_plain(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s.starts_with('-')
+        && s.trim() == s
+        && !s.contains(['\n', '\r', '\0'])
+}
+
+/// The NetworkManager key management of a profile, in the names Windows' profiles use, so a
+/// network read on one system is added on another.
+fn nm_security(key_mgmt: &str) -> Security {
+    match key_mgmt {
+        "" => Security::Open,
+        "wpa-psk" => Security::Personal {
+            auth: "WPA2PSK".into(),
+            encryption: "AES".into(),
+        },
+        "sae" => Security::Personal {
+            auth: "WPA3SAE".into(),
+            encryption: "AES".into(),
+        },
+        "wpa-eap" | "wpa-eap-suite-b-192" | "ieee8021x" => Security::Enterprise,
+        other => Security::Other(other.into()),
+    }
+}
+
+/// Every saved Wi-Fi network NetworkManager has (Linux), with its password when `with_keys`.
+/// The password comes only on `nmcli`'s standard output (`--show-secrets`), held in memory that
+/// is wiped; it is never on a command line. NetworkManager itself decides whether the person may
+/// see each password (its system prompt, polkit); one it will not show moves without it.
+pub fn export_nm(runner: &mut dyn Runner, with_keys: bool) -> Result<Vec<Network>, WifiError> {
+    let list = runner
+        .run(
+            Tool::Nmcli,
+            &[
+                "--terse",
+                "--escape",
+                "no",
+                "--fields",
+                "TYPE,NAME",
+                "connection",
+                "show",
+            ],
+        )
+        .map_err(|_| WifiError::Tool)?;
+    if !list.ok {
+        return Err(WifiError::Tool);
+    }
+    let mut nets = Vec::new();
+    for line in list.stdout.lines().take(MAX_PROFILES) {
+        let Some((kind, name)) = line.split_once(':') else {
+            continue;
+        };
+        if kind != "802-11-wireless" || !nm_plain(name) {
+            continue;
+        }
+        let mut fields = vec![
+            "802-11-wireless.ssid",
+            "802-11-wireless.hidden",
+            "connection.autoconnect",
+            "802-11-wireless-security.key-mgmt",
+        ];
+        if with_keys {
+            fields.push("802-11-wireless-security.psk");
+        }
+        let fields = fields.join(",");
+        let mut args = vec!["--terse", "--escape", "no", "--fields", &fields];
+        if with_keys {
+            args.push("--show-secrets");
+        }
+        args.extend(["connection", "show", "id", name]);
+        let Ok(out) = runner.run_secret(Tool::Nmcli, &args, None) else {
+            continue;
+        };
+        if !out.ok {
+            continue;
+        }
+        let text: &str = &out.stdout;
+        let Some(ssid) = nm_field(text, "802-11-wireless.ssid").filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let security =
+            nm_security(nm_field(text, "802-11-wireless-security.key-mgmt").unwrap_or(""));
+        let secret = match &security {
+            Security::Personal { .. } if with_keys => {
+                nm_field(text, "802-11-wireless-security.psk")
+                    .filter(|p| !p.is_empty() && p.len() <= 64)
+                    .map(|p| Secret::new(Zeroizing::new(p.to_string())))
+            }
+            _ => None,
+        };
+        nets.push(Network {
+            name: name.to_string(),
+            ssid: ssid.to_string(),
+            hidden: nm_field(text, "802-11-wireless.hidden") == Some("yes"),
+            auto_connect: nm_field(text, "connection.autoconnect") != Some("no"),
+            security,
+            secret,
+        });
+    }
+    Ok(nets)
+}
+
+/// Adds one network to NetworkManager (Linux), then checks it is there. The profile is made
+/// without its password (`nmcli connection add`), and the password is then given to `nmcli`'s
+/// own editor on its standard input, never on a command line (the route Ansible's nmcli module
+/// takes for the same reason). A profile whose password could not be set is removed again, so
+/// nothing half made is left. An open network needs no password; an enterprise one is a step
+/// with the organisation.
+pub fn import_nm(runner: &mut dyn Runner, n: &Network) -> Result<(), WifiError> {
+    if !nm_plain(&n.name) || !nm_plain(&n.ssid) {
+        return Err(WifiError::BadName);
+    }
+    let key_mgmt = match &n.security {
+        Security::Open => None,
+        Security::Personal { auth, .. } => match auth.as_str() {
+            "WPA2PSK" | "WPAPSK" => Some("wpa-psk"),
+            "WPA3SAE" => Some("sae"),
+            _ => return Err(WifiError::Tool),
+        },
+        Security::Enterprise => return Err(WifiError::Enterprise),
+        Security::Other(_) => return Err(WifiError::Tool),
+    };
+    let secret = match (key_mgmt, &n.secret) {
+        (None, _) => None,
+        (Some(_), Some(s)) if nm_plain(s.expose()) => Some(s),
+        (Some(_), _) => return Err(WifiError::Unreadable),
+    };
+    let yes = |b: bool| if b { "yes" } else { "no" };
+    let mut args = vec![
+        "connection",
+        "add",
+        "type",
+        "wifi",
+        "con-name",
+        &n.name,
+        "ssid",
+        &n.ssid,
+        "802-11-wireless.hidden",
+        yes(n.hidden),
+        "connection.autoconnect",
+        yes(n.auto_connect),
+    ];
+    if let Some(k) = key_mgmt {
+        args.extend(["802-11-wireless-security.key-mgmt", k]);
+    }
+    let added = runner
+        .run(Tool::Nmcli, &args)
+        .map_err(|_| WifiError::Tool)?;
+    if !added.ok {
+        return Err(WifiError::Tool);
+    }
+    if let Some(s) = secret {
+        let script = Zeroizing::new(format!(
+            "set 802-11-wireless-security.psk {}\nsave yes\nquit\n",
+            s.expose()
+        ));
+        let set = runner.run_secret(
+            Tool::Nmcli,
+            &["connection", "edit", "id", &n.name],
+            Some(script.as_bytes()),
+        );
+        if !set.is_ok_and(|o| o.ok) {
+            let _ = runner.run(Tool::Nmcli, &["connection", "delete", "id", &n.name]);
+            return Err(WifiError::Tool);
+        }
+    }
+    // Read back: the network is there, and NetworkManager holds its very password.
+    let now = export_nm(runner, secret.is_some())?;
+    let kept = |x: &Network| match (secret, &x.secret) {
+        (None, _) => true,
+        (Some(want), Some(got)) => want.expose() == got.expose(),
+        (Some(_), None) => false,
+    };
+    if now
+        .iter()
+        .any(|x| x.name == n.name && x.ssid == n.ssid && kept(x))
+    {
         Ok(())
     } else {
         Err(WifiError::NotThere)

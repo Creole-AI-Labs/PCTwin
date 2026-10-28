@@ -4,7 +4,7 @@
 
 use crate::{Account, Caller, Error, LaunchError, LaunchRequest, Process};
 use std::os::unix::net::UnixStream;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// pkexec by its full path, never looked up on the search path.
 pub(crate) const PKEXEC: &str = "/usr/bin/pkexec";

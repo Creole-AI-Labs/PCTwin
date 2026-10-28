@@ -25,6 +25,9 @@ pub enum Tool {
     XdgSettings,
     /// Windows `netsh` (Wi-Fi profiles).
     Netsh,
+    /// Linux NetworkManager's `nmcli` (Wi-Fi profiles; secrets only on its standard input and
+    /// output, never on its command line: [`Runner::run_secret`]).
+    Nmcli,
 }
 
 impl Tool {
@@ -38,6 +41,7 @@ impl Tool {
             Tool::Kreadconfig5 => "/usr/bin/kreadconfig5".into(),
             Tool::XdgSettings => "/usr/bin/xdg-settings".into(),
             Tool::Dconf => "/usr/bin/dconf".into(),
+            Tool::Nmcli => "/usr/bin/nmcli".into(),
             Tool::Netsh => {
                 let root = std::env::var_os("SystemRoot")
                     .map(|r| r.to_string_lossy().into_owned())
@@ -56,9 +60,29 @@ pub struct Output {
     pub stdout: String,
 }
 
+/// What a tool printed that may hold a secret: wiped from memory when dropped.
+pub struct SecretOutput {
+    pub ok: bool,
+    pub stdout: zeroize::Zeroizing<String>,
+}
+
 /// Runs a tool. The real one is [`SystemRunner`]; tests use their own.
 pub trait Runner {
     fn run(&mut self, tool: Tool, args: &[&str]) -> Result<Output, String>;
+
+    /// Runs a tool that is given a secret, or prints one: the secret goes only on its standard
+    /// input (`input`) and comes back only on its standard output, both wiped from memory
+    /// afterwards; never on a command line, where other programs on the laptop can read it. A
+    /// runner that cannot do this says so.
+    fn run_secret(
+        &mut self,
+        tool: Tool,
+        args: &[&str],
+        input: Option<&[u8]>,
+    ) -> Result<SecretOutput, String> {
+        let _ = (tool, args, input);
+        Err("this runner passes no secrets".into())
+    }
 }
 
 /// The most a tool's output may be.
@@ -117,6 +141,59 @@ impl Runner for SystemRunner {
         Ok(Output {
             ok: status.success(),
             stdout: String::from_utf8_lossy(&bytes).into_owned(),
+        })
+    }
+
+    fn run_secret(
+        &mut self,
+        tool: Tool,
+        args: &[&str],
+        input: Option<&[u8]>,
+    ) -> Result<SecretOutput, String> {
+        use std::io::Write;
+        use zeroize::Zeroizing;
+        let mut cmd = pctwin_types::process::quiet(tool.path());
+        cmd.args(args)
+            .env_clear()
+            .env("LC_ALL", "C")
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("the system's settings tool could not start ({})", e.kind()))?;
+        let mut out = child.stdout.take().ok_or("no output")?;
+        let reader = std::thread::spawn(move || {
+            let mut buf = Zeroizing::new(Vec::new());
+            let _ = (&mut out).take(MAX_OUTPUT).read_to_end(&mut buf);
+            buf
+        });
+        if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+            // Written whole, then closed, so the tool sees the end of its input.
+            let _ = stdin.write_all(bytes);
+        }
+        let start = Instant::now();
+        let status = loop {
+            if let Some(s) = child.try_wait().map_err(|e| e.kind().to_string())? {
+                break s;
+            }
+            if start.elapsed() > TIMEOUT {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("the system's settings tool did not answer in time".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let bytes = reader.join().map_err(|_| "the output could not be read")?;
+        let text = Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned());
+        Ok(SecretOutput {
+            ok: status.success(),
+            stdout: text,
         })
     }
 }
