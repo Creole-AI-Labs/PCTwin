@@ -71,16 +71,25 @@ fn a_placeholder_and_a_junction_are_reported_never_opened() {
     let started = Instant::now();
     let p = run(&home);
     assert!(started.elapsed() < Duration::from_secs(60));
-    let why = |rel: &str| {
+    // One line per reason in the app's folder, with how many.
+    let count = |word: &str| {
         p.not_moved
             .iter()
-            .find(|n| n.rel == rel)
-            .map(|n| n.why.clone())
-            .unwrap_or_else(|| panic!("{rel} not reported: {:?}", p.not_moved))
+            .find(|n| n.app == "Cloudy" && n.why.contains(word))
+            .map(|n| n.count)
+            .unwrap_or_else(|| panic!("{word} not reported: {:?}", p.not_moved))
     };
-    assert!(why("online-only.bin").contains("kept online"));
-    assert!(why("cloud-folder").contains("kept online"));
-    assert!(why("jumped").contains("link"));
+    assert_eq!(count("kept online"), 2, "the file and the folder");
+    assert_eq!(count("link"), 1);
+    // The detail per entry stays in the folder's own report.
+    let detail: Vec<&str> = p.reports[0]
+        .not_moved
+        .iter()
+        .map(|n| n.rel.as_str())
+        .collect();
+    for rel in ["online-only.bin", "cloud-folder", "jumped"] {
+        assert!(detail.contains(&rel), "{rel}: {detail:?}");
+    }
     let members: Vec<&String> = p
         .components
         .iter()
@@ -114,6 +123,10 @@ fn a_pipe_is_reported_never_opened() {
     let started = Instant::now();
     let p = run(&home);
     assert!(started.elapsed() < Duration::from_secs(60));
-    let n = p.not_moved.iter().find(|n| n.rel == "fifo").unwrap();
-    assert!(n.why.contains("not a file"));
+    let n = p
+        .not_moved
+        .iter()
+        .find(|n| n.why.contains("not a file"))
+        .unwrap();
+    assert_eq!((n.rel.as_str(), n.count), ("fifo", 1));
 }
