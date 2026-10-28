@@ -655,8 +655,10 @@ fn the_screens_argument_names_are_the_commands_own() {
             given.insert(key.to_owned(), arg[1].clone());
         }
         // These would pair, search the network, build a native menu (which macOS allows only
-        // on the main thread) or open the system's file picker and wait for a person; their
-        // names are proven above all the same.
+        // on the main thread), open the system's file picker and wait for a person, or ask the
+        // real update address and install what it offers: on macOS the updater replaces the
+        // program's bundle, which for a test program is three folders up (the build folder);
+        // on Windows it would run the installer. Their names are proven above all the same.
         if matches!(
             cmd,
             "pairing_old_start"
@@ -666,6 +668,8 @@ fn the_screens_argument_names_are_the_commands_own() {
                 | "quicksend_choose_folder"
                 | "move_choose_place"
                 | "history_export"
+                | "update_check"
+                | "update_install"
         ) {
             continue;
         }

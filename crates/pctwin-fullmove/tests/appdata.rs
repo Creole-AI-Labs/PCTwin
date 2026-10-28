@@ -312,7 +312,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     };
 
     // The old laptop: the 2.5 scan beside the files', then its extras.
-    let found = SpecialScan::start(&mover, &old)
+    let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
         .unwrap()
         .wait(&|| false)
         .expect("the scan finishes");

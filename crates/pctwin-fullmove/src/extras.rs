@@ -287,8 +287,26 @@ pub fn special_here(
     apps: &[pctwin_record::FoundApp],
     deadline: std::time::Instant,
 ) -> SpecialFound {
+    special_of(
+        pctwin_special::roots::System::here(),
+        owner,
+        home,
+        apps,
+        deadline,
+    )
+}
+
+/// [`special_here`] for a home laid out as `system` lays out its people's homes: the laptop's
+/// own system in a move ([`special_here`]); another one only in tests, which build a Windows
+/// home on every system they run on.
+pub fn special_of(
+    system: pctwin_special::roots::System,
+    owner: &pctwin_record::Owner,
+    home: &std::path::Path,
+    apps: &[pctwin_record::FoundApp],
+    deadline: std::time::Instant,
+) -> SpecialFound {
     use pctwin_special::component::Custody;
-    let system = pctwin_special::roots::System::here();
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
     );
@@ -363,6 +381,16 @@ impl SpecialScan {
     /// Starts looking at `owner`'s app data in `home` (read only), on a thread of its own, with
     /// [`SPECIAL_BUDGET`] in all from now.
     pub fn start(owner: &pctwin_record::Owner, home: &std::path::Path) -> Option<Self> {
+        Self::start_for(pctwin_special::roots::System::here(), owner, home)
+    }
+
+    /// [`SpecialScan::start`] for a home laid out as `system` lays out its people's homes (see
+    /// [`special_of`]).
+    pub fn start_for(
+        system: pctwin_special::roots::System,
+        owner: &pctwin_record::Owner,
+        home: &std::path::Path,
+    ) -> Option<Self> {
         let (tx, rx) = std::sync::mpsc::channel();
         let (owner, home) = (owner.clone(), home.to_path_buf());
         std::thread::Builder::new()
@@ -370,7 +398,7 @@ impl SpecialScan {
             .spawn(move || {
                 // 2.5 stops reading in time for its answer to arrive within the budget.
                 let deadline = std::time::Instant::now() + SPECIAL_BUDGET - SPECIAL_MARGIN;
-                let _ = tx.send(special_here(&owner, &home, &[], deadline));
+                let _ = tx.send(special_of(system, &owner, &home, &[], deadline));
             })
             .ok()?;
         Some(Self {
