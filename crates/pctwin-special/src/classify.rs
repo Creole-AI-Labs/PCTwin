@@ -465,39 +465,80 @@ fn comparable(p: &str) -> String {
 /// drive that is not connected now are said to be there. A text shaped like a path whose first
 /// folder this laptop does not have (`/api/v1`) is not taken for a path.
 fn link_evidence(base: &Path, paths: &[String]) -> Vec<Evidence> {
+    link_evidence_within(base, paths, LINK_ASK, LINK_TIME)
+}
+
+/// How long one question about a linked path may take (a disconnected network drive can take
+/// far longer than that to say no).
+const LINK_ASK: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long all the questions about one component's linked paths may take.
+const LINK_TIME: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Whether `p` is there, asked on the reader within `ask`; `None` when the system did not answer
+/// in time (the question is left to finish on its own, never waited for).
+fn ask_there(p: &Path, ask: std::time::Duration) -> Option<bool> {
+    let p = p.to_path_buf();
+    guard::bounded(ask, move || std::fs::symlink_metadata(&p).is_ok())
+}
+
+/// [`link_evidence`] with its limits given. Each drive or top folder is asked about once; a
+/// question with no answer in `ask` counts its drive as not connected from then on; past `total`
+/// the rest are counted "not checked".
+fn link_evidence_within(
+    base: &Path,
+    paths: &[String],
+    ask: std::time::Duration,
+    total: std::time::Duration,
+) -> Vec<Evidence> {
     let inside = format!(
         "{}/",
         comparable(&base.to_string_lossy()).trim_end_matches('/')
     );
+    let deadline = std::time::Instant::now() + total;
+    let mut roots: BTreeMap<String, bool> = BTreeMap::new();
     let mut outside: BTreeSet<String> = BTreeSet::new();
-    let mut missing = 0usize;
-    let mut offline = 0usize;
+    let (mut missing, mut offline, mut unchecked) = (0usize, 0usize, 0usize);
     for p in paths {
         if comparable(p).starts_with(&inside) {
             continue;
         }
+        if std::time::Instant::now() >= deadline {
+            unchecked += 1;
+            continue;
+        }
         let path = Path::new(p);
-        let b = p.as_bytes();
-        if b.get(1) == Some(&b':') {
-            // A drive letter: is that drive here at all?
-            if std::fs::metadata(&p[..3]).is_err() {
-                offline += 1;
-                continue;
-            }
+        let (root, is_drive) = if p.as_bytes().get(1) == Some(&b':') {
+            (p[..3].to_ascii_uppercase(), true)
         } else {
             let first = p[1..].split('/').next().unwrap_or("");
-            if first.is_empty() || std::fs::metadata(Path::new("/").join(first)).is_err() {
+            if first.is_empty() {
                 continue;
             }
+            (format!("/{first}"), false)
+        };
+        let root_here = *roots
+            .entry(root.clone())
+            .or_insert_with(|| ask_there(Path::new(&root), ask).unwrap_or(false));
+        if !root_here {
+            // A drive that is not here, or does not answer: on a drive not connected. A text whose
+            // first folder this laptop lacks (`/api/v1`) is not a path at all.
+            if is_drive {
+                offline += 1;
+            }
+            continue;
         }
-        match std::fs::symlink_metadata(path) {
-            Ok(_) => {
+        match ask_there(path, ask) {
+            Some(true) => {
                 let folder = path
                     .parent()
                     .map_or(p.clone(), |d| d.to_string_lossy().into_owned());
                 outside.insert(folder);
             }
-            Err(_) => missing += 1,
+            Some(false) => missing += 1,
+            None => {
+                roots.insert(root, false);
+                offline += 1;
+            }
         }
     }
     let mut ev = Vec::new();
@@ -509,6 +550,11 @@ fn link_evidence(base: &Path, paths: &[String]) -> Vec<Evidence> {
     if offline > 0 {
         ev.push(Evidence::MissingPart {
             what: format!("{offline} file(s) it links to are on a drive that is not connected"),
+        });
+    }
+    if unchecked > 0 {
+        ev.push(Evidence::MissingPart {
+            what: format!("{unchecked} file(s) it links to could not be checked in time"),
         });
     }
     if !outside.is_empty() {
@@ -1443,6 +1489,27 @@ mod tests {
             ])),
             None
         );
+    }
+
+    #[test]
+    fn linked_paths_are_checked_within_a_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("a.jpg");
+        std::fs::write(&there, b"x").unwrap();
+        let paths: Vec<String> = (0..5)
+            .map(|_| there.to_string_lossy().into_owned())
+            .collect();
+        let base = dir.path().join("app");
+        // No time at all: every one is "not checked", none is claimed there or missing.
+        let ev = link_evidence_within(&base, &paths, LINK_ASK, std::time::Duration::ZERO);
+        assert_eq!(
+            ev,
+            vec![Evidence::MissingPart {
+                what: "5 file(s) it links to could not be checked in time".into()
+            }]
+        );
+        let ev = link_evidence_within(&base, &paths, LINK_ASK, LINK_TIME);
+        assert!(matches!(&ev[..], [Evidence::LinksOutside { .. }]), "{ev:?}");
     }
 
     #[test]
