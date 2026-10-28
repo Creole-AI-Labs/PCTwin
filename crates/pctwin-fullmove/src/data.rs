@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 /// The longest capture record, in bytes.
 pub const MAX_RECORD: usize = 16 * 1024 * 1024;
 /// How long one grant lasts.
-const GRANT: Duration = Duration::from_secs(4 * 3600);
+const GRANT: Duration = pctwin_grant::MAX_LIFETIME;
 
 /// A component's ID as it crosses: its 32 bytes in hexadecimal.
 pub fn id_hex(c: &Component) -> String {
