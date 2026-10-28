@@ -41,9 +41,17 @@ windows-native-keyring-store = { version = "1.1", default-features = false }
 keyring-core = "1"
 apple-native-keyring-store = { version = "1", default-features = false, features = ["keychain"] }
 
+[features]
+# Tests only: a journal opened with `Journal::open` keeps its record key and counter in two files
+# beside the journal (so they go with the test's temporary folder) instead of the system's key
+# store, which tests filled with hundreds of left-over entries until it refused new ones. Turned
+# on through dev-dependencies only, so no program a person runs is built with it.
+test-keys = []
+
 [dev-dependencies]
 redb = "4.3"
 tempfile = "3"
+pctwin-journal = { path = ".", features = ["test-keys"] }
 
 [lints]
 workspace = true

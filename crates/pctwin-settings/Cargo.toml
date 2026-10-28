@@ -41,6 +41,8 @@ winreg = "0.55"
 tempfile = "3"
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 roxmltree = "0.21.1"
 zeroize = "1.9.0"
 pctwin-record = { path = "../pctwin-record" }

@@ -51,6 +51,8 @@ winreg = "0.55"
 rustix = { version = "1.1.5", features = ["fs", "process"] }
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # The helper's own integration tests stage packages in temporary folders.
 pctwin-helper = { path = ".", features = ["test-staging"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }

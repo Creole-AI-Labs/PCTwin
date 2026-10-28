@@ -27,6 +27,8 @@ tempfile = "3"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
 

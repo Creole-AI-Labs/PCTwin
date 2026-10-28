@@ -3901,6 +3901,7 @@ dependencies = [
  "keyring-core",
  "pctwin-catalogue",
  "pctwin-grant",
+ "pctwin-journal",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",

@@ -1250,7 +1250,7 @@ impl Journal {
             journal_id,
             undo: Mutex::new(UndoUse::default()),
             undo_free: Condvar::new(),
-            record_key: Box::new(keystore::Held::system()),
+            record_key: Box::new(keystore::Held::for_journal(path)),
             escape: Mutex::new(None),
         })
     }

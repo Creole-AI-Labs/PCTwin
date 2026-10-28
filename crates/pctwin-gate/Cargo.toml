@@ -57,6 +57,8 @@ nix = { version = "0.31", default-features = false, features = ["fs"] }
 libproc = "0.14"
 
 [dev-dependencies]
+# Tests keep journal keys beside their journals, never in the system's key store.
+pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # The gate's own tests turn the fault plan on.
 pctwin-gate = { path = ".", features = ["fault-plan"] }
 proptest = "1.11.0"

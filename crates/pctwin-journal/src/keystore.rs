@@ -84,6 +84,21 @@ impl Held {
         }
     }
 
+    /// The store a journal opened at `path` keeps its key in: the system's; in tests (the
+    /// `test-keys` feature) two files beside the journal, gone with the test's folder.
+    #[cfg_attr(not(feature = "test-keys"), allow(unused_variables))]
+    pub(crate) fn for_journal(path: &std::path::Path) -> Self {
+        #[cfg(feature = "test-keys")]
+        {
+            Self {
+                store: std::sync::Arc::new(Beside(path.to_path_buf())),
+                ..Self::system()
+            }
+        }
+        #[cfg(not(feature = "test-keys"))]
+        Self::system()
+    }
+
     /// A key given by the caller (tests, tools that keep it elsewhere): its counter of sealed
     /// writes is kept in this process's memory, never in the system's store.
     pub(crate) fn given(key: TagKey) -> Self {
@@ -111,6 +126,58 @@ pub(crate) trait KeyStore {
     fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError>;
     fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError>;
     fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError>;
+}
+
+/// Tests only (`test-keys`): a journal's key and counter in files beside the journal, so every
+/// process that opens it (a test and the helper or handover program it starts) finds them, and
+/// they go when the test's temporary folder goes. Never the system's key store, which tests
+/// would otherwise fill with entries nobody removes.
+#[cfg(feature = "test-keys")]
+struct Beside(std::path::PathBuf);
+
+#[cfg(feature = "test-keys")]
+impl Beside {
+    /// Named by the journal's own number, as the system's store names it, in its folder.
+    fn file(&self, journal_id: u64, what: &str) -> std::path::PathBuf {
+        self.0
+            .with_file_name(format!("{}.test-{what}", entry_name(journal_id)))
+    }
+
+    fn read(&self, journal_id: u64, what: &str) -> Result<Option<Vec<u8>>, KeyError> {
+        match std::fs::read(self.file(journal_id, what)) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(KeyError::Unavailable),
+        }
+    }
+
+    fn write(&self, journal_id: u64, what: &str, bytes: &[u8]) -> Result<(), KeyError> {
+        std::fs::write(self.file(journal_id, what), bytes).map_err(|_| KeyError::Unavailable)
+    }
+}
+
+#[cfg(feature = "test-keys")]
+impl KeyStore for Beside {
+    fn get(&self, journal_id: u64) -> Result<Option<TagKey>, KeyError> {
+        self.read(journal_id, "key")?
+            .map(|b| {
+                <[u8; 32]>::try_from(b.as_slice())
+                    .map(TagKey)
+                    .map_err(|_| KeyError::Missing)
+            })
+            .transpose()
+    }
+    fn put(&self, journal_id: u64, key: &TagKey) -> Result<(), KeyError> {
+        self.write(journal_id, "key", &key.0)
+    }
+    fn get_mark(&self, journal_id: u64) -> Result<Option<u64>, KeyError> {
+        self.read(journal_id, "mark")?
+            .map(|b| mark_bytes(&b))
+            .transpose()
+    }
+    fn put_mark(&self, journal_id: u64, mark: u64) -> Result<(), KeyError> {
+        self.write(journal_id, "mark", &mark.to_be_bytes())
+    }
 }
 
 /// Counters for journals opened with a given key, in this process's memory.
@@ -690,6 +757,8 @@ mod tests {
     #[test]
     fn the_system_store_keeps_a_key() {
         let id = u64::from_le_bytes(*b"pctwtest") ^ u64::from(std::process::id());
+        // Removed when the test ends, whether it passes or fails.
+        let _gone = Forget(Some(id), None);
         let made = key_for(&SystemStore, id, true).expect("the system's key store works here");
         let back = SystemStore.get(id).unwrap().unwrap();
         assert_eq!(made.0, back.0);
@@ -698,7 +767,7 @@ mod tests {
         SystemStore.put_mark(id, 41).unwrap();
         SystemStore.put_mark(id, 42).unwrap();
         assert_eq!(SystemStore.get_mark(id).unwrap(), Some(42));
-        forget(id);
+        forget_key(id);
         assert!(SystemStore.get(id).unwrap().is_none());
     }
 
@@ -709,6 +778,7 @@ mod tests {
     fn the_system_store_keeps_a_catalogue_rollback_mark() {
         use pctwin_catalogue::RollbackMarks;
         let name = format!("pctwin-test-{}", std::process::id());
+        let _gone = Forget(None, Some(name.clone()));
         assert_eq!(CatalogueMarks.highest(&name), Ok(None));
         CatalogueMarks.raise(&name, 3).unwrap();
         assert_eq!(CatalogueMarks.highest(&name), Ok(Some(3)));
@@ -720,36 +790,41 @@ mod tests {
         // Another catalogue's mark is its own; odd characters in a name stay inside its entry.
         assert_eq!(CatalogueMarks.highest(&format!("{name}-other")), Ok(None));
         assert_eq!(catalogue_mark_name("a/b..c"), "catalogue-a_b__c-mark");
-        #[cfg(any(windows, target_os = "macos"))]
-        SystemStore::named(&catalogue_mark_name(&name))
-            .unwrap()
-            .delete_credential()
-            .unwrap();
-        #[cfg(target_os = "linux")]
-        std::fs::remove_file(
-            SystemStore::folder()
-                .unwrap()
-                .join(catalogue_mark_name(&name)),
-        )
-        .unwrap();
+        forget_named(&catalogue_mark_name(&name));
         assert_eq!(CatalogueMarks.highest(&name), Ok(None));
     }
 
-    /// Removes a test key (tests only: PCTwin never removes a journal's key).
-    fn forget(id: u64) {
+    /// What a test put in the system's store, removed when the test ends however it ends (a
+    /// failed assertion included): a journal's key and counter, a catalogue's mark.
+    struct Forget(Option<u64>, Option<String>);
+
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            if let Some(id) = self.0 {
+                forget_key(id);
+            }
+            if let Some(name) = &self.1 {
+                forget_named(&catalogue_mark_name(name));
+            }
+        }
+    }
+
+    /// Removes a test key and its counter (tests only: PCTwin never removes a journal's key).
+    /// Already gone is fine.
+    fn forget_key(id: u64) {
+        forget_named(&entry_name(id));
+        forget_named(&mark_name(id));
+    }
+
+    /// Removes one entry of the system's store by name; already gone is fine.
+    fn forget_named(name: &str) {
         #[cfg(any(windows, target_os = "macos"))]
-        {
-            SystemStore::entry(id).unwrap().delete_credential().unwrap();
-            SystemStore::named(&mark_name(id))
-                .unwrap()
-                .delete_credential()
-                .unwrap();
+        if let Ok(entry) = SystemStore::named(name) {
+            let _ = entry.delete_credential();
         }
         #[cfg(target_os = "linux")]
-        {
-            let dir = SystemStore::folder().unwrap();
-            std::fs::remove_file(dir.join(entry_name(id))).unwrap();
-            std::fs::remove_file(dir.join(mark_name(id))).unwrap();
+        if let Ok(dir) = SystemStore::folder() {
+            let _ = std::fs::remove_file(dir.join(name));
         }
     }
 }
