@@ -210,6 +210,19 @@ pub struct Coverage {
     pub unreadable: Vec<(PathBuf, String)>,
     /// Folders not looked into because they hold the system's own caches.
     pub caches: Vec<PathBuf>,
+    /// Folders not looked into because they are links, kept online by a cloud app, or not
+    /// folders at all, and why.
+    pub skipped: Vec<(PathBuf, String)>,
+}
+
+fn not_looked_into(kind: crate::guard::Kind) -> Option<&'static str> {
+    use crate::guard::Kind;
+    match kind {
+        Kind::Link => Some("a link to somewhere else: not followed"),
+        Kind::OnlineOnly => Some("kept online by a cloud app: not downloaded or looked into"),
+        Kind::NotAFile => Some("not a file or folder"),
+        Kind::File | Kind::Folder => None,
+    }
 }
 
 /// Lower-case letters and digits only: how names are compared with what the old laptop recorded.
@@ -334,6 +347,10 @@ pub fn find_folders(
             cov.absent.push((root.kind, root.path.clone()));
             continue;
         };
+        if let Some(why) = not_looked_into(crate::guard::kind_of(&meta)) {
+            cov.skipped.push((root.path.clone(), why.to_string()));
+            continue;
+        }
         if !meta.is_dir() {
             cov.absent.push((root.kind, root.path.clone()));
             continue;
@@ -344,7 +361,12 @@ pub fn find_folders(
         }
         cov.searched.push((root.kind, root.path.clone()));
         for (name, m) in listing(&root.path, &mut cov) {
-            if m.file_type().is_symlink() {
+            if let Some(why) = not_looked_into(crate::guard::kind_of(&m)) {
+                // A home holds many links of its own; only those that would have been app
+                // folders are reported.
+                if root.kind != RootKind::HomeDot || name.starts_with('.') {
+                    cov.skipped.push((root.path.join(&name), why.to_string()));
+                }
                 continue;
             }
             let is_dir = m.is_dir();

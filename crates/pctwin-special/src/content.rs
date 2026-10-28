@@ -45,7 +45,7 @@ pub struct JsonFacts {
 /// The most linked paths kept per file.
 pub const MAX_PATHS: usize = 2000;
 /// The most text values read from one database while looking for linked paths.
-const MAX_VALUES: usize = 200_000;
+const MAX_VALUES: usize = 50_000;
 
 /// Whether a text is one full local path (`C:\...`, `C:/...`, or `/a/b...`): not an address,
 /// not another computer's share, not a relative place.
@@ -375,8 +375,20 @@ fn ident(name: &str) -> String {
 
 /// The full local paths a database's text values name (files it links to), read without
 /// writing anything on the old laptop; bounded in values read and paths kept.
-pub fn sqlite_paths(path: &Path) -> Result<Vec<String>, ContentError> {
-    let (db, _snapshot) = open_read(path)?;
+///
+/// SQLite itself stops the scan at `until` (a progress handler): the paths found by then are
+/// returned with `false` (not every value was read).
+pub fn sqlite_paths(
+    path: &Path,
+    until: std::time::Instant,
+) -> Result<(Vec<String>, bool), ContentError> {
+    let (mut db, _snapshot) = open_read(path)?;
+    db.progress_handler(10_000, Some(move || std::time::Instant::now() >= until))
+        .map_err(|e| ContentError::Damaged(e.to_string()))?;
+    let interrupted = |e: &rusqlite::Error| {
+        matches!(e, rusqlite::Error::SqliteFailure(f, _)
+            if f.code == rusqlite::ErrorCode::OperationInterrupted)
+    };
     let bad = |e: rusqlite::Error| ContentError::Damaged(e.to_string());
     let mut out = Vec::new();
     let mut read = 0usize;
@@ -390,7 +402,17 @@ pub fn sqlite_paths(path: &Path) -> Result<Vec<String>, ContentError> {
             );
             let mut st = db.prepare(&sql).map_err(bad)?;
             let mut rows = st.query([]).map_err(bad)?;
-            while let Some(r) = rows.next().map_err(bad)? {
+            loop {
+                let r = match rows.next() {
+                    Ok(Some(r)) => r,
+                    Ok(None) => break,
+                    Err(e) if interrupted(&e) => {
+                        out.sort();
+                        out.dedup();
+                        return Ok((out, false));
+                    }
+                    Err(e) => return Err(bad(e)),
+                };
                 read += 1;
                 let v: String = r.get(0).map_err(bad)?;
                 if local_path(&v) && out.len() < MAX_PATHS {
@@ -404,7 +426,7 @@ pub fn sqlite_paths(path: &Path) -> Result<Vec<String>, ContentError> {
     }
     out.sort();
     out.dedup();
-    Ok(out)
+    Ok((out, true))
 }
 
 /// What kind of store a database is, by its tables' shape.

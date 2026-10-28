@@ -37,6 +37,7 @@ pub mod classify;
 pub mod component;
 pub mod content;
 pub mod export;
+pub mod guard;
 pub mod handoff;
 pub mod land;
 pub mod roots;
