@@ -763,6 +763,10 @@ fn classify_within(
         link_evidence_within(&base, paths, LINK_ASK, LINK_TIME.min(left))
     };
 
+    // Files not looked into before the folder's time ran out: one unresolved component, never
+    // copied, never one line each.
+    let mut unchecked: Vec<String> = Vec::new();
+
     // SQLite databases with their log or journal, and what kind of store each is.
     let mut key_dbs: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for f in by_rel.values() {
@@ -829,6 +833,9 @@ fn classify_within(
             Ok(DbKind::MachineEncrypted) => {
                 ev.push(Evidence::MachineBoundProtection);
                 b.push(members, Custody::MachineBound, false, ev);
+            }
+            Err(content::ContentError::Damaged(m)) if m == OUT_OF_TIME => {
+                unchecked.extend(members);
             }
             Err(e) => {
                 ev.push(Evidence::Unreadable { why: e.to_string() });
@@ -1091,6 +1098,7 @@ fn classify_within(
                         b.push(one, Custody::Portable, false, ev)
                     }
                 }
+                Some(Err(why)) if why == OUT_OF_TIME => unchecked.push(f.rel.clone()),
                 Some(Err(why)) => b.push(
                     one,
                     Custody::Unresolved,
@@ -1100,14 +1108,7 @@ fn classify_within(
                 None => plain.push(f.rel.clone()),
             },
             // Not looked into in time: it may hold sign-ins, so it is never simply copied.
-            Shape::Ini | Shape::Text if late() => b.push(
-                one,
-                Custody::Unresolved,
-                false,
-                vec![Evidence::Unreadable {
-                    why: OUT_OF_TIME.into(),
-                }],
-            ),
+            Shape::Ini | Shape::Text if late() => unchecked.push(f.rel.clone()),
             Shape::Ini | Shape::Text if text_has_credentials(&f.path, f.len) => {
                 sessions = true;
                 b.push(
@@ -1141,6 +1142,16 @@ fn classify_within(
             Custody::Portable,
             false,
             vec![Evidence::NoSpecialShape],
+        );
+    }
+    if !unchecked.is_empty() {
+        b.push(
+            unchecked,
+            Custody::Unresolved,
+            false,
+            vec![Evidence::Unreadable {
+                why: OUT_OF_TIME.into(),
+            }],
         );
     }
     if sessions {
@@ -1601,6 +1612,39 @@ mod tests {
             .collect();
         not_read.sort();
         assert_eq!(not_read, vec!["a.txt", "sub"]);
+        // Files walked in time but not looked into before the time ran out gather into one
+        // unresolved component.
+        let dir2 = tempfile::tempdir().unwrap();
+        let many = dir2.path().join("Many");
+        std::fs::create_dir_all(&many).unwrap();
+        for n in 0..20 {
+            std::fs::write(many.join(format!("{n}.json")), br#"{"a":1}"#).unwrap();
+            std::fs::write(many.join(format!("{n}.ini")), b"a=1\n").unwrap();
+        }
+        let mut w = Walk {
+            files: Vec::new(),
+            web: Vec::new(),
+            not_moved: Vec::new(),
+            unreadable: Vec::new(),
+            max_depth: 10,
+            max_files: 100,
+            deadline: far(),
+        };
+        walk(&many, "", 0, &mut w);
+        assert_eq!(w.files.len(), 40);
+        let r = classify_within(
+            &folder_at(&many),
+            None,
+            10,
+            100,
+            std::time::Instant::now() + std::time::Duration::from_millis(1),
+        );
+        let unresolved: Vec<&Component> = r
+            .components
+            .iter()
+            .filter(|c| c.custody == Custody::Unresolved)
+            .collect();
+        assert!(unresolved.len() <= 1, "{}", unresolved.len());
         // A root's time spent: its later folders are not read either.
         let other = dir.path().join("Other");
         std::fs::create_dir_all(&other).unwrap();
