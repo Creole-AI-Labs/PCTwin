@@ -10,7 +10,8 @@
 //!   why it needs the person), every setting that moves or why not, every special category, and
 //!   what undo can do for each change. Its digest joins the plan the person approves.
 //! - [`run`]: after the files arrived: settings through the executor and the effect journal,
-//!   apps through an [`run::Installer`] (the administrator helper on Windows; a fake in tests),
+//!   apps through an [`run::Installer`] (the administrator helper on Windows; the system's own
+//!   package tools on Linux, [`unix`]; a fake in tests),
 //!   and one result word per item.
 //! - [`undo`]: what undo would do, looked at now, and undo itself, which keeps a setting the
 //!   person changed after the move.
@@ -24,3 +25,4 @@ pub mod install;
 pub mod plan;
 pub mod run;
 pub mod undo;
+pub mod unix;

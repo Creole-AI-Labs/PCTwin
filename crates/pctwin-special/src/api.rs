@@ -45,7 +45,7 @@ use crate::component::{
 };
 use crate::handoff::{Step, step_for};
 use crate::land::{self, Conflict, LandError, Landed, Made, OwnerOnly, Target, Undone};
-use crate::roots::{Coverage, RootKind, System, find_folders, roots_of};
+use crate::roots::{Coverage, RootKind, System, roots_of};
 use crate::select::Selection;
 
 /// One component, planned.
@@ -141,8 +141,12 @@ pub fn plan_within(
 ) -> Plan {
     // Snapshots an earlier stopped plan left in the temporary folder go first.
     crate::content::sweep_snapshots();
-    let roots = roots_of(from, home, &|v| std::env::var_os(v).map(PathBuf::from));
-    let (folders, coverage) = find_folders(owner, home, &roots, apps);
+    // Each person's own `XDG_*_HOME` settings: this session's only for this session's own home.
+    let session_home = std::env::var_os("HOME").map(PathBuf::from);
+    let (folders, coverage) =
+        crate::roots::find_folders_for(from, owner, home, apps, session_home.as_deref(), &|v| {
+            std::env::var_os(v).map(PathBuf::from)
+        });
     let reports = crate::classify::classify_newest_first(folders, from, catalogue, deadline);
     let selection = Selection::default_for(&reports);
     let mut components = Vec::new();

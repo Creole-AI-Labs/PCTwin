@@ -194,9 +194,33 @@ fn winget_here() -> Option<std::path::PathBuf> {
     path.exists().then_some(path)
 }
 
-/// Whether this laptop installs apps itself (Windows with winget: the administrator helper's chain).
+/// Whether this laptop installs apps itself (Windows with winget: the administrator helper's
+/// chain; Linux with one of its own package tools, which ask the system's prompt themselves).
 fn installs_here() -> bool {
+    if cfg!(all(unix, not(target_os = "macos"))) {
+        return pctwin_fullmove::unix::Tools::here().any();
+    }
     winget_here().is_some()
+}
+
+/// Linux: which package system this laptop uses (dpkg's list for apt, rpm with dnf for dnf),
+/// when PCTwin can install from it (PackageKit is here); otherwise no package is planned as
+/// PCTwin's to install.
+fn linux_packages() -> Option<pctwin_apps::routes::LinuxPackages> {
+    use pctwin_apps::routes::LinuxPackages;
+    if !cfg!(all(unix, not(target_os = "macos")))
+        || pctwin_fullmove::unix::Tools::here().pkcon.is_none()
+    {
+        return None;
+    }
+    let file = |p: &str| std::fs::metadata(p).is_ok_and(|m| m.is_file());
+    if file("/var/lib/dpkg/status") {
+        Some(LinuxPackages::Apt)
+    } else if file("/usr/bin/rpm") && file("/usr/bin/dnf") {
+        Some(LinuxPackages::Dnf)
+    } else {
+        None
+    }
 }
 
 /// This laptop's processor, as winget names it.
@@ -357,7 +381,7 @@ fn this_target() -> pctwin_apps::routes::Target {
             x64: cfg!(target_arch = "x86_64"),
             arm64: cfg!(target_arch = "aarch64"),
         },
-        linux: None,
+        linux: linux_packages(),
     }
 }
 
@@ -632,7 +656,8 @@ pub fn rebuild_here<R: Runtime>(
     // What landed where: a moved setting points only at a file that is there.
     let data_done = pctwin_fullmove::run::DataDone { files, ..data_done };
     // Windows with winget: the real chain (winget as the person, then the administrator helper
-    // once). Elsewhere: every app needs the person, and no administrator is asked for.
+    // once). Linux: the system's own package tools. Elsewhere (a Mac, for now): every app needs
+    // the person, and no administrator is asked for.
     let mut no_installer = NoInstaller {
         why: "this laptop has no way for PCTwin to install apps yet",
     };
@@ -673,7 +698,46 @@ pub fn rebuild_here<R: Runtime>(
         Some(c) => c,
         None => &mut no_installer,
     };
-    #[cfg(not(windows))]
+    // Linux: the system's own package tools, each asking the system's prompt itself; then the
+    // laptop's own lists read again.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let people: Vec<(String, Option<std::path::PathBuf>)> = pctwin_scan::list_people()
+        .into_iter()
+        .map(|p| (p.account_id, Some(p.home)))
+        .collect();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let home = home_here().unwrap_or_default();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let key_home = home.clone();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let key = move |remote: &str, wide: bool| {
+        pctwin_apps::found::linux::keyring_hash(remote, wide, &key_home)
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let list = || pctwin_apps::found::read_here(&people, me);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut linux = pctwin_fullmove::unix::LinuxInstaller {
+        runner: &pctwin_maker::run::SystemRunner,
+        tools: pctwin_fullmove::unix::Tools::here(),
+        home,
+        session: [
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_DATA_HOME",
+        ]
+        .into_iter()
+        .filter_map(|n| Some((std::ffi::OsString::from(n), std::env::var_os(n)?)))
+        .collect(),
+        flatpak_key: &key,
+        list: &list,
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let installer: &mut dyn Installer = if linux.tools.any() {
+        &mut linux
+    } else {
+        &mut no_installer
+    };
+    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
     let installer: &mut dyn Installer = &mut no_installer;
     let mut progress = |step: Progress| {
         let _ = app.emit(REBUILD_EVENT, step);
