@@ -384,17 +384,41 @@ pub fn private_sddl(sddl: &str, me: &str) -> bool {
     if !aces.starts_with('(') || !aces.ends_with(')') || me.is_empty() {
         return false;
     }
-    let mut list: Vec<String> = aces[1..aces.len() - 1]
-        .split(")(")
-        .map(str::to_ascii_uppercase)
-        .collect();
+    let me = me.to_ascii_uppercase();
+    let mut list: Vec<String> = Vec::new();
+    for ace in aces[1..aces.len() - 1].split(")(") {
+        let ace = ace.to_ascii_uppercase();
+        // The trustee is the last field; Windows may write it as its short name.
+        let (head, who) = ace.rsplit_once(';').unwrap_or(("", ace.as_str()));
+        list.push(format!("{head};{}", written_as(who, &me)));
+    }
     list.sort();
-    let mut want = vec![
-        format!("A;OICI;FA;;;{}", me.to_ascii_uppercase()),
-        "A;OICI;FA;;;SY".to_string(),
-    ];
+    let mut want = vec![format!("A;OICI;FA;;;{me}"), "A;OICI;FA;;;SY".to_string()];
     want.sort();
     list == want
+}
+
+/// The account an access list entry names, with the short names Windows writes for single local
+/// accounts turned back into the person's own SID when, and only when, that is who they are.
+///
+/// Windows writes a few well-known accounts by a two-letter name instead of their SID: `LA` is
+/// this computer's built-in Administrator (its local account with number 500), `LG` its built-in
+/// Guest (501). So when the person IS that account (GitHub's Windows runners run as it, and some
+/// people use it), the folder made for `S-1-5-21-...-500` reads back naming `LA`. Every other
+/// short name (`BA`, `BU`, `WD`, `AU`, ...) is a group or many people and never the person.
+///
+/// The person's SID says the number (500 or 501) but not whether its domain is this computer's;
+/// for a network (domain) account with number 500, `LA` would be this computer's own
+/// Administrator instead, an administrator of this computer, who can already open every folder
+/// on it. So reading `LA` as the person never lets the Wi-Fi password reach anyone who could not
+/// already read it.
+fn written_as<'a>(who: &'a str, me: &'a str) -> &'a str {
+    let local_account = me.starts_with("S-1-5-21-");
+    match who {
+        "LA" if local_account && me.ends_with("-500") => me,
+        "LG" if local_account && me.ends_with("-501") => me,
+        other => other,
+    }
 }
 
 /// A folder removed with everything in it when dropped (also on failure).

@@ -529,7 +529,10 @@ impl Walk {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
-        let entries: Vec<_> = entries.flatten().collect();
+        // In name order: the system lists a folder in no set order (Linux's in a hashed one), and
+        // the walk must stop at the same place, and report the same folders, every time.
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
         let names: Vec<String> = entries
             .iter()
             .map(|e| e.file_name().to_string_lossy().into_owned())

@@ -341,11 +341,13 @@ mod tests {
             notes: vec![],
         });
         let id = |n: u8| pctwin_record::ItemId::from_hex(&format!("{n:02x}").repeat(16)).unwrap();
+        // This system's own separator, so the file names read the same on every system.
+        let at = |n: &str| std::path::Path::new("d").join(n);
         let candidates = vec![
-            (id(1), std::path::PathBuf::from(r"C:\d\WriterSetup.exe")),
-            (id(2), std::path::PathBuf::from(r"C:\d\Writer-fake.exe")),
-            (id(3), std::path::PathBuf::from(r"C:\d\renewed.msi")),
-            (id(4), std::path::PathBuf::from(r"C:\d\plain.exe")),
+            (id(1), at("WriterSetup.exe")),
+            (id(2), at("Writer-fake.exe")),
+            (id(3), at("renewed.msi")),
+            (id(4), at("plain.exe")),
         ];
         let read = |p: &std::path::Path| pctwin_maker::OldCopy {
             maker: match p.file_name().unwrap().to_str().unwrap() {

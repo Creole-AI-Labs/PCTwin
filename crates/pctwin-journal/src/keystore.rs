@@ -200,9 +200,10 @@ impl SystemStore {
         #[cfg(target_os = "macos")]
         let store = apple_native_keyring_store::keychain::Store::new()
             .map_err(|_| KeyError::Unavailable)?;
-        let mut modifiers = std::collections::HashMap::new();
         #[cfg(windows)]
-        modifiers.insert("persistence", "Local");
+        let modifiers = std::collections::HashMap::from([("persistence", "Local")]);
+        #[cfg(target_os = "macos")]
+        let modifiers = std::collections::HashMap::new();
         keyring_core::api::CredentialStoreApi::build(
             store.as_ref(),
             SERVICE,

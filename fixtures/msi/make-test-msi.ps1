@@ -32,6 +32,9 @@ Run "CREATE TABLE ``Component`` (``Component`` CHAR(72) NOT NULL, ``ComponentId`
 Run "CREATE TABLE ``Feature`` (``Feature`` CHAR(38) NOT NULL, ``Feature_Parent`` CHAR(38), ``Title`` CHAR(64) LOCALIZABLE, ``Description`` CHAR(255) LOCALIZABLE, ``Display`` SHORT, ``Level`` SHORT NOT NULL, ``Directory_`` CHAR(72), ``Attributes`` SHORT NOT NULL PRIMARY KEY ``Feature``)"
 Run "CREATE TABLE ``FeatureComponents`` (``Feature_`` CHAR(38) NOT NULL, ``Component_`` CHAR(72) NOT NULL PRIMARY KEY ``Feature_``, ``Component_``)"
 Run "CREATE TABLE ``Registry`` (``Registry`` CHAR(72) NOT NULL, ``Root`` SHORT NOT NULL, ``Key`` CHAR(255) NOT NULL LOCALIZABLE, ``Name`` CHAR(255) LOCALIZABLE, ``Value`` LONGCHAR LOCALIZABLE, ``Component_`` CHAR(72) NOT NULL PRIMARY KEY ``Registry``)"
+# RegisterProduct records where the package came from by reading the Media table, and fails the
+# whole install (error 2228, then 1603) when there is none, even with no files to copy.
+Run "CREATE TABLE ``Media`` (``DiskId`` SHORT NOT NULL, ``LastSequence`` LONG NOT NULL, ``DiskPrompt`` CHAR(64) LOCALIZABLE, ``Cabinet`` CHAR(255), ``VolumeLabel`` CHAR(32), ``Source`` CHAR(72) PRIMARY KEY ``DiskId``)"
 Run "CREATE TABLE ``InstallExecuteSequence`` (``Action`` CHAR(72) NOT NULL, ``Condition`` CHAR(255), ``Sequence`` SHORT PRIMARY KEY ``Action``)"
 
 $props = @{
@@ -49,6 +52,8 @@ Run "INSERT INTO ``Directory`` (``Directory``, ``Directory_Parent``, ``DefaultDi
 Run "INSERT INTO ``Component`` (``Component``, ``ComponentId``, ``Directory_``, ``Attributes``, ``Condition``, ``KeyPath``) VALUES ('Main', '$ComponentId', 'TARGETDIR', 260, '', 'Mark')"
 Run "INSERT INTO ``Feature`` (``Feature``, ``Feature_Parent``, ``Title``, ``Description``, ``Display``, ``Level``, ``Directory_``, ``Attributes``) VALUES ('All', '', 'All', '', 0, 1, 'TARGETDIR', 0)"
 Run "INSERT INTO ``FeatureComponents`` (``Feature_``, ``Component_``) VALUES ('All', 'Main')"
+# One disk, the package itself, holding no files.
+Run "INSERT INTO ``Media`` (``DiskId``, ``LastSequence``) VALUES (1, 0)"
 # Root 2: HKEY_LOCAL_MACHINE.
 Run "INSERT INTO ``Registry`` (``Registry``, ``Root``, ``Key``, ``Name``, ``Value``, ``Component_``) VALUES ('Mark', 2, 'SOFTWARE\PCTwinTest', 'Installed', '1', 'Main')"
 $seq = @(

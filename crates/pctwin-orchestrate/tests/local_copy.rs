@@ -809,23 +809,20 @@ fn a_whole_home_sync_still_leaves_account_state() {
         free: 100 * GB,
         ..Fake::default()
     };
-    let cred = home()
-        .join("AppData")
-        .join("Local")
-        .join("Microsoft")
-        .join("Credentials")
-        .join("x");
-    let keys = home().join("Library").join("Keychains").join("x");
-    let state = fake.add(&cred.to_string_lossy(), 1);
-    let mac_keys = fake.add(&keys.to_string_lossy(), 1);
+    // A known place of this system's account state (the shipped catalogue's).
+    let place: &[&str] = if cfg!(windows) {
+        &["AppData", "Local", "Microsoft", "Credentials"]
+    } else if cfg!(target_os = "macos") {
+        &["Library", "Keychains"]
+    } else {
+        &[".local", "share", "keyrings"]
+    };
+    let state = place.iter().fold(home(), |p, n| p.join(n)).join("x");
+    let state = fake.add(&state.to_string_lossy(), 1);
     let mut consent = consent();
     consent.root = home();
     let mut keep = KeepLocal::new(os(), vec![consent], 4 * GB);
-    let which = if cfg!(target_os = "macos") {
-        &mac_keys
-    } else {
-        &state
-    };
+    let which = &state;
     let report = keep.run(
         &mut fake,
         wanted("me", std::slice::from_ref(which)),
