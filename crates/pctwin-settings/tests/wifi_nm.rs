@@ -110,6 +110,20 @@ impl Runner for Nm {
                 );
                 Ok(out(true, ""))
             }
+            [
+                "connection",
+                "modify",
+                "id",
+                name,
+                "connection.autoconnect",
+                v,
+            ] => match self.profiles.borrow_mut().get_mut(*name) {
+                Some(p) => {
+                    p.auto = *v == "yes";
+                    Ok(out(true, ""))
+                }
+                None => Ok(out(false, "")),
+            },
             ["connection", "delete", "id", name] => {
                 self.profiles.borrow_mut().remove(*name);
                 Ok(out(true, ""))
@@ -140,7 +154,7 @@ impl Runner for Nm {
                                 if !self.loses_psk {
                                     p.psk = v.to_string();
                                 }
-                            } else if line == "save yes" {
+                            } else if line == "save persistent" {
                                 saved = true;
                             }
                         }
@@ -214,6 +228,10 @@ fn a_network_moves_with_its_password_and_the_password_is_never_on_a_command_line
     import_nm(&mut new.clone(), home_net).unwrap();
     assert_eq!(new.profiles.borrow()["Home"].psk, PSK);
     assert_eq!(new.profiles.borrow()["Home"].key_mgmt, "sae");
+    assert!(
+        new.profiles.borrow()["Home"].auto,
+        "connects by itself, as it did"
+    );
     assert_eq!(
         import_nm(&mut new.clone(), work),
         Err(WifiError::Enterprise)
@@ -264,7 +282,24 @@ fn the_real_network_manager_keeps_a_password_given_only_on_standard_input() {
     let name = format!("PCTwin lab {}", std::process::id());
     let mut n = home(&name, PSK);
     n.ssid = "PCTwin Lab Net".into();
-    import_nm(&mut runner, &n).expect("added, with its password, and read back");
+    let added = import_nm(&mut runner, &n);
+    if added.is_err() {
+        // What NetworkManager holds, without the password, to say why.
+        let seen = runner.run(
+            Tool::Nmcli,
+            &[
+                "--terse",
+                "--fields",
+                "802-11-wireless.ssid,802-11-wireless-security.key-mgmt,802-11-wireless-security.psk-flags",
+                "connection",
+                "show",
+                "id",
+                &name,
+            ],
+        );
+        let _ = runner.run(Tool::Nmcli, &["connection", "delete", "id", &name]);
+        panic!("{added:?}: {seen:?}");
+    }
     let found = export_nm(&mut runner, true).unwrap();
     assert!(found.iter().any(|x| x.name == name && x.secret.is_some()));
     let gone = runner

@@ -696,8 +696,10 @@ pub fn import_nm(runner: &mut dyn Runner, n: &Network) -> Result<(), WifiError> 
         &n.ssid,
         "802-11-wireless.hidden",
         yes(n.hidden),
+        // Off while the password is set: nmcli's editor asks before saving a profile that would
+        // connect at once, and nothing would answer it. Turned on afterwards, as it was.
         "connection.autoconnect",
-        yes(n.auto_connect),
+        "no",
     ];
     if let Some(k) = key_mgmt {
         args.extend(["802-11-wireless-security.key-mgmt", k]);
@@ -710,7 +712,7 @@ pub fn import_nm(runner: &mut dyn Runner, n: &Network) -> Result<(), WifiError> 
     }
     if let Some(s) = secret {
         let script = Zeroizing::new(format!(
-            "set 802-11-wireless-security.psk {}\nsave yes\nquit\n",
+            "set 802-11-wireless-security.psk {}\nsave persistent\nquit\n",
             s.expose()
         ));
         let set = runner.run_secret(
@@ -719,6 +721,25 @@ pub fn import_nm(runner: &mut dyn Runner, n: &Network) -> Result<(), WifiError> 
             Some(script.as_bytes()),
         );
         if !set.is_ok_and(|o| o.ok) {
+            let _ = runner.run(Tool::Nmcli, &["connection", "delete", "id", &n.name]);
+            return Err(WifiError::Tool);
+        }
+    }
+    if n.auto_connect {
+        let on = runner
+            .run(
+                Tool::Nmcli,
+                &[
+                    "connection",
+                    "modify",
+                    "id",
+                    &n.name,
+                    "connection.autoconnect",
+                    "yes",
+                ],
+            )
+            .map_err(|_| WifiError::Tool)?;
+        if !on.ok {
             let _ = runner.run(Tool::Nmcli, &["connection", "delete", "id", &n.name]);
             return Err(WifiError::Tool);
         }
