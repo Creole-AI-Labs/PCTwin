@@ -4030,7 +4030,17 @@ impl<'d> ReceiverSession<'d> {
         let entry = self.journal.plan(&write).map_err(Start::Record)?;
         // Inside a folder that moves as one whole, its top folder must be made by this move (now,
         // or by an earlier file of it): never one someone else made or put there since the plan.
-        let ours = |stored: &str| self.made_here(destination, stored);
+        // A whole carried on from an earlier move from this old laptop may use the folder that
+        // move made, only while the folder at that name is still that very folder.
+        let ours = |stored: &str| {
+            self.made_here(destination, stored)
+                || self
+                    .allowance
+                    .adopted_at(destination, stored)
+                    .is_some_and(|id| {
+                        dest.folder_identity(stored).ok().flatten().map(file_id) == Some(id)
+                    })
+        };
         let fresh = self
             .allowance
             .whole_depth(destination, path)

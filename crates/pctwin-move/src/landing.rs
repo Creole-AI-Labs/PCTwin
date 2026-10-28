@@ -62,18 +62,42 @@ pub const MOST_WHOLE_NAMES: u32 = 100;
 /// Where every folder that moves as one whole ([`ItemKind::Package`] in `items`, placed by
 /// `rules`) is stored on this laptop. `meet(destination, path)` says how this laptop would store
 /// a path there (its key: names converted and folded to the drive's case) and whether anything is
-/// already there (see `pctwin_gate::Destination::meet`); `None` for a place not known here. Each
-/// whole keeps its planned path unless that meets something already there or another whole of
-/// this move by its key, else takes "Name (2)" and on, up to [`MOST_WHOLE_NAMES`]; past that it
-/// has no place (its files are not received, each said with why). Decided on this laptop alone:
-/// the old laptop announces every file at its planned path, so nothing of it crosses, however
-/// many there are.
+/// already there (see `pctwin_gate::Destination::meet`); `None` for a place not known here.
+///
+/// A whole an earlier move from this same old laptop already started or finished here carries on
+/// in its own folder (gap 3, 28 October 2026): `earlier(destination)` lists the folders earlier
+/// moves from this old laptop made there (the journal's record,
+/// `pctwin_journal::Ledger::folders_made_from`), and one of this whole's names is its own only
+/// when the journal says the write of one of this very whole's files made it and
+/// `still(destination, path, identity)` finds that very folder there now. Its files that are
+/// already there and the same are then found, not copied twice; the rest are copied into it. A
+/// folder of the same name that anyone else made, or that was put in its place since, is never
+/// taken as its own.
+///
+/// Otherwise each whole keeps its planned path unless that meets something already there or
+/// another whole of this move by its key, else takes "Name (2)" and on, up to
+/// [`MOST_WHOLE_NAMES`]; past that it has no place (its files are not received, each said with
+/// why). Decided on this laptop alone: the old laptop announces every file at its planned path,
+/// so nothing of it crosses, however many there are.
 pub fn place_wholes(
     items: &[Item],
     rules: &LandingRules,
     meet: impl Fn(&str, &str) -> Option<(String, bool)>,
+    earlier: impl Fn(&str) -> Vec<pctwin_journal::EarlierFolder>,
+    still: impl Fn(&str, &str, pctwin_journal::FileId) -> bool,
 ) -> Vec<WholePlace> {
     let mut claimed: std::collections::HashSet<(String, String)> = Default::default();
+    let mut made_before: BTreeMap<String, Vec<pctwin_journal::EarlierFolder>> = BTreeMap::new();
+    let by_id: std::collections::HashMap<pctwin_record::ItemId, &Item> =
+        items.iter().map(|i| (i.id, i)).collect();
+    // Whether `file` is inside the whole `whole` on the old laptop.
+    let inside = |file: &Item, whole: &Item| {
+        let (f, w) = (file.path.parts(), whole.path.parts());
+        file.owner == whole.owner
+            && file.place == whole.place
+            && f.len() > w.len()
+            && f[..w.len()] == *w
+    };
     let mut placed = Vec::new();
     for item in items {
         if item.kind != ItemKind::Package || item.inclusion != Inclusion::Included {
@@ -90,24 +114,53 @@ pub fn place_wholes(
             Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
             _ => (name.clone(), String::new()),
         };
-        let candidates = std::iter::once(place.path.clone())
-            .chain((2..=MOST_WHOLE_NAMES).map(|n| format!("{parent}{stem} ({n}){ext}")));
+        let candidates: Vec<String> = std::iter::once(place.path.clone())
+            .chain((2..=MOST_WHOLE_NAMES).map(|n| format!("{parent}{stem} ({n}){ext}")))
+            .collect();
+        let before = made_before
+            .entry(place.destination.clone())
+            .or_insert_with(|| earlier(&place.destination));
+        // Its own folder from an earlier move from this old laptop, first.
         let mut stored = None;
-        for candidate in candidates {
-            let Some((key, taken)) = meet(&place.destination, &candidate) else {
+        let mut adopted = None;
+        for candidate in &candidates {
+            let Some(id) = before
+                .iter()
+                .filter(|e| e.folder == *candidate)
+                .filter(|e| by_id.get(&e.item).is_some_and(|f| inside(f, item)))
+                .find_map(|e| e.id)
+            else {
+                continue;
+            };
+            let Some((key, taken)) = meet(&place.destination, candidate) else {
                 break;
             };
             let key = (place.destination.clone(), key);
-            if !taken && !claimed.contains(&key) {
+            if taken && !claimed.contains(&key) && still(&place.destination, candidate, id) {
                 claimed.insert(key);
-                stored = Some(candidate);
+                stored = Some(candidate.clone());
+                adopted = Some(id);
                 break;
+            }
+        }
+        if stored.is_none() {
+            for candidate in candidates {
+                let Some((key, taken)) = meet(&place.destination, &candidate) else {
+                    break;
+                };
+                let key = (place.destination.clone(), key);
+                if !taken && !claimed.contains(&key) {
+                    claimed.insert(key);
+                    stored = Some(candidate);
+                    break;
+                }
             }
         }
         placed.push(WholePlace {
             destination: place.destination,
             planned: place.path,
             stored,
+            adopted,
         });
     }
     placed
@@ -571,7 +624,7 @@ mod tests {
         // A drive that does not tell case apart: keys folded to one case.
         let meet =
             |d: &str, p: &str| (d == "documents").then(|| (p.to_lowercase(), here.contains(&p)));
-        let placed = place_wholes(&items, &rules(), meet);
+        let placed = place_wholes(&items, &rules(), meet, |_| Vec::new(), |_, _, _| false);
         let stored: Vec<Option<&str>> = placed.iter().map(|w| w.stored.as_deref()).collect();
         assert_eq!(
             stored,
@@ -588,7 +641,7 @@ mod tests {
         // Where case is told apart, X.app and x.app are two folders, each under its own name.
         let apart =
             |d: &str, p: &str| (d == "documents").then(|| (p.to_string(), here.contains(&p)));
-        let placed = place_wholes(&items, &rules(), apart);
+        let placed = place_wholes(&items, &rules(), apart, |_| Vec::new(), |_, _, _| false);
         assert_eq!(placed[3].stored.as_deref(), Some("x.app"));
     }
 
@@ -609,9 +662,13 @@ mod tests {
                 i
             })
             .collect();
-        let placed = place_wholes(&items, &rules(), |_, p: &str| {
-            Some((p.to_string(), p.ends_with("/.git")))
-        });
+        let placed = place_wholes(
+            &items,
+            &rules(),
+            |_, p: &str| Some((p.to_string(), p.ends_with("/.git"))),
+            |_| Vec::new(),
+            |_, _, _| false,
+        );
         assert_eq!(placed.len(), 1000);
         assert!(
             placed
@@ -621,9 +678,13 @@ mod tests {
         // The rules said to the old laptop stay as small as ever.
         assert!(serde_json::to_vec(&rules()).unwrap().len() < 1024);
         // Every name taken: no place, never the one already there.
-        let none = place_wholes(&items[..1], &rules(), |_, p: &str| {
-            Some((p.to_string(), true))
-        });
+        let none = place_wholes(
+            &items[..1],
+            &rules(),
+            |_, p: &str| Some((p.to_string(), true)),
+            |_| Vec::new(),
+            |_, _, _| false,
+        );
         assert_eq!(none[0].stored, None);
     }
 }

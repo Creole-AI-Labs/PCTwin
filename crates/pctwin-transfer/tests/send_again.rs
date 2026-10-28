@@ -5181,6 +5181,7 @@ async fn a_whole_is_never_written_into_a_folder_planted_after_it_was_placed() {
             destination: "me".into(),
             planned: "Documents".into(),
             stored: Some("Documents".into()),
+            adopted: None,
         }]);
         if planted {
             std::fs::create_dir_all(l.new.path().join("Documents")).unwrap();

@@ -1098,11 +1098,31 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         }
         // A folder that moves as one whole never lands merged into one already here, nor into
         // another of this move: where each is stored is decided here, once every place is known.
-        let wholes = landing::place_wholes(&approved.record.items, &rules, |destination, path| {
-            let dest = table.get(destination).ok()?;
-            let met = dest.meet(&pctwin_gate::IncomingPath::parse(path).ok()?);
-            Some((met.key, met.taken))
-        });
+        // A whole an earlier move from this same old laptop started or finished here carries on
+        // in the folder that move made (the journal says so, and it is still that very folder):
+        // found there, never copied a second time beside it.
+        let source = approved.record.source_laptop;
+        let wholes = landing::place_wholes(
+            &approved.record.items,
+            &rules,
+            |destination, path| {
+                let dest = table.get(destination).ok()?;
+                let met = dest.meet(&pctwin_gate::IncomingPath::parse(path).ok()?);
+                Some((met.key, met.taken))
+            },
+            |destination| {
+                here.journal
+                    .folders_made_from(source, destination)
+                    .unwrap_or_default()
+            },
+            |destination, path, id| {
+                table
+                    .get(destination)
+                    .ok()
+                    .and_then(|d| d.folder_identity(path).ok().flatten())
+                    == Some(id)
+            },
+        );
         // What this laptop accepts is made from the very rules the old laptop is sent, now that
         // every place is known (another person's holding place is made only after the
         // approval): both laptops place every file by one function, by construction.

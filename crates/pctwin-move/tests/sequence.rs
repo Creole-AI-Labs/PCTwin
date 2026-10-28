@@ -1427,6 +1427,184 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
     assert_eq!(there, ["database"]);
 }
 
+/// Gap 3 of the complications audit (28 October 2026): a whole folder moved again from the same
+/// old laptop (the move run again, or paired again after a stop) carries on in the folder the
+/// first move made. Its files already there and the same are found, not copied a second time
+/// beside it as "Name (2)"; one that did not arrive the first time is copied into that same
+/// folder. A folder of the same name the move did not make (or one put in its place since) is
+/// never taken as its own: the whole then lands beside it, as before.
+#[tokio::test]
+async fn a_whole_folder_moved_again_from_the_same_laptop_carries_on_in_its_own_folder() {
+    use pctwin_move::landing::LandingRules;
+    let lib = "Photos Library.photoslibrary";
+    let inside: [(&[&str], &[u8]); 2] = [
+        (&[lib, "originals", "A", "beach.heic"], b"the beach"),
+        (&[lib, "database", "Photos.sqlite"], b"rows"),
+    ];
+    let mut w = world();
+    w.record.items.push(item(
+        FolderRole::Pictures,
+        &[lib],
+        ItemKind::Package,
+        0,
+        Inclusion::Included,
+    ));
+    let mut ids = Vec::new();
+    for (path, bytes) in inside {
+        let f = item(
+            FolderRole::Pictures,
+            path,
+            ItemKind::File,
+            bytes.len() as u64,
+            Inclusion::Included,
+        );
+        write(&source_in(w.old.path(), &f), bytes);
+        ids.push(f.id);
+        w.record.items.push(f);
+    }
+    w.record.validate().unwrap();
+    let rules = LandingRules {
+        mover: "1000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+        chosen: Default::default(),
+    };
+    struct Mine {
+        rules: LandingRules,
+    }
+    impl Steps for Mine {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let new_table = |w: &World| {
+        let mut table = Destinations::new();
+        for (role, name) in ROLES {
+            table
+                .approve(
+                    role_label(role),
+                    Approved::MyFolders,
+                    &w.new.path().join(name),
+                )
+                .unwrap();
+        }
+        table
+    };
+    // One move of the record, as the app runs it, into the same journal each time.
+    let run = async |w: &World| {
+        let mut steps = Mine {
+            rules: rules.clone(),
+        };
+        let (mut old, mut new) = mem_pair();
+        let (old_live, new_live) = (Live::default(), Live::default());
+        let mut table = new_table(w);
+        let (sent, received) = no_hang(async {
+            tokio::join!(
+                send_greeted(
+                    &mut old,
+                    &w.record,
+                    "1000",
+                    &[],
+                    |i| Some(source_in(w.old.path(), i)),
+                    &old_live,
+                    std::sync::Arc::new(pctwin_transfer::FsOpener),
+                ),
+                receive_greeted(
+                    &mut new,
+                    &mut steps,
+                    |s, _| s.rules.clone(),
+                    &mut table,
+                    &w.journal,
+                    "1001",
+                    &new_live
+                ),
+            )
+        })
+        .await;
+        sent.unwrap();
+        received.unwrap()
+    };
+    let pictures = w.new.path().join("Pictures");
+    let outcome = |r: &pctwin_move::Received, id| {
+        r.files
+            .iter()
+            .find(|f| f.item == id)
+            .and_then(|f| f.outcome.clone())
+    };
+    // The first move: the library lands under its own name.
+    let first = run(&w).await;
+    for id in &ids {
+        assert!(
+            matches!(outcome(&first, *id), Some(ReceiveOutcome::Finished(_))),
+            "{:?}",
+            outcome(&first, *id)
+        );
+    }
+    // One file is lost on the new laptop before the move runs again (as a stop part way leaves
+    // a whole partly there).
+    std::fs::remove_file(pictures.join(lib).join("database/Photos.sqlite")).unwrap();
+    // The move again, from the same old laptop: no second library.
+    let again = run(&w).await;
+    match outcome(&again, ids[0]) {
+        Some(ReceiveOutcome::AlreadyThere(stored)) => {
+            assert_eq!(stored, format!("{lib}/originals/A/beach.heic"))
+        }
+        other => panic!("the file already there ended {other:?}"),
+    }
+    match outcome(&again, ids[1]) {
+        Some(ReceiveOutcome::Finished(done)) => {
+            assert_eq!(done.final_path, format!("{lib}/database/Photos.sqlite"))
+        }
+        other => panic!("the file not there ended {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read(pictures.join(lib).join("database/Photos.sqlite")).unwrap(),
+        b"rows"
+    );
+    let names: Vec<_> = std::fs::read_dir(&pictures)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("Photos Library"))
+        .collect();
+    assert_eq!(names, [lib], "never a second library beside the first");
+    // The folder is replaced by one the move did not make (same name): it is never taken as the
+    // move's own; the library lands beside it, and the one there is left exactly as it was.
+    std::fs::remove_dir_all(pictures.join(lib)).unwrap();
+    write(&pictures.join(lib).join("mine.txt"), b"the person's own");
+    let third = run(&w).await;
+    for id in &ids {
+        match outcome(&third, *id) {
+            Some(ReceiveOutcome::Finished(done)) => assert!(
+                done.final_path
+                    .starts_with("Photos Library (2).photoslibrary/"),
+                "{}",
+                done.final_path
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+    let there: Vec<_> = std::fs::read_dir(pictures.join(lib))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(there, ["mine.txt"]);
+}
+
 /// A ledger that stops working at one step (`at`), as PCTwin stopping there would leave it.
 struct StopsAt<'l> {
     inner: &'l dyn pctwin_journal::Ledger,
