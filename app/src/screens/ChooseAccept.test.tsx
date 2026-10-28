@@ -93,6 +93,18 @@ describe("choosing what moves, on the old laptop", () => {
   });
 });
 
+// The first real test (28 October 2026): direction marks Fluent put around names were stored and
+// shown as "�". No sentence in any language carries them now.
+describe("names in sentences", () => {
+  it("carry no direction marks, in any language", () => {
+    for (const code of ["en", "es", "fr", "pt", "hi", "zh-CN", "ar"] as const) {
+      const words = localization(code).getString("accept-title", { from: "Pink Swordfish" });
+      expect(words).toContain("Pink Swordfish");
+      expect(words).not.toMatch(/[⁦-⁩]/);
+    }
+  });
+});
+
 describe("accepting on the new laptop", () => {
   const plan = () => {
     const p = parsePlanView(plans[0]);

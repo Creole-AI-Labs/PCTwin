@@ -859,14 +859,15 @@ fn windows_facts() -> CensusFacts {
     let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
         Get-LocalUser | ForEach-Object { $_.SID.Value + [char]9 + [int]$_.Enabled + [char]9 + \
         $_.Name + [char]9 + $_.FullName }";
-    let mut powershell = Command::new(system32.join(r"WindowsPowerShell\v1.0\powershell.exe"));
+    let mut powershell =
+        pctwin_types::process::quiet(system32.join(r"WindowsPowerShell\v1.0\powershell.exe"));
     powershell.args(["-NoProfile", "-NonInteractive", "-Command", script]);
     let accounts = run(powershell)
         .ok()
         .filter(|out| !out.trim().is_empty())
         .map(|out| accounts_from_get_local_user(&out));
 
-    let mut whoami = Command::new(system32.join("whoami.exe"));
+    let mut whoami = pctwin_types::process::quiet(system32.join("whoami.exe"));
     whoami.args(["/user", "/fo", "csv", "/nh"]);
     let me = run(whoami)
         .ok()
@@ -905,7 +906,7 @@ fn reg_profile_list(system32: &Path) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     let chcp = system32.join("chcp.com");
     let reg = system32.join("reg.exe");
-    let mut cmd = Command::new(system32.join("cmd.exe"));
+    let mut cmd = pctwin_types::process::quiet(system32.join("cmd.exe"));
     cmd.raw_arg(format!(
         r#"/d /c ""{}" 65001 >nul & "{}" query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" /s""#,
         chcp.display(),
@@ -920,7 +921,7 @@ fn reg_profile_list(_system32: &Path) -> Result<String, String> {
 }
 
 fn mac_facts() -> CensusFacts {
-    let mut dscl = Command::new("/usr/bin/dscl");
+    let mut dscl = pctwin_types::process::quiet("/usr/bin/dscl");
     dscl.args([
         ".",
         "-readall",
@@ -952,7 +953,7 @@ fn mac_facts() -> CensusFacts {
 
 fn linux_facts() -> CensusFacts {
     let local = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
-    let mut getent = Command::new("getent");
+    let mut getent = pctwin_types::process::quiet("getent");
     getent.arg("passwd");
     let getent = run(getent)
         .ok()
@@ -979,7 +980,7 @@ fn linux_facts() -> CensusFacts {
 
 /// The signed-in user ID: `id -u`, or the owner of this person's home folder.
 fn unix_me() -> String {
-    let mut id = Command::new("id");
+    let mut id = pctwin_types::process::quiet("id");
     id.arg("-u");
     run(id)
         .ok()

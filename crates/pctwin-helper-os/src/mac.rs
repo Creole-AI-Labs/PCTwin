@@ -164,7 +164,7 @@ const CREATEHOMEDIR: &str = "/usr/sbin/createhomedir";
 const PWPOLICY: &str = "/usr/bin/pwpolicy";
 
 fn run(program: &str, args: &[&str]) -> Result<Vec<u8>, Error> {
-    let out = Command::new(program)
+    let out = pctwin_types::process::quiet(program)
         .args(args)
         .stdin(Stdio::null())
         .output()?;
@@ -277,7 +277,7 @@ pub(crate) fn secure_token_on(name: &str, password: &str) -> Result<bool, Error>
     }
     // Ended (with anything it started) and reaped whatever happens below, an error included.
     let mut tool = crate::ToolRun::spawn(
-        Command::new(SYSADMINCTL)
+        pctwin_types::process::quiet(SYSADMINCTL)
             .args(["interactive", "-secureTokenOn", name, "-password", "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -299,7 +299,7 @@ const SECURE_TOKEN_WAIT: std::time::Duration = std::time::Duration::from_secs(18
 /// Whether FileVault is on, as `fdesetup status` says ("FileVault is On."). Unknown is taken as
 /// on (the window is then shown, for a limited time).
 fn filevault_on() -> bool {
-    match Command::new("/usr/bin/fdesetup")
+    match pctwin_types::process::quiet("/usr/bin/fdesetup")
         .arg("status")
         .stdin(Stdio::null())
         .output()
@@ -311,7 +311,7 @@ fn filevault_on() -> bool {
 
 /// Whether the account `name` has a Secure Token, as the system says.
 pub(crate) fn secure_token_status(name: &str) -> Result<bool, Error> {
-    let out = Command::new(SYSADMINCTL)
+    let out = pctwin_types::process::quiet(SYSADMINCTL)
         .args(["-secureTokenStatus", name])
         .stdin(Stdio::null())
         .output()?;
@@ -400,7 +400,7 @@ pub(crate) fn ask_administrator(prompt: &str) -> Result<Option<crate::approval::
 /// authorization database with Apple's own tool.
 pub(crate) fn define_right(name: &str, definition: &str) -> Result<(), Error> {
     use std::io::Write;
-    let mut child = Command::new("/usr/bin/security")
+    let mut child = pctwin_types::process::quiet("/usr/bin/security")
         .args(["authorizationdb", "write", name])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

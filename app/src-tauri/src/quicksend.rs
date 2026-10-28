@@ -1038,7 +1038,7 @@ mod tests {
     fn link(at: &std::path::Path, to: &std::path::Path) {
         #[cfg(windows)]
         {
-            let made = std::process::Command::new("cmd")
+            let made = pctwin_types::process::quiet("cmd")
                 .args(["/C", "mklink", "/J"])
                 .arg(at)
                 .arg(to)

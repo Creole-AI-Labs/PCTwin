@@ -87,7 +87,7 @@ mod tests {
         let path = dir.path().join("helper.lock");
         // `mkfifo` is on every Mac and Linux (rustix has no mknodat on Apple systems).
         assert!(
-            std::process::Command::new("mkfifo")
+            pctwin_types::process::quiet("mkfifo")
                 .arg(&path)
                 .status()
                 .unwrap()

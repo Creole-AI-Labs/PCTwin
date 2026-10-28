@@ -157,7 +157,7 @@ fn windows_taskbar_light() -> bool {
     use std::os::windows::process::CommandExt;
     // No console window flashes up while asking.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("reg")
+    pctwin_types::process::quiet("reg")
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",

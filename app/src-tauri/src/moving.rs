@@ -2889,7 +2889,7 @@ pub fn move_privacy_answer(moving: State<'_, AppMoving>, again: bool) -> Result<
 #[tauri::command]
 pub fn open_privacy_settings() {
     if cfg!(target_os = "macos") {
-        let _ = std::process::Command::new("/usr/bin/open")
+        let _ = pctwin_types::process::quiet("/usr/bin/open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
             .spawn();
     }

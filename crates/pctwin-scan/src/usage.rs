@@ -38,7 +38,7 @@ pub fn read_usage(home: &Path) -> Usage {
             }
         }
     } else if cfg!(target_os = "macos") {
-        let out = std::process::Command::new("mdfind")
+        let out = pctwin_types::process::quiet("mdfind")
             .arg("-onlyin")
             .arg(home)
             .arg("kMDItemLastUsedDate >= $time.today(-30)")

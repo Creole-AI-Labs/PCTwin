@@ -11,7 +11,7 @@ pub(crate) const PKEXEC: &str = "/usr/bin/pkexec";
 
 pub(crate) fn start_pkexec(request: &LaunchRequest) -> Result<Process, LaunchError> {
     use std::io::Write;
-    let mut child = Command::new(PKEXEC)
+    let mut child = pctwin_types::process::quiet(PKEXEC)
         .arg("--disable-internal-agent")
         .arg(request.program())
         .args(request.args())
@@ -63,7 +63,7 @@ const CHAGE: &str = "/usr/bin/chage";
 
 fn run(program: &str, args: &[&str], input: Option<&[u8]>) -> Result<(), Error> {
     use std::io::Write;
-    let mut child = Command::new(program)
+    let mut child = pctwin_types::process::quiet(program)
         .args(args)
         .stdin(if input.is_some() {
             Stdio::piped()
@@ -132,7 +132,7 @@ pub(crate) fn add_standard_account(
 /// Where `useradd` makes `name`'s home: its default base folder (`useradd -D`, `HOME=`), or
 /// `/home`.
 fn default_home(name: &str) -> std::path::PathBuf {
-    let base = Command::new(USERADD)
+    let base = pctwin_types::process::quiet(USERADD)
         .arg("-D")
         .stdin(Stdio::null())
         .stderr(Stdio::null())

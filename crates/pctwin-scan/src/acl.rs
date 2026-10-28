@@ -10,7 +10,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::Duration;
 
@@ -69,7 +69,7 @@ fn getent(what: &str) -> Option<String> {
     if cfg!(target_os = "macos") {
         return None;
     }
-    let out = Command::new("getent")
+    let out = pctwin_types::process::quiet("getent")
         .arg(what)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -81,22 +81,22 @@ fn getent(what: &str) -> Option<String> {
 
 /// macOS keeps people and groups in its directory service, not in /etc.
 fn mac_groups(groups: &mut UnixGroups) {
-    let users = Command::new("dscl")
+    let users = pctwin_types::process::quiet("dscl")
         .args([".", "-list", "/Users", "UniqueID"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
-    let primary = Command::new("dscl")
+    let primary = pctwin_types::process::quiet("dscl")
         .args([".", "-list", "/Users", "PrimaryGroupID"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
-    let gids = Command::new("dscl")
+    let gids = pctwin_types::process::quiet("dscl")
         .args([".", "-list", "/Groups", "PrimaryGroupID"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
-    let members = Command::new("dscl")
+    let members = pctwin_types::process::quiet("dscl")
         .args([".", "-list", "/Groups", "GroupMembership"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -219,11 +219,11 @@ impl WindowsAcl {
         if self.helper.is_none() {
             let mut command = match &self.clean {
                 Some((exe, env)) => {
-                    let mut c = Command::new(exe);
+                    let mut c = pctwin_types::process::quiet(exe);
                     c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
                     c
                 }
-                None => Command::new(
+                None => pctwin_types::process::quiet(
                     std::env::var_os("SystemRoot")
                         .map(|r| {
                             std::path::PathBuf::from(r)

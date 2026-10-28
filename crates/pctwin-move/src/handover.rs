@@ -470,7 +470,7 @@ mod held_tests {
     fn link_folder(target: &Path, link: &Path) {
         #[cfg(windows)]
         {
-            let out = std::process::Command::new("cmd")
+            let out = pctwin_types::process::quiet("cmd")
                 .args(["/C", "mklink", "/J"])
                 .arg(link)
                 .arg(target)

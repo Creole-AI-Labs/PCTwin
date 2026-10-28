@@ -3,7 +3,7 @@
 //! 9.16, "Sweep order").
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -324,7 +324,7 @@ pub(crate) fn run_powershell(script: &str) -> Result<String, String> {
     let exe = std::env::var_os("SystemRoot")
         .map(|r| PathBuf::from(r).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
         .unwrap_or_else(|| PathBuf::from("powershell"));
-    let mut command = Command::new(exe);
+    let mut command = pctwin_types::process::quiet(exe);
     command
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .stdin(Stdio::null())

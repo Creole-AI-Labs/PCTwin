@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -82,7 +82,7 @@ pub fn system_drive_health() -> Health {
 
 /// Runs a system tool with a time limit, without a console window on Windows.
 fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new(program);
+    let mut command = pctwin_types::process::quiet(program);
     command
         .args(args)
         .stdin(Stdio::null())

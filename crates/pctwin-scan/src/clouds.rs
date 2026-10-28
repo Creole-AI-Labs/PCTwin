@@ -514,14 +514,14 @@ pub fn seen_on_this_laptop(home: &Path) -> Vec<Seen> {
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
         let system32 = Path::new(&root).join("System32");
-        let sid = std::process::Command::new(system32.join("whoami.exe"))
+        let sid = pctwin_types::process::quiet(system32.join("whoami.exe"))
             .args(["/user", "/fo", "csv", "/nh"])
             .stdin(std::process::Stdio::null())
             .output()
             .ok()
             .and_then(|o| crate::census::sid_from_whoami(&String::from_utf8_lossy(&o.stdout)));
         if let Some(sid) = sid
-            && let Ok(out) = std::process::Command::new(system32.join("reg.exe"))
+            && let Ok(out) = pctwin_types::process::quiet(system32.join("reg.exe"))
                 .args([
                     "query",
                     r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager",
