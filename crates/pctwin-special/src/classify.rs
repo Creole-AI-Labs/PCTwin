@@ -196,6 +196,8 @@ fn whole(path: &Path, max: u64) -> Result<Vec<u8>, String> {
 
 /// Why a file was not read through.
 const NO_ANSWER: &str = "it did not answer in time: not fully checked";
+/// Why a file was not looked into.
+const OUT_OF_TIME: &str = "not fully checked: the time for this folder ran out";
 
 /// Runs `f` on `path` within [`guard::READ_LIMIT`].
 fn within<T: Send + 'static>(
@@ -607,7 +609,13 @@ impl Build<'_> {
 /// Splits and classifies the app data folder `folder`, found on `system`, with the catalogue
 /// row `row` that knows it (if any).
 pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> FolderReport {
-    classify_within(folder, row, MAX_DEPTH, MAX_FILES)
+    classify_within(
+        folder,
+        row,
+        MAX_DEPTH,
+        MAX_FILES,
+        std::time::Instant::now() + FOLDER_TIME,
+    )
 }
 
 /// [`classify_folder`] with its walk's limits given.
@@ -616,6 +624,7 @@ fn classify_within(
     row: Option<&SpecialRow>,
     max_depth: usize,
     max_files: usize,
+    deadline: std::time::Instant,
 ) -> FolderReport {
     let mut w = Walk {
         files: Vec::new(),
@@ -624,7 +633,7 @@ fn classify_within(
         unreadable: Vec::new(),
         max_depth,
         max_files,
-        deadline: std::time::Instant::now() + FOLDER_TIME,
+        deadline,
     };
     let base = folder.path();
     match std::fs::symlink_metadata(&base) {
@@ -735,6 +744,10 @@ fn classify_within(
         b.push(members, Custody::Portable, false, vec![Evidence::LiveStore]);
     }
 
+    // Past the folder's time, nothing more is read: what is left is "not fully checked".
+    let deadline = w.deadline;
+    let late = || std::time::Instant::now() >= deadline;
+
     // JSON facts, read once.
     let json: BTreeMap<String, Result<JsonFacts, String>> = by_rel
         .values()
@@ -742,6 +755,8 @@ fn classify_within(
         .map(|f| {
             let facts = if f.len as usize > content::MAX_JSON {
                 Err("too large to read".to_string())
+            } else if late() {
+                Err(OUT_OF_TIME.to_string())
             } else {
                 whole(&f.path, content::MAX_JSON as u64)
                     .and_then(|bytes| content::json_facts(&bytes).map_err(|e| e.to_string()))
@@ -771,14 +786,33 @@ fn classify_within(
         if members.len() > 1 {
             ev.push(Evidence::SqliteCompanion);
         }
-        let kind = within(&f.path, |p| {
-            content::sqlite_tables(p).map(|t| content::db_kind(&t))
-        })
-        .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())));
+        let kind = if late() {
+            Err(content::ContentError::Damaged(OUT_OF_TIME.into()))
+        } else {
+            within(&f.path, |p| {
+                content::sqlite_tables(p).map(|t| content::db_kind(&t))
+            })
+            .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
+        };
         match kind {
             Ok(DbKind::Ordinary) => {
-                if let Some(Ok(paths)) = within(&f.path, content::sqlite_paths) {
-                    ev.extend(link_evidence(&base, &paths));
+                // SQLite stops its own scan before the reader's limit or the folder's time.
+                let until = deadline.min(
+                    std::time::Instant::now() + guard::READ_LIMIT
+                        - std::time::Duration::from_secs(2),
+                );
+                match within(&f.path, move |p| content::sqlite_paths(p, until)) {
+                    Some(Ok((paths, complete))) => {
+                        ev.extend(link_evidence(&base, &paths));
+                        if !complete {
+                            ev.push(Evidence::MissingPart {
+                                what: "the files it links to were not all checked in time".into(),
+                            });
+                        }
+                    }
+                    _ => ev.push(Evidence::MissingPart {
+                        what: "the files it links to could not be checked".into(),
+                    }),
                 }
                 b.push(members, Custody::Portable, false, ev)
             }
@@ -920,6 +954,7 @@ fn classify_within(
         let mut splits: BTreeMap<u16, BTreeSet<u16>> = BTreeMap::new();
         for m in &members {
             if by_rel.get(m).is_some_and(|f| f.shape == Shape::Gguf)
+                && !late()
                 && let Some((no, count)) = gguf_split(&by_rel[m].path)
             {
                 splits.entry(count).or_default().insert(no);
@@ -1133,18 +1168,40 @@ pub fn classify_all(
     system: System,
     catalogue: &Catalogue<SpecialRow>,
 ) -> Vec<FolderReport> {
+    classify_all_within(folders, system, catalogue, ROOT_TIME)
+}
+
+/// The most time all the folders of one root kind may take together; folders past it are
+/// reported "not fully checked" without being read.
+pub const ROOT_TIME: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// [`classify_all`] with each root kind's time given.
+pub fn classify_all_within(
+    folders: Vec<AppDataFolder>,
+    system: System,
+    catalogue: &Catalogue<SpecialRow>,
+    root_time: std::time::Duration,
+) -> Vec<FolderReport> {
     let reading = catalogue.read(folders, |f, row| row.matches(system, f));
-    let mut out: Vec<FolderReport> = reading
-        .known
-        .iter()
-        .map(|(f, row)| classify_folder(f, Some(row)))
-        .collect();
-    out.extend(
-        reading
-            .found_not_supported
-            .iter()
-            .map(|f| classify_folder(f, None)),
-    );
+    let mut ends: BTreeMap<RootKind, std::time::Instant> = BTreeMap::new();
+    let mut one = |f: &AppDataFolder, row: Option<&SpecialRow>| {
+        let now = std::time::Instant::now();
+        let root_end = *ends.entry(f.root).or_insert(now + root_time);
+        classify_within(
+            f,
+            row,
+            MAX_DEPTH,
+            MAX_FILES,
+            root_end.min(now + FOLDER_TIME),
+        )
+    };
+    let mut out: Vec<FolderReport> = Vec::new();
+    for (f, row) in &reading.known {
+        out.push(one(f, Some(row)));
+    }
+    for f in &reading.found_not_supported {
+        out.push(one(f, None));
+    }
     out
 }
 
@@ -1352,7 +1409,7 @@ mod tests {
         std::fs::write(app.join("a/b/in.txt"), b"x").unwrap();
         std::fs::write(deep.join("too-deep.txt"), b"x").unwrap();
         // Two folders down are read; the third is reported, not read.
-        let r = classify_within(&folder_at(&app), None, 2, 100);
+        let r = classify_within(&folder_at(&app), None, 2, 100, far());
         let members: Vec<&String> = r.components.iter().flat_map(|c| &c.members).collect();
         assert!(members.contains(&&"a/b/in.txt".to_string()));
         assert!(!members.iter().any(|m| m.ends_with("too-deep.txt")));
@@ -1360,7 +1417,7 @@ mod tests {
             rel: "a/b/c".into(),
             why: Skip::NotRead
         }));
-        let r = classify_within(&folder_at(&app), None, 3, 100);
+        let r = classify_within(&folder_at(&app), None, 3, 100, far());
         assert!(r.not_moved.is_empty());
 
         // Past the count, files and folders are reported, not read.
@@ -1369,7 +1426,7 @@ mod tests {
         for n in ["1.txt", "2.txt", "3.txt", "4.txt"] {
             std::fs::write(many.join(n), b"x").unwrap();
         }
-        let r = classify_within(&folder_at(&many), None, 10, 3);
+        let r = classify_within(&folder_at(&many), None, 10, 3, far());
         let not_read: Vec<&str> = r
             .not_moved
             .iter()
@@ -1510,6 +1567,51 @@ mod tests {
         );
         let ev = link_evidence_within(&base, &paths, LINK_ASK, LINK_TIME);
         assert!(matches!(&ev[..], [Evidence::LinksOutside { .. }]), "{ev:?}");
+    }
+
+    fn far() -> std::time::Instant {
+        std::time::Instant::now() + std::time::Duration::from_secs(600)
+    }
+
+    #[test]
+    fn past_its_time_a_folder_is_reported_not_fully_checked_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("App");
+        std::fs::create_dir_all(app.join("sub")).unwrap();
+        std::fs::write(app.join("a.txt"), b"x").unwrap();
+        std::fs::write(app.join("sub/b.txt"), b"x").unwrap();
+        let r = classify_within(&folder_at(&app), None, 10, 100, std::time::Instant::now());
+        assert!(
+            r.components
+                .iter()
+                .all(|c| c.members.is_empty() || c.custody == Custody::Unresolved)
+        );
+        let mut not_read: Vec<&str> = r
+            .not_moved
+            .iter()
+            .filter(|n| n.why == Skip::NotRead)
+            .map(|n| n.rel.as_str())
+            .collect();
+        not_read.sort();
+        assert_eq!(not_read, vec!["a.txt", "sub"]);
+        // A root's time spent: its later folders are not read either.
+        let other = dir.path().join("Other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("c.txt"), b"x").unwrap();
+        let reports = classify_all_within(
+            vec![folder_at(&app), folder_at(&other)],
+            System::Windows,
+            &Catalogue::shipped(crate::catalogue::SHIPPED),
+            std::time::Duration::ZERO,
+        );
+        for r in reports {
+            assert!(
+                r.not_moved.iter().all(|n| n.why == Skip::NotRead),
+                "{:?}",
+                r.not_moved
+            );
+            assert!(r.components.iter().all(|c| c.members.is_empty()));
+        }
     }
 
     #[test]
