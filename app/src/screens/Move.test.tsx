@@ -284,7 +284,9 @@ describe("the move, once paired", () => {
   it("shows the measured progress, then pausing and paused with a way to stop that asks first", async () => {
     await host(true);
     send("move-progress", runningQuiet);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("progress-title"));
+    // The old laptop says it is sending; the new laptop says it is being set up.
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("progress-title-old"));
+    expect(screen.getByRole("button", { name: text("move-stop") })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: text("progress-pause") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_pause");
     send("move-progress", pausing);
@@ -661,6 +663,14 @@ describe("the window", () => {
     expect(onWindow).toHaveBeenLastCalledWith("everyday");
     showPlan(plan);
     expect(onWindow).toHaveBeenLastCalledWith("expanded");
+    // A progress word never takes the plan off the screen: only the person's approval does.
+    send("move-progress", runningQuiet);
+    expect(onWindow).toHaveBeenLastCalledWith("expanded");
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
+    fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-starting-title"));
+    });
     send("move-progress", runningQuiet);
     expect(onWindow).toHaveBeenLastCalledWith("everyday");
     fireEvent.click(screen.getByRole("button", { name: text("progress-compact") }));

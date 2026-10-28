@@ -91,6 +91,15 @@ pctwin_types::listed_enum! {
     }
 }
 
+/// The bytes both laptops show as done: the planned size of every file the new laptop has
+/// finished with (copied and checked, already there, needing the person, or failed). Both
+/// laptops count it the same way from the new laptop's own word on each file, so the sending and
+/// the receiving screens show the same figure; bytes merely sent (old laptop) or written but not
+/// yet checked (new laptop) never count (found by the first real test, 28 October 2026).
+pub(crate) fn bytes_shown(r: &pctwin_transfer::MeterReading) -> u64 {
+    r.bytes_through
+}
+
 /// What C09 and C10 say is kept: the bytes copied and checked so far, and the plan's size.
 fn saved(meter: &pctwin_transfer::MoveMeter) -> (u64, u64) {
     let r = meter.reading();
@@ -1040,7 +1049,7 @@ fn progress_view(
             .collect(),
         counts: (&r.files).into(),
         bytes: Bytes {
-            checked: r.bytes_checked.saturating_add(r.bytes_already_there),
+            checked: bytes_shown(r),
             total: r.bytes_planned,
         },
         current: r
@@ -2824,6 +2833,29 @@ fn old_laptop_apps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sending and the receiving laptop show the same figure: only files the new laptop has
+    /// finished with, never bytes merely sent or written (first real test, 28 October 2026).
+    #[test]
+    fn both_laptops_show_only_what_the_new_laptop_finished() {
+        let sending = pctwin_transfer::MeterReading {
+            bytes_sent: 3_500,
+            bytes_confirmed: 3_400,
+            bytes_through: 3_000,
+            bytes_planned: 6_000,
+            ..Default::default()
+        };
+        let receiving = pctwin_transfer::MeterReading {
+            bytes_written: 3_300,
+            bytes_checked: 2_900,
+            bytes_already_there: 100,
+            bytes_through: 3_000,
+            bytes_planned: 6_000,
+            ..Default::default()
+        };
+        assert_eq!(bytes_shown(&sending), 3_000);
+        assert_eq!(bytes_shown(&sending), bytes_shown(&receiving));
+    }
 
     /// Gap 9 (28 October 2026): a place the move lands in that this laptop's system keeps in a
     /// sync service's folder (Documents kept in OneDrive, say) is said on the plan with the

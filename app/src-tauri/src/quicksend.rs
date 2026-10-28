@@ -292,10 +292,7 @@ fn progress_view(snap: &pctwin_transfer::MeterSnapshot, paused: bool) -> Progres
         },
         files_done: f.copied + f.already_there,
         files_total: f.total,
-        bytes_done: r
-            .bytes_checked
-            .saturating_add(r.bytes_already_there)
-            .max(r.bytes_confirmed),
+        bytes_done: crate::moving::bytes_shown(r),
         bytes_total: r.bytes_planned,
         current: None,
         failed: f.failed,
