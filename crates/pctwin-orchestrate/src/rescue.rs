@@ -248,11 +248,29 @@ impl ReadOnlyLevel {
 /// counts as mounted for writing.
 pub fn read_only_level(path: &Path) -> ReadOnlyLevel {
     let disks = sysinfo::Disks::new_with_refreshed_list();
-    let disk = disks
+    // Mac and Linux: the volume the path is really on, by its device number. The longest mount
+    // point its name starts with is not enough: on a Mac, `/var/...` and a person's home live on
+    // the writable data volume while their names start with `/`, the read-only system volume.
+    #[cfg(unix)]
+    let same_volume = {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(path).ok().map(|m| m.dev());
+        move |mount: &Path| dev.is_some() && std::fs::metadata(mount).ok().map(|m| m.dev()) == dev
+    };
+    #[cfg(not(unix))]
+    let same_volume = |_: &Path| false;
+    let by_device = disks
         .list()
         .iter()
-        .filter(|d| path.starts_with(d.mount_point()))
+        .filter(|d| same_volume(d.mount_point()))
         .max_by_key(|d| d.mount_point().as_os_str().len());
+    let disk = by_device.or_else(|| {
+        disks
+            .list()
+            .iter()
+            .filter(|d| path.starts_with(d.mount_point()))
+            .max_by_key(|d| d.mount_point().as_os_str().len())
+    });
     match disk {
         Some(d) if d.is_read_only() => ReadOnlyLevel::MountedReadOnly,
         _ => ReadOnlyLevel::ReadByPctwinOnly,
