@@ -16,7 +16,7 @@ import { RouteStrip } from "./ProgressParts";
 import Outcome from "./Outcome";
 import outcomes from "../contract/move-outcome.json";
 import { parseMoveOutcome } from "../bridge";
-import ChooseWhat, { choiceOf } from "./ChooseWhat";
+import ChooseWhat, { choiceOf, keyOf, stateOf } from "./ChooseWhat";
 import { next } from "./MoveHost";
 
 const l10n = localization("en");
@@ -53,15 +53,33 @@ describe("choosing what moves, on the old laptop", () => {
   it("every example the engine writes parses, and anything else is refused", () => {
     for (const c of chooses) expect(parseChoiceView(c)).not.toBeNull();
     expect(parseChoiceView({ groups: [], apps: 1 })).toBeNull();
+    expect(parseChoiceView({ groups: [], folders: [{ role: "documents", parts: [1], files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
     expect(parseChoiceView({ groups: [{ role: "nowhere", files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
   });
 
-  it("Everything moves every group and the apps; Everything except leaves the ticked; Only moves the ticked", () => {
+  it("Everything moves every folder and the apps; the others move exactly the ticked folders", () => {
     const v = found();
-    expect(choiceOf(v, "everything", [], false)).toEqual({ groups: ["documents", "pictures"], apps: true });
-    expect(choiceOf(v, "except", ["pictures"], true)).toEqual({ groups: ["documents"], apps: false });
-    expect(choiceOf(v, "only", ["pictures"], false)).toEqual({ groups: ["pictures"], apps: false });
-    expect(choiceOf(v, "only", [], true)).toEqual({ groups: [], apps: true });
+    const all = new Set(v.folders.map(keyOf));
+    expect(choiceOf(v, "everything", new Set(), false)).toEqual({ folders: v.folders.map((f) => ({ role: f.role, parts: f.parts })), apps: true });
+    const work = keyOf({ role: "documents", parts: ["Work"] });
+    expect(choiceOf(v, "only", new Set([work]), false)).toEqual({ folders: [{ role: "documents", parts: ["Work"] }], apps: false });
+    all.delete(work);
+    expect(choiceOf(v, "except", all, true).folders).not.toContainEqual({ role: "documents", parts: ["Work"] });
+  });
+
+  it("a folder with some of its folders ticked is partly ticked, and ticking it ticks all of it", () => {
+    const v = found();
+    const docs = v.folders.find((f) => f.role === "documents" && f.parts.length === 0);
+    if (!docs) throw new Error("Documents is in the example");
+    expect(stateOf(v, docs, new Set([keyOf({ role: "documents", parts: ["Work"] })]))).toBe("mixed");
+    inApp(<ChooseWhat view={v} onContinue={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: text("choose-only") }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-open", { name: text("plan-role-documents") }) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith("Work") }));
+    const box = screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-documents")) });
+    expect(box.getAttribute("aria-checked")).toBe("mixed");
+    fireEvent.click(box);
+    expect(box.getAttribute("aria-checked")).toBe("true");
   });
 
   it("Everything except starts with what PCTwin leaves behind anyway, caches first", () => {
@@ -78,15 +96,16 @@ describe("choosing what moves, on the old laptop", () => {
     const go = screen.getByRole("button", { name: text("choose-continue") });
     expect((go as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(text("choose-nothing"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-documents")) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-pictures")) }));
     fireEvent.click(go);
-    expect(onContinue).toHaveBeenCalledWith({ groups: ["documents"], apps: false });
+    expect(onContinue).toHaveBeenCalledWith({ folders: [{ role: "pictures", parts: [] }], apps: false });
   });
 
   it("has no accessibility violations in any of the three choices", async () => {
     inApp(<ChooseWhat view={found()} onContinue={vi.fn()} />);
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("radio", { name: text("choose-except") }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-open", { name: text("plan-role-documents") }) }));
     expect(await violations()).toEqual([]);
   });
 

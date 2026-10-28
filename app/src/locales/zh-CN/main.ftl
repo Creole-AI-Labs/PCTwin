@@ -1854,7 +1854,13 @@ choose-mode = 要搬什么
 choose-everything = 全部
 choose-except = 全部，除了
 choose-only = 只搬我选的
-choose-except-hint = 勾选要留下的内容。
+choose-except-hint = 取消勾选要留下的内容。
+choose-open = 打开 { $name }
+choose-close = 收起 { $name }
+choose-total =
+    { $files ->
+       *[other] { $files } 个文件
+    } · 已选：{ $size }
 choose-only-hint = 勾选要带走的内容。
 choose-apps = 应用、设置和应用数据
 choose-apps-count =

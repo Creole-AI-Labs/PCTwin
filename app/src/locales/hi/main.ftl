@@ -2089,7 +2089,14 @@ choose-mode = क्या ले जाएँ
 choose-everything = सब कुछ
 choose-except = सब कुछ, इनके सिवा
 choose-only = सिर्फ़ जो मैं चुनूँ
-choose-except-hint = जो छोड़ना है उस पर निशान लगाएँ।
+choose-except-hint = जो छोड़ना है उससे निशान हटाएँ।
+choose-open = { $name } खोलें
+choose-close = { $name } बंद करें
+choose-total =
+    { $files ->
+        [one] 1 फ़ाइल
+       *[other] { $files } फ़ाइलें
+    } · चुना गया: { $size }
 choose-only-hint = जो ले जाना है उस पर निशान लगाएँ।
 choose-apps = ऐप, सेटिंग और ऐप डेटा
 choose-apps-count =

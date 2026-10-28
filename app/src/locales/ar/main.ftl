@@ -2372,7 +2372,18 @@ choose-mode = ما الذي يُنقل
 choose-everything = كل شيء
 choose-except = كل شيء ما عدا
 choose-only = فقط ما أختاره
-choose-except-hint = ضع علامة على ما تتركه.
+choose-except-hint = أزل العلامة عمّا تتركه.
+choose-open = فتح { $name }
+choose-close = إغلاق { $name }
+choose-total =
+    { $files ->
+        [zero] { $files } من الملفات
+        [one] ملف واحد
+        [two] { $files } من الملفات
+        [few] { $files } من الملفات
+        [many] { $files } من الملفات
+       *[other] { $files } من الملفات
+    } · المختار: { $size }
 choose-only-hint = ضع علامة على ما تأخذه.
 choose-apps = التطبيقات والإعدادات وبيانات التطبيقات
 choose-apps-count =

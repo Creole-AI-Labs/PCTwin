@@ -430,3 +430,22 @@
 .mini-box button {
   cursor: pointer;
 }
+
+/* The old laptop's folder tree: each level a little further in, the open button beside its tick. */
+.mv-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mv-tree .mv-tree {
+  padding-inline-start: 24px;
+}
+.mv-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mv-tree-spacer {
+  display: inline-block;
+  width: 36px;
+}

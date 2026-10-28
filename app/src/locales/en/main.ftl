@@ -1967,7 +1967,14 @@ choose-mode = What to move
 choose-everything = Everything
 choose-except = Everything except
 choose-only = Only what I choose
-choose-except-hint = Tick what to leave behind.
+choose-except-hint = Untick what to leave behind.
+choose-open = Open { $name }
+choose-close = Close { $name }
+choose-total =
+    { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } · Chosen: { $size }
 choose-only-hint = Tick what to bring.
 choose-apps = Apps, settings and app data
 choose-apps-count =

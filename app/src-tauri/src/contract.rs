@@ -913,6 +913,26 @@ fn families() -> Vec<(&'static str, Value)> {
                             bytes: 41_000_000_000,
                         },
                     ],
+                    folders: vec![
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Documents,
+                            parts: Vec::new(),
+                            files: 40,
+                            bytes: 200_000_000,
+                        },
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Documents,
+                            parts: vec!["Work".into()],
+                            files: 1_200,
+                            bytes: 3_000_000_000,
+                        },
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Pictures,
+                            parts: Vec::new(),
+                            files: 8_400,
+                            bytes: 41_000_000_000,
+                        },
+                    ],
                     apps: 12,
                     left_behind: vec![crate::moving::LeftBehind {
                         why: pctwin_record::LeftOutReason::Rebuildable,
@@ -922,6 +942,7 @@ fn families() -> Vec<(&'static str, Value)> {
                 },
                 crate::moving::ChoiceView {
                     groups: Vec::new(),
+                    folders: Vec::new(),
                     apps: 0,
                     left_behind: Vec::new(),
                 },
@@ -1280,7 +1301,7 @@ fn calls() -> Value {
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
             { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
-            { "name": "move_choose_what", "args": [["choice", { "groups": ["documents"], "apps": true }]] },
+            { "name": "move_choose_what", "args": [["choice", { "folders": [{ "role": "documents", "parts": ["Work"] }], "apps": true }]] },
         ],
         "events": {
             "old": OLD_EVENT,

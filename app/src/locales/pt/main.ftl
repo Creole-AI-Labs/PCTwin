@@ -2153,7 +2153,15 @@ choose-mode = O que levar
 choose-everything = Tudo
 choose-except = Tudo, exceto
 choose-only = Só o que eu escolher
-choose-except-hint = Marque o que deixar para trás.
+choose-except-hint = Desmarque o que deixar para trás.
+choose-open = Abrir { $name }
+choose-close = Fechar { $name }
+choose-total =
+    { $files ->
+        [one] 1 arquivo
+        [many] { $files } arquivos
+       *[other] { $files } arquivos
+    } · Escolhido: { $size }
 choose-only-hint = Marque o que levar.
 choose-apps = Apps, configurações e dados de apps
 choose-apps-count =

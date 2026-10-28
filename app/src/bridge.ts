@@ -738,12 +738,14 @@ export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", 
 /** The old laptop: what it found, for the person to choose what moves (`ChoiceView`, event `move-choose`). */
 export type ChoiceGroup = { role: FolderRole; files: number; bytes: number };
 export type LeftBehind = { why: (typeof LEFT_OUT_REASONS)[number]; items: number; bytes: number };
-export type ChoiceView = { groups: ChoiceGroup[]; apps: number; leftBehind: LeftBehind[] };
-/** The person's choice: the groups that move, and whether apps, settings and app data do. */
-export type Choice = { groups: FolderRole[]; apps: boolean };
+/** One folder of the tree (`parts` empty for the group itself): the files counted in it. */
+export type ChoiceFolder = { role: FolderRole; parts: string[]; files: number; bytes: number };
+export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[] };
+/** The person's choice: the folders whose files move, and whether apps, settings and app data do. */
+export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean };
 
 export function parseChoiceView(v: unknown): ChoiceView | null {
-  const f = exactly(v, ["groups", "apps", "leftBehind"]);
+  const f = exactly(v, ["groups", "folders", "apps", "leftBehind"]);
   if (!f || !isCount(f.apps)) return null;
   const groups = listOf(f.groups, (x) => {
     const g = exactly(x, ["role", "files", "bytes"]);
@@ -753,7 +755,12 @@ export function parseChoiceView(v: unknown): ChoiceView | null {
     const l = exactly(x, ["why", "items", "bytes"]);
     return l && oneOf(l.why, LEFT_OUT_REASONS) && isCount(l.items) && isCount(l.bytes) ? { why: l.why, items: l.items, bytes: l.bytes } : null;
   });
-  return groups && leftBehind ? { groups, apps: f.apps, leftBehind } : null;
+  const folders = listOf(f.folders, (x) => {
+    const d = exactly(x, ["role", "parts", "files", "bytes"]);
+    const parts = d ? listOf(d.parts, (p) => (typeof p === "string" ? p : null)) : null;
+    return d && parts && oneOf(d.role, FOLDER_ROLES) && isCount(d.files) && isCount(d.bytes) ? { role: d.role, parts, files: d.files, bytes: d.bytes } : null;
+  });
+  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind } : null;
 }
 /** The old laptop: the person's choice of what moves. */
 export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });

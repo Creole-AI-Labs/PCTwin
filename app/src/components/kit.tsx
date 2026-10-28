@@ -142,11 +142,20 @@ export function Toggle({ checked, onChange, label, hint }: { checked: boolean; o
   );
 }
 
-export function Checkbox({ checked, onChange, label, hint }: { checked: boolean; onChange: (on: boolean) => void; label: ReactNode; hint?: ReactNode }) {
+/**
+ * A checkbox. `mixed`: some, not all, of what it stands for is ticked (a folder with some of its
+ * folders chosen); the box shows the browser's own mixed state, which screen readers say, and a
+ * click then ticks all of it.
+ */
+export function Checkbox({ checked, onChange, label, hint, mixed = false }: { checked: boolean; onChange: (on: boolean) => void; label: ReactNode; hint?: ReactNode; mixed?: boolean }) {
   return (
     <label className="kit-check">
       <input
         type="checkbox"
+        ref={(el) => {
+          if (el) el.indeterminate = mixed;
+        }}
+        aria-checked={mixed ? "mixed" : checked}
         checked={checked}
         onChange={(e) => {
           onChange(e.target.checked);

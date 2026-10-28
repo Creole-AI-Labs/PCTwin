@@ -1,6 +1,28 @@
 [
   {
     "apps": 12,
+    "folders": [
+      {
+        "bytes": 200000000,
+        "files": 40,
+        "parts": [],
+        "role": "documents"
+      },
+      {
+        "bytes": 3000000000,
+        "files": 1200,
+        "parts": [
+          "Work"
+        ],
+        "role": "documents"
+      },
+      {
+        "bytes": 41000000000,
+        "files": 8400,
+        "parts": [],
+        "role": "pictures"
+      }
+    ],
     "groups": [
       {
         "bytes": 3200000000,
@@ -23,6 +45,7 @@
   },
   {
     "apps": 0,
+    "folders": [],
     "groups": [],
     "leftBehind": []
   }

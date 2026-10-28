@@ -426,8 +426,13 @@
           "choice",
           {
             "apps": true,
-            "groups": [
-              "documents"
+            "folders": [
+              {
+                "parts": [
+                  "Work"
+                ],
+                "role": "documents"
+              }
             ]
           }
         ]
