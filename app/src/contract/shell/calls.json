@@ -401,10 +401,21 @@
     {
       "args": [],
       "name": "fullmove_undo"
+    },
+    {
+      "args": [
+        [
+          "retry",
+          true
+        ]
+      ],
+      "name": "move_appdata_answer"
     }
   ],
   "events": {
     "guard": "guard-view",
+    "moveAppdata": "move-appdata",
+    "moveAppdataOpen": "move-appdata-open",
     "moveFinished": "move-finished",
     "moveFound": "move-found",
     "moveLink": "move-link",

@@ -13,7 +13,10 @@ import { parseMoveOutcome, parsePlanView } from "../bridge";
 import { parseRebuildStep } from "../fullmove";
 import { localization } from "../i18n";
 import { violations } from "../testing/a11y";
-import { RebuildPlanSection, Rebuilding, RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
+import { AppDataComing, CloseApps, RebuildPlanSection, Rebuilding, RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
+import appdata from "../contract/move-appdata.json";
+import opens from "../contract/move-appdata-open.json";
+import { parseAppsOpen, parseDataProgress } from "../fullmove";
 import { next } from "./MoveHost";
 
 const l10n = localization("en");
@@ -143,5 +146,39 @@ describe("the outcome's apps, settings and app data", () => {
     const { rebuilt } = fullOutcome();
     inApp(<RebuiltSection rebuilt={{ ...rebuilt, canUndo: false }} onUndo={() => undefined} />);
     expect(screen.queryByRole("button", { name: text("fullmove-outcome-undo") })).toBeNull();
+  });
+});
+
+describe("the app data before the files", () => {
+  it("the new laptop says how far the old laptop's app data is, and what it waits for there", () => {
+    const p = parseDataProgress(appdata[1]);
+    if (!p) throw new Error("parses");
+    inApp(<AppDataComing progress={p} />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("fullmove-appdata-title"));
+    expect(plain(screen.getByRole("status").textContent)).toBe(plain(text("fullmove-appdata-progress", { done: "2", total: "3" })));
+    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-appdata-waiting", { apps: "Chromey" })));
+  });
+
+  it("the old laptop names the apps to close, with Try again and Go on without them", () => {
+    const o = parseAppsOpen(opens[0]);
+    if (!o) throw new Error("parses");
+    const onAnswer = vi.fn();
+    inApp(<CloseApps apps={o.apps} onAnswer={onAnswer} />);
+    expect(document.body.textContent).toContain("Chromey");
+    fireEvent.click(screen.getByRole("button", { name: text("fullmove-close-again") }));
+    expect(onAnswer).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: text("fullmove-close-without") }));
+    expect(onAnswer).toHaveBeenCalledWith(false);
+  });
+
+  it("the old laptop's progress takes the page before the files, and the files' progress takes it on", () => {
+    const p = parseDataProgress(appdata[0]);
+    if (!p) throw new Error("parses");
+    const wait = { kind: "wait", stage: "moving" } as const;
+    const coming = next(wait, { kind: "appdata", progress: p });
+    expect(coming.kind).toBe("appdata");
+    expect(next(coming, { kind: "stage", stage: { kind: "moving" } })).toBe(coming);
+    expect(next(coming, { kind: "progress", progress: {} as never }).kind).toBe("progress");
+    expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"] } })).toEqual({ kind: "close-apps", apps: ["Mail"] });
   });
 });

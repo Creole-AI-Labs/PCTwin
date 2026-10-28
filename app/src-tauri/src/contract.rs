@@ -742,6 +742,27 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-progress", json(progress())),
         ("move-outcome", json(outcomes())),
         (
+            "move-appdata",
+            json([
+                pctwin_fullmove::data::DataProgress {
+                    done: 1,
+                    total: 3,
+                    waiting_for: vec![],
+                },
+                pctwin_fullmove::data::DataProgress {
+                    done: 2,
+                    total: 3,
+                    waiting_for: vec!["Chromey".into()],
+                },
+            ]),
+        ),
+        (
+            "move-appdata-open",
+            json([crate::fullmove::AppsOpen {
+                apps: vec!["Chromey".into(), "Mail".into()],
+            }]),
+        ),
+        (
             "move-rebuild",
             json([
                 pctwin_fullmove::run::Progress::Permission,
@@ -1089,6 +1110,7 @@ fn calls() -> Value {
             { "name": "guard_view", "args": [] },
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
             { "name": "fullmove_undo", "args": [] },
+            { "name": "move_appdata_answer", "args": [["retry", true]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -1105,6 +1127,8 @@ fn calls() -> Value {
             "moveLink": crate::moving::LINK_EVENT,
             "moveRebuild": crate::fullmove::REBUILD_EVENT,
             "moveUndoClosed": crate::fullmove::UNDO_CLOSED_EVENT,
+            "moveAppdata": crate::fullmove::APPDATA_EVENT,
+            "moveAppdataOpen": crate::fullmove::APPDATA_OPEN_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

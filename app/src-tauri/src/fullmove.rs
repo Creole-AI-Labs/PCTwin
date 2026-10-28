@@ -53,11 +53,28 @@ pub type AppFullMove = Arc<FullMoveState>;
 
 /// The state, with the role keys made now (once per program; `None` if they were made already,
 /// and the program must then not start).
+/// One state per program: building the app again in the same program (its permission tests do)
+/// is given the same keys, never a second set.
+static STATE: std::sync::OnceLock<Option<AppFullMove>> = std::sync::OnceLock::new();
+
 pub fn new_state() -> Option<AppFullMove> {
-    // One state per program: building the app again in the same program (its permission tests
-    // do) is given the same keys, never a second set.
-    static STATE: std::sync::OnceLock<Option<AppFullMove>> = std::sync::OnceLock::new();
     STATE.get_or_init(made).clone()
+}
+
+/// The 2.5 role's key, for the program's whole life (the capture runs on a thread of its own).
+fn capture_key() -> Option<&'static pctwin_grant::CaptureKey> {
+    STATE.get()?.as_ref().map(|s| &s.keys.capture)
+}
+
+/// The new laptop: the old laptop's progress with the app data (`move-appdata`).
+pub const APPDATA_EVENT: &str = "move-appdata";
+/// The old laptop: apps to close before their data can be read (`move-appdata-open`).
+pub const APPDATA_OPEN_EVENT: &str = "move-appdata-open";
+
+/// The apps the person is asked to close on the old laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppsOpen {
+    pub apps: Vec<String>,
 }
 
 fn made() -> Option<AppFullMove> {
@@ -734,23 +751,50 @@ pub fn data_staging<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf
 }
 
 /// The old laptop's app data source for the move (`None`: nothing found in time).
-pub fn data_source<'a, R: Runtime>(
-    app: &'a AppHandle<R>,
+pub fn data_source<R: Runtime>(
+    app: &AppHandle<R>,
+    moving: &crate::moving::AppMoving,
     found: Option<&pctwin_fullmove::extras::SpecialFound>,
-) -> Option<pctwin_fullmove::data::Source<'a>> {
+) -> Option<pctwin_fullmove::data::Source> {
     let found = found?;
-    let state = app.try_state::<AppFullMove>()?;
-    let key: &'a pctwin_grant::CaptureKey = &state.inner().keys.capture;
+    let key = capture_key()?;
     let mut b = [0u8; 8];
     getrandom::fill(&mut b).ok()?;
     let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
     let work = std::env::temp_dir().join(format!("pctwin-capture-{tag}"));
-    Some(pctwin_fullmove::data::Source::new(
-        found.planned.clone(),
-        key,
-        &pctwin_special::capture::SystemHolders,
-        work,
-    ))
+    // An app still open: the person is shown which ones to close, and answers Try again or Go
+    // on without them (no answer in time is "go on without").
+    let (app, moving) = (app.clone(), moving.clone());
+    let ask = Box::new(move |apps: &[String]| {
+        let answer = moving.wait_for_close();
+        let _ = app.emit(
+            APPDATA_OPEN_EVENT,
+            AppsOpen {
+                apps: apps.iter().map(|a| name(a)).collect(),
+            },
+        );
+        answer
+            .recv_timeout(Duration::from_secs(600))
+            .unwrap_or(false)
+    });
+    Some(
+        pctwin_fullmove::data::Source::new(
+            found.planned.clone(),
+            key,
+            std::sync::Arc::new(pctwin_special::capture::SystemHolders),
+            work,
+        )
+        .asking(ask),
+    )
+}
+
+/// The old laptop: the person's answer about the apps to close (true: try again).
+#[tauri::command]
+pub fn move_appdata_answer(
+    moving: State<'_, crate::moving::AppMoving>,
+    retry: bool,
+) -> Result<(), crate::moving::MoveProblem> {
+    moving.close_answer(retry)
 }
 
 /// An adapter for a laptop with no settings mechanism: nothing is read or written.

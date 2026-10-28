@@ -250,6 +250,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         guard::guard_view,
         guard::guard_intent,
         fullmove::fullmove_undo,
+        fullmove::move_appdata_answer,
     ]
 }
 

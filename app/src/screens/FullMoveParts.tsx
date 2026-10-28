@@ -8,7 +8,9 @@
  */
 import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Section } from "../components/kit";
-import type { ChangeView, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
+import type { ChangeView, DataProgress, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
+import { shownName } from "../names";
+import FrameFooter from "./FrameFooter";
 import { Attention, Check } from "../icons";
 import { pageLocale } from "../move";
 import { TopStrip } from "./FrameParts";
@@ -186,4 +188,58 @@ export function RebuiltSection({ rebuilt, onUndo }: { rebuilt: Rebuilt; onUndo?:
 /** How many of the full move's lines need the person (added to R01's "needs action" figure). */
 export function rebuiltNeedsAction(rebuilt: Rebuilt | undefined): number {
   return rebuilt ? rebuilt.lines.filter((l) => l.status === "needs-action").length : 0;
+}
+
+/** The new laptop, while the old laptop's app data comes: measured, and what the old laptop waits for. */
+export function AppDataComing({ progress }: { progress: DataProgress }) {
+  const { l10n } = useLocalization();
+  return (
+    <>
+      <TopStrip labelId="outcome-eyebrow" />
+      <Heading id="fullmove-appdata-title" />
+      <p className="subhead" role="status">
+        {l10n.getString("fullmove-appdata-progress", { done: progress.done.toLocaleString(pageLocale()), total: progress.total.toLocaleString(pageLocale()) })}
+      </p>
+      {progress.waitingFor.length > 0 && (
+        <div className="mv-note">
+          <Banner tone="attention">{l10n.getString("fullmove-appdata-waiting", { apps: progress.waitingFor.map(shownName).join(", ") })}</Banner>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The old laptop: apps to close before their data can be read, with Try again or Go on without them. */
+export function CloseApps({ apps, onAnswer }: { apps: string[]; onAnswer: (retry: boolean) => void }) {
+  const { l10n } = useLocalization();
+  return (
+    <>
+      <TopStrip labelId="move-wait-eyebrow" />
+      <Heading id="fullmove-close-title" />
+      <p className="subhead">{l10n.getString("fullmove-close-body")}</p>
+      <RowList>
+        {apps.map((a) => (
+          <Row key={a} title={<Name>{a}</Name>} />
+        ))}
+      </RowList>
+      <FrameFooter>
+        <Button
+          variant="quiet"
+          onClick={() => {
+            onAnswer(false);
+          }}
+        >
+          {l10n.getString("fullmove-close-without")}
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            onAnswer(true);
+          }}
+        >
+          {l10n.getString("fullmove-close-again")}
+        </Button>
+      </FrameFooter>
+    </>
+  );
 }

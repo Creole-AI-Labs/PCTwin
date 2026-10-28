@@ -144,3 +144,22 @@ export function parseRebuildStep(v: unknown): RebuildStep | null {
   }
   return null;
 }
+
+/** The old laptop's progress with the app data (`DataProgress`, event `move-appdata`). */
+export type DataProgress = { done: number; total: number; waitingFor: string[] };
+
+export function parseDataProgress(v: unknown): DataProgress | null {
+  const f = exactly(v, ["done", "total", "waitingFor"]);
+  if (!f || !isCount(f.done) || !isCount(f.total) || f.done > f.total) return null;
+  const waitingFor = listOf(f.waitingFor, (x) => (typeof x === "string" ? x : null));
+  return waitingFor ? { done: f.done, total: f.total, waitingFor } : null;
+}
+
+/** The apps to close on the old laptop before their data can be read (`AppsOpen`, event `move-appdata-open`). */
+export type AppsOpen = { apps: string[] };
+
+export function parseAppsOpen(v: unknown): AppsOpen | null {
+  const f = exactly(v, ["apps"]);
+  const apps = f ? listOf(f.apps, (x) => (typeof x === "string" ? x : null)) : null;
+  return apps ? { apps } : null;
+}
