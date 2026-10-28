@@ -339,13 +339,30 @@ pub fn here(
     );
     let mut x = from_discovery(system, found, folders);
     if let Some(home) = home {
-        let (special, not_moved) = special_here(owner, home, apps);
-        x.special = special;
-        x.special_searched = true;
-        x.special_not_moved = not_moved;
+        // Looking for the special categories reads app data folders, which can be large: it gets
+        // a time budget. If it does not finish in time, nothing is listed from it and the plan
+        // says the special categories were not moved (the reading carries on, read only, and its
+        // answer is not used).
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (owner, home, apps) = (owner.clone(), home.to_path_buf(), apps.to_vec());
+        let spawned = std::thread::Builder::new()
+            .name("pctwin-special-scan".into())
+            .spawn(move || {
+                let _ = tx.send(special_here(&owner, &home, &apps));
+            });
+        if spawned.is_ok()
+            && let Ok((special, not_moved)) = rx.recv_timeout(SPECIAL_BUDGET)
+        {
+            x.special = special;
+            x.special_searched = true;
+            x.special_not_moved = not_moved;
+        }
     }
     x
 }
+
+/// How long looking for the special categories may take on the old laptop.
+pub const SPECIAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(90);
 
 #[cfg(test)]
 mod tests {

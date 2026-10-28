@@ -316,6 +316,8 @@ impl FullPlan {
             paths: &map,
             same_screens: false,
             hints: Catalogue::starter_hints(),
+            // What this laptop says can run, read once per program (warm it at start).
+            facts: pctwin_settings::judge::Facts::system(),
         };
         let found = Discovery {
             found: x.settings.clone(),

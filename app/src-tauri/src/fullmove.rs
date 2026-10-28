@@ -61,6 +61,13 @@ pub fn new_state() -> Option<AppFullMove> {
 }
 
 fn made() -> Option<AppFullMove> {
+    // What this laptop says can run is read once (a few seconds), as PCTwin starts, never per
+    // setting.
+    let _ = std::thread::Builder::new()
+        .name("pctwin-facts".into())
+        .spawn(|| {
+            let _ = pctwin_settings::judge::Facts::system();
+        });
     Some(Arc::new(FullMoveState {
         keys: pctwin_grant::RoleKeys::mint()?,
         last: Mutex::new(None),

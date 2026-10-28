@@ -351,9 +351,11 @@ impl<'a> WingetInstaller<'a> {
     /// Installs one prepared download through the helper, then looks at what is really there.
     fn install_one(&mut self, p: &Prepared, app: &FoundApp) -> AppResult {
         let Some(plan) = self.plan.clone() else {
+            // The helper never ran (declined, or it could not start, such as a packages folder
+            // it would not trust): nothing was installed; the person installs it.
             return AppResult::because(match self.down {
                 Some(HelperDown::Declined) => Reason::Permission,
-                _ => Reason::InstallFailed,
+                _ => Reason::ManualInstall,
             });
         };
         let Action::InstallVerifiedPackage(pkg) = &p.op.action else {
@@ -363,7 +365,9 @@ impl<'a> WingetInstaller<'a> {
             .map_err(|e| e.to_string())
             .and_then(|mut f| self.helper.stage(pkg.artifact, pkg.sha256, p.size, &mut f));
         if staged.is_err() {
-            return AppResult::because(Reason::InstallFailed);
+            // The helper did not take the download (its own folder refused it): nothing was
+            // installed; the person installs it from the maker.
+            return AppResult::because(Reason::ManualInstall);
         }
         let before: Vec<String> = self.machine.entries().into_iter().map(|e| e.key).collect();
         let installed = match self.request(&plan, &p.op.action_id, p.op.action.clone()) {
@@ -378,7 +382,7 @@ impl<'a> WingetInstaller<'a> {
             Err(_) => Installed::Failed,
         };
         let now = self.machine.entries();
-        let probe = after::probe(app, &now);
+        let probe = after::probe(app, pkg.scope, &now);
         let extra = after::extras(&before, &now, probe.key.as_deref());
         let result: ItemResult = after::result(app, installed, &probe, &extra, Opened::NotChecked);
         AppResult {
