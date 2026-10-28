@@ -415,12 +415,27 @@
         ]
       ],
       "name": "move_appdata_answer"
+    },
+    {
+      "args": [
+        [
+          "choice",
+          {
+            "apps": true,
+            "groups": [
+              "documents"
+            ]
+          }
+        ]
+      ],
+      "name": "move_choose_what"
     }
   ],
   "events": {
     "guard": "guard-view",
     "moveAppdata": "move-appdata",
     "moveAppdataOpen": "move-appdata-open",
+    "moveChoose": "move-choose",
     "moveFinished": "move-finished",
     "moveFound": "move-found",
     "moveLink": "move-link",

@@ -2147,3 +2147,61 @@ fullmove-outcome-here-older = Une version plus ancienne ({ $version }) est sur c
 fullmove-outcome-here-badge = Laissée telle quelle
 fullmove-outcome-fresh = Les applications installées par PCTwin repartent de zéro. Ouvrez chacune et connectez-vous si elle le demande.
 progress-may-sleep = Cet ordinateur risque de se mettre en veille pendant le transfert. Gardez-le branché et ouvert.
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = Que voulez-vous déplacer ?
+choose-body = Choisissez ici, sur le portable où sont vos affaires. Votre nouveau portable vous montrera ensuite ce qui arrive et vous demandera de l'accepter.
+choose-mode = Quoi déplacer
+choose-everything = Tout
+choose-except = Tout sauf
+choose-only = Seulement ce que je choisis
+choose-except-hint = Cochez ce qu'il faut laisser.
+choose-only-hint = Cochez ce qu'il faut emporter.
+choose-apps = Applications, réglages et données d'applications
+choose-apps-count =
+    { $count ->
+        [one] 1 application, avec ses réglages
+        [many] { $count } applications, avec leurs réglages
+       *[other] { $count } applications, avec leurs réglages
+    }
+choose-group-size =
+    { $files ->
+        [one] 1 fichier
+        [many] { $files } fichiers
+       *[other] { $files } fichiers
+    } · { $size }
+choose-left-title = Laissé de toute façon
+choose-left-badge = Laissé
+choose-left-caches = Caches et fichiers temporaires
+choose-left-chosen-by-user = Ce que vous avez choisi de laisser
+choose-left-work-managed = Les fichiers de votre travail ou de votre école
+choose-left-device-bound = Ce qui est lié à ce portable, comme les clés d'accès
+choose-left-unreadable = Les fichiers que PCTwin n'a pas pu lire
+choose-left-cloud-only = Les fichiers gardés uniquement en ligne
+choose-left-system = Des parties de Windows lui-même
+choose-left-too-many-files = Des dossiers trop grands pour un seul déplacement
+choose-left-rebuildable = Ce que votre nouveau portable peut recréer, comme les paquets téléchargés
+choose-nothing = Choisissez au moins une chose à déplacer.
+choose-continue = Continuer
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } veut vous envoyer ceci.
+accept-body = Cela a été choisi sur votre ancien portable. Acceptez, et PCTwin le déplace ici.
+accept-files =
+    { $count ->
+        [one] 1 fichier
+        [many] { $count } fichiers
+       *[other] { $count } fichiers
+    }
+accept-apps =
+    { $count ->
+        [one] 1 application, installée pour vous
+        [many] { $count } applications, installées pour vous
+       *[other] { $count } applications, installées pour vous
+    }
+accept-settings = Réglages et données d'applications
+accept-fits = Cela tient sur ce portable.
+accept-needs = Quelque chose demande votre attention d'abord. Voyez les détails.
+accept-not-now = Pas maintenant
+accept-details = Voir les détails
+accept-accept = Accepter

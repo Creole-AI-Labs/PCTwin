@@ -59,6 +59,7 @@ const COMMANDS: &[&str] = &[
     "guard_intent",
     "fullmove_undo",
     "move_appdata_answer",
+    "move_choose_what",
 ];
 
 fn main() {

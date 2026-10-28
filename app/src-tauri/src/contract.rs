@@ -883,6 +883,36 @@ fn families() -> Vec<(&'static str, Value)> {
             }]),
         ),
         (
+            "move-choose",
+            json([
+                crate::moving::ChoiceView {
+                    groups: vec![
+                        crate::moving::ChoiceGroup {
+                            role: FolderRole::Documents,
+                            files: 1_240,
+                            bytes: 3_200_000_000,
+                        },
+                        crate::moving::ChoiceGroup {
+                            role: FolderRole::Pictures,
+                            files: 8_400,
+                            bytes: 41_000_000_000,
+                        },
+                    ],
+                    apps: 12,
+                    left_behind: vec![crate::moving::LeftBehind {
+                        why: pctwin_record::LeftOutReason::Rebuildable,
+                        items: 3,
+                        bytes: 900_000_000,
+                    }],
+                },
+                crate::moving::ChoiceView {
+                    groups: Vec::new(),
+                    apps: 0,
+                    left_behind: Vec::new(),
+                },
+            ]),
+        ),
+        (
             "move-rebuild",
             json([
                 pctwin_fullmove::run::Progress::Permission,
@@ -1232,6 +1262,7 @@ fn calls() -> Value {
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
             { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
+            { "name": "move_choose_what", "args": [["choice", { "groups": ["documents"], "apps": true }]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -1250,6 +1281,7 @@ fn calls() -> Value {
             "moveUndoClosed": crate::fullmove::UNDO_CLOSED_EVENT,
             "moveAppdata": crate::fullmove::APPDATA_EVENT,
             "moveAppdataOpen": crate::fullmove::APPDATA_OPEN_EVENT,
+            "moveChoose": crate::moving::CHOOSE_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

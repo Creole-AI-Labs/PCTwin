@@ -61,6 +61,7 @@
     "allow-guard-intent",
     "allow-fullmove-undo",
     "allow-move-appdata-answer",
+    "allow-move-choose-what",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     {

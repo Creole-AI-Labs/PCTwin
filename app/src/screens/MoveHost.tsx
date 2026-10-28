@@ -9,6 +9,7 @@ import {
   moveApprove,
   moveBegin,
   moveChoosePlace,
+  moveChooseWhat,
   movePause,
   movePeopleHere,
   movePlacePeople,
@@ -20,6 +21,7 @@ import {
   moveRetry,
   moveStop,
   toMoveProblem,
+  type ChoiceView,
   type ConnectionView,
   type HelpStep,
   type HelpTopic,
@@ -30,7 +32,9 @@ import {
   type Peer,
   type WaitStage,
 } from "../bridge";
+import AcceptMove from "./AcceptMove";
 import BeforeYouStart from "./BeforeYouStart";
+import ChooseWhat from "./ChooseWhat";
 import FullDiskAccess from "./FullDiskAccess";
 import type { BeforeItem } from "../people";
 import PlaceOthers from "./PlaceOthers";
@@ -40,13 +44,12 @@ import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
 import { setWindowMode, type WindowMode } from "../native";
 import MiniPanel from "./MiniPanel";
-import { overviewOf, type Approval, type FolderRole, type PlanView } from "../plan";
+import type { Approval, FolderRole, PlanView } from "../plan";
 import DriveProblem from "./DriveProblem";
 import MoveEnded, { type MoveEnd } from "./MoveEnded";
 import MoveWaiting from "./MoveWaiting";
 import Outcome from "./Outcome";
 import PlanReview, { type ChosenPlace, type PlaceNote } from "./PlanReview";
-import Overview from "./Overview";
 import MeetLaptop from "./MeetLaptop";
 import CheckConnection from "./CheckConnection";
 import { connectionCheck, peerReadiness, type Greeted, type Naming, type WaitingState } from "../connection";
@@ -65,6 +68,8 @@ import StopMove from "./StopMove";
 type View =
   /** The old laptop: who lives here, before the move starts (M06). */
   | { kind: "who"; here: PeopleHere }
+  /** The old laptop: the person chooses what moves (decided 28 October 2026). */
+  | { kind: "choose"; choice: ChoiceView }
   | { kind: "wait"; stage: WaitStage }
   | { kind: "plan"; plan: PlanView }
   /** The new laptop: where the other people's things go (M06). */
@@ -129,6 +134,8 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "who":
     case "privacy":
       return "finding";
+    case "choose":
+      return "approving";
     case "wait":
       if (view.stage === "scanning" || view.stage === "administrator") return "finding";
       if (view.stage === "moving") return "moving";
@@ -184,6 +191,8 @@ export function next(view: View, event: MoveEvent): View {
       return view.kind === "wait" ? { kind: "wait", stage: event.stage.kind } : view;
     case "plan":
       return { kind: "plan", plan: event.plan };
+    case "choose":
+      return { kind: "choose", choice: event.choice };
     case "people":
       return { kind: "people", toPlace: event.toPlace };
     case "privacy":
@@ -195,7 +204,7 @@ export function next(view: View, event: MoveEvent): View {
     case "progress":
       // A page waiting on the person (the plan, who is moving, where others go, privacy) is only
       // left by their answer, never by a progress word.
-      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy") return view;
+      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy" || view.kind === "choose") return view;
       return view.kind === "reconnecting" ? view : { kind: "progress", progress: event.progress };
     case "finished":
       return { kind: "outcome", outcome: event.outcome };
@@ -443,6 +452,18 @@ export default function MoveHost({
           onStop={stopNow}
         />
       );
+    case "choose":
+      return (
+        <ChooseWhat
+          view={view.choice}
+          onContinue={(choice) => {
+            setView({ kind: "wait", stage: "waiting" });
+            moveChooseWhat(choice).catch((error: unknown) => {
+              setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
+            });
+          }}
+        />
+      );
     case "privacy":
       return (
         <FullDiskAccess
@@ -481,11 +502,33 @@ export default function MoveHost({
         />
       );
     case "plan":
+      // The choosing was done on the old laptop: here one tap accepts what comes (decided 28
+      // October 2026); the full plan is there for the details, and for a place when it does not fit.
       if (!overviewSeen) {
-        const seen = () => {
-          setOverviewSeen(true);
-        };
-        return <Overview view={overviewOf(view.plan)} people={false} onOpen={seen} onContinue={seen} />;
+        const key = { revision: view.plan.revision, fingerprint: view.plan.fingerprint };
+        return (
+          <AcceptMove
+            plan={view.plan}
+            from={otherLaptop}
+            onAccept={() => {
+              moveApprove(key, true, [], []).then(
+                () => {
+                  setView({ kind: "wait", stage: "moving" });
+                },
+                (error: unknown) => {
+                  if (toMoveProblem(error).kind === "plan-changed") setPlanChanged(true);
+                  else setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
+                },
+              );
+            }}
+            onDetails={() => {
+              setOverviewSeen(true);
+            }}
+            onNotNow={() => {
+              void moveApprove(key, false).catch(() => undefined);
+            }}
+          />
+        );
       }
       return (
         <PlanReview

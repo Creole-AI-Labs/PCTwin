@@ -2138,3 +2138,61 @@ fullmove-outcome-here-older = En esta laptop hay una versión anterior ({ $versi
 fullmove-outcome-here-badge = Se deja como está
 fullmove-outcome-fresh = Las apps que instaló PCTwin empiezan desde cero. Abre cada una e inicia sesión si te lo pide.
 progress-may-sleep = Esta laptop podría suspenderse durante el traslado. Mantenla conectada y abierta.
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = ¿Qué quieres mover?
+choose-body = Elige aquí, en el portátil donde están tus cosas. Tu nuevo portátil te mostrará lo que llega y te pedirá que lo aceptes.
+choose-mode = Qué mover
+choose-everything = Todo
+choose-except = Todo excepto
+choose-only = Solo lo que elija
+choose-except-hint = Marca lo que quieras dejar.
+choose-only-hint = Marca lo que quieras llevar.
+choose-apps = Aplicaciones, ajustes y datos de aplicaciones
+choose-apps-count =
+    { $count ->
+        [one] 1 aplicación, con sus ajustes
+        [many] { $count } aplicaciones, con sus ajustes
+       *[other] { $count } aplicaciones, con sus ajustes
+    }
+choose-group-size =
+    { $files ->
+        [one] 1 archivo
+        [many] { $files } archivos
+       *[other] { $files } archivos
+    } · { $size }
+choose-left-title = Se quedan de todos modos
+choose-left-badge = Se queda
+choose-left-caches = Cachés y archivos temporales
+choose-left-chosen-by-user = Lo que elegiste dejar
+choose-left-work-managed = Archivos de tu trabajo o escuela
+choose-left-device-bound = Cosas ligadas a este portátil, como las llaves de acceso
+choose-left-unreadable = Archivos que PCTwin no pudo leer
+choose-left-cloud-only = Archivos guardados solo en línea
+choose-left-system = Partes del propio Windows
+choose-left-too-many-files = Carpetas demasiado grandes para un solo traslado
+choose-left-rebuildable = Cosas que tu nuevo portátil puede volver a crear, como paquetes descargados
+choose-nothing = Elige al menos una cosa para mover.
+choose-continue = Continuar
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } quiere enviarte esto.
+accept-body = Se eligió en tu portátil antiguo. Acéptalo y PCTwin lo trae aquí.
+accept-files =
+    { $count ->
+        [one] 1 archivo
+        [many] { $count } archivos
+       *[other] { $count } archivos
+    }
+accept-apps =
+    { $count ->
+        [one] 1 aplicación, instalada para ti
+        [many] { $count } aplicaciones, instaladas para ti
+       *[other] { $count } aplicaciones, instaladas para ti
+    }
+accept-settings = Ajustes y datos de aplicaciones
+accept-fits = Cabe en este portátil.
+accept-needs = Algo necesita tu atención primero. Mira los detalles.
+accept-not-now = Ahora no
+accept-details = Ver los detalles
+accept-accept = Aceptar

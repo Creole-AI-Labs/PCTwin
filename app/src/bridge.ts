@@ -717,6 +717,29 @@ export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportI
 export const fullmoveUndo = (id: string | null) => run("fullmove_undo", { id });
 /** The old laptop: the person's answer about the apps to close (true: try again). */
 export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", { retry });
+
+/** The old laptop: what it found, for the person to choose what moves (`ChoiceView`, event `move-choose`). */
+export type ChoiceGroup = { role: FolderRole; files: number; bytes: number };
+export type LeftBehind = { why: (typeof LEFT_OUT_REASONS)[number]; items: number; bytes: number };
+export type ChoiceView = { groups: ChoiceGroup[]; apps: number; leftBehind: LeftBehind[] };
+/** The person's choice: the groups that move, and whether apps, settings and app data do. */
+export type Choice = { groups: FolderRole[]; apps: boolean };
+
+export function parseChoiceView(v: unknown): ChoiceView | null {
+  const f = exactly(v, ["groups", "apps", "leftBehind"]);
+  if (!f || !isCount(f.apps)) return null;
+  const groups = listOf(f.groups, (x) => {
+    const g = exactly(x, ["role", "files", "bytes"]);
+    return g && oneOf(g.role, FOLDER_ROLES) && isCount(g.files) && isCount(g.bytes) ? { role: g.role, files: g.files, bytes: g.bytes } : null;
+  });
+  const leftBehind = listOf(f.leftBehind, (x) => {
+    const l = exactly(x, ["why", "items", "bytes"]);
+    return l && oneOf(l.why, LEFT_OUT_REASONS) && isCount(l.items) && isCount(l.bytes) ? { why: l.why, items: l.items, bytes: l.bytes } : null;
+  });
+  return groups && leftBehind ? { groups, apps: f.apps, leftBehind } : null;
+}
+/** The old laptop: the person's choice of what moves. */
+export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });
 /** The undo the screens opened is over (the person went back). */
 export const listenUndoClosed = (handler: () => void): Promise<UnlistenFn> =>
   listen<unknown>("move-undo-closed", () => {
@@ -737,7 +760,8 @@ export type MoveEvent =
   | { kind: "link"; link: ConnectionView }
   | { kind: "rebuild"; step: RebuildStep }
   | { kind: "appdata"; progress: DataProgress }
-  | { kind: "appdata-open"; open: AppsOpen };
+  | { kind: "appdata-open"; open: AppsOpen }
+  | { kind: "choose"; choice: ChoiceView };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -761,6 +785,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
     on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
     on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
+    on("move-choose", parseChoiceView, (choice) => ({ kind: "choose", choice })),
   ]);
   return () => {
     for (const stop of all) stop();

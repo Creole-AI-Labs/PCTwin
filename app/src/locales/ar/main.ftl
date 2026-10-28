@@ -2361,3 +2361,73 @@ fullmove-outcome-here-older = يوجد على هذا الحاسوب إصدار �
 fullmove-outcome-here-badge = تُرك كما هو
 fullmove-outcome-fresh = التطبيقات التي ثبّتها PCTwin تبدأ من جديد. افتح كل واحد منها وسجّل الدخول إن طلب ذلك.
 progress-may-sleep = قد يدخل هذا الحاسوب في وضع السكون أثناء النقل. أبقه موصولًا بالكهرباء ومفتوحًا.
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = ماذا تريد أن تنقل؟
+choose-body = اختر هنا، على الحاسوب الذي فيه أغراضك. بعدها يعرض حاسوبك الجديد ما سيصل ويطلب منك قبوله.
+choose-mode = ما الذي يُنقل
+choose-everything = كل شيء
+choose-except = كل شيء ما عدا
+choose-only = فقط ما أختاره
+choose-except-hint = ضع علامة على ما تتركه.
+choose-only-hint = ضع علامة على ما تأخذه.
+choose-apps = التطبيقات والإعدادات وبيانات التطبيقات
+choose-apps-count =
+    { $count ->
+        [zero] { $count } من التطبيقات مع إعداداتها
+        [one] تطبيق واحد مع إعداداته
+        [two] { $count } من التطبيقات مع إعداداتها
+        [few] { $count } من التطبيقات مع إعداداتها
+        [many] { $count } من التطبيقات مع إعداداتها
+       *[other] { $count } من التطبيقات مع إعداداتها
+    }
+choose-group-size =
+    { $files ->
+        [zero] { $files } من الملفات
+        [one] ملف واحد
+        [two] { $files } من الملفات
+        [few] { $files } من الملفات
+        [many] { $files } من الملفات
+       *[other] { $files } من الملفات
+    } · { $size }
+choose-left-title = يبقى هنا في كل الأحوال
+choose-left-badge = يبقى
+choose-left-caches = ذاكرة التخزين المؤقت والملفات المؤقتة
+choose-left-chosen-by-user = ما اخترت تركه
+choose-left-work-managed = ملفات عملك أو مدرستك
+choose-left-device-bound = أشياء مرتبطة بهذا الحاسوب، مثل مفاتيح المرور
+choose-left-unreadable = ملفات لم يستطع PCTwin قراءتها
+choose-left-cloud-only = ملفات محفوظة على الإنترنت فقط
+choose-left-system = أجزاء من Windows نفسه
+choose-left-too-many-files = مجلدات أكبر من أن تُنقل مرة واحدة
+choose-left-rebuildable = أشياء يستطيع حاسوبك الجديد إنشاءها من جديد، مثل الحزم المنزّلة
+choose-nothing = اختر شيئًا واحدًا على الأقل لنقله.
+choose-continue = متابعة
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = يريد { $from } أن يرسل إليك هذا.
+accept-body = تم اختيار هذا على حاسوبك القديم. اقبله، وينقله PCTwin إلى هنا.
+accept-files =
+    { $count ->
+        [zero] { $count } من الملفات
+        [one] ملف واحد
+        [two] { $count } من الملفات
+        [few] { $count } من الملفات
+        [many] { $count } من الملفات
+       *[other] { $count } من الملفات
+    }
+accept-apps =
+    { $count ->
+        [zero] { $count } من التطبيقات، تُثبَّت لك
+        [one] تطبيق واحد، يُثبَّت لك
+        [two] { $count } من التطبيقات، تُثبَّت لك
+        [few] { $count } من التطبيقات، تُثبَّت لك
+        [many] { $count } من التطبيقات، تُثبَّت لك
+       *[other] { $count } من التطبيقات، تُثبَّت لك
+    }
+accept-settings = الإعدادات وبيانات التطبيقات
+accept-fits = يتسع له هذا الحاسوب.
+accept-needs = هناك ما يحتاج إليك أولًا. اطّلع على التفاصيل.
+accept-not-now = ليس الآن
+accept-details = عرض التفاصيل
+accept-accept = قبول

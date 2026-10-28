@@ -82,12 +82,11 @@ function send(event: string, payload: unknown) {
   });
 }
 
-/** The engine sends the plan; the overview (M03) comes first, once, and Continue goes on to the plan. */
+/** The engine sends the plan; the one-tap accept comes first, once, and "See the details" goes on to the full plan. */
 function showPlan(p: unknown) {
   send("move-plan", p);
-  if (screen.queryByRole("heading", { level: 1, name: text("overview-title") })) {
-    fireEvent.click(screen.getByRole("button", { name: text("overview-continue") }));
-  }
+  const details = screen.queryByRole("button", { name: text("accept-details") });
+  if (details) fireEvent.click(details);
 }
 
 async function host(old: boolean) {
@@ -110,7 +109,7 @@ const plan = plans[0] as Omit<(typeof plans)[0], "rebuild">;
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(13);
+    expect(tauri.handlers.size).toBe(14);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -179,15 +178,14 @@ describe("the move, once paired", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-lost-title"));
   });
 
-  it("new laptop: the overview (M03) comes once, before the first plan, with the plan's own totals", async () => {
+  it("new laptop: one tap accepts what the old laptop chose, once, before the first plan, with the plan's own totals", async () => {
     await host(false);
     send("move-plan", plan);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("overview-title"));
-    // 34 files, from the plan; the people were placed on their own page, so there is no People row.
-    expect(plain(document.body.textContent)).toContain("34");
-    expect(screen.queryByText(text("overview-people-title"))).toBeNull();
-    // Any row's Review goes to the plan, where each part is changed.
-    fireEvent.click(screen.getAllByRole("button", { name: (n) => n.includes(text("overview-review")) })[0]);
+    expect(plain(screen.getByRole("heading", { level: 1 }).textContent)).toBe(plain(text("accept-title", { from: text("qs-label-other") })));
+    // 34 files, from the plan.
+    expect(plain(document.body.textContent)).toContain(plain(text("accept-files", { count: 34 })));
+    // See the details opens the full plan, where a place can be chosen.
+    fireEvent.click(screen.getByRole("button", { name: text("accept-details") }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("plan-title"));
     // A later revision of the plan does not show the overview again.
     send("move-plan", { ...plan, revision: 3 });

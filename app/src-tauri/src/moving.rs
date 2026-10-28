@@ -240,8 +240,110 @@ struct Run {
     placing: Option<Placing>,
     /// The old laptop: the person's answer to the Full Disk Access guide (true: look again).
     privacy: Option<oneshot::Sender<bool>>,
+    /// The old laptop: the groups shown for the person to choose from, and where their choice of
+    /// what moves goes (decided 28 October 2026).
+    choosing: Option<(
+        std::collections::BTreeSet<FolderRole>,
+        oneshot::Sender<Choice>,
+    )>,
     report: Vec<ReportItem>,
     finished: bool,
+}
+
+/// The old laptop: what it found, for the person to choose what moves (`move-choose`).
+pub const CHOOSE_EVENT: &str = "move-choose";
+
+/// One group of the person's files the old laptop found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceGroup {
+    pub role: FolderRole,
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// Things PCTwin leaves behind anyway, shown already ticked under "Everything except".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeftBehind {
+    pub why: pctwin_record::LeftOutReason,
+    pub items: u64,
+    pub bytes: u64,
+}
+
+/// What the old laptop's person chooses from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceView {
+    pub groups: Vec<ChoiceGroup>,
+    /// Apps found (their settings and app data come with them).
+    pub apps: u64,
+    pub left_behind: Vec<LeftBehind>,
+}
+
+/// The person's choice: the groups that move, and whether apps, settings and app data do. The
+/// screens turn Everything, Everything except and Only what I choose into this; it can only
+/// leave things out of what was shown, never add to it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Choice {
+    pub groups: Vec<FolderRole>,
+    pub apps: bool,
+}
+
+/// What the person can choose from in `record`: their included files by group, and what is left
+/// out anyway (not their own choice), counted.
+fn choice_view(record: &Record) -> ChoiceView {
+    let mut groups: BTreeMap<FolderRole, (u64, u64)> = BTreeMap::new();
+    let mut left: BTreeMap<String, (pctwin_record::LeftOutReason, u64, u64)> = BTreeMap::new();
+    for item in &record.items {
+        match item.inclusion {
+            pctwin_record::Inclusion::Included => {
+                if matches!(item.kind, pctwin_record::ItemKind::File) {
+                    let g = groups.entry(item.place.role).or_default();
+                    g.0 += 1;
+                    g.1 = g.1.saturating_add(item.size_bytes);
+                }
+            }
+            pctwin_record::Inclusion::LeftOut { reason } => {
+                if reason == pctwin_record::LeftOutReason::ChosenByUser {
+                    continue;
+                }
+                let key = format!("{reason:?}");
+                let l = left.entry(key).or_insert((reason, 0, 0));
+                l.1 += 1;
+                l.2 = l.2.saturating_add(item.size_bytes);
+            }
+        }
+    }
+    ChoiceView {
+        groups: groups
+            .into_iter()
+            .map(|(role, (files, bytes))| ChoiceGroup { role, files, bytes })
+            .collect(),
+        apps: record.apps.found.len() as u64,
+        left_behind: left
+            .into_values()
+            .map(|(why, items, bytes)| LeftBehind { why, items, bytes })
+            .collect(),
+    }
+}
+
+/// Leaves out of `record` every file in a group the person did not choose (their own choice,
+/// said as such on the new laptop), and the apps when they chose none.
+fn apply_choice(record: &mut Record, choice: &Choice) {
+    let kept: std::collections::BTreeSet<FolderRole> = choice.groups.iter().copied().collect();
+    for item in &mut record.items {
+        if item.inclusion == pctwin_record::Inclusion::Included && !kept.contains(&item.place.role)
+        {
+            item.inclusion = pctwin_record::Inclusion::LeftOut {
+                reason: pctwin_record::LeftOutReason::ChosenByUser,
+            };
+        }
+    }
+    if !choice.apps {
+        record.apps = Default::default();
+    }
 }
 
 /// The people the new laptop asked the mover to place.
@@ -294,6 +396,7 @@ impl Moving {
             chosen: BTreeMap::new(),
             placing: None,
             privacy: None,
+            choosing: None,
             report: Vec::new(),
             finished: false,
         });
@@ -314,6 +417,33 @@ impl Moving {
             run.privacy = Some(tx);
         }
         rx
+    }
+
+    /// The old laptop: waits for the person's choice of what moves among `groups`.
+    fn wait_for_choice(
+        &self,
+        groups: std::collections::BTreeSet<FolderRole>,
+    ) -> oneshot::Receiver<Choice> {
+        let (tx, rx) = oneshot::channel();
+        if let Some(run) = lock(&self.run).as_mut() {
+            run.choosing = Some((groups, tx));
+        }
+        rx
+    }
+
+    /// The person's choice of what moves: only groups that were shown, once.
+    fn choose_what(&self, choice: Choice) -> Result<(), MoveProblem> {
+        self.with_run(|run| match run.choosing.take() {
+            Some((shown, tx)) if choice.groups.iter().all(|g| shown.contains(g)) => {
+                let _ = tx.send(choice);
+                Ok(())
+            }
+            Some(waiting) => {
+                run.choosing = Some(waiting);
+                Err(MoveProblem::PlanChanged)
+            }
+            None => Err(MoveProblem::NotMoving),
+        })?
     }
 
     /// The person's answer to the Full Disk Access guide: look again, or go on without them.
@@ -2195,7 +2325,19 @@ async fn run_old<R: Runtime>(
     if scan_stop.load(Ordering::Acquire) {
         return Err(Stop::Cancelled.into());
     }
-    let extras = crate::fullmove::extras_here(special.as_ref(), sweep.links);
+    // The person chooses what moves here, where their things are (decided 28 October 2026): it
+    // only ever leaves things out of what was found; the new laptop still accepts what comes.
+    let view = choice_view(&record);
+    let shown = view.groups.iter().map(|g| g.role).collect();
+    let answer = moving.wait_for_choice(shown);
+    let _ = app.emit(CHOOSE_EVENT, &view);
+    let choice = pctwin_move::or_stop(&live.control, async {
+        answer.await.map_err(|_| MoveError::from(Stop::Cancelled))
+    })
+    .await?;
+    apply_choice(&mut record, &choice);
+    let special = if choice.apps { special } else { None };
+    let extras = crate::fullmove::extras_here(special.as_ref(), sweep.links, choice.apps);
     // The app data the new laptop chooses is captured from these (read only), after its approval.
     let mut source = crate::fullmove::data_source(app, moving, special.as_ref());
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
@@ -2767,6 +2909,13 @@ pub fn move_retry(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
     moving.retry()
 }
 
+/// The old laptop: the person's choice of what moves (Everything, Everything except, Only what I
+/// choose), as the groups that move and whether apps, settings and app data do.
+#[tauri::command]
+pub fn move_choose_what(moving: State<'_, AppMoving>, choice: Choice) -> Result<(), MoveProblem> {
+    moving.choose_what(choice)
+}
+
 /// Stops the rest of the move (X10). Not undo: what is copied and checked stays.
 #[tauri::command]
 pub fn move_stop(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
@@ -2833,6 +2982,120 @@ fn old_laptop_apps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A record with one included file in each of `roles`, and one rebuildable folder left out.
+    fn found_in(roles: &[FolderRole]) -> Record {
+        use pctwin_record::*;
+        let laptop = LaptopId::generate().unwrap();
+        let mut record = Record::new(laptop);
+        let owner = Owner::Person {
+            account_id: "S-1".into(),
+        };
+        let mut add = |role: FolderRole, name: &str, inclusion: Inclusion| {
+            let place = Place {
+                role,
+                storage: Storage::SystemDrive,
+            };
+            let path = ItemPath::new(vec![ItemName::from_text(name)]).unwrap();
+            record.items.push(Item {
+                id: ItemId::derive(&laptop, &owner, &place, &path),
+                kind: ItemKind::File,
+                owner: owner.clone(),
+                place,
+                path,
+                size_bytes: 10,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion,
+            });
+        };
+        for (n, role) in roles.iter().enumerate() {
+            add(*role, &format!("f{n}.txt"), Inclusion::Included);
+        }
+        add(
+            FolderRole::Other,
+            "node_modules",
+            Inclusion::LeftOut {
+                reason: LeftOutReason::Rebuildable,
+            },
+        );
+        record
+    }
+
+    /// The old laptop's choice only ever leaves things out of what was found: a group not chosen
+    /// is left out as the person's own choice, the rest stays exactly as it was (decided 28
+    /// October 2026).
+    #[test]
+    fn the_old_laptops_choice_only_leaves_things_out() {
+        let mut record = found_in(&[FolderRole::Documents, FolderRole::Pictures]);
+        let view = choice_view(&record);
+        assert_eq!(
+            view.groups.iter().map(|g| g.role).collect::<Vec<_>>(),
+            [FolderRole::Documents, FolderRole::Pictures]
+        );
+        assert_eq!(
+            view.left_behind.len(),
+            1,
+            "what is left out anyway is shown"
+        );
+        apply_choice(
+            &mut record,
+            &Choice {
+                groups: vec![FolderRole::Documents],
+                apps: false,
+            },
+        );
+        let inclusion = |role| {
+            record
+                .items
+                .iter()
+                .find(|i| i.place.role == role)
+                .map(|i| i.inclusion)
+        };
+        assert_eq!(
+            inclusion(FolderRole::Documents),
+            Some(pctwin_record::Inclusion::Included)
+        );
+        assert_eq!(
+            inclusion(FolderRole::Pictures),
+            Some(pctwin_record::Inclusion::LeftOut {
+                reason: pctwin_record::LeftOutReason::ChosenByUser
+            })
+        );
+        // What was left out anyway stays left out for its own reason, never brought back.
+        assert_eq!(
+            inclusion(FolderRole::Other),
+            Some(pctwin_record::Inclusion::LeftOut {
+                reason: pctwin_record::LeftOutReason::Rebuildable
+            })
+        );
+        assert!(record.apps.is_empty());
+    }
+
+    /// A choice naming a group that was never shown is refused, and the page still waits.
+    #[test]
+    fn a_choice_of_something_never_shown_is_refused() {
+        let moving = AppMoving::default();
+        moving.begin().unwrap();
+        let mut rx = moving.wait_for_choice([FolderRole::Documents].into());
+        assert_eq!(
+            moving.choose_what(Choice {
+                groups: vec![FolderRole::Music],
+                apps: true
+            }),
+            Err(MoveProblem::PlanChanged)
+        );
+        assert!(rx.try_recv().is_err(), "no answer yet");
+        moving
+            .choose_what(Choice {
+                groups: vec![FolderRole::Documents],
+                apps: true,
+            })
+            .unwrap();
+        assert_eq!(rx.try_recv().unwrap().groups, [FolderRole::Documents]);
+    }
 
     /// The sending and the receiving laptop show the same figure: only files the new laptop has
     /// finished with, never bytes merely sent or written (first real test, 28 October 2026).

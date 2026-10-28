@@ -1843,3 +1843,53 @@ fullmove-outcome-here-older = 这台电脑上有较旧的版本（{ $version }�
 fullmove-outcome-here-badge = 保持原样
 fullmove-outcome-fresh = PCTwin 安装的应用会从头开始。请逐个打开，如有要求请登录。
 progress-may-sleep = 移动过程中这台电脑可能会进入睡眠。请保持接通电源并打开盖子。
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = 要搬哪些东西？
+choose-body = 请在放着你东西的这台笔记本电脑上选择。之后新的笔记本电脑会显示要过来的内容，并请你确认接收。
+choose-mode = 要搬什么
+choose-everything = 全部
+choose-except = 全部，除了
+choose-only = 只搬我选的
+choose-except-hint = 勾选要留下的内容。
+choose-only-hint = 勾选要带走的内容。
+choose-apps = 应用、设置和应用数据
+choose-apps-count =
+    { $count ->
+       *[other] { $count } 个应用，连同它们的设置
+    }
+choose-group-size =
+    { $files ->
+       *[other] { $files } 个文件
+    } · { $size }
+choose-left-title = 这些本来就会留下
+choose-left-badge = 留下
+choose-left-caches = 缓存和临时文件
+choose-left-chosen-by-user = 你选择留下的内容
+choose-left-work-managed = 你的工作单位或学校的文件
+choose-left-device-bound = 绑定在这台笔记本电脑上的东西，例如通行密钥
+choose-left-unreadable = PCTwin 无法读取的文件
+choose-left-cloud-only = 只保存在网上的文件
+choose-left-system = Windows 自身的部分
+choose-left-too-many-files = 太大、一次搬不完的文件夹
+choose-left-rebuildable = 新笔记本电脑可以重新生成的东西，例如下载的软件包
+choose-nothing = 请至少选择一样要搬的东西。
+choose-continue = 继续
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } 想把这些发给你。
+accept-body = 这是在你的旧笔记本电脑上选好的。接受后，PCTwin 会把它们搬到这里。
+accept-files =
+    { $count ->
+       *[other] { $count } 个文件
+    }
+accept-apps =
+    { $count ->
+       *[other] { $count } 个应用，将为你安装
+    }
+accept-settings = 设置和应用数据
+accept-fits = 这台笔记本电脑放得下。
+accept-needs = 有一项需要你先处理。请查看详情。
+accept-not-now = 暂不
+accept-details = 查看详情
+accept-accept = 接受

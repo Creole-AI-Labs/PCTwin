@@ -2078,3 +2078,57 @@ fullmove-outcome-here-older = इस लैपटॉप पर एक पुर�
 fullmove-outcome-here-badge = वैसा ही छोड़ा गया
 fullmove-outcome-fresh = PCTwin के इंस्टॉल किए ऐप नए सिरे से शुरू होते हैं। हर ऐप खोलें और माँगे तो साइन इन करें।
 progress-may-sleep = स्थानांतरण के दौरान यह लैपटॉप स्लीप में जा सकता है। इसे चार्ज पर लगा और खुला रखें।
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = क्या ले जाना है?
+choose-body = यहीं चुनें, उस लैपटॉप पर जहाँ आपकी चीज़ें हैं। फिर आपका नया लैपटॉप दिखाएगा कि क्या आ रहा है और आपसे उसे स्वीकार करने को कहेगा।
+choose-mode = क्या ले जाएँ
+choose-everything = सब कुछ
+choose-except = सब कुछ, इनके सिवा
+choose-only = सिर्फ़ जो मैं चुनूँ
+choose-except-hint = जो छोड़ना है उस पर निशान लगाएँ।
+choose-only-hint = जो ले जाना है उस पर निशान लगाएँ।
+choose-apps = ऐप, सेटिंग और ऐप डेटा
+choose-apps-count =
+    { $count ->
+        [one] 1 ऐप, उसकी सेटिंग के साथ
+       *[other] { $count } ऐप, उनकी सेटिंग के साथ
+    }
+choose-group-size =
+    { $files ->
+        [one] 1 फ़ाइल
+       *[other] { $files } फ़ाइलें
+    } · { $size }
+choose-left-title = ये वैसे भी यहीं रहेंगे
+choose-left-badge = यहीं रहेगा
+choose-left-caches = कैश और अस्थायी फ़ाइलें
+choose-left-chosen-by-user = जो आपने छोड़ना चुना
+choose-left-work-managed = आपके दफ़्तर या स्कूल की फ़ाइलें
+choose-left-device-bound = इस लैपटॉप से जुड़ी चीज़ें, जैसे पासकी
+choose-left-unreadable = वे फ़ाइलें जिन्हें PCTwin पढ़ नहीं सका
+choose-left-cloud-only = सिर्फ़ ऑनलाइन रखी फ़ाइलें
+choose-left-system = Windows के अपने हिस्से
+choose-left-too-many-files = एक बार में ले जाने के लिए बहुत बड़े फ़ोल्डर
+choose-left-rebuildable = जो चीज़ें आपका नया लैपटॉप फिर से बना सकता है, जैसे डाउनलोड किए पैकेज
+choose-nothing = ले जाने के लिए कम से कम एक चीज़ चुनें।
+choose-continue = आगे बढ़ें
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } आपको यह भेजना चाहता है।
+accept-body = यह आपके पुराने लैपटॉप पर चुना गया। स्वीकार करें, और PCTwin इसे यहाँ ले आएगा।
+accept-files =
+    { $count ->
+        [one] 1 फ़ाइल
+       *[other] { $count } फ़ाइलें
+    }
+accept-apps =
+    { $count ->
+        [one] 1 ऐप, आपके लिए इंस्टॉल होगा
+       *[other] { $count } ऐप, आपके लिए इंस्टॉल होंगे
+    }
+accept-settings = सेटिंग और ऐप डेटा
+accept-fits = यह इस लैपटॉप पर आ जाएगा।
+accept-needs = पहले किसी चीज़ पर आपका ध्यान चाहिए। विवरण देखें।
+accept-not-now = अभी नहीं
+accept-details = विवरण देखें
+accept-accept = स्वीकार करें

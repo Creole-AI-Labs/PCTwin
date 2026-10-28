@@ -1956,3 +1956,57 @@ fullmove-outcome-here-older = An older version ({ $version }) is on this laptop.
 fullmove-outcome-here-badge = Left as it is
 fullmove-outcome-fresh = Apps PCTwin installed start fresh. Open each one and sign in if it asks.
 progress-may-sleep = This laptop may go to sleep during the move. Keep it plugged in and open.
+
+## The old laptop chooses what moves (decided 28 October 2026)
+choose-title = What should move?
+choose-body = Choose here, on the laptop with your things. Your new laptop then shows what is coming and asks you to accept it.
+choose-mode = What to move
+choose-everything = Everything
+choose-except = Everything except
+choose-only = Only what I choose
+choose-except-hint = Tick what to leave behind.
+choose-only-hint = Tick what to bring.
+choose-apps = Apps, settings and app data
+choose-apps-count =
+    { $count ->
+        [one] 1 app, with its settings
+       *[other] { $count } apps, with their settings
+    }
+choose-group-size =
+    { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } · { $size }
+choose-left-title = Left behind anyway
+choose-left-badge = Left behind
+choose-left-caches = Caches and temporary files
+choose-left-chosen-by-user = Things you chose to leave
+choose-left-work-managed = Your work or school's files
+choose-left-device-bound = Things tied to this laptop, such as passkeys
+choose-left-unreadable = Files PCTwin could not read
+choose-left-cloud-only = Files kept only online
+choose-left-system = Parts of Windows itself
+choose-left-too-many-files = Folders too big for one move
+choose-left-rebuildable = Things your new laptop can make again, such as downloaded packages
+choose-nothing = Choose at least one thing to move.
+choose-continue = Continue
+
+## The new laptop accepts what the old laptop chose (decided 28 October 2026)
+accept-title = { $from } wants to send you this.
+accept-body = This was chosen on your old laptop. Accept it, and PCTwin moves it here.
+accept-files =
+    { $count ->
+        [one] 1 file
+       *[other] { $count } files
+    }
+accept-apps =
+    { $count ->
+        [one] 1 app, installed for you
+       *[other] { $count } apps, installed for you
+    }
+accept-settings = Settings and app data
+accept-fits = It fits on this laptop.
+accept-needs = Something needs you first. See the details.
+accept-not-now = Not now
+accept-details = See the details
+accept-accept = Accept
