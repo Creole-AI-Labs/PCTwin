@@ -272,10 +272,18 @@ fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
     for cmd in every_known_command() {
         if matches!(
             cmd.as_str(),
-            "pairing_new_search" | "set_window_mode" | "quicksend_choose_folder" | "history_export"
+            "pairing_new_search"
+                | "set_window_mode"
+                | "quicksend_choose_folder"
+                | "history_export"
+                | "update_check"
+                | "update_install"
         ) {
             // Checked below, and in the resolved-permissions test (the folder picker would open
-            // the system's window and wait for a person).
+            // the system's window and wait for a person). A command with no arguments runs
+            // whatever it is given, so the updater's two are never called: they would ask the
+            // real update address and install what it offers (on macOS over the build folder,
+            // three folders above the test program; on Windows by running the installer).
             let_through.insert(cmd);
             continue;
         }
