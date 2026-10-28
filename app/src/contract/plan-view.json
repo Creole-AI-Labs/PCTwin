@@ -84,6 +84,7 @@
           "kind": "app",
           "needs": null,
           "secret": null,
+          "source": "Example.Writer",
           "special": null,
           "title": {
             "kind": "name",
@@ -98,6 +99,7 @@
           "kind": "app",
           "needs": "manual-install",
           "secret": null,
+          "source": null,
           "special": null,
           "title": {
             "kind": "name",
@@ -112,6 +114,7 @@
           "kind": "settings",
           "needs": null,
           "secret": null,
+          "source": null,
           "special": null,
           "title": {
             "kind": "name",
@@ -126,6 +129,7 @@
           "kind": "special",
           "needs": "sign-in",
           "secret": null,
+          "source": null,
           "special": "sign-in",
           "title": {
             "kind": "name",
@@ -140,6 +144,7 @@
           "kind": "special",
           "needs": null,
           "secret": null,
+          "source": null,
           "special": "copy",
           "title": {
             "kind": "name",
@@ -154,6 +159,7 @@
           "kind": "special",
           "needs": null,
           "secret": 2,
+          "source": null,
           "special": "copy",
           "title": {
             "kind": "name",
@@ -168,6 +174,7 @@
           "kind": "special",
           "needs": "finish-by-hand",
           "secret": null,
+          "source": null,
           "special": "not-yet",
           "title": {
             "kind": "key",

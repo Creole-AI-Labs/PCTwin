@@ -183,6 +183,9 @@ impl DataProgress {
     }
 }
 
+/// Who is told the old laptop's progress with the app data.
+pub type Tell = Box<dyn FnMut(&DataProgress) + Send>;
+
 /// The person's answer when apps must be closed first: try those again, or go on without them.
 pub type AskClose = Box<dyn FnMut(&[String]) -> bool + Send>;
 
@@ -530,7 +533,7 @@ pub struct Sink {
     open: Option<Open>,
     /// The connection was lost part way through the app data.
     pub lost: bool,
-    on_progress: Option<Box<dyn FnMut(&DataProgress) + Send>>,
+    on_progress: Option<Tell>,
 }
 
 /// Whether `rel` is a plain path inside a folder: names separated by `/`, none empty, `.` or
@@ -557,7 +560,7 @@ impl Sink {
     }
 
     /// Tells `tell` the old laptop's progress while it captures.
-    pub fn telling(mut self, tell: Box<dyn FnMut(&DataProgress) + Send>) -> Self {
+    pub fn telling(mut self, tell: Tell) -> Self {
         self.on_progress = Some(tell);
         self
     }

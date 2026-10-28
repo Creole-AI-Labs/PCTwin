@@ -645,8 +645,10 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
             .unwrap()
             .wait(&|| false)
             .unwrap();
-        let mut plan = FullPlan::default();
-        plan.special = found.lines.clone();
+        let plan = FullPlan {
+            special: found.lines.clone(),
+            ..FullPlan::default()
+        };
         let choice = plan.choice(&[]);
         assert!(!choice.copy.is_empty());
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -739,8 +741,10 @@ async fn staged_app_data_never_outlives_the_move_that_brought_it() {
         .unwrap()
         .wait(&|| false)
         .unwrap();
-    let mut plan = FullPlan::default();
-    plan.special = found.lines.clone();
+    let plan = FullPlan {
+        special: found.lines.clone(),
+        ..FullPlan::default()
+    };
     // The person ticks every secret, so the secret's files are staged too.
     let picked: Vec<u32> = plan
         .special

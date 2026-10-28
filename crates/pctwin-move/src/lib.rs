@@ -466,7 +466,7 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
         match exchanged {
             Ok(()) => {}
             Err(MoveError::Transfer(TransferError::ConnectionDropped)) if port.is_some() => {
-                if let Some(out) = data.as_deref_mut() {
+                if let Some(out) = data.as_mut() {
                     out.lost();
                 }
             }
