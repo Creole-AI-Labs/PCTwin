@@ -277,6 +277,9 @@ pub struct ProgressView {
     pub current: Option<String>,
     pub failed: u64,
     pub speed: Option<crate::moving::Range>,
+    /// The measured time left in whole minutes, as the full move works it out; `None` while it
+    /// is still being worked out.
+    pub minutes_left: Option<crate::moving::Range>,
 }
 
 fn progress_view(snap: &pctwin_transfer::MeterSnapshot, paused: bool) -> ProgressView {
@@ -299,6 +302,13 @@ fn progress_view(snap: &pctwin_transfer::MeterSnapshot, paused: bool) -> Progres
         speed: snap
             .bytes_per_second
             .map(|b| crate::moving::Range { low: b, high: b }),
+        minutes_left: match snap.time_left {
+            pctwin_transfer::TimeLeft::About { seconds } => {
+                let m = seconds.div_ceil(60);
+                Some(crate::moving::Range { low: m, high: m })
+            }
+            _ => None,
+        },
     }
 }
 

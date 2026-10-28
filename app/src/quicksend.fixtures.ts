@@ -27,6 +27,7 @@ export const PROGRESS: SendProgress = {
   current: "Reference photos/beach.jpg",
   failed: 0,
   speed: { low: 1_900_000, high: 3_100_000 },
+  minutesLeft: { low: 3, high: 3 },
 };
 
 export const RECEIPT_WHOLE: Receipt = {

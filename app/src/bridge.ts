@@ -934,14 +934,16 @@ export function parseQsReceipt(value: unknown): QsReceipt | null {
 const QS_PHASES = ["copying", "paused", "checking", "needs-action", "lost", "complete"] as const;
 
 export function parseQsProgress(value: unknown): SendProgress | null {
-  const f = exactly(value, ["phase", "filesDone", "filesTotal", "bytesDone", "bytesTotal", "current", "failed", "speed"]);
+  const f = exactly(value, ["phase", "filesDone", "filesTotal", "bytesDone", "bytesTotal", "current", "failed", "speed", "minutesLeft"]);
   if (!f || !oneOf(f.phase, QS_PHASES)) return null;
   const { filesDone, filesTotal, bytesDone, bytesTotal, failed } = f;
   if (!isCount(filesDone) || !isCount(filesTotal) || !isCount(bytesDone) || !isCount(bytesTotal) || !isCount(failed)) return null;
   if (!(f.current === null || typeof f.current === "string")) return null;
   const speed = f.speed === null ? null : parseRange(f.speed);
   if (f.speed !== null && speed === null) return null;
-  return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed };
+  const minutesLeft = f.minutesLeft === null ? null : parseRange(f.minutesLeft);
+  if (f.minutesLeft !== null && minutesLeft === null) return null;
+  return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed, minutesLeft };
 }
 
 /** Where received files go: the folder's own name, the whole folder (for More details), and its free space. */

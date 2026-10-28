@@ -814,6 +814,7 @@ fn qs_progress() -> Vec<crate::quicksend::ProgressView> {
             low: 2_000_000,
             high: 2_000_000,
         }),
+        minutes_left: Some(Range { low: 4, high: 4 }),
     }]
 }
 

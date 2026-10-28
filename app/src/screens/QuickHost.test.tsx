@@ -135,7 +135,7 @@ describe("sending", () => {
     await waitFor(() => {
       expect(called("quicksend_send")).toBe(true);
     });
-    send("quicksend-progress", { phase: "copying", filesDone: 1, filesTotal: 2, bytesDone: 1, bytesTotal: 2, current: null, failed: 0, speed: null });
+    send("quicksend-progress", { phase: "copying", filesDone: 1, filesTotal: 2, bytesDone: 1, bytesTotal: 2, current: null, failed: 0, speed: null, minutesLeft: null });
     send("quicksend-receipt", { ...receipts[0], side: "sender" });
     expect(heading()).toBe(text("qs-done-partial-title"));
     expect(page()).not.toMatch(/receipt/i);
@@ -183,7 +183,7 @@ describe("sending the missing files", () => {
     });
     send("quicksend-receipt", { ...receipts[0], side: "sender" });
     // A late word from the engine never takes the person off this page.
-    send("quicksend-progress", { phase: "copying", filesDone: 1, filesTotal: 2, bytesDone: 1, bytesTotal: 2, current: null, failed: 0, speed: null });
+    send("quicksend-progress", { phase: "copying", filesDone: 1, filesTotal: 2, bytesDone: 1, bytesTotal: 2, current: null, failed: 0, speed: null, minutesLeft: null });
     expect(heading()).toBe(text("qs-done-partial-title"));
     tauri.invoke.mockClear();
     fireEvent.click(screen.getByRole("button", { name: (n) => n.includes(text("qs-done-send-missing")) }));

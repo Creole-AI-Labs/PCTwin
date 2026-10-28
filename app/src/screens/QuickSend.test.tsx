@@ -200,6 +200,15 @@ describe("Q12 Your files are on their way", () => {
     return events;
   };
 
+  // Asked for during the first real test (28 October 2026): both laptops say how long is left.
+  it("says the measured time left, or that it is still working it out, never a guess", () => {
+    progress();
+    expect(plain(document.body.textContent)).toContain(plain(text("progress-time-left", { range: text("progress-minutes-one", { minutes: 3 }) })));
+    cleanup();
+    progress({ minutesLeft: null });
+    expect(plain(document.body.textContent)).toContain(text("progress-time-measuring"));
+  });
+
   it("the receiver's page is in receive words: never Sending selected files or Pause send", () => {
     const e = { onPause: fn(), onResume: fn(), onCompact: fn(), onStop: fn() };
     inApp(<QuickProgress side="receive" from={GREEN_OWL} to={BLUE_FOX} progress={PROGRESS} {...e} />);

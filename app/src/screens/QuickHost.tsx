@@ -48,7 +48,7 @@ type View =
   | { kind: "done"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem };
 
-const STARTING: SendProgress = { phase: "copying", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, current: null, failed: 0, speed: null };
+const STARTING: SendProgress = { phase: "copying", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, current: null, failed: 0, speed: null, minutesLeft: null };
 
 /** Merges a fresh pick into the list, keeping each thing's tick as the person left it. */
 function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
