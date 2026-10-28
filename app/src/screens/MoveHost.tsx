@@ -587,7 +587,9 @@ export default function MoveHost({
             );
           }}
           onBack={() => {
-            void moveApprove({ revision: view.plan.revision, fingerprint: view.plan.fingerprint }, false).catch(() => undefined);
+            // Back from the details is back to Accept, never a "no": declining is Not now
+            // (found in the two-copy test, 29 October 2026).
+            setOverviewSeen(false);
           }}
         />
       );

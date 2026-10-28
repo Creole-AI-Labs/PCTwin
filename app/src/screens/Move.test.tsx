@@ -274,10 +274,12 @@ describe("the move, once paired", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("plan-title"));
   });
 
-  it("going back from the plan declines it", async () => {
+  it("going back from the details returns to Accept, and only Not now declines", async () => {
     await host(false);
     showPlan(plan);
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(tauri.invoke).not.toHaveBeenCalledWith("move_approve", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: text("accept-not-now") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [], updates: [] });
   });
 
