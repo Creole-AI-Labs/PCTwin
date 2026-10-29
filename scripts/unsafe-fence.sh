@@ -14,8 +14,8 @@
 #                     28 October 2026)
 #                     (os_rm_holders added 29 October 2026, 2.5 decision on files live while
 #                     their app is open: Windows Restart Manager names the app holding a file;
-#                     asked for in the 2.6 wiring brief; the user's approval to be confirmed at
-#                     its fresh-context review)
+#                     asked for in the 2.6 wiring brief; approved by the founder, 29 October
+#                     2026)
 #
 # Every other crate must say `[lints] workspace = true`, which brings in the workspace's
 # `unsafe_code = "forbid"`. A crate that sets its own unsafe_code, or whose sources contain an

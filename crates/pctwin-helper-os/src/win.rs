@@ -1494,7 +1494,7 @@ type RmHolder = (u32, Vec<u16>);
 /// more programs appeared meanwhile) and the session ended, all in one call; nothing is closed or
 /// restarted. Needs no administrator: the person's own programs are listed. Added 29 October 2026
 /// for the 2.5 decision on files live while their app is open (the person is asked to close only
-/// the app holding a file, by its name).
+/// the app holding a file, by its name); approved by the founder, 29 October 2026.
 fn os_rm_holders(files: &[Vec<u16>]) -> Result<Vec<RmHolder>, (&'static str, u32)> {
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::RestartManager::{
