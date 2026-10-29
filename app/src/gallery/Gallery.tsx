@@ -84,7 +84,7 @@ export default function Gallery() {
         <div className="kit-progress-title">
           <div>
             <p className="eyebrow">Your move</p>
-            <h2 className="gallery-heading">Settling you in.</h2>
+            <h2 className="gallery-heading">Moving your things to this laptop</h2>
           </div>
           <ProgressValue value={0.68} />
         </div>
@@ -183,7 +183,7 @@ export default function Gallery() {
       <Section title="Mini progress (F09)">
         <div className="gallery-mini">
           <MiniProgress
-            title="Your move, nearby."
+            title="Move in progress"
             value={0.68}
             label="Move progress"
             left="Moving your selected files"
