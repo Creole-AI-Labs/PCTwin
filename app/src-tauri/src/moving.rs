@@ -2299,6 +2299,9 @@ struct AppSteps<R: Runtime> {
     /// undone), and the move protocol the old laptop speaks: whether to offer its own folder.
     moved_here: std::collections::BTreeSet<pctwin_record::LaptopId>,
     version: u16,
+    /// The first folder of every folder earlier moves made here, by the old laptop that made it:
+    /// another old laptop of the same name gets a numbered own folder.
+    made_here: Vec<(pctwin_record::LaptopId, String)>,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -2642,9 +2645,18 @@ impl<R: Runtime> Steps for AppSteps<R> {
                 // The folders the person unticked: none of their files is sent or received.
                 self.rules.left_out = self.moving.left_out();
                 // This old laptop's own folder, when it was offered and the person kept it on.
+                // A folder of that name another old laptop's move made here: numbered ("(2)").
+                let source = record.source_laptop;
+                let made = &self.made_here;
                 self.rules.own_folder = own_folder_offered(self.version, &self.moved_here, record)
                     .then(|| self.moving.own_folder())
-                    .flatten();
+                    .flatten()
+                    .and_then(|name| {
+                        pctwin_move::landing::own_folder_free(&name, &|c| {
+                            made.iter()
+                                .any(|(from, top)| *from != source && top.eq_ignore_ascii_case(c))
+                        })
+                    });
                 // The files the person agreed to leave on the old laptop so the plan fits.
                 if self.moving.leave_behind() {
                     self.leaving = std::mem::take(&mut self.proposed);
@@ -3318,6 +3330,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         // The old laptops whose moves are here already (an unreadable journal offers nothing).
         moved_here: journal.moved_here_from().unwrap_or_default(),
         version: 0,
+        made_here: made_here(&journal),
     };
     // A stop ends the greeting at once.
     let mut link = pctwin_move::or_stop(&live.control, async {
@@ -3368,19 +3381,8 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         let data = steps.sink.take();
         let picked = std::mem::take(&mut steps.picked);
         let landed = landed_here(&received, &steps.rules, &table);
-        // The old laptop's installers that came, by item, where they are now: reused only when
-        // the person chose that (and then only after the same checks as a download).
-        let (wait_free_wifi, reuse_installers) = steps.moving.install_choices();
-        let wanted: std::collections::HashSet<ItemId> = full
-            .apps
-            .iter()
-            .flat_map(|a| a.app.installers.iter().copied())
-            .collect();
-        let old_installers = landed
-            .iter()
-            .filter(|(i, _)| wanted.contains(&i.id))
-            .map(|(i, p)| (i.id, p.clone()))
-            .collect();
+        // Reusing the old laptop's installers is not offered yet: the answer is ignored.
+        let (wait_free_wifi, _reuse_installers) = steps.moving.install_choices();
         let files = pctwin_fullmove::run::files_landed(&full, landed);
         outcome.rebuilt = Some(crate::fullmove::rebuild_here(
             app,
@@ -3389,11 +3391,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             &me,
             data.as_ref().map(|s| (s, picked)),
             files,
-            crate::fullmove::InstallChoices {
-                wait_free_wifi,
-                reuse_installers,
-                old_installers,
-            },
+            crate::fullmove::InstallChoices { wait_free_wifi },
         ));
     }
     Ok(Ran {
@@ -3670,6 +3668,24 @@ fn spawn_run<R: Runtime>(
         })
         .map(|_| ())
         .map_err(|_| MoveProblem::Failed)
+}
+
+/// The first folder of every folder earlier moves (never a Quick Send's) made here, with the old
+/// laptop each came from. An unreadable journal gives none.
+fn made_here(journal: &pctwin_journal::Journal) -> Vec<(pctwin_record::LaptopId, String)> {
+    let Ok(folders) = journal.made_folders() else {
+        return Vec::new();
+    };
+    folders
+        .into_iter()
+        .filter_map(|m| {
+            let e = journal.entry(m.entry).ok()??;
+            (e.write.scope != pctwin_journal::Scope::QUICK_SEND).then(|| {
+                let top = m.folder.split('/').next().unwrap_or_default().to_string();
+                (e.write.source_laptop, top)
+            })
+        })
+        .collect()
 }
 
 /// Whether the plan for `record` offers its old laptop its own folder (several old laptops into

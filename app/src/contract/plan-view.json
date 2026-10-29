@@ -254,7 +254,7 @@
       "downloads": {
         "apps": 2,
         "connection": "may-charge",
-        "withOldInstaller": 1
+        "withOldInstaller": 0
       },
       "links": 4,
       "more": 0,

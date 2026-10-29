@@ -144,12 +144,11 @@ pub struct AppEntry {
 }
 
 /// What the apps the plan installs need from the internet, before the person approves (Task List
-/// 2.7): how many are downloaded, and how many of those have their own installer from the old
-/// laptop in the move (reused, when the person chooses that, instead of downloaded).
+/// 2.7): how many are downloaded. An installer found on the old laptop is never reused yet
+/// ([`crate::install`]), so every one is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Downloads {
     pub apps: u64,
-    pub with_old_installer: u64,
 }
 
 impl FullPlan {
@@ -161,22 +160,11 @@ impl FullPlan {
 
 /// See [`Downloads`]: only apps PCTwin installs itself from a package it downloads.
 pub fn downloads_of(apps: &[AppEntry]) -> Downloads {
-    {
-        let mut d = Downloads::default();
-        for e in apps {
-            if e.plan.disposition != Disposition::Install || e.winget().is_none() {
-                continue;
-            }
-            d.apps += 1;
-            if e.plan
-                .routes
-                .iter()
-                .any(|r| matches!(r, Route::OldInstaller { .. }))
-            {
-                d.with_old_installer += 1;
-            }
-        }
-        d
+    Downloads {
+        apps: apps
+            .iter()
+            .filter(|e| e.plan.disposition == Disposition::Install && e.winget().is_some())
+            .count() as u64,
     }
 }
 

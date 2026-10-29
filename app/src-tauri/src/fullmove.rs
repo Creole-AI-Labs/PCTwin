@@ -221,8 +221,8 @@ pub struct RebuildPlanView {
     pub prompt: bool,
     /// A Windows restore point is asked for before the first change.
     pub restore_point: bool,
-    /// What the apps PCTwin installs need from the internet, with the two choices the plan offers
-    /// for it ("Wait for free Wi-Fi", "Reuse installers found on the old laptop").
+    /// What the apps PCTwin installs need from the internet, with the choice the plan offers for it
+    /// ("Wait for free Wi-Fi").
     pub downloads: DownloadsView,
 }
 
@@ -235,9 +235,10 @@ pub enum Connection {
     NotKnown,
 }
 
-/// The apps PCTwin downloads to install, and how many of them have their own installer from the
-/// old laptop in the move; and the connection now. The plan offers "Wait for free Wi-Fi" when
-/// anything is downloaded, and "Reuse installers found on the old laptop" when an installer came.
+/// The apps PCTwin downloads to install, and the connection now: the plan offers "Wait for free
+/// Wi-Fi" when anything is downloaded. `with_old_installer` is always 0: installers found on the
+/// old laptop are not reused yet (second security review, 29 October 2026), so the plan never
+/// offers "Reuse installers found on the old laptop".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadsView {
@@ -255,13 +256,11 @@ pub fn connection_now() -> Connection {
     }
 }
 
-/// What the person chose on the plan for the installs, and where the old laptop's installers are
-/// on this laptop now (used only when they chose to reuse them).
+/// What the person chose on the plan for the installs. Reusing the old laptop's installers is
+/// not offered (second security review, 29 October 2026): every app is downloaded.
 #[derive(Debug, Clone, Default)]
 pub struct InstallChoices {
     pub wait_free_wifi: bool,
-    pub reuse_installers: bool,
-    pub old_installers: std::collections::HashMap<pctwin_record::ItemId, std::path::PathBuf>,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -456,7 +455,8 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             let d = plan.downloads();
             DownloadsView {
                 apps: d.apps,
-                with_old_installer: d.with_old_installer,
+                // Never reused yet (second security review): none is offered.
+                with_old_installer: 0,
                 connection: connection_now(),
             }
         },
@@ -803,12 +803,6 @@ pub fn rebuild_here<R: Runtime>(
             )
             // The move these installs belong to: only its own undo can remove what it installs.
             .for_move(scope.0)
-            // The person's choices on the plan.
-            .reusing(if choices.reuse_installers {
-                choices.old_installers.clone()
-            } else {
-                Default::default()
-            })
         })
         .map(|chain| {
             if choices.wait_free_wifi {

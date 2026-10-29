@@ -300,11 +300,11 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         links: 4,
         prompt: false,
         restore_point: false,
-        // Two apps downloaded, one with its own installer from the old laptop, on a connection
-        // that may charge for data (2.6 wiring).
+        // Two apps downloaded, on a connection that may charge for data (2.6 wiring). Installers
+        // from the old laptop are not reused yet, so none is counted.
         downloads: crate::fullmove::DownloadsView {
             apps: 2,
-            with_old_installer: 1,
+            with_old_installer: 0,
             connection: crate::fullmove::Connection::MayCharge,
         },
     }

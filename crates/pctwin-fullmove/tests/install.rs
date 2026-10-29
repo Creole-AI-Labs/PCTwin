@@ -641,10 +641,7 @@ mod choices {
     use pctwin_fullmove::install::WaitFree;
     use pctwin_fullmove::plan::downloads_of;
     use pctwin_record::ItemId;
-    use std::collections::HashMap;
     use std::time::Duration;
-
-    const COMPOUND: [u8; 8] = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
     fn old_item() -> ItemId {
         ItemId::from_hex(&"5a".repeat(16)).unwrap()
@@ -698,67 +695,16 @@ mod choices {
         set(chain).install(&refs, &mut || {})
     }
 
-    fn old_file(dir: &std::path::Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let p = dir.join(name);
-        std::fs::write(&p, bytes).unwrap();
-        p
-    }
-
+    /// An installer found on the old laptop is never reused yet (second security review): the
+    /// app is downloaded, its own route checked as always.
     #[test]
-    fn the_old_laptops_own_package_is_installed_with_the_same_checks_and_nothing_downloaded() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut bytes = COMPOUND.to_vec();
-        bytes.extend_from_slice(b"the old laptop's own Lab Writer package");
-        let file = old_file(dir.path(), "LabWriter.msi", &bytes);
+    fn an_installer_from_the_old_laptop_is_never_reused_the_app_is_downloaded() {
         let w = winget();
         let mut helper = FakeHelper::default();
-        let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
-            c.reusing(HashMap::from([(old_item(), file.clone())]))
-        });
-        assert_eq!(
-            results[0].result.status(),
-            ItemStatus::Reinstalled,
-            "{results:?}"
-        );
-        assert!(!downloaded(&w), "nothing was downloaded");
-        // The helper got exactly these bytes, by their hash, under the old laptop's maker.
-        assert_eq!(helper.staged.len(), 1);
-        assert_eq!(helper.staged[0].1, Hex32(sha(&bytes)));
-        assert_eq!(helper.staged[0].2, bytes);
-        let Action::InstallVerifiedPackage(pkg) = &helper.started[0].operations[1].action else {
-            panic!("an install");
-        };
-        assert_eq!(pkg.sha256, Hex32(sha(&bytes)));
-    }
-
-    #[test]
-    fn an_old_installer_is_downloaded_instead_unless_chosen_and_a_windows_installer_package() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut msi = COMPOUND.to_vec();
-        msi.extend_from_slice(b"package");
-        for (name, bytes, chosen) in [
-            ("LabWriter.msi", msi.clone(), false),
-            ("LabWriter.exe", msi.clone(), true),
-            (
-                "LabWriter.msi",
-                b"MZ a program, named as a package".to_vec(),
-                true,
-            ),
-        ] {
-            let file = old_file(dir.path(), name, &bytes);
-            let w = winget();
-            let mut helper = FakeHelper::default();
-            let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
-                if chosen {
-                    c.reusing(HashMap::from([(old_item(), file.clone())]))
-                } else {
-                    c
-                }
-            });
-            assert!(downloaded(&w), "{name} chosen={chosen}");
-            assert_eq!(helper.staged[0].2, INSTALLER, "{name}");
-            assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
-        }
+        let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| c);
+        assert!(downloaded(&w));
+        assert_eq!(helper.staged[0].2, INSTALLER);
+        assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
     }
 
     fn costs(seq: Vec<NetworkCost>) -> (WaitFree, std::rc::Rc<RefCell<Vec<Duration>>>) {
@@ -812,30 +758,12 @@ mod choices {
     }
 
     #[test]
-    fn the_old_laptops_installer_needs_no_wait() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut bytes = COMPOUND.to_vec();
-        bytes.extend_from_slice(b"package");
-        let file = old_file(dir.path(), "LabWriter.msi", &bytes);
-        let (wait, slept) = costs(vec![NetworkCost::Metered]);
-        let w = winget();
-        let mut helper = FakeHelper::default();
-        let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
-            c.reusing(HashMap::from([(old_item(), file.clone())]))
-                .waiting(wait)
-        });
-        assert!(slept.borrow().is_empty());
-        assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
-    }
-
-    #[test]
-    fn the_plan_counts_the_downloads_and_the_old_installers() {
+    fn the_plan_counts_the_downloads() {
         let mut manual = entry(app());
         manual.plan.routes.clear();
         let mut not_installed = with_old(entry(app()));
         not_installed.plan.disposition = Disposition::NeedsAction;
         let d = downloads_of(&[entry(app()), with_old(entry(app())), manual, not_installed]);
         assert_eq!(d.apps, 2);
-        assert_eq!(d.with_old_installer, 1);
     }
 }
