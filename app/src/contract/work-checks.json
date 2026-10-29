@@ -1,0 +1,164 @@
+[
+  {
+    "checks": [],
+    "generation": 0,
+    "more": 0
+  },
+  {
+    "checks": [
+      {
+        "checked": 0,
+        "index": 0,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Thesis.svg",
+        "notChecked": [],
+        "of": 0,
+        "state": "not-run-yet",
+        "what": "linked-files"
+      },
+      {
+        "checked": 12,
+        "index": 1,
+        "label": "machine-checked",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Garden plan.svg",
+        "notChecked": [],
+        "of": 12,
+        "state": "all-there",
+        "what": "linked-files"
+      },
+      {
+        "checked": 40,
+        "index": 2,
+        "label": "still-needs-attention",
+        "missing": [
+          "images/front.jpg",
+          "Inter"
+        ],
+        "missingMore": 3,
+        "name": "Poster.svg",
+        "notChecked": [],
+        "of": 45,
+        "state": "missing",
+        "what": "linked-files"
+      },
+      {
+        "checked": 1,
+        "index": 3,
+        "label": "still-needs-attention",
+        "missing": [
+          "Inter"
+        ],
+        "missingMore": 0,
+        "name": "Inter",
+        "notChecked": [
+          "Web font (.woff2)"
+        ],
+        "of": 1,
+        "state": "missing",
+        "what": "font"
+      },
+      {
+        "checked": 0,
+        "index": 4,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Photos 2024.zip",
+        "notChecked": [],
+        "of": 0,
+        "state": "damaged",
+        "what": "archive"
+      },
+      {
+        "checked": 0,
+        "index": 5,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Recipes.sqlite",
+        "notChecked": [],
+        "of": 0,
+        "state": "not-there",
+        "what": "database"
+      },
+      {
+        "checked": 0,
+        "index": 6,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Print my boarding pass",
+        "notChecked": [],
+        "of": 0,
+        "state": "waiting-for-you",
+        "what": "task"
+      },
+      {
+        "checked": 1,
+        "index": 7,
+        "label": "person-confirmed",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Open my accounts",
+        "notChecked": [],
+        "of": 1,
+        "state": "all-there",
+        "what": "task"
+      },
+      {
+        "checked": 0,
+        "index": 8,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Open my invoices",
+        "notChecked": [],
+        "of": 0,
+        "state": "you-said-no",
+        "what": "task"
+      },
+      {
+        "checked": 0,
+        "index": 9,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Album.m3u",
+        "notChecked": [],
+        "of": 0,
+        "state": "outside-project",
+        "what": "linked-files"
+      },
+      {
+        "checked": 0,
+        "index": 10,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Locked.db",
+        "notChecked": [],
+        "of": 0,
+        "state": "could-not-read",
+        "what": "database"
+      },
+      {
+        "checked": 0,
+        "index": 11,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Drawing.xyz",
+        "notChecked": [],
+        "of": 0,
+        "state": "not-supported",
+        "what": "linked-files"
+      }
+    ],
+    "generation": 7,
+    "more": 0
+  }
+]

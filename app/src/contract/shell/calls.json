@@ -463,12 +463,113 @@
         ]
       ],
       "name": "move_choose_what"
+    },
+    {
+      "args": [],
+      "name": "work_checks"
+    },
+    {
+      "args": [
+        [
+          "pick",
+          {
+            "family": "Inter",
+            "kind": "font"
+          }
+        ]
+      ],
+      "name": "work_check_add"
+    },
+    {
+      "args": [],
+      "name": "work_check_run"
+    },
+    {
+      "args": [
+        [
+          "index",
+          0
+        ],
+        [
+          "generation",
+          1
+        ],
+        [
+          "worked",
+          true
+        ]
+      ],
+      "name": "work_check_answer"
+    },
+    {
+      "args": [
+        [
+          "index",
+          0
+        ],
+        [
+          "generation",
+          1
+        ]
+      ],
+      "name": "work_check_remove"
+    },
+    {
+      "args": [],
+      "name": "repair_offer"
+    },
+    {
+      "args": [
+        [
+          "generation",
+          1
+        ],
+        [
+          "lines",
+          [
+            0,
+            2
+          ]
+        ]
+      ],
+      "name": "repair_run"
+    },
+    {
+      "args": [],
+      "name": "move_changes"
+    },
+    {
+      "args": [
+        [
+          "generation",
+          1
+        ],
+        [
+          "approve",
+          true
+        ]
+      ],
+      "name": "move_reapprove"
+    },
+    {
+      "args": [],
+      "name": "safe_stop"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "recovery_kit_save"
     }
   ],
   "events": {
     "guard": "guard-view",
     "moveAppdata": "move-appdata",
     "moveAppdataOpen": "move-appdata-open",
+    "moveChanged": "move-changed",
     "moveChoose": "move-choose",
     "moveFinished": "move-finished",
     "moveFound": "move-found",
@@ -489,7 +590,8 @@
     "qsPicked": "quicksend-picked",
     "qsProblem": "quicksend-problem",
     "qsProgress": "quicksend-progress",
-    "qsReceipt": "quicksend-receipt"
+    "qsReceipt": "quicksend-receipt",
+    "safeStop": "safe-stop"
   },
   "helpSteps": [
     "pairing",

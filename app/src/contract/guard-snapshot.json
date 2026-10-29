@@ -71,6 +71,16 @@
             "action": "install",
             "name": "Writer",
             "undo": "remove-yourself"
+          },
+          {
+            "action": "install",
+            "name": "Viewer",
+            "undo": "removes-if-package"
+          },
+          {
+            "action": "replace",
+            "name": "Notes",
+            "undo": "keeps-newer"
           }
         ],
         "downloadBytes": 1000,

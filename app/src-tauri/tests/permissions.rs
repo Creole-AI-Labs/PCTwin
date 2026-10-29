@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 82 names: the app's seventy-nine commands, listening to and
+/// Exactly what the screens may call, 93 names: the app's ninety commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 82] = [
+const SCREENS_MAY_CALL: [&str; 93] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -112,6 +112,17 @@ const SCREENS_MAY_CALL: [&str; 82] = [
     "cleanup_confirm",
     "report_preview",
     "report_save",
+    "work_checks",
+    "work_check_add",
+    "work_check_run",
+    "work_check_answer",
+    "work_check_remove",
+    "repair_offer",
+    "repair_run",
+    "move_changes",
+    "move_reapprove",
+    "safe_stop",
+    "recovery_kit_save",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",

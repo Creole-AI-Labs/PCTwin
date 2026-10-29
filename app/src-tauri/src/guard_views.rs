@@ -81,9 +81,14 @@ pctwin_types::listed_enum! {
         NeedsYouService,
         /// A sign-in, licence or activation: the app's maker governs it.
         NeedsYouMaker,
-        /// An app PCTwin installed: PCTwin does not remove apps yet; the person removes it in the
+        /// An app PCTwin installed that PCTwin does not remove: the person removes it in the
         /// system's settings if they do not want it.
         RemoveYourself,
+        /// An app PCTwin installs on Windows: undo removes it if it came as a Windows Installer
+        /// package and is still that version; otherwise the person removes it.
+        RemovesIfPackage,
+        /// An older version here that PCTwin updates: undo cannot bring the older one back.
+        KeepsNewer,
     }
 }
 

@@ -46,13 +46,15 @@ fn budget(fits: Option<bool>) -> DriveBudget {
     }
 }
 
-const PROMISES: [UndoPromise; 6] = [
+const PROMISES: [UndoPromise; 8] = [
     UndoPromise::CanReverse,
     UndoPromise::CanRemoveApp,
     UndoPromise::MustKeep,
     UndoPromise::NeedsYouService,
     UndoPromise::NeedsYouMaker,
     UndoPromise::RemoveYourself,
+    UndoPromise::RemovesIfPackage,
+    UndoPromise::KeepsNewer,
 ];
 const ACTIONS: [ChangeAction; 4] = [
     ChangeAction::Install,
@@ -124,6 +126,16 @@ fn screens() -> Vec<ScreenView> {
                     name: "Writer".into(),
                     action: ChangeAction::Install,
                     undo: UndoPromise::RemoveYourself,
+                }))
+                .chain(std::iter::once(ChangeLine {
+                    name: "Viewer".into(),
+                    action: ChangeAction::Install,
+                    undo: UndoPromise::RemovesIfPackage,
+                }))
+                .chain(std::iter::once(ChangeLine {
+                    name: "Notes".into(),
+                    action: ChangeAction::Replace,
+                    undo: UndoPromise::KeepsNewer,
                 }))
                 .collect(),
             more: 2,

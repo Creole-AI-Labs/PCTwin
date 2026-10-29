@@ -1,0 +1,39 @@
+[
+  {
+    "generation": 2,
+    "held": 6,
+    "lines": [
+      {
+        "name": "Writer",
+        "steps": [
+          "install",
+          "settings"
+        ],
+        "why": "app-updated"
+      },
+      {
+        "name": "Sketch Tool",
+        "steps": [
+          "settings",
+          "app-data"
+        ],
+        "why": "app-removed"
+      },
+      {
+        "name": "Pictures",
+        "steps": [
+          "files"
+        ],
+        "why": "destination-changed"
+      },
+      {
+        "name": "Thesis.svg",
+        "steps": [
+          "files"
+        ],
+        "why": "project-edited"
+      }
+    ],
+    "more": 0
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "busy": [],
+    "safe": true
+  },
+  {
+    "busy": [
+      "moving",
+      "rebuilding",
+      "app-data",
+      "undoing"
+    ],
+    "safe": false
+  }
+]

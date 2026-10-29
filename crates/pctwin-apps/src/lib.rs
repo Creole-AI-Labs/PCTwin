@@ -20,6 +20,7 @@
 //! no permission ([`after`]).
 
 pub mod after;
+pub mod compat;
 pub mod fetch;
 pub mod found;
 pub mod install;

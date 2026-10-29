@@ -1,0 +1,68 @@
+[
+  {
+    "generation": 3,
+    "kept": 41,
+    "lines": [
+      {
+        "kind": "app",
+        "line": 0,
+        "reason": "unreadable",
+        "status": "failed",
+        "title": {
+          "kind": "name",
+          "value": "Writer"
+        },
+        "waitsFor": []
+      },
+      {
+        "kind": "app",
+        "line": 1,
+        "reason": "manual-install",
+        "status": "needs-action",
+        "title": {
+          "kind": "name",
+          "value": "Sketch Tool"
+        },
+        "waitsFor": [
+          "internet",
+          "administrator",
+          "installer-tool"
+        ]
+      },
+      {
+        "kind": "settings",
+        "line": 2,
+        "reason": "unreadable",
+        "status": "failed",
+        "title": {
+          "kind": "name",
+          "value": "Writer settings"
+        },
+        "waitsFor": [
+          "close-app"
+        ]
+      },
+      {
+        "kind": "special",
+        "line": 3,
+        "reason": "unreadable",
+        "status": "failed",
+        "title": {
+          "kind": "name",
+          "value": "Mail"
+        },
+        "waitsFor": [
+          "old-laptop",
+          "space"
+        ]
+      }
+    ],
+    "more": 0
+  },
+  {
+    "generation": 4,
+    "kept": 45,
+    "lines": [],
+    "more": 0
+  }
+]
