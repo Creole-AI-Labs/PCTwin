@@ -2255,3 +2255,49 @@ accept-needs = Quelque chose demande votre attention d'abord. Voyez les détails
 accept-not-now = Pas maintenant
 accept-details = Voir les détails
 accept-accept = Accepter
+
+# 2.5 special categories
+special-category-email = E-mail
+special-category-browser = Navigateurs
+special-category-game = Jeux
+special-category-ai-tool = Outils d'IA et éditeurs de code
+special-category-secret = Clés et mots de passe
+special-category-other = Autres données d'applications
+special-note-search-rebuilds = Votre application de messagerie refait sa recherche à la première ouverture. La recherche peut être lente pendant un moment.
+special-note-server-resync = Vos e-mails reviennent du serveur de messagerie quand vous vous connectez. PCTwin garde l'ancienne copie seulement au cas où quelque chose ne serait jamais arrivé au serveur.
+special-note-own-sync = Le plus simple : activez la synchronisation de ce navigateur sur votre nouvel ordinateur. Elle ramène vos favoris, votre historique, vos onglets ouverts et vos extensions.
+special-note-passwords-guided = Les mots de passe enregistrés ne passent que par l'export et l'import du navigateur lui-même, ou par sa synchronisation. Le fichier exporté n'est pas protégé : PCTwin le garde privé et le supprime après l'import.
+special-note-passkeys-guided = Les clés d'accès enregistrées dans un compte reviennent quand vous vous y connectez. Celles gardées seulement sur cet ordinateur doivent être recréées sur chaque site. Faites-le avant d'effacer l'ancien ordinateur.
+special-note-cloud-saves = Le lanceur du jeu peut aussi garder vos sauvegardes en ligne. S'il vous demande lesquelles garder, regardez d'abord les dates.
+special-note-models-checked = Les modèles d'IA sont vérifiés fichier par fichier à leur arrivée. PCTwin ne les lance jamais.
+special-note-tool-settings-review = Ces réglages peuvent lancer des programmes ou accéder à Internet. Vérifiez-les avant de les utiliser sur le nouvel ordinateur.
+special-note-secret-tick-each = Ceci ne bouge que si vous le cochez. Il n'apparaît jamais dans un rapport.
+forgotten-title = Ce que l'on oublie souvent
+forgotten-kind-fonts = Vos propres polices
+forgotten-kind-mail-signatures = Signatures d'e-mail
+forgotten-kind-dictionaries = Vos propres mots du dictionnaire
+forgotten-kind-office-templates = Modèles Office
+forgotten-kind-mail-archives = E-mails gardés sur cet ordinateur
+forgotten-kind-game-saves = Sauvegardes de jeux
+forgotten-kind-game-library = Jeux installés par un lanceur de jeux
+forgotten-moving = Ceci part avec vos autres affaires.
+forgotten-not-moving = Ceci ne fait pas partie du transfert. Vous pouvez le copier vous-même.
+forgotten-step-install = Après le transfert, ouvrez chaque police sur le nouvel ordinateur et choisissez Installer.
+forgotten-step-locate-verify = Installez le lanceur de jeux sur le nouvel ordinateur et connectez-vous. Il peut réinstaller vos jeux. Si vous copiez ce dossier, utilisez l'option du lanceur pour retrouver les jeux installés et laissez-le vérifier les fichiers.
+forgotten-not-whole = PCTwin a arrêté de compter ici : il peut y en avoir plus.
+forgotten-printers = Imprimantes à ajouter de nouveau
+forgotten-printer-step = Ajoutez de nouveau cette imprimante sur votre nouvel ordinateur.
+forgotten-printer-network = Partagée depuis un autre ordinateur
+forgotten-not-checked = PCTwin n'a pas pu regarder ici.
+forgotten-files =
+    { $count ->
+        [one] 1 fichier
+        [many] { $count } fichiers
+       *[other] { $count } fichiers
+    }
+forgotten-online-only =
+    { $count ->
+        [one] 1 fichier gardé seulement en ligne, non téléchargé
+        [many] { $count } fichiers gardés seulement en ligne, non téléchargés
+       *[other] { $count } fichiers gardés seulement en ligne, non téléchargés
+    }

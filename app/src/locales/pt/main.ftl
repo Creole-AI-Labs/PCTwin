@@ -2250,3 +2250,49 @@ accept-needs = Algo precisa de você primeiro. Veja os detalhes.
 accept-not-now = Agora não
 accept-details = Ver os detalhes
 accept-accept = Aceitar
+
+# 2.5 special categories
+special-category-email = E-mail
+special-category-browser = Navegadores
+special-category-game = Jogos
+special-category-ai-tool = Ferramentas de IA e editores de código
+special-category-secret = Chaves e senhas
+special-category-other = Outros dados de apps
+special-note-search-rebuilds = Seu app de e-mail refaz a busca na primeira vez que abre. A busca pode ficar lenta por um tempo.
+special-note-server-resync = Seus e-mails voltam do servidor de e-mail quando você entra na conta. O PCTwin guarda a cópia antiga só caso algo nunca tenha chegado ao servidor.
+special-note-own-sync = O jeito mais fácil: ative a sincronização deste navegador no novo notebook. Ela traz seus favoritos, histórico, abas abertas e extensões.
+special-note-passwords-guided = Senhas salvas só passam pela exportação e importação do próprio navegador, ou pela sincronização dele. O arquivo exportado não é protegido, então o PCTwin o mantém privado e o apaga depois da importação.
+special-note-passkeys-guided = Chaves de acesso salvas em uma conta voltam quando você entra nela. As que ficam só neste notebook precisam ser criadas de novo em cada site. Faça isso antes de apagar o notebook antigo.
+special-note-cloud-saves = O inicializador do jogo também pode guardar seus jogos salvos online. Se ele perguntar quais manter, confira as datas primeiro.
+special-note-models-checked = Os modelos de IA são verificados arquivo por arquivo quando chegam. O PCTwin nunca os executa.
+special-note-tool-settings-review = Estas configurações podem iniciar programas ou acessar a internet. Confira antes de usá-las no novo notebook.
+special-note-secret-tick-each = Isto só vai se você marcar. Nunca aparece em um relatório.
+forgotten-title = Coisas que as pessoas costumam esquecer
+forgotten-kind-fonts = Suas próprias fontes
+forgotten-kind-mail-signatures = Assinaturas de e-mail
+forgotten-kind-dictionaries = Suas próprias palavras do dicionário
+forgotten-kind-office-templates = Modelos do Office
+forgotten-kind-mail-archives = E-mails guardados neste notebook
+forgotten-kind-game-saves = Jogos salvos
+forgotten-kind-game-library = Jogos instalados por um inicializador de jogos
+forgotten-moving = Isto vai junto com suas outras coisas.
+forgotten-not-moving = Isto não está na mudança. Você mesmo pode copiar.
+forgotten-step-install = Depois da mudança, abra cada fonte no novo notebook e escolha Instalar.
+forgotten-step-locate-verify = Instale o inicializador de jogos no novo notebook e entre na conta. Ele pode instalar seus jogos de novo. Se você copiar esta pasta, use a opção do inicializador para encontrar jogos instalados e deixe ele verificar os arquivos.
+forgotten-not-whole = O PCTwin parou de contar aqui, então pode haver mais.
+forgotten-printers = Impressoras para adicionar de novo
+forgotten-printer-step = Adicione esta impressora de novo no novo notebook.
+forgotten-printer-network = Compartilhada por outro computador
+forgotten-not-checked = O PCTwin não conseguiu olhar aqui.
+forgotten-files =
+    { $count ->
+        [one] 1 arquivo
+        [many] { $count } arquivos
+       *[other] { $count } arquivos
+    }
+forgotten-online-only =
+    { $count ->
+        [one] 1 arquivo guardado só online, não baixado
+        [many] { $count } arquivos guardados só online, não baixados
+       *[other] { $count } arquivos guardados só online, não baixados
+    }

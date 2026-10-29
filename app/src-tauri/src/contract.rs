@@ -177,6 +177,22 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         update: None,
         source: None,
         note: None,
+        category: None,
+        notes: Vec::new(),
+    };
+    use pctwin_special::category::{Category, Note};
+    use pctwin_special::forgotten::{Finding, Forgotten, PlaceStep, Printer};
+    let place = |kind: &str, name: &str, place: &str, step, moving| Forgotten {
+        kind: kind.into(),
+        name: name.into(),
+        place: place.into(),
+        files: 3,
+        bytes: 120_000,
+        online_only: 0,
+        complete: true,
+        moving,
+        step,
+        page: None,
     };
     crate::fullmove::RebuildPlanView {
         changes: vec![
@@ -230,6 +246,8 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             },
             ChangeView {
                 note: Some(pctwin_fullmove::plan::ChangeNote::Sites),
+                category: Some(Category::Browser),
+                notes: vec![Note::OwnSync { page: None }, Note::PasskeysGuided],
                 ..change(
                     Title::Name("Browser".into()),
                     Kind::Special,
@@ -241,28 +259,82 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     1,
                 )
             },
-            change(
-                Title::Name("Mail".into()),
-                Kind::Special,
-                ChangeAction::LeaveAlone,
-                UndoPromise::MustKeep,
-                0,
-                Some(Reason::SignIn),
-                Some(SpecialStep::SignIn),
-                3,
-            ),
-            change(
-                Title::Name("Browser".into()),
-                Kind::Special,
-                ChangeAction::Merge,
-                UndoPromise::CanReverse,
-                0,
-                None,
-                Some(SpecialStep::Copy),
-                12,
-            ),
+            ChangeView {
+                category: Some(Category::Email),
+                notes: vec![Note::ServerResync],
+                ..change(
+                    Title::Name("Mail".into()),
+                    Kind::Special,
+                    ChangeAction::LeaveAlone,
+                    UndoPromise::MustKeep,
+                    0,
+                    Some(Reason::SignIn),
+                    Some(SpecialStep::SignIn),
+                    3,
+                )
+            },
+            ChangeView {
+                category: Some(Category::Email),
+                notes: vec![Note::SearchRebuilds],
+                ..change(
+                    Title::Name("Mail".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Copy),
+                    40,
+                )
+            },
+            ChangeView {
+                category: Some(Category::Browser),
+                notes: vec![Note::OwnSync {
+                    page: Some("https://example.org/sync".into()),
+                }],
+                ..change(
+                    Title::Name("Browser".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Copy),
+                    12,
+                )
+            },
+            ChangeView {
+                category: Some(Category::Game),
+                notes: vec![Note::CloudSavesMayDiffer],
+                ..change(
+                    Title::Name("Quest".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Copy),
+                    5,
+                )
+            },
+            ChangeView {
+                category: Some(Category::AiTool),
+                notes: vec![Note::ModelsCheckedNotRun, Note::ToolSettingsReview],
+                ..change(
+                    Title::Name("Model runner".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Copy),
+                    9,
+                )
+            },
             ChangeView {
                 secret: Some(2),
+                category: Some(Category::Secret),
+                notes: vec![Note::PasswordsGuided, Note::SecretTickEach],
                 ..change(
                     Title::Name("Browser".into()),
                     Kind::Special,
@@ -272,6 +344,19 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     None,
                     Some(SpecialStep::Copy),
                     2,
+                )
+            },
+            ChangeView {
+                category: Some(Category::Other),
+                ..change(
+                    Title::Name("Notes app".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Copy),
+                    4,
                 )
             },
             change(
@@ -300,6 +385,46 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         links: 4,
         prompt: false,
         restore_point: false,
+        forgotten: Some(Finding {
+            found: vec![
+                place(
+                    "fonts",
+                    "Your own fonts",
+                    "AppData/Local/Microsoft/Windows/Fonts",
+                    PlaceStep::Install,
+                    true,
+                ),
+                place(
+                    "mail-signatures",
+                    "Mail signatures",
+                    "AppData/Roaming/Microsoft/Signatures",
+                    PlaceStep::Copy,
+                    true,
+                ),
+                Forgotten {
+                    complete: false,
+                    online_only: 2,
+                    ..place(
+                        "game-library",
+                        "Games installed by a game launcher",
+                        "C:/Program Files (x86)/Launcher/library",
+                        PlaceStep::LocateVerify,
+                        false,
+                    )
+                },
+            ],
+            printers: vec![
+                Printer {
+                    name: "Office Laser".into(),
+                    network: false,
+                },
+                Printer {
+                    name: r"\\print-server\Floor 2".into(),
+                    network: true,
+                },
+            ],
+            not_checked: vec![("Library/Mail".into(), "permission denied".into())],
+        }),
     }
 }
 

@@ -103,6 +103,9 @@ pub struct Change {
     pub source: Option<String>,
     /// What else the person should know about it, in a word the screens translate.
     pub note: Option<ChangeNote>,
+    /// A special category's category, and what the person is told because of it.
+    pub category: Option<pctwin_special::category::Category>,
+    pub notes: Vec<pctwin_special::category::Note>,
 }
 
 /// What else the person should know about a change, beside what it does.
@@ -227,6 +230,8 @@ pub struct FullPlan {
     /// file was there, so a setting that points at one is pointed at where it really landed
     /// ([`crate::run::DataDone::files`]).
     pub old_folders: Vec<(FolderRole, String)>,
+    /// What the old laptop's forgotten-things finder found (2.5).
+    pub forgotten: Option<pctwin_special::forgotten::Finding>,
 }
 
 /// Whether `app` belongs in the mover's plan: theirs, or everyone's.
@@ -391,6 +396,7 @@ impl FullPlan {
                 from: Some(x.system),
                 extras_digest: Some(digest),
                 links: x.links,
+                forgotten: x.forgotten.clone(),
                 ..Self::default()
             };
         };
@@ -454,6 +460,7 @@ impl FullPlan {
             left_out_by_person: x.left_out_by_person,
             links: x.links,
             old_folders: x.folders.iter().map(|f| (f.role, f.path.clone())).collect(),
+            forgotten: x.forgotten.clone(),
         }
     }
 
@@ -479,6 +486,8 @@ impl FullPlan {
                 needs,
                 special: None,
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 source: (action == Action::Install)
                     .then(|| e.winget().map(str::to_string))
@@ -498,6 +507,8 @@ impl FullPlan {
                 needs: None,
                 special: None,
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 update: None,
                 source: None,
@@ -523,6 +534,8 @@ impl FullPlan {
                 needs,
                 special: Some(s.step),
                 files: s.files,
+                category: Some(s.category),
+                notes: s.notes.clone(),
                 secret: s.secret.then_some(at as u32),
                 update: None,
                 source: None,
@@ -541,6 +554,8 @@ impl FullPlan {
                 needs: Some(Reason::FinishByHand),
                 special: None,
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 update: None,
                 source: None,
@@ -557,6 +572,8 @@ impl FullPlan {
                 needs: Some(Reason::FinishByHand),
                 special: Some(SpecialStep::LookAtIt),
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 update: None,
                 source: None,
@@ -573,6 +590,8 @@ impl FullPlan {
                 needs: None,
                 special: None,
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 update: None,
                 source: None,
@@ -588,6 +607,8 @@ impl FullPlan {
                 needs: Some(Reason::FinishByHand),
                 special: Some(SpecialStep::NotYet),
                 files: 0,
+                category: None,
+                notes: Vec::new(),
                 secret: None,
                 update: None,
                 source: None,
