@@ -2915,3 +2915,15 @@ space-box-fits = Com eles no notebook antigo, todo o resto cabe.
 finish-handover-check-old = Verificar o notebook antigo de novo
 finish-handover-check-armed = O PCTwin está pronto para verificar o notebook antigo. Abra o PCTwin no notebook antigo e conecte os dois notebooks como para uma transferência. Depois toque em Olhar de novo.
 finish-handover-look-again = Olhar de novo
+qs-where-title = Onde salvar estes arquivos?
+qs-where-body = { $count ->
+        [one] { $count } arquivo, { $size }. Nada é salvo até você escolher.
+        [many] { $count } arquivos, { $size }. Nada é salvo até você escolher.
+       *[other] { $count } arquivos, { $size }. Nada é salvo até você escolher.
+    }
+qs-where-folder = Pasta: { $folder }
+qs-where-details = Mais detalhes
+qs-where-path = Local completo: { $path }
+qs-where-save = Salvar aqui
+qs-where-choose = Escolher outra pasta
+qs-where-stop = Parar

@@ -2920,3 +2920,15 @@ space-box-fits = S’ils restent sur votre ancien ordinateur, tout le reste tien
 finish-handover-check-old = Vérifier à nouveau l’ancien ordinateur
 finish-handover-check-armed = PCTwin est prêt à vérifier l’ancien ordinateur. Ouvrez PCTwin sur l’ancien ordinateur et connectez les deux ordinateurs comme pour un transfert. Puis appuyez sur Regarder à nouveau.
 finish-handover-look-again = Regarder à nouveau
+qs-where-title = Où les enregistrer ?
+qs-where-body = { $count ->
+        [one] { $count } fichier, { $size }. Rien n’est enregistré avant votre choix.
+        [many] { $count } fichiers, { $size }. Rien n’est enregistré avant votre choix.
+       *[other] { $count } fichiers, { $size }. Rien n’est enregistré avant votre choix.
+    }
+qs-where-folder = Dossier : { $folder }
+qs-where-details = Plus de détails
+qs-where-path = Emplacement complet : { $path }
+qs-where-save = Enregistrer ici
+qs-where-choose = Choisir un autre dossier
+qs-where-stop = Arrêter

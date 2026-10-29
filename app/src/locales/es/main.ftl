@@ -2911,3 +2911,15 @@ space-box-fits = Si se quedan en tu laptop anterior, todo lo demás cabe.
 finish-handover-check-old = Volver a comprobar la laptop anterior
 finish-handover-check-armed = PCTwin está listo para comprobar la laptop anterior. Abre PCTwin en la laptop anterior y conecta las dos laptops como para un traslado. Luego pulsa Mirar de nuevo.
 finish-handover-look-again = Mirar de nuevo
+qs-where-title = ¿Dónde se guardan?
+qs-where-body = { $count ->
+        [one] 1 archivo, { $size }. No se guarda nada hasta que elijas.
+        [many] { $count } archivos, { $size }. No se guarda nada hasta que elijas.
+       *[other] { $count } archivos, { $size }. No se guarda nada hasta que elijas.
+    }
+qs-where-folder = Carpeta: { $folder }
+qs-where-details = Más detalles
+qs-where-path = Ubicación completa: { $path }
+qs-where-save = Guardar aquí
+qs-where-choose = Elegir otra carpeta
+qs-where-stop = Detener

@@ -2822,3 +2822,14 @@ space-box-fits = उन्हें पुराने लैपटॉप पर
 finish-handover-check-old = पुराने लैपटॉप को दोबारा जाँचें
 finish-handover-check-armed = PCTwin पुराने लैपटॉप को जाँचने के लिए तैयार है। पुराने लैपटॉप पर PCTwin खोलें और दोनों लैपटॉप को वैसे ही जोड़ें जैसे ले जाने के लिए जोड़ते हैं। फिर दोबारा देखें दबाएँ।
 finish-handover-look-again = दोबारा देखें
+qs-where-title = इन्हें कहाँ रखें?
+qs-where-body = { $count ->
+        [one] { $count } फ़ाइल, { $size }। आपके चुनने तक कुछ भी सेव नहीं होता।
+       *[other] { $count } फ़ाइलें, { $size }। आपके चुनने तक कुछ भी सेव नहीं होता।
+    }
+qs-where-folder = फ़ोल्डर: { $folder }
+qs-where-details = और जानकारी
+qs-where-path = पूरी जगह: { $path }
+qs-where-save = यहाँ सेव करें
+qs-where-choose = दूसरा फ़ोल्डर चुनें
+qs-where-stop = रोकें

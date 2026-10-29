@@ -2700,3 +2700,14 @@ space-box-fits = With them left on your old laptop, everything else fits.
 finish-handover-check-old = Check the old laptop again
 finish-handover-check-armed = PCTwin is ready to check the old laptop. Open PCTwin on the old laptop and connect the two laptops as for a move. Then press Look again.
 finish-handover-look-again = Look again
+qs-where-title = Where should these go?
+qs-where-body = { $count ->
+        [one] 1 file, { $size }. Nothing is saved until you choose.
+       *[other] { $count } files, { $size }. Nothing is saved until you choose.
+    }
+qs-where-folder = Folder: { $folder }
+qs-where-details = More details
+qs-where-path = Full place: { $path }
+qs-where-save = Save here
+qs-where-choose = Choose another folder
+qs-where-stop = Stop

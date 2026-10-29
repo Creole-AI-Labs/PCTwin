@@ -14,6 +14,7 @@ import {
   qsPause,
   qsPick,
   qsReceive,
+  qsSaveHere,
   qsResume,
   qsSend,
   qsStop,
@@ -46,6 +47,8 @@ type View =
   /** The receiver has no folder (no Downloads folder could be found or opened): choose one first. */
   | { kind: "no-folder" }
   | { kind: "pair" }
+  /** The receiver, once paired and told what is coming: where should these go? Nothing is saved before Save here (29 October 2026). */
+  | { kind: "where" }
   | { kind: "progress"; progress: SendProgress }
   | { kind: "done"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem };
@@ -79,6 +82,9 @@ export default function QuickHost({
   const { l10n } = useLocalization();
   const bytes = useBytes();
   const sender = mode === "send";
+  // For the engine's events (the listener is set once): which side this is, and whether Save here was pressed.
+  const senderRef = useRef(sender);
+  const savedRef = useRef(false);
   const [view, setView] = useState<View>({ kind: sender ? "pick" : "folder" });
   // Each step settles in like a new screen; a problem arrives without travel.
   useSettle(view.kind, { calm: view.kind === "problem" });
@@ -128,9 +134,13 @@ export default function QuickHost({
       // What is being received: kept for the sizes on the Done page, never a page of its own.
       if (event.kind === "incoming") {
         setOffered(event.files);
+        // The receiver: what is coming is announced, then PCTwin waits for where it goes.
+        if (!senderRef.current) setView((v) => (v.kind === "progress" && !savedRef.current ? { kind: "where" } : v));
         return;
       }
       setView((v) => {
+        // Waiting for where the files go: only a problem (the sender stopped, the link was lost) moves the page.
+        if (v.kind === "where") return event.kind === "problem" ? { kind: "problem", problem: event.problem } : v;
         // Only a send that is going on moves the page: a late word never takes the person off
         // the page they are on.
         if (v.kind !== "progress" && v.kind !== "pair") return v;
@@ -307,6 +317,52 @@ export default function QuickHost({
             qsReceive().catch(fail);
           }}
         />
+      );
+    case "where":
+      return (
+        <>
+          <TopStrip labelId="qs-eyebrow-receiving" />
+          <Heading id="qs-where-title" />
+          <p className="subhead">{l10n.getString("qs-where-body", { count: offered.length, size: bytes(offered.reduce((n, f) => n + f.size, 0)) })}</p>
+          <div className="qs-folder-line">
+            <Tile>
+              <Folder size={18} />
+            </Tile>
+            <span dir="auto" role="status">
+              {folder ? l10n.getString("qs-where-folder", { folder: folder.name }) : ""}
+            </span>
+          </div>
+          {folder && (
+            <details className="mv-details">
+              <summary>{l10n.getString("qs-where-details")}</summary>
+              <p dir="auto">{l10n.getString("qs-where-path", { path: folder.path })}</p>
+            </details>
+          )}
+          {folderFailed && <Banner tone="attention">{l10n.getString("qs-folder-failed")}</Banner>}
+          <FrameFooter>
+            <Button
+              variant="quiet"
+              onClick={() => {
+                // Nothing is saved yet, so stopping loses nothing.
+                void qsStop().catch(() => undefined);
+                onHome();
+              }}
+            >
+              {l10n.getString("qs-where-stop")}
+            </Button>
+            <Button onClick={chooseFolder}>{l10n.getString("qs-where-choose")}</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                savedRef.current = true;
+                setView({ kind: "progress", progress: STARTING });
+                qsSaveHere().catch(fail);
+              }}
+            >
+              {l10n.getString("qs-where-save")}
+            </Button>
+          </FrameFooter>
+        </>
       );
     case "progress":
       if (mini) {

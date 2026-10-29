@@ -3221,3 +3221,18 @@ space-box-fits = مع بقائها على حاسوبك القديم، يتسع �
 finish-handover-check-old = افحص الحاسوب القديم مرة أخرى
 finish-handover-check-armed = PCTwin جاهز لفحص الحاسوب القديم. افتح PCTwin على الحاسوب القديم وصِل الحاسوبين كما في النقل. ثم اضغط انظر مرة أخرى.
 finish-handover-look-again = انظر مرة أخرى
+qs-where-title = أين تُحفظ هذه الملفات؟
+qs-where-body = { $count ->
+        [zero] لا ملفات، { $size }. لا يُحفظ شيء حتى تختار.
+        [one] ملف واحد، { $size }. لا يُحفظ شيء حتى تختار.
+        [two] ملفان، { $size }. لا يُحفظ شيء حتى تختار.
+        [few] { $count } ملفات، { $size }. لا يُحفظ شيء حتى تختار.
+        [many] { $count } ملفًا، { $size }. لا يُحفظ شيء حتى تختار.
+       *[other] { $count } ملف، { $size }. لا يُحفظ شيء حتى تختار.
+    }
+qs-where-folder = المجلد: { $folder }
+qs-where-details = مزيد من التفاصيل
+qs-where-path = المكان الكامل: { $path }
+qs-where-save = احفظ هنا
+qs-where-choose = اختر مجلدًا آخر
+qs-where-stop = إيقاف

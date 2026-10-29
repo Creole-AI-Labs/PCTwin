@@ -2558,3 +2558,13 @@ space-box-fits = 把它们留在旧电脑上后，其余内容都放得下。
 finish-handover-check-old = 再次检查旧电脑
 finish-handover-check-armed = PCTwin 已准备好检查旧电脑。请在旧电脑上打开 PCTwin，并像迁移时一样连接两台电脑。然后点击“再看一次”。
 finish-handover-look-again = 再看一次
+qs-where-title = 这些文件保存到哪里？
+qs-where-body = { $count ->
+       *[other] { $count } 个文件，{ $size }。在你选择之前不会保存任何内容。
+    }
+qs-where-folder = 文件夹：{ $folder }
+qs-where-details = 更多详情
+qs-where-path = 完整位置：{ $path }
+qs-where-save = 保存到这里
+qs-where-choose = 选择其他文件夹
+qs-where-stop = 停止
