@@ -106,7 +106,9 @@ pub struct NamedHolders;
 
 impl pctwin_special::capture::Holders for NamedHolders {
     fn holding(&self, files: &[std::path::PathBuf]) -> pctwin_special::capture::Holding {
-        use pctwin_special::capture::{Holding, SystemHolders};
+        #[cfg(windows)]
+        use pctwin_special::capture::Holding;
+        use pctwin_special::capture::SystemHolders;
         match SystemHolders.holding(files) {
             #[cfg(windows)]
             Holding::Held { by } if by.is_empty() => Holding::Held {
@@ -287,6 +289,9 @@ pub fn connection_now() -> Connection {
 /// not offered (second security review, 29 October 2026): every app is downloaded.
 #[derive(Debug, Clone, Default)]
 pub struct InstallChoices {
+    /// Read by the Windows install chain (winget downloads); a Mac or Linux installs through the
+    /// system's own tools, which PCTwin does not hold back for the connection yet.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub wait_free_wifi: bool,
 }
 

@@ -8,6 +8,10 @@
 //!
 //! The old laptop is read only, except for this step: consented, recorded in the outcome
 //! ([`KeptOnlineView`]) and reversed (each file made online only again).
+//!
+//! Offered only on Windows (the choose page says so elsewhere); the rest of this module is built
+//! everywhere so its tests run on every system, so its Windows-only parts are unused there.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
