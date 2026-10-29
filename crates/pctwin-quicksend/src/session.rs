@@ -31,6 +31,11 @@ const OFFERS: u8 = 1;
 const ENDS: u8 = 2;
 /// How often the leader asks, while nothing is being sent.
 pub const POLL_EVERY: Duration = Duration::from_millis(500);
+/// The follower answers no faster than this, whatever the leader does.
+pub const MIN_POLL: Duration = Duration::from_millis(250);
+/// The longest either side waits for the other's next turn-taking message: a silent laptop ends
+/// the session.
+pub const STEP_WAIT: Duration = Duration::from_secs(30);
 /// Most laptops sent to at the same time; more wait their turn.
 pub const MOST_AT_ONCE: usize = 3;
 
@@ -95,41 +100,73 @@ fn decide(leader: Want, follower: Want, i_lead: bool) -> Option<Turn> {
     }
 }
 
+/// How turns are taken: how often the leader asks ([`POLL_EVERY`]), how fast the follower
+/// answers at most ([`MIN_POLL`]), and how long either waits for the other ([`STEP_WAIT`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pace {
+    pub every: Duration,
+    pub min: Duration,
+    pub step: Duration,
+}
+
+impl Default for Pace {
+    fn default() -> Self {
+        Self {
+            every: POLL_EVERY,
+            min: MIN_POLL,
+            step: STEP_WAIT,
+        }
+    }
+}
+
 /// Waits for the next turn in an open session over `ch`. `leader`: this laptop sent first.
-/// `want` is asked what this side wants each time (at most once per [`POLL_EVERY`] on the
-/// leader). Anything unexpected, or the link failing, ends the session.
+/// `want` is asked what this side wants each time (at most once per `pace.every` on the leader).
+/// A message not there within `pace.step`, anything unexpected, or the link failing ends the
+/// session; the follower never answers faster than `pace.min`, so a leader that asks too often
+/// is slowed, not served.
 pub async fn next_turn(
     ch: &mut impl Channel,
     leader: bool,
     want: &mut dyn FnMut() -> Want,
-    every: Duration,
+    pace: Pace,
 ) -> Turn {
+    let mut answered: Option<tokio::time::Instant> = None;
     loop {
         let decided = if leader {
             let mine = want();
             if ch.send(&message(POLL, mine)).await.is_err() {
                 return Turn::Ended;
             }
-            let Some(theirs) = ch.recv().await.ok().and_then(|b| read(&b, ANSWER)) else {
+            let Some(theirs) = recv_within(ch, pace.step, ANSWER).await else {
                 return Turn::Ended;
             };
             decide(mine, theirs, true)
         } else {
-            let Some(theirs) = ch.recv().await.ok().and_then(|b| read(&b, POLL)) else {
+            let Some(theirs) = recv_within(ch, pace.step, POLL).await else {
                 return Turn::Ended;
             };
+            if let Some(last) = answered {
+                tokio::time::sleep_until(last + pace.min).await;
+            }
             let mine = want();
             if ch.send(&message(ANSWER, mine)).await.is_err() {
                 return Turn::Ended;
             }
+            answered = Some(tokio::time::Instant::now());
             decide(theirs, mine, false)
         };
         match decided {
             Some(turn) => return turn,
-            None if leader => tokio::time::sleep(every).await,
+            None if leader => tokio::time::sleep(pace.every).await,
             None => {}
         }
     }
+}
+
+/// The other side's turn-taking message of `kind`, within `wait`.
+async fn recv_within(ch: &mut impl Channel, wait: Duration, kind: u8) -> Option<Want> {
+    let got = tokio::time::timeout(wait, ch.recv()).await.ok()?.ok()?;
+    read(&got, kind)
 }
 
 /// Where a queued send is.
@@ -153,6 +190,8 @@ pub struct Queued {
     pub state: SendState,
     /// Paused by the person: a waiting one does not start; a running one is held.
     pub paused: bool,
+    /// Cancelled by the person while it was being picked up or sent: it never waits again.
+    pub cancelled: bool,
 }
 
 /// Every send made and not yet finished, in the order made, with what each carries (`T`).
@@ -184,6 +223,7 @@ impl<T> Sends<T> {
                 bytes,
                 state: SendState::Waiting,
                 paused: false,
+                cancelled: false,
             },
             Some(what),
         ));
@@ -225,12 +265,29 @@ impl<T> Sends<T> {
         Some((q.id, what.take()?))
     }
 
-    /// A send started for a turn that went to the other laptop: waiting again, in its place.
-    pub fn unstart(&mut self, id: u64, what: T) {
-        if let Some((q, slot)) = self.items.iter_mut().find(|(q, _)| q.id == id) {
-            q.state = SendState::Waiting;
-            *slot = Some(what);
+    /// A send started for a turn that went to the other laptop: waiting again, in its place (still
+    /// paused if it was paused meanwhile), unless it was cancelled meanwhile, when it leaves the
+    /// list. Whether it waits again.
+    pub fn unstart(&mut self, id: u64, what: T) -> bool {
+        let Some(at) = self.items.iter().position(|(q, _)| q.id == id) else {
+            return false;
+        };
+        if self.items[at].0.cancelled {
+            self.items.remove(at);
+            return false;
         }
+        let (q, slot) = &mut self.items[at];
+        q.state = SendState::Waiting;
+        *slot = Some(what);
+        true
+    }
+
+    /// Whether send `id` is paused, and whether it was cancelled (for a send being picked up).
+    pub fn marks(&self, id: u64) -> Option<(bool, bool)> {
+        self.items
+            .iter()
+            .find(|(q, _)| q.id == id)
+            .map(|(q, _)| (q.paused, q.cancelled))
     }
 
     /// Send `id` finished (sent, failed or stopped): it leaves the list.
@@ -254,6 +311,7 @@ impl<T> Sends<T> {
     pub fn cancel(&mut self, id: u64) -> Option<bool> {
         let at = self.items.iter().position(|(q, _)| q.id == id)?;
         if self.items[at].0.state == SendState::Sending {
+            self.items[at].0.cancelled = true;
             return Some(true);
         }
         self.items.remove(at);
@@ -370,6 +428,31 @@ mod tests {
         assert!(s.ready("d"));
         assert_eq!(s.list().len(), 3);
         let _ = d;
+    }
+
+    /// A send picked up for a turn keeps the person's Cancel and Pause on its own entry: a
+    /// cancelled one never waits again, a paused one is still paused when it waits again.
+    #[test]
+    fn cancel_and_pause_hold_for_a_send_being_picked_up() {
+        let mut s: Sends<u8> = Sends::default();
+        let two = s.add("a", 1, 1, 2);
+        assert_eq!(s.start("a"), Some((two, 2)));
+        assert_eq!(s.cancel(two), Some(true));
+        assert_eq!(
+            s.marks(two),
+            Some((false, true)),
+            "the mark stays on the send"
+        );
+        assert!(!s.unstart(two, 2), "a cancelled one never waits again");
+        assert_eq!(s.marks(two), None);
+        let three = s.add("a", 1, 1, 3);
+        assert_eq!(s.start("a"), Some((three, 3)));
+        assert!(s.set_paused(three, true));
+        assert_eq!(s.marks(three), Some((true, false)));
+        assert!(s.unstart(three, 3));
+        assert!(!s.ready("a"), "paused while picked up: still paused");
+        assert!(s.set_paused(three, false));
+        assert_eq!(s.start("a"), Some((three, 3)));
     }
 
     #[test]

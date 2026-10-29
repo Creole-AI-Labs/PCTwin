@@ -99,7 +99,10 @@ pub struct QuickSend {
     pub(crate) dated: Mutex<Vec<Dated>>,
     /// A receive waiting for the person to say where the files go (decided 29 October 2026: the
     /// receiver is asked when they arrive, not before): [`quicksend_save_here`] answers it.
-    save: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// Each question is numbered ([`IncomingView::prompt`]); Save and Decline name the one they
+    /// answer, so a late click never answers the next offer.
+    save: Mutex<Option<(u64, tokio::sync::oneshot::Sender<()>)>>,
+    next_prompt: std::sync::atomic::AtomicU64,
     /// The notes shown now, at most one per laptop it came from: the only web addresses Open
     /// may open, each by the id of the note shown.
     pub(crate) notes: Mutex<Notes>,
@@ -390,6 +393,28 @@ fn progress_view(snap: &pctwin_transfer::MeterSnapshot, paused: bool) -> Progres
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct IncomingView {
     pub files: Vec<OfferedView>,
+    /// This question's number: Save and Decline name it.
+    pub prompt: u64,
+}
+
+/// Asks where the files of a new offer go: the question's number, and the answer to wait for.
+fn ask_save(qs: &QuickSend) -> (u64, tokio::sync::oneshot::Receiver<()>) {
+    let prompt = qs.next_prompt.fetch_add(1, Ordering::Relaxed) + 1;
+    let (answered, answer) = tokio::sync::oneshot::channel();
+    *lock(&qs.save) = Some((prompt, answered));
+    (prompt, answer)
+}
+
+/// Takes question `prompt`'s answer slot, only while it is the question asked now.
+fn answer_slot(qs: &QuickSend, prompt: u64) -> Option<tokio::sync::oneshot::Sender<()>> {
+    let mut save = lock(&qs.save);
+    match save.take() {
+        Some((asked, tx)) if asked == prompt => Some(tx),
+        other => {
+            *save = other;
+            None
+        }
+    }
 }
 
 /// Why a Quick Send could not go on.
@@ -679,8 +704,7 @@ pub async fn quicksend_receive<R: Runtime>(
         .inner()
         .clone();
     lock(&qs.dated).clear();
-    let (answered, answer) = tokio::sync::oneshot::channel();
-    *lock(&qs.save) = Some(answered);
+    let (prompt, answer) = ask_save(&qs);
     let state = Arc::clone(&qs);
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
@@ -703,6 +727,7 @@ pub async fn quicksend_receive<R: Runtime>(
                     INCOMING_EVENT,
                     IncomingView {
                         files: offered(incoming.files()),
+                        prompt,
                     },
                 );
                 // Where it goes: asked now, answered by Save (the sender waits as long).
@@ -773,46 +798,55 @@ pub async fn quicksend_receive<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
-/// One more offer from the other laptop in an open six-digit session: shown, asked where to save
-/// exactly as the first (Save into the folder held, Choose another folder, or Cancel, which
-/// declines it), then received. `Some(None)`: declined, the session goes on; `None`: the session
-/// is over.
+/// One more offer from the other laptop in an open six-digit session: it must come within
+/// [`crate::sessions::OFFER_WAIT`] of its turn; shown, asked where to save exactly as the first
+/// (Save into the folder held, Choose another folder, or Decline, each naming this question),
+/// then received. `None`: the session is over.
 async fn receive_turn<R: Runtime>(
     app: &AppHandle<R>,
     state: &Arc<QuickSend>,
     link: &mut pctwin_link::Link,
     me: &str,
     journal_at: &std::path::Path,
-) -> Option<Option<ReceiptView>> {
-    let incoming = match pctwin_quicksend::receive(link).await.ok()? {
+) -> Option<crate::sessions::Received> {
+    let arrived =
+        tokio::time::timeout(crate::sessions::OFFER_WAIT, pctwin_quicksend::receive(link))
+            .await
+            .ok()?
+            .ok()?;
+    let incoming = match arrived {
         pctwin_quicksend::Arrival::Files(incoming) => incoming,
         // Only files are offered in an open session.
         pctwin_quicksend::Arrival::Note(_) => return None,
     };
-    let (answered, answer) = tokio::sync::oneshot::channel();
-    *lock(&state.save) = Some(answered);
-    let live = Live::default();
-    *lock(&state.live) = Some(live.clone());
+    let (prompt, answer) = ask_save(state);
     let _ = app.emit(
         INCOMING_EVENT,
         IncomingView {
             files: offered(incoming.files()),
+            prompt,
         },
     );
+    // Only this question's Decline (or its wait running out) declines it.
     let saved = wait_for_save(
         answer,
-        live.control.wait_stopped(),
+        std::future::pending(),
         pctwin_quicksend::ANSWER_WAIT,
     )
     .await;
-    lock(&state.save).take();
+    let _ = answer_slot(state, prompt);
     let held = match saved.ok().and_then(|()| take_held(state).ok()) {
         Some(held) => held,
         None => {
             incoming.decline(link).await.ok()?;
-            return Some(None);
+            return Some(crate::sessions::Received {
+                receipt: None,
+                declined: true,
+            });
         }
     };
+    let live = Live::default();
+    *lock(&state.live) = Some(live.clone());
     *lock(&state.received_into) = Some(Known {
         path: held.path.clone(),
         identity: held.identity,
@@ -825,7 +859,10 @@ async fn receive_turn<R: Runtime>(
         .await;
     done.store(true, Ordering::Release);
     let r = r.ok()?;
-    Some(Some(receipt_view("receiver", &r, live.control.stopped())))
+    Some(crate::sessions::Received {
+        receipt: Some(receipt_view("receiver", &r, live.control.stopped())),
+        declined: false,
+    })
 }
 
 /// A note or link as the receiving screen shows it: the text exactly as sent (checked to hold
@@ -1025,12 +1062,25 @@ fn keep_original_dates(qs: &QuickSend) -> Result<u64, MoveProblem> {
 
 /// Save: the files that arrived go into the folder held now (Downloads, or the one chosen).
 #[tauri::command]
-pub fn quicksend_save_here(qs: State<'_, AppQuickSend>) -> Result<(), MoveProblem> {
+pub fn quicksend_save_here(qs: State<'_, AppQuickSend>, prompt: u64) -> Result<(), MoveProblem> {
+    save_here(&qs, prompt)
+}
+
+fn save_here(qs: &QuickSend, prompt: u64) -> Result<(), MoveProblem> {
     if lock(&qs.folder).is_none() {
         return Err(MoveProblem::Failed);
     }
-    let waiting = lock(&qs.save).take().ok_or(MoveProblem::NotMoving)?;
+    let waiting = answer_slot(qs, prompt).ok_or(MoveProblem::NotMoving)?;
     waiting.send(()).map_err(|_| MoveProblem::NotMoving)
+}
+
+/// Decline, on the question `prompt` (files offered in an open send, or the first): nothing is
+/// written; the sender is told. A Decline for a question no longer asked does nothing.
+#[tauri::command]
+pub fn quicksend_decline_here(qs: State<'_, AppQuickSend>, prompt: u64) -> Result<(), MoveProblem> {
+    answer_slot(&qs, prompt)
+        .map(drop)
+        .ok_or(MoveProblem::NotMoving)
 }
 
 /// Waits for the person's Save, unless they stop or the sender's own wait for an answer is over.
@@ -1204,6 +1254,25 @@ mod tests {
     use super::*;
     use pctwin_known::folders::{open_plain_around, plain_folder, plain_identity};
     use pctwin_record::ItemId;
+
+    /// Save and Decline answer only the question asked now: a late click for an earlier offer
+    /// never answers the next one.
+    #[test]
+    fn a_late_answer_never_answers_the_next_offer() {
+        let qs = QuickSend::default();
+        let d = tempfile::tempdir().unwrap();
+        remember_chosen(&qs, d.path().to_path_buf()).unwrap();
+        let (first, mut a1) = ask_save(&qs);
+        let (second, mut a2) = ask_save(&qs);
+        assert_ne!(first, second);
+        assert!(save_here(&qs, first).is_err(), "the first question is gone");
+        assert!(a1.try_recv().is_err());
+        assert!(a2.try_recv().is_err(), "a late Save answered nothing");
+        assert!(answer_slot(&qs, first).is_none(), "nor a late Decline");
+        assert!(save_here(&qs, second).is_ok());
+        assert!(a2.try_recv().is_ok());
+        assert!(save_here(&qs, second).is_err(), "once");
+    }
 
     /// Nothing is received before the person says where: Save goes on; a stop, a Save that can no
     /// longer come, or the sender's wait running out ends it as not answered (29 October 2026).

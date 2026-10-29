@@ -209,7 +209,7 @@ describe("Remember this connection", () => {
     await waitFor(() => {
       expect(called("quicksend_receive")).toBe(true);
     });
-    send("quicksend-incoming", { files: [] });
+    send("quicksend-incoming", { files: [], prompt: 1 });
     fireEvent.click(button(text("qs-where-save")));
     send("quicksend-receipt", receipts[0]);
     send("quicksend-remember", { fallbackStore: false, connections: [{ id: ADA.id, label: ADA.label, lastUsed: ADA.lastUsed }, { id: KITCHEN.id, label: KITCHEN.label, lastUsed: KITCHEN.lastUsed }] });
@@ -626,7 +626,7 @@ describe("an open send, after the first files", () => {
   it("the other laptop's Send to: asked where to save like the first, then received, then its Done page", async () => {
     await sentWithTheCode();
     replies.quicksend_folder = () => DOWNLOADS;
-    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }] });
+    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }], prompt: 2 });
     await waitFor(() => {
       expect(heading()).toBe(text("qs-where-title"));
     });
@@ -647,7 +647,7 @@ describe("an open send, after the first files", () => {
   it("declining more files keeps the send open and goes back", async () => {
     await sentWithTheCode();
     replies.quicksend_folder = () => DOWNLOADS;
-    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }] });
+    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }], prompt: 2 });
     await waitFor(() => {
       expect(heading()).toBe(text("qs-where-title"));
     });

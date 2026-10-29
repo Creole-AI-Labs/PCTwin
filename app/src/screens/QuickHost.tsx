@@ -151,6 +151,8 @@ export default function QuickHost({
   // For the engine's events (the listener is set once): which side this is, and whether Save here was pressed.
   const senderRef = useRef(sender);
   const savedRef = useRef(false);
+  // The question the Save on the "where" page answers (a late click never answers the next).
+  const promptRef = useRef(0);
   const [view, setView] = useState<View>({ kind: mode === "sends" ? "sends" : mode === "note" ? "compose" : sender ? "pick" : "folder" });
   const viewRef = useRef<View>(view);
   useEffect(() => {
@@ -216,6 +218,7 @@ export default function QuickHost({
       // What is being received: kept for the sizes on the Done page, never a page of its own.
       if (event.kind === "incoming") {
         setOffered(event.files);
+        promptRef.current = event.prompt;
         // More from the other laptop in an open send: asked where they go, exactly as the first.
         const v = viewRef.current;
         if (mineRef.current.some((s) => !s.ending) && v.kind !== "where" && !(v.kind === "progress" && !savedRef.current && !senderRef.current)) {
@@ -726,7 +729,7 @@ export default function QuickHost({
               onClick={() => {
                 savedRef.current = true;
                 setView({ kind: "progress", progress: STARTING });
-                qsSaveHere().catch(fail);
+                qsSaveHere(promptRef.current).catch(fail);
               }}
             >
               {l10n.getString("qs-where-save")}

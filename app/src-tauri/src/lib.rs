@@ -321,6 +321,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         quicksend::quicksend_folder,
         quicksend::quicksend_choose_folder,
         quicksend::quicksend_save_here,
+        quicksend::quicksend_decline_here,
         quicksend::quicksend_open_folder,
         quicksend::quicksend_keep_original_dates,
         quicksend::quicksend_pause,

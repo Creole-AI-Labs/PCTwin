@@ -979,10 +979,11 @@ export function parseOffered(value: unknown): OfferedFile | null {
   return f && typeof f.id === "string" && typeof f.path === "string" && isCount(f.size) ? { id: f.id, path: f.path, size: f.size } : null;
 }
 
-export function parseQsIncoming(value: unknown): { files: OfferedFile[] } | null {
-  const f = exactly(value, ["files"]);
+/** Files offered here, and the number of the question "where do they go": Save and Decline name it. */
+export function parseQsIncoming(value: unknown): { files: OfferedFile[]; prompt: number } | null {
+  const f = exactly(value, ["files", "prompt"]);
   const files = f && listOf(f.files, parseOffered);
-  return files ? { files } : null;
+  return f && files && isCount(f.prompt) ? { files, prompt: f.prompt } : null;
 }
 
 function parseQsOutcome(value: unknown): QsOutcome | null {
@@ -1069,7 +1070,10 @@ export const qsFolder = () => ask("quicksend_folder", parseQsFolder);
 /** Change: a folder from the system's picker, used from now on this session ({ none } when none was chosen). */
 export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
 /** Save: what arrived goes into the folder shown now (Downloads, or the one chosen); nothing is saved before this. */
-export const qsSaveHere = () => run("quicksend_save_here");
+/** Save, on question `prompt` (from the incoming event): a late click never answers the next offer. */
+export const qsSaveHere = (prompt: number) => run("quicksend_save_here", { prompt });
+/** Decline, on question `prompt`: nothing is written; the sender is told. */
+export const qsDeclineHere = (prompt: number) => run("quicksend_decline_here", { prompt });
 /** Opens the folder the last receive saved into, in the system's file manager (never a file). */
 export const qsOpenFolder = () => run("quicksend_open_folder");
 /** Keep original dates: how many of the last receive's files got their original dates back. */
@@ -1080,7 +1084,7 @@ export const qsStop = () => run("quicksend_stop");
 
 export type QsEvent =
   | { kind: "progress"; progress: SendProgress }
-  | { kind: "incoming"; files: OfferedFile[] }
+  | { kind: "incoming"; files: OfferedFile[]; prompt: number }
   | { kind: "receipt"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem }
   | { kind: "picked"; items: PickedItem[] }
@@ -1096,7 +1100,7 @@ export async function listenQuickSend(handler: (event: QsEvent) => void): Promis
     });
   const all = await Promise.all([
     on("quicksend-progress", parseQsProgress, (progress) => ({ kind: "progress", progress })),
-    on("quicksend-incoming", parseQsIncoming, (i) => ({ kind: "incoming", files: i.files })),
+    on("quicksend-incoming", parseQsIncoming, (i) => ({ kind: "incoming", files: i.files, prompt: i.prompt })),
     on("quicksend-receipt", parseQsReceipt, (receipt) => ({ kind: "receipt", receipt })),
     on("quicksend-problem", parseQsProblem, (problem) => ({ kind: "problem", problem })),
     on("quicksend-picked", (v) => listOf(v, parsePicked), (items) => ({ kind: "picked", items })),
