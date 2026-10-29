@@ -916,6 +916,9 @@ impl NewLaptopOf<'_, '_> {
             proposed: true,
             placement: (&r.placement).into(),
             root: r.root,
+            // Landing does not use them: what the person is shown came with the plan.
+            category: pctwin_special::category::Category::Other,
+            notes: Vec::new(),
         };
         let approved = Approved {
             seal: self.seal,

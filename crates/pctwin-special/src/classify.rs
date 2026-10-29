@@ -891,11 +891,17 @@ fn classify_within(
         let facts = if late() {
             Err(content::ContentError::Damaged(OUT_OF_TIME.into()))
         } else {
-            within(&f.path, move |p| content::sqlite_facts(p, until))
+            within(&f.path, move |p| content::sqlite_db_facts(p, until))
                 .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
         };
         let (kind, db_paths) = match facts {
-            Ok((k, paths)) => (Ok(k), paths),
+            Ok(facts) => {
+                // Saved web addresses (history, bookmarks), by the tables' shape: a browser's.
+                if content::browsing(&facts.tables) {
+                    ev.push(Evidence::BrowsingData);
+                }
+                (Ok(facts.kind), facts.paths)
+            }
             Err(e) => (Err(e), None),
         };
         match kind {
@@ -1179,6 +1185,12 @@ fn classify_within(
                         vec![Evidence::CredentialValues],
                     )
                 }
+                Some(Ok(j)) if j.bookmarks => b.push(
+                    one,
+                    Custody::Portable,
+                    false,
+                    vec![Evidence::StructuredData, Evidence::BrowsingData],
+                ),
                 Some(Ok(j)) if j.starts_programs => b.push(
                     one,
                     Custody::Portable,

@@ -11,7 +11,7 @@ mod common;
 use common::*;
 use pctwin_catalogue::Catalogue;
 use pctwin_record::Owner;
-use pctwin_special::catalogue::{NativeRoute, SHIPPED, SpecialRow};
+use pctwin_special::catalogue::{NO_ROWS, NativeRoute, SHIPPED, SpecialRow};
 use pctwin_special::classify::{FolderReport, Placement, Skip, classify_all, placement};
 use pctwin_special::component::{Component, Custody, Evidence};
 use pctwin_special::roots::{RootKind, System, find_folders, roots_of};
@@ -109,7 +109,7 @@ fn with_no_catalogue_rows_everything_is_classified_by_its_content() {
     game_saves(&home.join("Saved Games/Synthetic Game"));
     model_library(&home.join(".modelrunner"), false);
 
-    let none = Catalogue::<SpecialRow>::shipped(SHIPPED);
+    let none = Catalogue::<SpecialRow>::shipped(NO_ROWS);
     assert!(none.rows().is_empty());
     let r = discover(&home, &none);
     for f in &r {
@@ -346,7 +346,7 @@ fn a_new_app_works_by_adding_one_catalogue_row() {
     put(&d.join("tokens/session.json"), br#"{"theme":"dark"}"#);
 
     // Before the row: found, classified, not known; between systems it is only preserved.
-    let none = Catalogue::<SpecialRow>::shipped(SHIPPED);
+    let none = Catalogue::<SpecialRow>::shipped(NO_ROWS);
     let before = discover(&home, &none);
     let f = folder(&before, "Synthetic Journal");
     assert!(f.row.is_none());
