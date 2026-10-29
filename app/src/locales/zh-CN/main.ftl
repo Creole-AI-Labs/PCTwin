@@ -1937,28 +1937,28 @@ accept-accept = 接受
 # 2.6 wiring
 reason-open-in-app = 旧笔记本电脑上有一个应用打开着这个文件，所以 PCTwin 没有复制它（在应用写入时复制可能会损坏）。请在旧电脑上关闭那个应用，然后开始一次包含这个文件的新迁移。
 report-open-in = 在 { $app } 中打开着
-fullmove-close-files = 这些文件在这台电脑上的某个应用中打开着，所以 PCTwin 暂时不会复制它们：{ $files }。请关闭正在使用它们的应用，然后选择“重试”。
+fullmove-close-files = 这些文件在这台电脑上的某个应用中打开着，所以 PCTwin 暂时无法安全地复制它们。请关闭正在使用它们的应用，然后选择“重试”。如果不带它们继续，它们会留在这台电脑上，报告中会列出它们。
 choose-online-only =
     { NUMBER($count) ->
        *[other] 同时带上仅在线保存在 { $provider } 中的文件（{ $count } 个文件，{ $size }）。它们会先下载到这台电脑上，之后再恢复为仅在线。
     }
-choose-online-only-unnamed = 这台电脑上的一个云文件夹
+choose-online-only-unnamed = 这台电脑上的一个在线存储服务
 choose-online-only-metered = 在可能按流量收费的网络上也这样做（例如手机热点）
-choose-online-only-not-here = 仅在线保存的文件会继续安全地保存在网上。在 Mac 上暂时还不能带上它们的副本。
+choose-online-only-not-here = 如果你有些文件仅在线保存，它们会继续留在你的在线存储中。PCTwin 暂时还不能从这台电脑带上它们的副本。
 kept-online-copied =
     { NUMBER($count) ->
        *[other] 已下载并复制 { $count } 个仅在线保存的文件。
     }
 kept-online-safe =
     { NUMBER($count) ->
-       *[other] 有 { $count } 个仅在线保存的文件没有复制，它们仍安全地保存在网上。请在新电脑上从保存它们的应用中打开。
+       *[other] 有 { $count } 个仅在线保存的文件没有复制。它们仍在线保存：请在新电脑上从保存它们的应用中打开。
     }
 kept-online-still-here =
     { NUMBER($count) ->
        *[other] 有 { $count } 个已下载的文件仍在这台电脑上占用 { $size }，因为它们的云应用还没有把它们恢复为仅在线。要释放空间，请右键点击每个文件，然后选择“释放空间”。
     }
-kept-online-paused-metered = 下载已停止，因为这个网络可能按流量收费。其余文件仍安全地保存在网上。
-kept-online-paused-space = 下载已停止，因为这台电脑的空间快用完了。其余文件仍安全地保存在网上。
+kept-online-paused-metered = 下载已停止，因为这个网络可能按流量收费。其余文件没有复制，仍在线保存。
+kept-online-paused-space = 下载已停止，因为这台电脑的空间快用完了。其余文件没有复制，仍在线保存。
 plan-own-folder = 把来自 { $laptop } 的东西放进单独的文件夹
 plan-own-folder-help = 这台电脑上已经有另一台旧电脑的东西。每台电脑一个文件夹，可以让它们分开。
 plan-own-folder-name = 来自 { $laptop }
@@ -1968,9 +1968,20 @@ plan-downloads =
        *[other] 将从网上下载 { $count } 个应用，安装到这台电脑上。
     }
 plan-wait-free-wifi = 等到有免费 Wi-Fi 时再下载
-plan-wait-free-wifi-help = 这个网络可能按流量收费。打开此项后，PCTwin 最多等待 20 分钟，直到有免费网络。没能下载的应用会列出来，方便你以后安装。
+plan-wait-free-wifi-help = 如果下载应用时网络可能按流量收费，PCTwin 最多等待 20 分钟，直到有免费 Wi-Fi。没能下载的应用会列出来，方便你以后安装。
 plan-reuse-installers =
     { NUMBER($count) ->
        *[other] 为 { $count } 个应用使用在旧电脑上找到的安装程序，而不是下载
     }
 plan-reuse-installers-help = 每一个都会先检查，和下载的一样：它必须由该应用自己的开发者签名。
+fullmove-close-files-title = 关闭正在使用这些文件的应用
+choose-online-only-title = 仅在线保存的文件
+kept-online-title = 仅在线保存的文件
+kept-online-downloaded = 已下载 { $size }
+plan-own-folder-called = 文件夹名为 { $folder }。
+accept-own-folder = 另一台电脑的东西会放进它们自己的文件夹 { $folder }。你可以在详情中关闭此项。
+plan-downloads-title = 从网上下载的应用
+plan-connection-free = 这台电脑现在的网络不按流量收费。
+plan-connection-may-charge = 这台电脑现在的网络可能按流量收费，例如手机热点。
+plan-connection-not-known = PCTwin 无法判断这台电脑的网络是否按流量收费。
+fullmove-rebuilding-wait-wifi = 如果这个网络可能按流量收费，PCTwin 会在下载应用前最多等待 20 分钟，直到有免费 Wi-Fi。连接免费 Wi-Fi 可以更快继续。

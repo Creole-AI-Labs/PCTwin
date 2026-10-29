@@ -449,6 +449,11 @@
   display: inline-block;
   width: 36px;
 }
+/* A second tick that belongs to the one above it (files kept only online: also on a connection that may charge). */
+.mv-tree-sub {
+  padding-inline-start: 28px;
+  margin-top: var(--space-2);
+}
 
 /* R02 by kind: the sizes bar, then one line per kind that opens into its files. */
 .rp-title {

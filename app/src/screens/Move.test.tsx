@@ -227,6 +227,34 @@ describe("the move, once paired", () => {
     });
   });
 
+  it("2.6: the approval carries the own folder (on unless turned off) and the install choices, from Accept and from the details", async () => {
+    const full = plans[1];
+    await host(false);
+    send("move-plan", full);
+    const accept = screen.getByRole("button", { name: text("accept-accept") });
+    // The plan says where the things go before one tap accepts it.
+    const folder = plain(text("plan-own-folder-name-unnamed"));
+    expect(document.body.textContent).toContain(folder);
+    if (!(accept as HTMLButtonElement).disabled) {
+      fireEvent.click(accept);
+      await waitFor(() => {
+        expect(tauri.invoke).toHaveBeenCalledWith("move_approve", expect.objectContaining({ approve: true, ownFolder: folder, waitFreeWifi: true, reuseInstallers: false }));
+      });
+      return;
+    }
+    // The details: the person turns the own folder off and Wait for free Wi-Fi off.
+    fireEvent.click(screen.getByRole("button", { name: text("accept-details") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => plain(n).startsWith(plain(text("plan-own-folder", { laptop: text("qs-label-other") }))) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-wait-free-wifi")) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
+    const start: HTMLButtonElement = screen.getByRole("button", { name: text("plan-start") });
+    if (start.disabled) throw new Error("the engine's full example can be started from the details");
+    fireEvent.click(start);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", expect.objectContaining({ approve: true, ownFolder: null, waitFreeWifi: false, reuseInstallers: false }));
+    });
+  });
+
   it("a folder sent to another place shows where and its free space, holds the start when it will not fit, and goes back to the usual place", async () => {
     await host(false);
     showPlan(plan);

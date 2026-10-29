@@ -5,7 +5,7 @@ import { ArrowForward, Info } from "../icons";
 import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
 import { pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
-import { RebuildPlanSection } from "./FullMoveParts";
+import { RebuildPlanSection, type InstallChoices } from "./FullMoveParts";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
@@ -104,6 +104,14 @@ export interface PlanReviewProps {
   onPick?: (line: number, bring: boolean) => void;
   updates?: readonly number[];
   onUpdate?: (app: number, update: boolean) => void;
+  /**
+   * Several old laptops into one (2.6), when the plan offers it: whether this old laptop's things
+   * go in their own folder (on unless turned off), and that folder's name as it will be made.
+   */
+  ownFolder?: { on: boolean; laptop: string; folder: string; onChange: (on: boolean) => void };
+  /** The plan's two install choices (Wait for free Wi-Fi, Use the installers found on the old laptop). */
+  installs?: InstallChoices;
+  onInstalls?: (choices: InstallChoices) => void;
 }
 
 /**
@@ -115,7 +123,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick, updates = [], onUpdate }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick, updates = [], onUpdate, ownFolder, installs, onInstalls }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const holds = approvalHolds(plan, approval);
@@ -285,7 +293,22 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         </PlanBox>
       </div>
 
-      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} picked={picked} onPick={onPick} updates={updates} onUpdate={onUpdate} />}
+      {plan.ownFolderOffered && ownFolder && (
+        <div className="plan-approve">
+          <Checkbox
+            checked={ownFolder.on}
+            onChange={ownFolder.onChange}
+            label={l10n.getString("plan-own-folder", { laptop: ownFolder.laptop })}
+            hint={
+              <>
+                {l10n.getString("plan-own-folder-help")} <bdi dir="auto">{l10n.getString("plan-own-folder-called", { folder: ownFolder.folder })}</bdi>
+              </>
+            }
+          />
+        </div>
+      )}
+
+      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} picked={picked} onPick={onPick} updates={updates} onUpdate={onUpdate} installs={installs} onInstalls={onInstalls} />}
 
       {!blocked && (
         <div className="plan-approve">

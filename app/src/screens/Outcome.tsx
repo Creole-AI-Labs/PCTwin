@@ -1,7 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Metrics, Row, RowList, Section } from "../components/kit";
 import { Attention, Check } from "../icons";
-import { KINDS, formatBytes, pageLocale, type MoveOutcome } from "../move";
+import { KINDS, formatBytes, pageLocale, type KeptOnline, type MoveOutcome } from "../move";
 import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
 import { RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
@@ -110,6 +110,7 @@ export default function Outcome({ outcome, onReport, onHome, onUndo, old = false
           </RowList>
         </Section>
       )}
+      {outcome.keptOnline && <KeptOnlineSection kept={outcome.keptOnline} />}
       <AfterMoveCheck outcome={outcome} />
       {outcome.rebuilt && <RebuiltSection rebuilt={outcome.rebuilt} onUndo={onUndo} />}
       <FrameFooter>
@@ -157,6 +158,33 @@ function AfterMoveCheck({ outcome }: { outcome: MoveOutcome }) {
           );
         })}
       </RowList>
+    </Section>
+  );
+}
+
+/**
+ * The old laptop, after bringing copies of files kept only online (2.6): how many were downloaded
+ * and copied, how many stay online and were not copied, the downloaded files the cloud app has
+ * not made online only again (with how to free that space), and why it stopped early, if it did.
+ */
+export function KeptOnlineSection({ kept }: { kept: KeptOnline }) {
+  const { l10n } = useLocalization();
+  const size = (bytes: number) => formatBytes(bytes, pageLocale());
+  return (
+    <Section title={l10n.getString("kept-online-title")}>
+      <RowList>
+        <Row
+          title={l10n.getString("kept-online-copied", { count: kept.copied })}
+          detail={kept.downloadedBytes > 0 ? l10n.getString("kept-online-downloaded", { size: size(kept.downloadedBytes) }) : undefined}
+        />
+        {kept.safeInCloud > 0 && <Row title={l10n.getString("kept-online-safe", { count: kept.safeInCloud })} />}
+        {kept.stillOnOldLaptopFiles > 0 && <Row title={l10n.getString("kept-online-still-here", { count: kept.stillOnOldLaptopFiles, size: size(kept.stillOnOldLaptopBytes) })} />}
+      </RowList>
+      {kept.paused && (
+        <div className="mv-note">
+          <Banner tone="attention">{l10n.getString(kept.paused === "metered-now" ? "kept-online-paused-metered" : "kept-online-paused-space")}</Banner>
+        </div>
+      )}
     </Section>
   );
 }

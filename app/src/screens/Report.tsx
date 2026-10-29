@@ -79,6 +79,12 @@ export default function Report({ items, onBack }: { items: ReportItem[]; onBack:
               <td>
                 {item.note && <p className="mv-note" data-note={item.note}>{l10n.getString(`report-note-${item.note}`)}</p>}
                 {item.reason && item.note !== "no-longer-there" && <ReasonText reason={item.reason} />}
+                {item.openIn && (
+                  // The app that held the file open on the old laptop, by its own name.
+                  <p className="mv-note" data-open-in="">
+                    {l10n.getString("report-open-in", { app: shownName(item.openIn) })}
+                  </p>
+                )}
                 <EvidenceLine outcome={item} />
                 <details className="mv-details">
                   <summary>{l10n.getString("report-more-details")}</summary>

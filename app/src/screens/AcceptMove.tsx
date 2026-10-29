@@ -19,6 +19,7 @@ export default function AcceptMove({
   onAccept,
   onDetails,
   onNotNow,
+  ownFolder = null,
 }: {
   plan: PlanView;
   /** The old laptop's name, as pairing showed it. */
@@ -26,6 +27,8 @@ export default function AcceptMove({
   onAccept: () => void;
   onDetails: () => void;
   onNotNow: () => void;
+  /** Several old laptops into one: the folder this old laptop's things go in, when they get their own (changed in the details). */
+  ownFolder?: string | null;
 }) {
   const { l10n } = useLocalization();
   const { chosen } = overviewOf(plan);
@@ -46,6 +49,7 @@ export default function AcceptMove({
         {apps > 0 && <Row title={l10n.getString("accept-apps", { count: apps })} />}
         {settings && <Row title={l10n.getString("accept-settings")} />}
       </RowList>
+      {ownFolder !== null && <p className="subhead">{l10n.getString("accept-own-folder", { folder: ownFolder })}</p>}
       <div className="mv-note">
         <Banner tone={needs ? "attention" : "ready"}>{l10n.getString(needs ? "accept-needs" : "accept-fits")}</Banner>
       </div>
