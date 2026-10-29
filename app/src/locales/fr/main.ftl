@@ -3051,3 +3051,67 @@ qs-remember-replaces = Avez-vous déjà connecté cet ordinateur ? Choisissez-le
 qs-remember-replaces-suggested = C’est peut-être encore { $label }. Le remplacer ?
 qs-remember-replace = Remplacer
 qs-remember-keep-both = Non, garder les deux
+
+# 2.6 wiring
+reason-open-in-app = Une appli avait ce fichier ouvert sur l’ancien ordinateur, donc PCTwin ne l’a pas copié (une copie faite pendant que l’appli écrit pourrait être abîmée). Fermez cette appli sur l’ancien ordinateur, puis lancez un nouveau transfert qui inclut ce fichier.
+report-open-in = Ouvert dans { $app }
+fullmove-close-files = Ces fichiers sont ouverts dans une appli sur cet ordinateur, donc PCTwin ne peut pas encore les copier sans risque. Fermez l’appli qui les utilise, puis choisissez Réessayer. Si vous continuez sans eux, ils restent sur cet ordinateur et le rapport les indique.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Apporter aussi le fichier gardé seulement en ligne dans { $provider } (1 fichier, { $size }). Il est d’abord téléchargé sur cet ordinateur, puis remis seulement en ligne.
+        [many] Apporter aussi les fichiers gardés seulement en ligne dans { $provider } ({ $count } de fichiers, { $size }). Ils sont d’abord téléchargés sur cet ordinateur, puis remis seulement en ligne.
+       *[other] Apporter aussi les fichiers gardés seulement en ligne dans { $provider } ({ $count } fichiers, { $size }). Ils sont d’abord téléchargés sur cet ordinateur, puis remis seulement en ligne.
+    }
+choose-online-only-unnamed = un service de stockage en ligne de cet ordinateur
+choose-online-only-metered = Aussi sur une connexion qui peut facturer les données (le partage de connexion d’un téléphone)
+choose-online-only-not-here = Si certains de vos fichiers sont gardés seulement en ligne, ils restent dans votre stockage en ligne. PCTwin ne peut pas encore en apporter une copie depuis cet ordinateur.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 fichier gardé seulement en ligne a été téléchargé et copié.
+        [many] { $count } de fichiers gardés seulement en ligne ont été téléchargés et copiés.
+       *[other] { $count } fichiers gardés seulement en ligne ont été téléchargés et copiés.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 fichier gardé seulement en ligne n’a pas été copié. Il est toujours gardé en ligne : ouvrez-le sur le nouvel ordinateur depuis l’appli qui le garde.
+        [many] { $count } de fichiers gardés seulement en ligne n’ont pas été copiés. Ils sont toujours gardés en ligne : ouvrez-les sur le nouvel ordinateur depuis l’appli qui les garde.
+       *[other] { $count } fichiers gardés seulement en ligne n’ont pas été copiés. Ils sont toujours gardés en ligne : ouvrez-les sur le nouvel ordinateur depuis l’appli qui les garde.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 fichier téléchargé prend encore { $size } sur cet ordinateur, car son appli cloud ne l’a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit dessus et choisissez Libérer de l’espace.
+        [many] { $count } de fichiers téléchargés prennent encore { $size } sur cet ordinateur, car leur appli cloud ne les a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit sur chacun et choisissez Libérer de l’espace.
+       *[other] { $count } fichiers téléchargés prennent encore { $size } sur cet ordinateur, car leur appli cloud ne les a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit sur chacun et choisissez Libérer de l’espace.
+    }
+kept-online-paused-metered = Le téléchargement s’est arrêté, car cette connexion peut facturer les données. Le reste n’a pas été copié et est toujours gardé en ligne.
+kept-online-paused-space = Le téléchargement s’est arrêté, car cet ordinateur manque de place. Le reste n’a pas été copié et est toujours gardé en ligne.
+plan-own-folder = Mettre les affaires de { $laptop } dans leur propre dossier
+plan-own-folder-help = Cet ordinateur a déjà des affaires d’un autre ancien ordinateur. Un dossier par ordinateur les garde séparées.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = De l’autre ordinateur
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 appli est téléchargée depuis internet pour être installée sur cet ordinateur.
+        [many] { $count } d’applis sont téléchargées depuis internet pour être installées sur cet ordinateur.
+       *[other] { $count } applis sont téléchargées depuis internet pour être installées sur cet ordinateur.
+    }
+plan-wait-free-wifi = Attendre un Wi-Fi gratuit avant de télécharger
+plan-wait-free-wifi-help = Si la connexion peut facturer les données au moment de télécharger les applis, PCTwin attend jusqu’à 20 minutes un Wi-Fi gratuit. Les applis qu’il n’a pas pu télécharger sont listées pour que vous les installiez plus tard.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Utiliser le programme d’installation trouvé sur l’ancien ordinateur pour 1 appli, au lieu de la télécharger
+        [many] Utiliser les programmes d’installation trouvés sur l’ancien ordinateur pour { $count } d’applis, au lieu de les télécharger
+       *[other] Utiliser les programmes d’installation trouvés sur l’ancien ordinateur pour { $count } applis, au lieu de les télécharger
+    }
+plan-reuse-installers-help = Chacun est d’abord vérifié, comme un téléchargement : il doit être signé par l’éditeur de l’appli.
+fullmove-close-files-title = Fermez les applis qui utilisent ces fichiers
+choose-online-only-title = Fichiers gardés seulement en ligne
+kept-online-title = Fichiers gardés seulement en ligne
+kept-online-downloaded = { $size } téléchargés
+plan-own-folder-called = Le dossier s’appelle { $folder }.
+accept-own-folder = Les affaires de l’autre ordinateur vont dans leur propre dossier, { $folder }. Vous pouvez désactiver cela dans les détails.
+plan-downloads-title = Applis depuis internet
+plan-connection-free = La connexion de cet ordinateur ne facture pas les données en ce moment.
+plan-connection-may-charge = La connexion de cet ordinateur peut facturer les données en ce moment, par exemple le partage de connexion d’un téléphone.
+plan-connection-not-known = PCTwin ne peut pas savoir si la connexion de cet ordinateur facture les données.
+fullmove-rebuilding-wait-wifi = Si cette connexion peut facturer les données, PCTwin attend jusqu’à 20 minutes un Wi-Fi gratuit avant de télécharger les applis. Connectez-vous à un Wi-Fi gratuit pour continuer plus tôt.

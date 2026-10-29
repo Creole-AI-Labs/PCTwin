@@ -57,11 +57,14 @@ pub enum Reason {
     /// name the move gave it: the setting was left as it was, for the person to choose the file
     /// again.
     MovedFileMissing,
+    /// An app had the file open on the old laptop (a mail store, a database), so it was not
+    /// copied, never torn: close that app and move it again (Task List 2.5, 29 October 2026).
+    OpenInApp,
 }
 
 impl Reason {
     /// Every reason, in report order.
-    pub const ALL: [Reason; 18] = [
+    pub const ALL: [Reason; 19] = [
         Reason::NotEnoughSpace,
         Reason::ChangedDuringMove,
         Reason::Unreadable,
@@ -80,6 +83,7 @@ impl Reason {
         Reason::FinishByHand,
         Reason::PartsMissing,
         Reason::MovedFileMissing,
+        Reason::OpenInApp,
     ];
 
     /// The one status this reason belongs to.
@@ -102,7 +106,8 @@ impl Reason {
             | Reason::Restart
             | Reason::FinishByHand
             | Reason::PartsMissing
-            | Reason::MovedFileMissing => ItemStatus::NeedsAction,
+            | Reason::MovedFileMissing
+            | Reason::OpenInApp => ItemStatus::NeedsAction,
         }
     }
 }
@@ -264,7 +269,7 @@ mod tests {
             "\"not-enough-space\",\"changed-during-move\",\"unreadable\",\"not-verified\",\
              \"refused-by-safety-check\",\"name-not-allowed\",\"install-failed\",\"no-equivalent\",\
              \"drive-locked\",\"sign-in\",\"activation\",\"permission\",\"online-only\",\"manual-install\",\
-             \"restart\",\"finish-by-hand\",\"parts-missing\",\"moved-file-missing\""
+             \"restart\",\"finish-by-hand\",\"parts-missing\",\"moved-file-missing\",\"open-in-app\""
         );
     }
 }

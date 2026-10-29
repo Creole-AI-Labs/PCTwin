@@ -402,6 +402,12 @@ export interface PlanView {
   rebuild?: RebuildPlan;
   /** The new laptop is too small: what PCTwin proposes leaving on the old laptop (2.6). */
   space?: SpaceProposal;
+  /**
+   * Several old laptops into one (2.6): this laptop already holds a move from another old laptop,
+   * so the plan offers "Put <laptop>'s things in their own folder" (on unless turned off); the
+   * folder's name goes with the approval (`moveApprove`'s `ownFolder`).
+   */
+  ownFolderOffered?: boolean;
 }
 
 /**

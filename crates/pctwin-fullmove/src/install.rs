@@ -13,6 +13,20 @@
 //! 4. **what is really there**: Windows' own list is read again; the app must be there, at the
 //!    person's version or newer, with nothing else slipped in, for `reinstalled`.
 //!
+//! Two choices the person makes on the plan (Task List 2.7 and 2.6 wiring, 29 October 2026):
+//!
+//! - **Installers found on the old laptop are never reused yet** (second security review, 29
+//!   October 2026, no-go): the transfer checks a file with BLAKE3, not the SHA-256 the helper is
+//!   given, so a hash taken from the landed file itself proves nothing; the file lands in the
+//!   person's own folders, which other programs can change; and the maker to check against is
+//!   the old laptop's own word. Until the installer comes with its transfer-verified SHA-256, into
+//!   a folder PCTwin holds, and its signer matches this laptop's own catalogue row, every app is
+//!   downloaded.
+//! - **Wait for free Wi-Fi** ([`WingetInstaller::waiting`]): before the first download, while the
+//!   connection may charge for data (or the system cannot say), the installs wait for a free one,
+//!   up to a bound; past it, the apps that needed a download end needs-action (the person installs
+//!   them later), never downloaded on a connection that may charge.
+//!
 //! Anything that does not hold ends needs-action or failed with its reason, never "reinstalled".
 //! The helper itself sits behind [`Helper`] and Windows' list behind [`Machine`], so the chain is
 //! proven up to the helper's boundary without installing anything (tests/install.rs).
@@ -40,6 +54,59 @@ use sha2::Digest;
 
 use crate::plan::AppEntry;
 use crate::run::{AppResult, Installer, Removable};
+
+/// Waiting for a connection that does not charge for data before downloading (see the module's
+/// words). Once it has waited its whole bound, it does not wait again in this move.
+pub struct WaitFree {
+    cost: Box<dyn Fn() -> pctwin_apps::fetch::NetworkCost>,
+    sleep: Box<dyn Fn(std::time::Duration)>,
+    every: std::time::Duration,
+    at_most: std::time::Duration,
+    gave_up: std::cell::Cell<bool>,
+}
+
+/// How often the connection is looked at again while waiting, and how long PCTwin waits at most.
+pub const WAIT_FREE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+pub const WAIT_FREE_AT_MOST: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+impl WaitFree {
+    /// `cost`: the connection now; `sleep`: waits that long (the system's own sleep, or a test's).
+    pub fn new(
+        cost: Box<dyn Fn() -> pctwin_apps::fetch::NetworkCost>,
+        sleep: Box<dyn Fn(std::time::Duration)>,
+        every: std::time::Duration,
+        at_most: std::time::Duration,
+    ) -> Self {
+        Self {
+            cost,
+            sleep,
+            every,
+            at_most,
+            gave_up: std::cell::Cell::new(false),
+        }
+    }
+
+    /// Whether downloading may go ahead: the connection is free now, or becomes free within the
+    /// bound. `false` once the bound has passed.
+    fn until_free(&self) -> bool {
+        use pctwin_apps::fetch::NetworkCost;
+        if self.gave_up.get() {
+            return false;
+        }
+        let mut waited = std::time::Duration::ZERO;
+        loop {
+            if (self.cost)() == NetworkCost::Unmetered {
+                return true;
+            }
+            if waited >= self.at_most {
+                self.gave_up.set(true);
+                return false;
+            }
+            (self.sleep)(self.every);
+            waited += self.every;
+        }
+    }
+}
 
 /// The most winget searches at once.
 const SEARCHES_AT_ONCE: usize = 3;
@@ -231,6 +298,8 @@ pub struct WingetInstaller<'a> {
     /// The move these installs belong to (its scope): with none, the helper records no product,
     /// and undo lists every app for the person.
     for_move: Option<[u8; 16]>,
+    /// Waiting for free Wi-Fi before any download, when the person chose it.
+    wait_free: Option<WaitFree>,
 }
 
 const RESTORE_ID: &str = "restore-point";
@@ -257,7 +326,14 @@ impl<'a> WingetInstaller<'a> {
             down: None,
             plan: None,
             for_move: None,
+            wait_free: None,
         }
+    }
+
+    /// Wait for free Wi-Fi before downloading (see the module's words).
+    pub fn waiting(mut self, wait: WaitFree) -> Self {
+        self.wait_free = Some(wait);
+        self
     }
 
     /// The installs are for move `scope`: a Windows Installer app the helper records can then
@@ -270,6 +346,10 @@ impl<'a> WingetInstaller<'a> {
     /// Downloads and checks `app`'s package (`at`: its place in the list).
     fn prepare(&mut self, at: usize, e: &AppEntry) -> Result<Prepared, AppResult> {
         let id = e.winget().ok_or_else(manual)?;
+        // Never downloaded on a connection that may charge, when the person chose to wait.
+        if self.wait_free.as_ref().is_some_and(|w| !w.until_free()) {
+            return Err(manual());
+        }
         let folder = self.work.join(at.to_string());
         std::fs::create_dir_all(&folder).map_err(|_| manual())?;
         let call =

@@ -473,6 +473,13 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             installs: 2_097_152_000,
             app_data: 58_720_256,
         },
+        // Two apps downloaded, on a connection that may charge for data (2.6 wiring). Installers
+        // from the old laptop are not reused yet, so none is counted.
+        downloads: crate::fullmove::DownloadsView {
+            apps: 2,
+            with_old_installer: 0,
+            connection: crate::fullmove::Connection::MayCharge,
+        },
     }
 }
 
@@ -732,6 +739,7 @@ fn plans() -> Vec<PlanView> {
         },
         rebuild: None,
         space: None,
+        own_folder_offered: false,
     };
     let full = PlanView {
         rebuild: Some(rebuild_plan()),
@@ -741,6 +749,8 @@ fn plans() -> Vec<PlanView> {
             bytes: 18_400_000_000,
             still_short_bytes: 0,
         }),
+        // This laptop already holds a move from another old laptop (2.6).
+        own_folder_offered: true,
         ..files_only.clone()
     };
     vec![files_only, full]
@@ -863,6 +873,7 @@ fn outcomes() -> Vec<MoveOutcome> {
         },
         rebuilt: None,
         landed: Vec::new(),
+        kept_online: None,
     };
     let full = MoveOutcome {
         rebuilt: Some(rebuilt()),
@@ -880,7 +891,20 @@ fn outcomes() -> Vec<MoveOutcome> {
         ],
         ..files_only.clone()
     };
-    vec![files_only, full]
+    // The old laptop, after keeping copies of online-only files (2.6, with consent): one the
+    // cloud app has not made online only again yet, and paused for space.
+    let kept = MoveOutcome {
+        kept_online: Some(crate::keep_local::KeptOnlineView {
+            copied: 40,
+            safe_in_cloud: 3,
+            downloaded_bytes: 2_400_000_000,
+            still_on_old_laptop_files: 1,
+            still_on_old_laptop_bytes: 52_000_000,
+            paused: Some(crate::keep_local::KeptPaused::NoSpace),
+        }),
+        ..files_only.clone()
+    };
+    vec![files_only, full, kept]
 }
 
 fn report_items() -> Vec<ReportItem> {
@@ -895,6 +919,7 @@ fn report_items() -> Vec<ReportItem> {
         reason,
         evidence,
         note: None,
+        open_in: None,
     };
     vec![
         line("1", ItemStatus::Copied, None, Some(Evidence::Drive)),
@@ -920,6 +945,12 @@ fn report_items() -> Vec<ReportItem> {
         ReportItem {
             note: Some(ReportNote::NoLongerThere),
             ..line("10", ItemStatus::Failed, Some(Reason::Unreadable), None)
+        },
+        // An app had it open on the old laptop: it waits there for that app to close (2.5).
+        ReportItem {
+            open_in: Some("Outlook".into()),
+            destination: None,
+            ..line("11", ItemStatus::NeedsAction, Some(Reason::OpenInApp), None)
         },
     ]
 }
@@ -1225,9 +1256,18 @@ fn families() -> Vec<(&'static str, Value)> {
         ),
         (
             "move-appdata-open",
-            json([crate::fullmove::AppsOpen {
-                apps: vec!["Chromey".into(), "Mail".into()],
-            }]),
+            json([
+                crate::fullmove::AppsOpen {
+                    apps: vec!["Chromey".into(), "Mail".into()],
+                    files: vec![],
+                },
+                // Files in the person's own folders an app holds open (2.5): one app the system
+                // named, one file whose app it could not name.
+                crate::fullmove::AppsOpen {
+                    apps: vec!["Outlook".into()],
+                    files: vec!["Outlook.pst".into(), "Accounts.db".into()],
+                },
+            ]),
         ),
         (
             "move-choose",
@@ -1271,12 +1311,31 @@ fn families() -> Vec<(&'static str, Value)> {
                         items: 3,
                         bytes: 900_000_000,
                     }],
+                    online_only: vec![
+                        crate::moving::OnlineOnlyGroup {
+                            provider: pctwin_record::CloudProvider::OneDrive,
+                            name: Some("OneDrive".into()),
+                            files: 320,
+                            bytes: 6_400_000_000,
+                        },
+                        // A cloud found on the laptop that the catalogue does not name yet.
+                        crate::moving::OnlineOnlyGroup {
+                            provider: pctwin_record::CloudProvider::from_found_name("Nextcloud"),
+                            name: None,
+                            files: 2,
+                            bytes: 4_000_000,
+                        },
+                    ],
+                    keep_local_here: true,
                 },
+                // A Mac: keeping local copies is not built there yet.
                 crate::moving::ChoiceView {
                     groups: Vec::new(),
                     folders: Vec::new(),
                     apps: 0,
                     left_behind: Vec::new(),
+                    online_only: Vec::new(),
+                    keep_local_here: false,
                 },
             ]),
         ),
@@ -1768,7 +1827,7 @@ fn calls() -> Value {
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
             { "name": "rescue_drives", "args": [] },
             { "name": "rescue_begin", "args": [["id", "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10"], ["fallback", { "music": "From your old laptop/Music" }]] },
-            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true], ["ownFolder", "From Bea's laptop"], ["waitFreeWifi", true], ["reuseInstallers", true]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },

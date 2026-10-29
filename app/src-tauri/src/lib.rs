@@ -36,6 +36,7 @@ mod help;
 mod history;
 #[cfg(test)]
 mod info_plist;
+mod keep_local;
 mod laptop_name;
 pub mod launch;
 pub mod limits;
@@ -459,6 +460,9 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             // remembered connections' service when something is remembered or waiting.
             handed::keep_args();
             remembered::start_if_needed(app.handle());
+            // Online-only files an earlier move made local and did not put back go back online
+            // only (the move stopped part way): the old laptop ends as it was.
+            keep_local::put_back_left(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

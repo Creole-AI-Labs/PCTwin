@@ -2826,3 +2826,61 @@ qs-remember-replaces = Connected these two before? Choose the earlier connection
 qs-remember-replaces-suggested = This may be { $label } again. Replace it?
 qs-remember-replace = Replace
 qs-remember-keep-both = No, keep both
+
+# 2.6 wiring
+reason-open-in-app = An app had this file open on the old laptop, so PCTwin did not copy it (a copy made while the app writes could be broken). Close that app on the old laptop, then start a new move that includes this file.
+report-open-in = Open in { $app }
+fullmove-close-files = These files are open in an app on this laptop, so PCTwin cannot copy them safely yet. Close the app using them, then choose Try again. If you go on without them, they stay on this laptop and the report lists them.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Also bring the file kept only online in { $provider } (1 file, { $size }). It is downloaded on this laptop first, then put back online only.
+       *[other] Also bring the files kept only online in { $provider } ({ $count } files, { $size }). They are downloaded on this laptop first, then put back online only.
+    }
+choose-online-only-unnamed = an online storage service on this laptop
+choose-online-only-metered = Also on a connection that may charge for data (a phone hotspot)
+choose-online-only-not-here = If some of your files are kept only online, they stay in your online storage. PCTwin cannot bring a copy of them from this laptop yet.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 file kept only online was downloaded and copied.
+       *[other] { $count } files kept only online were downloaded and copied.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 file kept only online was not copied. It is still kept online: open it on the new laptop from the app that keeps it.
+       *[other] { $count } files kept only online were not copied. They are still kept online: open them on the new laptop from the app that keeps them.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 downloaded file still takes { $size } on this laptop, because its cloud app has not made it online only again. To free the space, right-click it and choose Free up space.
+       *[other] { $count } downloaded files still take { $size } on this laptop, because their cloud app has not made them online only again. To free the space, right-click each one and choose Free up space.
+    }
+kept-online-paused-metered = Downloading stopped because this connection may charge for data. The rest were not copied and are still kept online.
+kept-online-paused-space = Downloading stopped because this laptop is running out of space. The rest were not copied and are still kept online.
+plan-own-folder = Put the things from { $laptop } in their own folder
+plan-own-folder-help = This laptop already has things from another old laptop. A folder for each laptop keeps them apart.
+plan-own-folder-name = From { $laptop }
+plan-own-folder-name-unnamed = From the other laptop
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 app is downloaded from the internet to install it on this laptop.
+       *[other] { $count } apps are downloaded from the internet to install them on this laptop.
+    }
+plan-wait-free-wifi = Wait for free Wi-Fi before downloading
+plan-wait-free-wifi-help = If the connection may charge for data when the apps are downloaded, PCTwin waits up to 20 minutes for free Wi-Fi. Apps it could not download are listed for you to install later.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Use the installer found on the old laptop for 1 app, instead of downloading it
+       *[other] Use the installers found on the old laptop for { $count } apps, instead of downloading them
+    }
+plan-reuse-installers-help = Each one is checked first, the same way as a download: it must be signed by the app's own maker.
+fullmove-close-files-title = Close the apps using these files
+choose-online-only-title = Files kept only online
+kept-online-title = Files kept only online
+kept-online-downloaded = { $size } downloaded
+plan-own-folder-called = The folder is called { $folder }.
+accept-own-folder = The things from the other laptop go in their own folder, { $folder }. You can turn this off in the details.
+plan-downloads-title = Apps from the internet
+plan-connection-free = This laptop's connection does not charge for data now.
+plan-connection-may-charge = This laptop's connection may charge for data now, such as a phone hotspot.
+plan-connection-not-known = PCTwin cannot tell whether this laptop's connection charges for data.
+fullmove-rebuilding-wait-wifi = If this connection may charge for data, PCTwin waits up to 20 minutes for free Wi-Fi before it downloads apps. Connect to free Wi-Fi to carry on sooner.

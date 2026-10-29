@@ -1971,6 +1971,22 @@ impl Journal {
         self.entries_after(0)
     }
 
+    /// The old laptops whose moves wrote here and were not undone since; never a Quick Send's. A
+    /// second old laptop moving into this one is offered its own folder by these (Task List 2.6,
+    /// several old laptops into one).
+    pub fn moved_here_from(&self) -> Result<std::collections::BTreeSet<LaptopId>, JournalError> {
+        let mut out = std::collections::BTreeSet::new();
+        for e in self.entries()? {
+            if e.write.scope != Scope::QUICK_SEND
+                && !out.contains(&e.write.source_laptop)
+                && self.undo_of(e.id)?.is_none()
+            {
+                out.insert(e.write.source_laptop);
+            }
+        }
+        Ok(out)
+    }
+
     /// Every entry numbered above `after`, in the order planned.
     pub fn entries_after(&self, after: u64) -> Result<Vec<Entry>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;

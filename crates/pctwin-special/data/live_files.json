@@ -1,0 +1,12 @@
+{
+  "about": "Kinds of file in a person's own folders that an app keeps open and writes while it runs. A file is one of these when its name ends as a kind says and, where the kind names shapes, its bytes show one of them. The names here are examples of kinds, never of apps: the app holding a file is named by the system at the time.",
+  "kinds": [
+    { "kind": "mail-store", "endings": ["pst", "ost"], "shapes": ["outlook-data"] },
+    { "kind": "database", "endings": ["db", "db3", "sqlite", "sqlite3", "s3db", "sl3", "gnucash"], "shapes": ["sqlite"], "sidecars": ["-wal", "-shm", "-journal"] },
+    { "kind": "database", "endings": ["mdb"], "shapes": ["lmdb-data"] },
+    { "kind": "database", "endings": ["ldb"], "shapes": ["leveldb-table"] },
+    { "kind": "office-database", "endings": ["accdb", "mdb", "accde"], "shapes": ["office-database"] },
+    { "kind": "accounts-file", "endings": ["qbw", "qbb"], "shapes": [] },
+    { "kind": "virtual-disk", "endings": ["vhd", "vhdx", "vmdk", "vdi", "qcow2"], "shapes": [] }
+  ]
+}

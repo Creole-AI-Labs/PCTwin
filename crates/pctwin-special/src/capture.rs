@@ -149,14 +149,18 @@ impl Holders for SystemHolders {
     fn holding(&self, files: &[PathBuf]) -> Holding {
         use std::os::windows::fs::OpenOptionsExt;
         const FILE_SHARE_READ: u32 = 1;
+        const OPEN_NO_RECALL: u32 = 0x0010_0000;
         const SHARING_VIOLATION: i32 = 32;
         const LOCK_VIOLATION: i32 = 33;
         for f in files {
             // Opening for reading while refusing to share writing fails if anyone has it open
             // for writing. The handle is closed at once.
+            // FILE_FLAG_OPEN_NO_RECALL: a file that went online only is never brought down by
+            // being looked at (second security review of the 2.6 wiring).
             match std::fs::OpenOptions::new()
                 .read(true)
                 .share_mode(FILE_SHARE_READ)
+                .custom_flags(OPEN_NO_RECALL)
                 .open(f)
             {
                 Ok(_) => {}

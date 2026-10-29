@@ -3042,3 +3042,67 @@ qs-remember-replaces = ¿Ya conectaste esta laptop antes? Elígela y se olvidar�
 qs-remember-replaces-suggested = Puede que sea { $label } otra vez. ¿Reemplazarla?
 qs-remember-replace = Reemplazar
 qs-remember-keep-both = No, mantener las dos
+
+# 2.6 wiring
+reason-open-in-app = Una aplicación tenía este archivo abierto en el portátil antiguo, así que PCTwin no lo copió (una copia hecha mientras la aplicación escribe podría quedar dañada). Cierra esa aplicación en el portátil antiguo y luego inicia un traslado nuevo que incluya este archivo.
+report-open-in = Abierto en { $app }
+fullmove-close-files = Estos archivos están abiertos en una aplicación de este portátil, así que PCTwin todavía no puede copiarlos de forma segura. Cierra la aplicación que los usa y luego elige Intentar de nuevo. Si sigues sin ellos, se quedan en este portátil y el informe los indica.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Traer también el archivo guardado solo en línea en { $provider } (1 archivo, { $size }). Primero se descarga en este portátil y después vuelve a quedar solo en línea.
+        [many] Traer también los archivos guardados solo en línea en { $provider } ({ $count } de archivos, { $size }). Primero se descargan en este portátil y después vuelven a quedar solo en línea.
+       *[other] Traer también los archivos guardados solo en línea en { $provider } ({ $count } archivos, { $size }). Primero se descargan en este portátil y después vuelven a quedar solo en línea.
+    }
+choose-online-only-unnamed = un servicio de almacenamiento en línea de este portátil
+choose-online-only-metered = También con una conexión que puede cobrar por los datos (la zona Wi-Fi de un teléfono)
+choose-online-only-not-here = Si algunos de tus archivos están guardados solo en línea, siguen en tu almacenamiento en línea. PCTwin todavía no puede traer una copia de ellos desde este portátil.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] Se descargó y se copió 1 archivo guardado solo en línea.
+        [many] Se descargaron y se copiaron { $count } de archivos guardados solo en línea.
+       *[other] Se descargaron y se copiaron { $count } archivos guardados solo en línea.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 archivo guardado solo en línea no se copió. Sigue guardado en línea: ábrelo en el portátil nuevo desde la aplicación que lo guarda.
+        [many] { $count } de archivos guardados solo en línea no se copiaron. Siguen guardados en línea: ábrelos en el portátil nuevo desde la aplicación que los guarda.
+       *[other] { $count } archivos guardados solo en línea no se copiaron. Siguen guardados en línea: ábrelos en el portátil nuevo desde la aplicación que los guarda.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 archivo descargado todavía ocupa { $size } en este portátil, porque su aplicación de la nube no lo ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en él y elige Liberar espacio.
+        [many] { $count } de archivos descargados todavía ocupan { $size } en este portátil, porque su aplicación de la nube no los ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en cada uno y elige Liberar espacio.
+       *[other] { $count } archivos descargados todavía ocupan { $size } en este portátil, porque su aplicación de la nube no los ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en cada uno y elige Liberar espacio.
+    }
+kept-online-paused-metered = La descarga se detuvo porque esta conexión puede cobrar por los datos. El resto no se copió y sigue guardado en línea.
+kept-online-paused-space = La descarga se detuvo porque este portátil se está quedando sin espacio. El resto no se copió y sigue guardado en línea.
+plan-own-folder = Poner las cosas de { $laptop } en su propia carpeta
+plan-own-folder-help = Este portátil ya tiene cosas de otro portátil antiguo. Una carpeta para cada portátil las mantiene separadas.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = Del otro portátil
+plan-downloads =
+    { NUMBER($count) ->
+        [one] Se descarga 1 aplicación de internet para instalarla en este portátil.
+        [many] Se descargan { $count } de aplicaciones de internet para instalarlas en este portátil.
+       *[other] Se descargan { $count } aplicaciones de internet para instalarlas en este portátil.
+    }
+plan-wait-free-wifi = Esperar a una Wi-Fi gratuita antes de descargar
+plan-wait-free-wifi-help = Si la conexión puede cobrar por los datos cuando se descargan las aplicaciones, PCTwin espera hasta 20 minutos a un Wi-Fi gratuito. Las aplicaciones que no pueda descargar aparecen en la lista para que las instales más tarde.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Usar el instalador encontrado en el portátil antiguo para 1 aplicación, en lugar de descargarla
+        [many] Usar los instaladores encontrados en el portátil antiguo para { $count } de aplicaciones, en lugar de descargarlas
+       *[other] Usar los instaladores encontrados en el portátil antiguo para { $count } aplicaciones, en lugar de descargarlas
+    }
+plan-reuse-installers-help = Cada uno se comprueba primero, igual que una descarga: debe estar firmado por el propio fabricante de la aplicación.
+fullmove-close-files-title = Cierra las apps que usan estos archivos
+choose-online-only-title = Archivos guardados solo en línea
+kept-online-title = Archivos guardados solo en línea
+kept-online-downloaded = { $size } descargados
+plan-own-folder-called = La carpeta se llama { $folder }.
+accept-own-folder = Las cosas del otro portátil van en su propia carpeta, { $folder }. Puedes desactivarlo en los detalles.
+plan-downloads-title = Aplicaciones desde internet
+plan-connection-free = La conexión de este portátil no cobra por los datos ahora.
+plan-connection-may-charge = La conexión de este portátil puede cobrar por los datos ahora, por ejemplo la conexión compartida de un teléfono.
+plan-connection-not-known = PCTwin no puede saber si la conexión de este portátil cobra por los datos.
+fullmove-rebuilding-wait-wifi = Si esta conexión puede cobrar por los datos, PCTwin espera hasta 20 minutos a un Wi-Fi gratuito antes de descargar las aplicaciones. Conéctate a un Wi-Fi gratuito para seguir antes.

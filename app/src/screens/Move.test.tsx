@@ -209,7 +209,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(start);
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [], updates: [] , leaveBehind: false });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [], updates: [] , leaveBehind: false, ownFolder: null, waitFreeWifi: false, reuseInstallers: false });
     });
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-starting-title"));
@@ -223,7 +223,38 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [], updates: [] , leaveBehind: false });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [], updates: [] , leaveBehind: false, ownFolder: null, waitFreeWifi: false, reuseInstallers: false });
+    });
+  });
+
+  it("2.6: the approval carries the own folder (on unless turned off) and the install choices, from Accept and from the details", async () => {
+    const full = plans[1];
+    await host(false);
+    send("move-plan", full);
+    const accept = screen.getByRole("button", { name: text("accept-accept") });
+    // The plan says where the things go before one tap accepts it.
+    const folder = plain(text("plan-own-folder-name-unnamed"));
+    expect(document.body.textContent).toContain(folder);
+    if (!(accept as HTMLButtonElement).disabled) {
+      fireEvent.click(accept);
+      await waitFor(() => {
+        expect(tauri.invoke).toHaveBeenCalledWith("move_approve", expect.objectContaining({ approve: true, ownFolder: folder, waitFreeWifi: true, reuseInstallers: false }));
+      });
+      return;
+    }
+    // The details: the person turns the own folder off and Wait for free Wi-Fi off.
+    fireEvent.click(screen.getByRole("button", { name: text("accept-details") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => plain(n).startsWith(plain(text("plan-own-folder", { laptop: text("qs-label-other") }))) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-wait-free-wifi")) }));
+    // The full example does not fit this laptop (2.6): leaving the proposed files behind makes it fit.
+    const spaceBox = screen.queryByText(text("space-box-title"))?.closest("section");
+    if (spaceBox) fireEvent.click(within(spaceBox).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
+    const start: HTMLButtonElement = screen.getByRole("button", { name: text("plan-start") });
+    if (start.disabled) throw new Error("the engine's full example can be started from the details");
+    fireEvent.click(start);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", expect.objectContaining({ approve: true, ownFolder: null, waitFreeWifi: false, reuseInstallers: false, leaveBehind: !!spaceBox }));
     });
   });
 
@@ -280,7 +311,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
     expect(tauri.invoke).not.toHaveBeenCalledWith("move_approve", expect.anything());
     fireEvent.click(screen.getByRole("button", { name: text("accept-not-now") }));
-    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [], updates: [] , leaveBehind: false });
+    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [], updates: [] , leaveBehind: false, ownFolder: null, waitFreeWifi: false, reuseInstallers: false });
   });
 
   it("shows the measured progress, then pausing and paused with a way to stop that asks first", async () => {

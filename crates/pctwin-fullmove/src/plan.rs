@@ -194,6 +194,31 @@ pub struct AppEntry {
     pub plan: AppPlan,
 }
 
+/// What the apps the plan installs need from the internet, before the person approves (Task List
+/// 2.7): how many are downloaded. An installer found on the old laptop is never reused yet
+/// ([`crate::install`]), so every one is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Downloads {
+    pub apps: u64,
+}
+
+impl FullPlan {
+    /// See [`Downloads`].
+    pub fn downloads(&self) -> Downloads {
+        downloads_of(&self.apps)
+    }
+}
+
+/// See [`Downloads`]: only apps PCTwin installs itself from a package it downloads.
+pub fn downloads_of(apps: &[AppEntry]) -> Downloads {
+    Downloads {
+        apps: apps
+            .iter()
+            .filter(|e| e.plan.disposition == Disposition::Install && e.winget().is_some())
+            .count() as u64,
+    }
+}
+
 impl AppEntry {
     /// The first route PCTwin itself installs from (a winget package), if any.
     pub fn winget(&self) -> Option<&str> {

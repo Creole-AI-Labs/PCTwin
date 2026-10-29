@@ -8,7 +8,7 @@
  */
 import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Section } from "../components/kit";
-import type { ChangeView, DataProgress, LineNote, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
+import type { AppsOpen, ChangeView, DataProgress, Downloads, LineNote, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
 import { shownName } from "../names";
 import FrameFooter from "./FrameFooter";
 import { Attention, Check } from "../icons";
@@ -52,6 +52,56 @@ function Changes({ titleId, changes }: { titleId: string; changes: ChangeView[] 
   );
 }
 
+/** The plan's two install choices, as the person set them (both go with the approval). */
+export type InstallChoices = { waitFreeWifi: boolean; reuseInstallers: boolean };
+
+/** Where the choices start: waiting for free Wi-Fi is on when the connection now may charge for data. */
+export function installDefaults(downloads: Downloads | undefined): InstallChoices {
+  return { waitFreeWifi: downloads !== undefined && downloads.apps > 0 && downloads.connection === "may-charge", reuseInstallers: false };
+}
+
+/**
+ * M23's downloads: how many apps come from the internet, the connection now, and the two choices
+ * (Wait for free Wi-Fi when anything is downloaded; Use the installers found on the old laptop
+ * when one came). Nothing shows when nothing is downloaded.
+ */
+export function InstallChoicesBox({ downloads, choices, onChange }: { downloads: Downloads; choices: InstallChoices; onChange: (choices: InstallChoices) => void }) {
+  const { l10n } = useLocalization();
+  if (downloads.apps === 0) return null;
+  return (
+    <PlanBox title={l10n.getString("plan-downloads-title")}>
+      <p className="plan-lead">{l10n.getString("plan-downloads", { count: downloads.apps })}</p>
+      <p className="plan-quiet" data-connection={downloads.connection}>
+        {l10n.getString(`plan-connection-${downloads.connection}`)}
+      </p>
+      <ul className="plan-items">
+        <li className="plan-item">
+          <Checkbox
+            checked={choices.waitFreeWifi}
+            onChange={(on) => {
+              onChange({ ...choices, waitFreeWifi: on });
+            }}
+            label={l10n.getString("plan-wait-free-wifi")}
+            hint={l10n.getString("plan-wait-free-wifi-help")}
+          />
+        </li>
+        {downloads.withOldInstaller > 0 && (
+          <li className="plan-item">
+            <Checkbox
+              checked={choices.reuseInstallers}
+              onChange={(on) => {
+                onChange({ ...choices, reuseInstallers: on });
+              }}
+              label={l10n.getString("plan-reuse-installers", { count: downloads.withOldInstaller })}
+              hint={l10n.getString("plan-reuse-installers-help")}
+            />
+          </li>
+        )}
+      </ul>
+    </PlanBox>
+  );
+}
+
 /** M23's section for the full move: every app, setting and special category, with what undo can do for each. */
 export function RebuildPlanSection({
   rebuild,
@@ -60,8 +110,13 @@ export function RebuildPlanSection({
   updates = [],
   onUpdate,
   onCompat,
+  installs,
+  onInstalls,
 }: {
   rebuild: RebuildPlan;
+  /** The two install choices; without `onInstalls` they are not shown. */
+  installs?: InstallChoices;
+  onInstalls?: (choices: InstallChoices) => void;
   picked?: readonly number[];
   onPick?: (line: number, bring: boolean) => void;
   /** The older apps here ticked "Update it", by their place in the plan. */
@@ -91,6 +146,7 @@ export function RebuildPlanSection({
       <p className="subhead">{l10n.getString("fullmove-plan-body")}</p>
       <UndoLegend />
       <Changes titleId="fullmove-group-install" changes={install} />
+      {installs && onInstalls && <InstallChoicesBox downloads={rebuild.downloads} choices={installs} onChange={onInstalls} />}
       <Changes titleId="fullmove-group-settings" changes={settings} />
       <Changes titleId="fullmove-group-appdata" changes={appData} />
       {secrets.length > 0 && (
@@ -197,8 +253,13 @@ export function RebuildPlanSection({
   );
 }
 
-/** After the files: apps and settings being set up. Nothing to press; it ends on the outcome. */
-export function Rebuilding({ step }: { step: RebuildStep | null }) {
+/**
+ * After the files: apps and settings being set up. Nothing to press; it ends on the outcome.
+ * `waitsForFreeWifi`: the person chose Wait for free Wi-Fi and apps are downloaded, so the
+ * engine may hold the downloads up to 20 minutes on a connection that may charge; said while it
+ * sets up apps, in words that stay true whether it is waiting or not.
+ */
+export function Rebuilding({ step, waitsForFreeWifi = false }: { step: RebuildStep | null; waitsForFreeWifi?: boolean }) {
   const { l10n } = useLocalization();
   const line =
     step === null
@@ -215,6 +276,11 @@ export function Rebuilding({ step }: { step: RebuildStep | null }) {
         <p className="subhead" role="status">
           {line}
         </p>
+      )}
+      {waitsForFreeWifi && step?.step !== "settings" && (
+        <div className="mv-note">
+          <Banner tone="info">{l10n.getString("fullmove-rebuilding-wait-wifi")}</Banner>
+        </div>
       )}
     </>
   );
@@ -334,19 +400,45 @@ export function AppDataComing({ progress }: { progress: DataProgress }) {
   );
 }
 
-/** The old laptop: apps to close before their data can be read, with Try again or Go on without them. */
-export function CloseApps({ apps, onAnswer }: { apps: string[]; onAnswer: (retry: boolean) => void }) {
+/**
+ * The old laptop: apps to close before their data can be read, and files in the person's own
+ * folders an app holds open (2.5), each list on its own with what it means; Try again or Go on
+ * without them.
+ */
+export function CloseApps({ open, onAnswer }: { open: AppsOpen; onAnswer: (retry: boolean) => void }) {
   const { l10n } = useLocalization();
+  const { apps, files } = open;
   return (
     <>
       <TopStrip labelId="move-wait-eyebrow" />
-      <Heading id="fullmove-close-title" />
-      <p className="subhead">{l10n.getString("fullmove-close-body")}</p>
-      <RowList>
-        {apps.map((a) => (
-          <Row key={a} title={<Name>{a}</Name>} />
-        ))}
-      </RowList>
+      <Heading id={apps.length > 0 ? "fullmove-close-title" : "fullmove-close-files-title"} />
+      {apps.length > 0 && (
+        <>
+          <p className="subhead">{l10n.getString("fullmove-close-body")}</p>
+          <RowList>
+            {apps.map((a) => (
+              <Row key={a} title={<Name>{a}</Name>} />
+            ))}
+          </RowList>
+        </>
+      )}
+      {files.length > 0 && (
+        <section aria-labelledby="fm-close-files">
+          {apps.length > 0 && (
+            <h2 id="fm-close-files" className="plan-box-title">
+              {l10n.getString("fullmove-close-files-title")}
+            </h2>
+          )}
+          <p className="subhead" id={apps.length > 0 ? undefined : "fm-close-files"}>
+            {l10n.getString("fullmove-close-files")}
+          </p>
+          <RowList>
+            {files.map((f) => (
+              <Row key={f} title={<Name>{f}</Name>} />
+            ))}
+          </RowList>
+        </section>
+      )}
       <FrameFooter>
         <Button
           variant="quiet"

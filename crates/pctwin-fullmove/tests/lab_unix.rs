@@ -698,6 +698,7 @@ async fn full_move(kind: Kind) {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     let mut person = NewPerson {
         kind,

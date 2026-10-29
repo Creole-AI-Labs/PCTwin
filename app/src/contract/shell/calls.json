@@ -182,6 +182,18 @@
         [
           "leaveBehind",
           true
+        ],
+        [
+          "ownFolder",
+          "From Bea's laptop"
+        ],
+        [
+          "waitFreeWifi",
+          true
+        ],
+        [
+          "reuseInstallers",
+          true
         ]
       ],
       "name": "move_approve"

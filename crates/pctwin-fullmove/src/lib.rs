@@ -13,6 +13,8 @@
 //!   apps through an [`run::Installer`] (the administrator helper on Windows; the system's own
 //!   package tools on Linux, [`unix`]; a fake in tests),
 //!   and one result word per item.
+//! - [`live`]: on the old laptop, the person's files that are live while their app runs (a mail
+//!   store, a database): copied only once that app is closed, or left needs-action.
 //! - [`undo`]: what undo would do, looked at now, and undo itself, which keeps a setting the
 //!   person changed after the move.
 //!
@@ -23,6 +25,7 @@ pub mod data;
 pub mod drift;
 pub mod extras;
 pub mod install;
+pub mod live;
 pub mod plan;
 pub mod run;
 pub mod undo;

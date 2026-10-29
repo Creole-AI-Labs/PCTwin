@@ -216,7 +216,7 @@ describe("the app data before the files", () => {
     const o = parseAppsOpen(opens[0]);
     if (!o) throw new Error("parses");
     const onAnswer = vi.fn();
-    inApp(<CloseApps apps={o.apps} onAnswer={onAnswer} />);
+    inApp(<CloseApps open={o} onAnswer={onAnswer} />);
     expect(document.body.textContent).toContain("Chromey");
     fireEvent.click(screen.getByRole("button", { name: text("fullmove-close-again") }));
     expect(onAnswer).toHaveBeenCalledWith(true);
@@ -232,7 +232,9 @@ describe("the app data before the files", () => {
     expect(coming.kind).toBe("appdata");
     expect(next(coming, { kind: "stage", stage: { kind: "moving" } })).toBe(coming);
     expect(next(coming, { kind: "progress", progress: {} as never }).kind).toBe("progress");
-    expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"] } })).toEqual({ kind: "close-apps", apps: ["Mail"] });
+    expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"], files: [] } })).toEqual({ kind: "close-apps", open: { apps: ["Mail"], files: [] } });
+    // Files an app holds open (2.5) travel to the page apart from the apps.
+    expect(next(wait, { kind: "appdata-open", open: { apps: ["Outlook"], files: ["Accounts.db"] } })).toEqual({ kind: "close-apps", open: { apps: ["Outlook"], files: ["Accounts.db"] } });
   });
 
   // Found by the first real test (28 October 2026): progress before approval took both laptops

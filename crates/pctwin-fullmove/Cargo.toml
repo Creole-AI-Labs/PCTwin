@@ -27,6 +27,9 @@ pctwin-special = { path = "../pctwin-special" }
 # The app data stream's two ends (src/data.rs), and the gate the landing writes through.
 pctwin-move = { path = "../pctwin-move" }
 pctwin-gate = { path = "../pctwin-gate" }
+# Live files in the person's own folders (src/live.rs): read through the send's opener, and a
+# file stored online only is never opened.
+pctwin-transfer = { path = "../pctwin-transfer" }
 pctwin-types = { path = "../pctwin-types" }
 # The install chain (src/install.rs): the helper's broker actions, winget run as the person, and
 # each download's SHA-256 (what the helper checks the bytes against).
@@ -44,7 +47,6 @@ pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }
 pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # Synthetic browser databases for the app data test, and reading them back.
 rusqlite = { version = "0.41.0", features = ["bundled", "backup"] }
-pctwin-transfer = { path = "../pctwin-transfer" }
 tempfile = "3"
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
 

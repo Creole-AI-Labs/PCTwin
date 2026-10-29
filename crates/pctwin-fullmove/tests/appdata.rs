@@ -351,6 +351,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     let mut person = NewPerson {
         rules,

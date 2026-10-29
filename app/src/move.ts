@@ -55,7 +55,7 @@ export const FAILED_REASONS = [
 export type FailedReason = (typeof FAILED_REASONS)[number];
 
 /** The reasons that belong to `needs-action` (the person must finish a step). */
-export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand", "parts-missing", "moved-file-missing"] as const;
+export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand", "parts-missing", "moved-file-missing", "open-in-app"] as const;
 export type NeedsActionReason = (typeof NEEDS_ACTION_REASONS)[number];
 
 export type Reason = FailedReason | NeedsActionReason;
@@ -150,7 +150,8 @@ export type FileKind = (typeof FILE_KINDS)[number];
  * One line of the detailed report (R02). Names and paths are the person's own text. Its kind and
  * size are absent only in a report kept by an older version (shown under other files).
  */
-export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote; kind?: FileKind; bytes?: number } & Outcome;
+/** `openIn`: on the old laptop, the app that had the file open (reason `open-in-app`), when the system could name it. */
+export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote; kind?: FileKind; bytes?: number; openIn?: string } & Outcome;
 
 /* ---------- Progress: measured numbers only ---------- */
 
@@ -287,6 +288,23 @@ export type MoveOutcome = {
   /** The new laptop: where each group of the person's things is now (the folder as the person reads it). */
   /** `moved`: the folder was moved or replaced during the move, so `folder` is where it was. */
   landed?: { name: GroupName; folder: string; moved: boolean }[];
+  /** The old laptop: what keeping copies of online-only files did, when the person chose it (2.6). */
+  keptOnline?: KeptOnline;
+};
+
+/**
+ * The old laptop, after keeping copies of online-only files (`KeptOnlineView`): files copied, files
+ * left safe in their cloud, bytes downloaded, and files the cloud app has not made online only
+ * again yet (they still take space there: "right-click it and choose Free up space"). `paused`:
+ * why keeping copies stopped early, if it did.
+ */
+export type KeptOnline = {
+  copied: number;
+  safeInCloud: number;
+  downloadedBytes: number;
+  stillOnOldLaptopFiles: number;
+  stillOnOldLaptopBytes: number;
+  paused: "metered-now" | "no-space" | null;
 };
 
 /** One kind of file after the move: how many the plan held, and how many are copied and checked. */

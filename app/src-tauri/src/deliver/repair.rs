@@ -390,7 +390,17 @@ pub fn run_part<R: Runtime>(
     let journal = crate::moving::journal_path(app)
         .and_then(|p| pctwin_journal::Journal::open(&p).ok())
         .ok_or(RepairProblem::Failed)?;
-    let (view, lines) = crate::fullmove::rebuild_full(app, part, &journal, me, None, files);
+    // A retry installs at once: the person pressed "Fix these" now, so it does not wait for free
+    // Wi-Fi again.
+    let (view, lines) = crate::fullmove::rebuild_full(
+        app,
+        part,
+        &journal,
+        me,
+        None,
+        files,
+        crate::fullmove::InstallChoices::default(),
+    );
     Ok((lines, view.undo_id))
 }
 

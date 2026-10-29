@@ -54,6 +54,114 @@ pub struct LandingRules {
     /// new laptop (M05): each lands in the place [`chosen_label`] names, approved there.
     #[serde(default)]
     pub chosen: std::collections::BTreeSet<FolderRole>,
+    /// Several old laptops into one (Task List 2.6): the folder, in each of the new laptop's
+    /// places, that this old laptop's mover's (and shared) files land in, in the person's
+    /// language ("From Bea's laptop"), so they never mix with an earlier old laptop's. One plain
+    /// folder name ([`own_folder_fine`]). Move protocol 7 and later
+    /// ([`pctwin_transfer::OWN_FOLDER_SINCE`]); never sent to an older laptop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_folder: Option<String>,
+}
+
+/// The longest own-folder name, in bytes.
+pub const MAX_OWN_FOLDER: usize = 120;
+
+/// Characters that change how text around them reads or that cannot be seen: direction marks
+/// and isolates, joiners, the byte-order mark and soft hyphen. A folder name holding one could
+/// look like another (second security review of the 2.6 wiring).
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{17B4}'
+            | '\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFFB}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
+}
+
+/// Whether `name`, before its first dot, is a name Windows keeps for a device (`CON`, `NUL`,
+/// `COM1`, `LPT9`, and the same with a superscript digit), in any case.
+fn reserved_on_windows(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = base.to_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    let mut chars = upper.chars();
+    let head: String = chars.by_ref().take(3).collect();
+    let rest: String = chars.collect();
+    (head == "COM" || head == "LPT")
+        && matches!(
+            rest.as_str(),
+            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{B9}" | "\u{B2}" | "\u{B3}"
+        )
+}
+
+/// Whether `name` may be an old laptop's own folder: one plain folder name (no folder marks,
+/// nothing a system reads as special: no name Windows keeps for a device, no invisible or
+/// direction-changing character), as fallback names are checked. Every system's own name rules
+/// are still checked by the safety gate where it lands.
+pub fn own_folder_fine(name: &str) -> bool {
+    let trimmed = name.trim();
+    trimmed == name
+        && !name.is_empty()
+        && name.len() <= MAX_OWN_FOLDER
+        && name != "."
+        && name != ".."
+        && !name.ends_with('.')
+        && !reserved_on_windows(name)
+        && !name.chars().any(|c| {
+            c.is_control()
+                || invisible(c)
+                || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+}
+
+/// The most numbers tried for an own folder ("From Ada's laptop (2)" to "(100)").
+pub const MOST_OWN_FOLDER_NAMES: u32 = 100;
+
+/// The own folder for an old laptop: `name`, or, when `taken(candidate)` says that name is
+/// already used here by another old laptop (two old laptops with the same name), "name (2)",
+/// "name (3)" and on; `None` when none is free or the name is not a plain folder name.
+pub fn own_folder_free(name: &str, taken: &dyn Fn(&str) -> bool) -> Option<String> {
+    if !own_folder_fine(name) {
+        return None;
+    }
+    if !taken(name) {
+        return Some(name.to_string());
+    }
+    (2..=MOST_OWN_FOLDER_NAMES)
+        .map(|n| format!("{name} ({n})"))
+        .find(|c| own_folder_fine(c) && !taken(c))
+}
+
+impl LandingRules {
+    /// The rules as sent to a laptop speaking move protocol `version`: one before
+    /// [`pctwin_transfer::OWN_FOLDER_SINCE`] cannot read an own folder, so none is named (its
+    /// files land as they always did).
+    pub fn for_version(mut self, version: u16) -> Self {
+        if version < pctwin_transfer::OWN_FOLDER_SINCE {
+            self.own_folder = None;
+        }
+        self
+    }
 }
 
 /// The most names tried for one folder that moves as one whole ("Name (2)" to "Name (100)").
@@ -187,9 +295,8 @@ impl LandingRules {
             }
             Owner::System => None,
             _ if self.left_out.contains(&item.place.role) => None,
-            _ if self.chosen.contains(&item.place.role) => Some(LandingPlace::new(
-                chosen_label(item.place.role),
-                shown_path(&item.path),
+            _ if self.chosen.contains(&item.place.role) => Some(self.in_own_folder(
+                LandingPlace::new(chosen_label(item.place.role), shown_path(&item.path)),
             )),
             _ => {
                 let places = NewPlaces::new(self.roles.clone());
@@ -199,8 +306,18 @@ impl LandingRules {
                         .cloned()
                         .unwrap_or_else(|| format!("From your old laptop/{}", role_label(role)))
                 };
-                landing_for(item, &self.mover, &places, &fallback).place()
+                landing_for(item, &self.mover, &places, &fallback)
+                    .place()
+                    .map(|p| self.in_own_folder(p))
             }
+        }
+    }
+
+    /// `place`, inside this old laptop's own folder when the rules name one.
+    fn in_own_folder(&self, place: LandingPlace) -> LandingPlace {
+        match &self.own_folder {
+            Some(own) => LandingPlace::new(place.destination, format!("{own}/{}", place.path)),
+            None => place,
         }
     }
 }
@@ -342,7 +459,15 @@ pub fn parse_rules(msg: &[u8]) -> Result<LandingRules, TransferError> {
     if body.len() > MAX_RULES {
         return Err(bad("too long"));
     }
-    serde_json::from_slice(body).map_err(|_| bad("not readable"))
+    let rules: LandingRules = serde_json::from_slice(body).map_err(|_| bad("not readable"))?;
+    if rules
+        .own_folder
+        .as_deref()
+        .is_some_and(|o| !own_folder_fine(o))
+    {
+        return Err(bad("not a folder name"));
+    }
+    Ok(rules)
 }
 
 #[cfg(test)]
@@ -386,6 +511,7 @@ mod tests {
             held: BTreeMap::from([("1001".into(), "for-1".into())]),
             left_out: Default::default(),
             chosen: Default::default(),
+            own_folder: None,
         }
     }
 
@@ -529,6 +655,149 @@ mod tests {
         let without: LandingRules =
             serde_json::from_str(r#"{"mover":"1000","roles":{},"fallback":{},"held":{}}"#).unwrap();
         assert!(without.left_out.is_empty());
+    }
+
+    /// Several old laptops into one (Task List 2.6): with an own folder named, every file of the
+    /// mover's and the shared ones lands inside it in its place; another person's held things do
+    /// not; an older laptop is never sent one, and a name that is not one plain folder is refused.
+    #[test]
+    fn an_old_laptops_own_folder_holds_its_movers_files_only() {
+        let mut r = rules();
+        r.own_folder = Some("From Bea's laptop".into());
+        let mine = item(
+            Owner::Person {
+                account_id: "1000".into(),
+            },
+            FolderRole::Documents,
+            &["Work", "a.txt"],
+        );
+        let plain = rules().landing(&mine).unwrap();
+        assert_eq!(
+            r.landing(&mine),
+            Some(LandingPlace::new(
+                plain.destination.clone(),
+                format!("From Bea's laptop/{}", plain.path)
+            ))
+        );
+        let shared = item(Owner::Shared, FolderRole::Other, &["menu.txt"]);
+        assert_eq!(
+            r.landing(&shared),
+            Some(LandingPlace::new("public", "From Bea's laptop/menu.txt"))
+        );
+        let bea = item(
+            Owner::Person {
+                account_id: "1001".into(),
+            },
+            FolderRole::Documents,
+            &["c.txt"],
+        );
+        assert_eq!(
+            r.landing(&bea),
+            Some(LandingPlace::new("for-1", "documents/c.txt"))
+        );
+        // A place the person chose holds it too.
+        let mut chose = r.clone();
+        chose.chosen.insert(FolderRole::Documents);
+        assert_eq!(
+            chose.landing(&mine),
+            Some(LandingPlace::new(
+                chosen_label(FolderRole::Documents),
+                "From Bea's laptop/Work/a.txt"
+            ))
+        );
+        // Left out stays left out.
+        let mut out = r.clone();
+        out.left_out.insert(FolderRole::Documents);
+        assert_eq!(out.landing(&mine), None);
+        // Version 7 and later read it; an older laptop is never sent one, so it lands as always.
+        assert_eq!(
+            r.clone()
+                .for_version(pctwin_transfer::OWN_FOLDER_SINCE)
+                .own_folder,
+            r.own_folder
+        );
+        let older = r.clone().for_version(pctwin_transfer::OWN_FOLDER_SINCE - 1);
+        assert_eq!(older.own_folder, None);
+        assert_eq!(older.landing(&mine), Some(plain));
+        // Without one, the rules are written exactly as before (an older laptop reads them).
+        let json = serde_json::to_string(&rules()).unwrap();
+        assert!(!json.contains("own_folder"), "{json}");
+        // Read back, and only a plain folder name is taken.
+        let msg = |own: &str| {
+            let mut r = rules();
+            r.own_folder = Some(own.into());
+            let mut m = vec![KIND];
+            m.extend_from_slice(&serde_json::to_vec(&r).unwrap());
+            m
+        };
+        assert_eq!(
+            parse_rules(&msg("From Bea's laptop"))
+                .unwrap()
+                .own_folder
+                .as_deref(),
+            Some("From Bea's laptop")
+        );
+        for bad in [
+            "", " From", "From ", ".", "..", "a/b", "a\\b", "C:", "x.", "a\u{0}b", "a*b", "a?b",
+            "a\"b", "a<b", "a>b", "a|b",
+        ] {
+            assert!(!own_folder_fine(bad), "{bad:?}");
+            assert!(parse_rules(&msg(bad)).is_err(), "{bad:?}");
+        }
+        // Names Windows keeps for devices, and characters that cannot be seen or turn text round.
+        for bad in [
+            "CON",
+            "con",
+            "Nul",
+            "AUX",
+            "PRN",
+            "COM1",
+            "com9",
+            "LPT1",
+            "COM\u{B9}",
+            "CON.txt",
+            "nul .x",
+            "CONIN$",
+            "a\u{202E}b",
+            "a\u{200B}b",
+            "a\u{2066}b",
+            "\u{FEFF}a",
+            "a\u{00AD}b",
+            "a\u{E0041}b",
+        ] {
+            assert!(!own_folder_fine(bad), "{bad:?}");
+        }
+        for fine in [
+            "Console",
+            "COM",
+            "COM10",
+            "LPT0x",
+            "Connie's laptop",
+            "Ana Lúcia",
+            "\u{0644}\u{0627}",
+        ] {
+            assert!(own_folder_fine(fine), "{fine:?}");
+        }
+        assert!(own_folder_fine(&"x".repeat(MAX_OWN_FOLDER)));
+        assert!(!own_folder_fine(&"x".repeat(MAX_OWN_FOLDER + 1)));
+        assert!(own_folder_fine("De l’ordinateur de Bea"));
+    }
+
+    /// Two old laptops with the same name each get their own folder: the second one's is numbered.
+    #[test]
+    fn a_second_laptop_of_the_same_name_gets_a_numbered_folder() {
+        let used = ["From Ada's laptop", "From Ada's laptop (2)"];
+        let taken = |c: &str| used.contains(&c);
+        assert_eq!(
+            own_folder_free("From Bea's laptop", &taken).as_deref(),
+            Some("From Bea's laptop")
+        );
+        assert_eq!(
+            own_folder_free("From Ada's laptop", &taken).as_deref(),
+            Some("From Ada's laptop (3)")
+        );
+        assert_eq!(own_folder_free("From Ada's laptop", &|_| true), None);
+        assert_eq!(own_folder_free("CON", &|_| false), None);
     }
 
     #[tokio::test]

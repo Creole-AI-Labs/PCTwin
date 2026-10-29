@@ -3046,3 +3046,67 @@ qs-remember-replaces = Você já conectou este notebook antes? Escolha-o e a con
 qs-remember-replaces-suggested = Pode ser { $label } de novo. Substituir?
 qs-remember-replace = Substituir
 qs-remember-keep-both = Não, manter as duas
+
+# 2.6 wiring
+reason-open-in-app = Um app estava com este arquivo aberto no notebook antigo, então o PCTwin não o copiou (uma cópia feita enquanto o app escreve poderia sair estragada). Feche esse app no notebook antigo e depois comece uma nova transferência que inclua este arquivo.
+report-open-in = Aberto em { $app }
+fullmove-close-files = Estes arquivos estão abertos em um app neste notebook, então o PCTwin ainda não pode copiá-los com segurança. Feche o app que os usa e depois escolha Tentar de novo. Se continuar sem eles, eles ficam neste notebook e o relatório os mostra.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Trazer também o arquivo guardado só online no { $provider } (1 arquivo, { $size }). Ele é baixado primeiro neste notebook e depois volta a ficar só online.
+        [many] Trazer também os arquivos guardados só online no { $provider } ({ $count } de arquivos, { $size }). Eles são baixados primeiro neste notebook e depois voltam a ficar só online.
+       *[other] Trazer também os arquivos guardados só online no { $provider } ({ $count } arquivos, { $size }). Eles são baixados primeiro neste notebook e depois voltam a ficar só online.
+    }
+choose-online-only-unnamed = um serviço de armazenamento online deste notebook
+choose-online-only-metered = Também numa conexão que pode cobrar pelos dados (o roteador de um celular)
+choose-online-only-not-here = Se alguns dos seus arquivos estão guardados só online, eles continuam no seu armazenamento online. O PCTwin ainda não pode trazer uma cópia deles deste notebook.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 arquivo guardado só online foi baixado e copiado.
+        [many] { $count } de arquivos guardados só online foram baixados e copiados.
+       *[other] { $count } arquivos guardados só online foram baixados e copiados.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 arquivo guardado só online não foi copiado. Ele continua guardado online: abra-o no notebook novo pelo app que o guarda.
+        [many] { $count } de arquivos guardados só online não foram copiados. Eles continuam guardados online: abra-os no notebook novo pelo app que os guarda.
+       *[other] { $count } arquivos guardados só online não foram copiados. Eles continuam guardados online: abra-os no notebook novo pelo app que os guarda.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 arquivo baixado ainda ocupa { $size } neste notebook, porque o app da nuvem ainda não o deixou só online de novo. Para liberar o espaço, clique nele com o botão direito e escolha Liberar espaço.
+        [many] { $count } de arquivos baixados ainda ocupam { $size } neste notebook, porque o app da nuvem ainda não os deixou só online de novo. Para liberar o espaço, clique em cada um com o botão direito e escolha Liberar espaço.
+       *[other] { $count } arquivos baixados ainda ocupam { $size } neste notebook, porque o app da nuvem ainda não os deixou só online de novo. Para liberar o espaço, clique em cada um com o botão direito e escolha Liberar espaço.
+    }
+kept-online-paused-metered = O download parou porque esta conexão pode cobrar pelos dados. O resto não foi copiado e continua guardado online.
+kept-online-paused-space = O download parou porque este notebook está ficando sem espaço. O resto não foi copiado e continua guardado online.
+plan-own-folder = Colocar as coisas de { $laptop } numa pasta só delas
+plan-own-folder-help = Este notebook já tem coisas de outro notebook antigo. Uma pasta para cada notebook as mantém separadas.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = Do outro notebook
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 app é baixado da internet para ser instalado neste notebook.
+        [many] { $count } de apps são baixados da internet para serem instalados neste notebook.
+       *[other] { $count } apps são baixados da internet para serem instalados neste notebook.
+    }
+plan-wait-free-wifi = Esperar um Wi-Fi gratuito antes de baixar
+plan-wait-free-wifi-help = Se a conexão puder cobrar pelos dados quando os apps forem baixados, o PCTwin espera até 20 minutos por um Wi-Fi gratuito. Os apps que não puder baixar aparecem na lista para você instalar depois.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Usar o instalador encontrado no notebook antigo para 1 app, em vez de baixá-lo
+        [many] Usar os instaladores encontrados no notebook antigo para { $count } de apps, em vez de baixá-los
+       *[other] Usar os instaladores encontrados no notebook antigo para { $count } apps, em vez de baixá-los
+    }
+plan-reuse-installers-help = Cada um é verificado primeiro, do mesmo jeito que um download: ele precisa ser assinado pelo próprio fabricante do app.
+fullmove-close-files-title = Feche os apps que usam estes arquivos
+choose-online-only-title = Arquivos guardados só online
+kept-online-title = Arquivos guardados só online
+kept-online-downloaded = { $size } baixados
+plan-own-folder-called = A pasta se chama { $folder }.
+accept-own-folder = As coisas do outro notebook vão para uma pasta própria, { $folder }. Você pode desligar isso nos detalhes.
+plan-downloads-title = Apps da internet
+plan-connection-free = A conexão deste notebook não cobra pelos dados agora.
+plan-connection-may-charge = A conexão deste notebook pode cobrar pelos dados agora, como o roteador de um celular.
+plan-connection-not-known = O PCTwin não consegue saber se a conexão deste notebook cobra pelos dados.
+fullmove-rebuilding-wait-wifi = Se esta conexão puder cobrar pelos dados, o PCTwin espera até 20 minutos por um Wi-Fi gratuito antes de baixar os apps. Conecte-se a um Wi-Fi gratuito para continuar antes.

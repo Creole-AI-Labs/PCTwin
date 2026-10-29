@@ -57,7 +57,11 @@
 //!   (approved by the user, 27 October 2026), `os_win_verify_trust` (Windows' own signature check on a
 //!   held file, replacing PowerShell, whose answer code in the person's folders could replace)
 //!   and `os_disk_hotplug` (whether a disk can be unplugged: an NVMe disk in a Thunderbolt or USB4
-//!   case reports a bus inside the laptop).
+//!   case reports a bus inside the laptop); and, added 29 October 2026 for the 2.5 decision on
+//!   files live while their app is open (approved by the founder, 29 October 2026),
+//!   `os_rm_holders` (Windows Restart Manager's list of the
+//!   programs holding a file, by the names Windows shows, so the person is asked to close only
+//!   that app).
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`, `os_authorization_holds`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -83,8 +87,8 @@ mod win;
 #[cfg(windows)]
 pub use win::{
     DiskHotplug, FileTrust, PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder,
-    caller_of, clean_command, defender_scanner, disk_hotplug, file_type_is_dangerous, minimal_env,
-    program_folder, system_folder, verify_file_trust,
+    caller_of, clean_command, defender_scanner, disk_hotplug, file_holders, file_type_is_dangerous,
+    minimal_env, program_folder, system_folder, verify_file_trust,
 };
 #[cfg(windows)]
 pub use win::{folder_access_list, private_folder};

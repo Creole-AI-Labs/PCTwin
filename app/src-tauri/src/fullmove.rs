@@ -72,10 +72,49 @@ pub const APPDATA_EVENT: &str = "move-appdata";
 /// The old laptop: apps to close before their data can be read (`move-appdata-open`).
 pub const APPDATA_OPEN_EVENT: &str = "move-appdata-open";
 
-/// The apps the person is asked to close on the old laptop.
+/// The apps the person is asked to close on the old laptop: for their app data, or for files in
+/// the person's own folders that they hold open (`files`, by name; Task List 2.5, 29 October
+/// 2026). An app the system cannot name is not in `apps`; its files still are in `files`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppsOpen {
     pub apps: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// Asks the person on the old laptop to close `apps` (holding `files`), and waits for Try again
+/// (true) or Go on without them (false); no answer in ten minutes, or the move ending, is "go on
+/// without". PCTwin never closes an app itself.
+pub fn ask_to_close<R: Runtime>(
+    app: &AppHandle<R>,
+    moving: &crate::moving::AppMoving,
+    apps: Vec<String>,
+    files: Vec<String>,
+) -> bool {
+    let answer = moving.wait_for_close();
+    let _ = app.emit(APPDATA_OPEN_EVENT, AppsOpen { apps, files });
+    answer
+        .recv_timeout(Duration::from_secs(600))
+        .unwrap_or(false)
+}
+
+/// Whether a program holds files open for writing, with the programs named where the system can
+/// name them: on Windows the share-mode check says whether anyone writes, and Restart Manager
+/// names who holds it ([`pctwin_helper_os::file_holders`]); elsewhere as
+/// [`pctwin_special::capture::SystemHolders`] says.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NamedHolders;
+
+impl pctwin_special::capture::Holders for NamedHolders {
+    fn holding(&self, files: &[std::path::PathBuf]) -> pctwin_special::capture::Holding {
+        use pctwin_special::capture::{Holding, SystemHolders};
+        match SystemHolders.holding(files) {
+            #[cfg(windows)]
+            Holding::Held { by } if by.is_empty() => Holding::Held {
+                by: pctwin_helper_os::file_holders(files).unwrap_or_default(),
+            },
+            other => other,
+        }
+    }
 }
 
 fn made() -> Option<AppFullMove> {
@@ -209,6 +248,46 @@ pub struct RebuildPlanView {
     pub internet: pctwin_fullmove::plan::Internet,
     /// The room it takes beyond the files.
     pub room: RoomView,
+    /// What the apps PCTwin installs need from the internet, with the choice the plan offers for it
+    /// ("Wait for free Wi-Fi").
+    pub downloads: DownloadsView,
+}
+
+/// The connection right now, as the system says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Connection {
+    Free,
+    MayCharge,
+    NotKnown,
+}
+
+/// The apps PCTwin downloads to install, and the connection now: the plan offers "Wait for free
+/// Wi-Fi" when anything is downloaded. `with_old_installer` is always 0: installers found on the
+/// old laptop are not reused yet (second security review, 29 October 2026), so the plan never
+/// offers "Reuse installers found on the old laptop".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadsView {
+    pub apps: u64,
+    pub with_old_installer: u64,
+    pub connection: Connection,
+}
+
+/// The connection now.
+pub fn connection_now() -> Connection {
+    match pctwin_apps::fetch::network_cost() {
+        pctwin_apps::fetch::NetworkCost::Unmetered => Connection::Free,
+        pctwin_apps::fetch::NetworkCost::Metered => Connection::MayCharge,
+        pctwin_apps::fetch::NetworkCost::Unknown => Connection::NotKnown,
+    }
+}
+
+/// What the person chose on the plan for the installs. Reusing the old laptop's installers is
+/// not offered (second security review, 29 October 2026): every app is downloaded.
+#[derive(Debug, Clone, Default)]
+pub struct InstallChoices {
+    pub wait_free_wifi: bool,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -418,6 +497,15 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             RoomView {
                 installs: r.installs,
                 app_data: r.app_data,
+            }
+        },
+        downloads: {
+            let d = plan.downloads();
+            DownloadsView {
+                apps: d.apps,
+                // Never reused yet (second security review): none is offered.
+                with_old_installer: 0,
+                connection: connection_now(),
             }
         },
     }
@@ -700,6 +788,7 @@ pub fn rebuild_here<R: Runtime>(
     me: &str,
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
+    choices: InstallChoices,
 ) -> RebuiltView {
     let mut drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
     // App data the old laptop refused because it was edited there after the approval: nothing of
@@ -714,7 +803,7 @@ pub fn rebuild_here<R: Runtime>(
     // Kept until the results are remembered (re-check of 2.9): an undo waiting for the gate then
     // spends them after, never before, so they are never put back once spent.
     let _keeping = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Rebuilding);
-    let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone());
+    let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone(), choices);
     crate::deliver::repair::remember(
         app,
         crate::deliver::repair::Last {
@@ -737,6 +826,7 @@ pub fn rebuild_full<R: Runtime>(
     me: &str,
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
+    choices: InstallChoices,
 ) -> (RebuiltView, Vec<RebuiltLine>) {
     use crate::deliver::safe_stop::{BusyWith, hold};
     // Installing, putting settings in place and placing app data must not be cut part way.
@@ -818,19 +908,34 @@ pub fn rebuild_full<R: Runtime>(
         work
     };
     #[cfg(windows)]
-    let mut chain = winget_here().map(|winget| {
-        pctwin_fullmove::install::WingetInstaller::new(
-            winget,
-            winget_arch(),
-            work,
-            &pctwin_maker::run::SystemRunner,
-            &mut helper,
-            &machine,
-            &mut nonce,
-        )
-        // The move these installs belong to: only its own undo can remove what it installs.
-        .for_move(scope.0)
-    });
+    let mut chain = winget_here()
+        .map(|winget| {
+            pctwin_fullmove::install::WingetInstaller::new(
+                winget,
+                winget_arch(),
+                work,
+                &pctwin_maker::run::SystemRunner,
+                &mut helper,
+                &machine,
+                &mut nonce,
+            )
+            // The move these installs belong to: only its own undo can remove what it installs.
+            .for_move(scope.0)
+        })
+        .map(|chain| {
+            if choices.wait_free_wifi {
+                chain.waiting(pctwin_fullmove::install::WaitFree::new(
+                    Box::new(pctwin_apps::fetch::network_cost),
+                    Box::new(std::thread::sleep),
+                    pctwin_fullmove::install::WAIT_FREE_EVERY,
+                    pctwin_fullmove::install::WAIT_FREE_AT_MOST,
+                ))
+            } else {
+                chain
+            }
+        });
+    #[cfg(not(windows))]
+    let _ = &choices;
     #[cfg(windows)]
     let installer: &mut dyn Installer = match chain.as_mut() {
         Some(c) => c,
@@ -1131,16 +1236,12 @@ pub fn data_source<R: Runtime>(
     // on without them (no answer in time is "go on without").
     let (app, moving) = (app.clone(), moving.clone());
     let ask = Box::new(move |apps: &[String]| {
-        let answer = moving.wait_for_close();
-        let _ = app.emit(
-            APPDATA_OPEN_EVENT,
-            AppsOpen {
-                apps: apps.iter().map(|a| name(a)).collect(),
-            },
-        );
-        answer
-            .recv_timeout(Duration::from_secs(600))
-            .unwrap_or(false)
+        ask_to_close(
+            &app,
+            &moving,
+            apps.iter().map(|a| name(a)).collect(),
+            Vec::new(),
+        )
     });
     Some(
         pctwin_fullmove::data::Source::new(

@@ -70,6 +70,7 @@
         "reason": "cloud-only"
       }
     ],
+    "ownFolderOffered": true,
     "preview": {
       "estimatedBytes": 0,
       "fits": true,
@@ -516,6 +517,11 @@
           "update": null
         }
       ],
+      "downloads": {
+        "apps": 2,
+        "connection": "may-charge",
+        "withOldInstaller": 0
+      },
       "forgotten": {
         "found": [
           {

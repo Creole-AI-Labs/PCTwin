@@ -1,7 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { useState } from "react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Segmented } from "../components/kit";
-import type { Choice, ChoiceFolder, ChoiceView } from "../bridge";
+import type { Choice, ChoiceFolder, ChoiceView, KeepLocalAnswer } from "../bridge";
 import { formatBytes, pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
@@ -34,10 +34,22 @@ export function stateOf(view: ChoiceView, top: ChoiceFolder, ticked: ReadonlySet
 }
 
 /** The folders that move for a mode and the person's ticks (a tick means "moves"). */
-export function choiceOf(view: ChoiceView, mode: ChooseMode, ticked: ReadonlySet<string>, appsTicked: boolean): Choice {
+export function choiceOf(view: ChoiceView, mode: ChooseMode, ticked: ReadonlySet<string>, appsTicked: boolean, keep: Readonly<Record<string, KeepAnswer>> = {}): Choice {
   const folders = mode === "everything" ? view.folders : view.folders.filter((f) => ticked.has(keyOf(f)));
-  return { folders: folders.map((f) => ({ role: f.role, parts: f.parts })), apps: view.apps > 0 && (mode === "everything" || appsTicked) };
+  // Only clouds the laptop offered, and only where it can keep local copies; none unless ticked.
+  const keepLocal: KeepLocalAnswer[] = [];
+  if (view.keepLocalHere) {
+    for (const g of view.onlineOnly) {
+      const answer = keep[g.provider] as KeepAnswer | undefined;
+      if (answer?.bring) keepLocal.push({ provider: g.provider, onMetered: answer.onMetered });
+    }
+  }
+  const apps = view.apps > 0 && (mode === "everything" || appsTicked);
+  return { folders: folders.map((f) => ({ role: f.role, parts: f.parts })), apps, ...(keepLocal.length > 0 ? { keepLocal } : {}) };
 }
+
+/** One cloud's ticks: bring a real copy of its online-only files, and also on a connection that may charge. */
+export type KeepAnswer = { bring: boolean; onMetered: boolean };
 
 /** Files and bytes in `top` and everything inside it. */
 function totals(view: ChoiceView, top: ChoiceFolder): { files: number; bytes: number } {
@@ -58,6 +70,11 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set(view.folders.map(keyOf)));
   const [appsTicked, setAppsTicked] = useState(true);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  // Files kept only online: none come unless ticked, cloud by cloud.
+  const [keep, setKeep] = useState<Readonly<Record<string, KeepAnswer>>>({});
+  const setKeepOf = (provider: string, answer: KeepAnswer) => {
+    setKeep((k) => ({ ...k, [provider]: answer }));
+  };
   const pick = (m: ChooseMode) => {
     setMode(m);
     // Everything except starts with everything ticked; Only what I choose with nothing.
@@ -65,7 +82,7 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
     setAppsTicked(m !== "only");
     setOpen(new Set());
   };
-  const choice = choiceOf(view, mode, ticked, appsTicked);
+  const choice = choiceOf(view, mode, ticked, appsTicked, keep);
   const nothing = choice.folders.length === 0 && !choice.apps;
   const size = (files: number, bytes: number) => l10n.getString("choose-group-size", { files, size: formatBytes(bytes, pageLocale()) });
   const toggle = (top: ChoiceFolder) => {
@@ -175,6 +192,46 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
             ))}
           </RowList>
         </>
+      )}
+      {view.onlineOnly.length > 0 && (
+        <section aria-labelledby="choose-online-title">
+          <h2 id="choose-online-title" className="plan-box-title">
+            {l10n.getString("choose-online-only-title")}
+          </h2>
+          <ul className="mv-people">
+            {view.onlineOnly.map((g) => {
+              const answer = (keep[g.provider] as KeepAnswer | undefined) ?? { bring: false, onMetered: false };
+              const provider = g.name ?? l10n.getString("choose-online-only-unnamed");
+              return (
+                <li key={g.provider}>
+                  <Checkbox
+                    checked={answer.bring}
+                    onChange={(bring) => {
+                      setKeepOf(g.provider, { bring, onMetered: bring && answer.onMetered });
+                    }}
+                    label={l10n.getString("choose-online-only", { count: g.files, provider, size: formatBytes(g.bytes, pageLocale()) })}
+                  />
+                  {answer.bring && (
+                    <div className="mv-tree-sub">
+                      <Checkbox
+                        checked={answer.onMetered}
+                        onChange={(onMetered) => {
+                          setKeepOf(g.provider, { bring: true, onMetered });
+                        }}
+                        label={l10n.getString("choose-online-only-metered")}
+                      />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+      {!view.keepLocalHere && (
+        <div className="mv-note">
+          <Banner tone="info">{l10n.getString("choose-online-only-not-here")}</Banner>
+        </div>
       )}
       <p className="subhead" role="status">
         {l10n.getString("choose-total", { files: chosenTotal.files, size: formatBytes(chosenTotal.bytes, pageLocale()) })}

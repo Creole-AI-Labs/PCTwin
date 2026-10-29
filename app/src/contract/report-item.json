@@ -110,5 +110,15 @@
     "reason": "unreadable",
     "source": "documents/10.txt",
     "status": "failed"
+  },
+  {
+    "bytes": 1200,
+    "id": "00000000000000000000000000000011",
+    "kind": "documents",
+    "name": "11.txt",
+    "openIn": "Outlook",
+    "reason": "open-in-app",
+    "source": "documents/11.txt",
+    "status": "needs-action"
   }
 ]

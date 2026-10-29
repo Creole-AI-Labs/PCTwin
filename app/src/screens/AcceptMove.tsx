@@ -23,6 +23,7 @@ export default function AcceptMove({
   onNotNow,
   leaveBehind = false,
   onLeaveBehind,
+  ownFolder = null,
 }: {
   plan: PlanView;
   /** The old laptop's name, as pairing showed it. */
@@ -33,6 +34,8 @@ export default function AcceptMove({
   /** The smaller-laptop proposal (2.6): the person chose to leave those files on the old laptop. */
   leaveBehind?: boolean;
   onLeaveBehind?: (on: boolean) => void;
+  /** Several old laptops into one: the folder this old laptop's things go in, when they get their own (changed in the details). */
+  ownFolder?: string | null;
 }) {
   const { l10n } = useLocalization();
   // A rescue: nobody chose this on another laptop; it is what was found on the drive.
@@ -58,6 +61,7 @@ export default function AcceptMove({
         {settings && <Row title={l10n.getString("accept-settings")} />}
       </RowList>
       {plan.space && onLeaveBehind && <SpaceBox space={plan.space} accepted={leaveBehind} onChange={onLeaveBehind} />}
+      {ownFolder !== null && <p className="subhead">{l10n.getString("accept-own-folder", { folder: ownFolder })}</p>}
       <div className="mv-note">
         <Banner tone={needs ? "attention" : "ready"}>{l10n.getString(needs ? "accept-needs" : "accept-fits")}</Banner>
       </div>

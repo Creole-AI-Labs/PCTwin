@@ -62,10 +62,11 @@ import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
-import { AppDataComing, CloseApps, Rebuilding } from "./FullMoveParts";
+import { AppDataComing, CloseApps, Rebuilding, installDefaults, type InstallChoices } from "./FullMoveParts";
 import UndoHost from "./UndoHost";
 import FinishHost from "./FinishHost";
-import type { DataProgress, RebuildStep } from "../fullmove";
+import type { AppsOpen, DataProgress, RebuildStep } from "../fullmove";
+import { ownFolderName } from "../ownFolder";
 import StopMove from "./StopMove";
 import MoveChanged from "./MoveChanged";
 import type { ChangesView } from "../deliver";
@@ -101,7 +102,7 @@ type View =
   /** The new laptop: the old laptop's app data coming, before the files. */
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
-  | { kind: "close-apps"; apps: string[] }
+  | { kind: "close-apps"; open: AppsOpen }
   /** Something changed after the person said yes: only that is asked about again (2.9, X06). */
   | { kind: "changed"; changes: ChangesView };
 
@@ -190,7 +191,8 @@ export function next(view: View, event: MoveEvent): View {
   // Before the files, the old laptop's app data: its progress, and on the old laptop the apps to
   // close. The first measured progress of the files takes the page on.
   if (event.kind === "appdata") return view.kind === "progress" ? view : { kind: "appdata", progress: event.progress };
-  if (event.kind === "appdata-open") return { kind: "close-apps", apps: event.open.apps };
+  // The apps to close, and the person's files an app holds open, each listed on its own.
+  if (event.kind === "appdata-open") return { kind: "close-apps", open: event.open };
   if (view.kind === "appdata" && event.kind === "stage") return view;
   switch (event.kind) {
     case "link":
@@ -284,6 +286,12 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
   // The overview (M03) comes once, before the first plan; a later revision goes straight to it.
   const [overviewSeen, setOverviewSeen] = useState(false);
+  // Several old laptops into one: this old laptop's things in their own folder, on unless turned off.
+  const [ownFolderOn, setOwnFolderOn] = useState(true);
+  // The plan's two install choices, once the person changed them; until then the plan's defaults.
+  const [installs, setInstalls] = useState<InstallChoices | null>(null);
+  // What the approval asked for, for the page shown while apps are set up.
+  const [waitsForFreeWifi, setWaitsForFreeWifi] = useState(false);
   // Why the other people ticked were not moved, when they were not: said until the move ends.
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
@@ -532,7 +540,26 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
           }}
         />
       );
-    case "plan":
+    case "plan": {
+      // The answers that go with the approval, from either page: the own folder's name when the
+      // plan offers it and the person kept it on, and the two install choices.
+      const plan = view.plan;
+      // The folder is named after the old laptop as this page names it.
+      const folder = ownFolderName((id, args) => l10n.getString(id, args), otherName ? labelText(l10n, otherName) : null);
+      const ownFolder = plan.ownFolderOffered && ownFolderOn ? folder : null;
+      const chosenInstalls = installs ?? installDefaults(plan.rebuild?.downloads);
+      const approveWith = (a: { revision: number; fingerprint: string }, out: FolderRole[], secrets: number[], ups: number[]) => {
+        setWaitsForFreeWifi(chosenInstalls.waitFreeWifi && (plan.rebuild?.downloads.apps ?? 0) > 0);
+        moveApprove(a, true, out, secrets, ups, leaveBehind, ownFolder, chosenInstalls.waitFreeWifi, chosenInstalls.reuseInstallers).then(
+          () => {
+            setView({ kind: "wait", stage: "moving" });
+          },
+          (error: unknown) => {
+            if (toMoveProblem(error).kind === "plan-changed") setPlanChanged(true);
+            else setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
+          },
+        );
+      };
       // The choosing was done on the old laptop: here one tap accepts what comes (decided 28
       // October 2026); the full plan is there for the details, and for a place when it does not fit.
       if (!overviewSeen) {
@@ -541,16 +568,9 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
           <AcceptMove
             plan={view.plan}
             from={otherLaptop}
+            ownFolder={ownFolder}
             onAccept={() => {
-              moveApprove(key, true, [], [], [], leaveBehind).then(
-                () => {
-                  setView({ kind: "wait", stage: "moving" });
-                },
-                (error: unknown) => {
-                  if (toMoveProblem(error).kind === "plan-changed") setPlanChanged(true);
-                  else setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
-                },
-              );
+              approveWith(key, [], [], []);
             }}
             onDetails={() => {
               setOverviewSeen(true);
@@ -605,16 +625,11 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
           onUpdate={(app, update) => {
             setUpdates((u) => (update ? (u.includes(app) ? u : [...u, app]) : u.filter((a) => a !== app)));
           }}
+          ownFolder={{ on: ownFolderOn, laptop: otherLaptop, folder, onChange: setOwnFolderOn }}
+          installs={chosenInstalls}
+          onInstalls={setInstalls}
           onStart={(a) => {
-            moveApprove(a, true, leftOut, picked, updates, leaveBehind).then(
-              () => {
-                setView({ kind: "wait", stage: "moving" });
-              },
-              (error: unknown) => {
-                if (toMoveProblem(error).kind === "plan-changed") setPlanChanged(true);
-                else setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
-              },
-            );
+            approveWith(a, leftOut, picked, updates);
           }}
           onBack={() => {
             // Back from the details is back to Accept, never a "no": declining is Not now
@@ -623,6 +638,7 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
           }}
         />
       );
+    }
     case "progress": {
       // Both laptops by their names on the route strip, from the greeting.
       const named = peer ? { old: old ? (peer.mineName ?? view.progress.laptops.old) : (peer.theirsName ?? view.progress.laptops.old), new: old ? peer.theirsName : peer.mineName } : view.progress.laptops;
@@ -724,13 +740,13 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
         />
       );
     case "rebuilding":
-      return <Rebuilding step={view.step} />;
+      return <Rebuilding step={view.step} waitsForFreeWifi={waitsForFreeWifi} />;
     case "appdata":
       return <AppDataComing progress={view.progress} />;
     case "close-apps":
       return (
         <CloseApps
-          apps={view.apps}
+          open={view.open}
           onAnswer={(retry) => {
             setView({ kind: "wait", stage: "moving" });
             void moveAppdataAnswer(retry).catch(() => undefined);

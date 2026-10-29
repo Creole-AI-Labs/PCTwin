@@ -370,5 +370,59 @@
       "undoId": "01010101010101010101010101010101"
     },
     "stopped": false
+  },
+  {
+    "afterMove": {
+      "documents": {
+        "copied": 20,
+        "planned": 20
+      },
+      "music": {
+        "copied": 0,
+        "planned": 0
+      },
+      "other": {
+        "copied": 0,
+        "planned": 0
+      },
+      "photos": {
+        "copied": 11,
+        "planned": 12
+      },
+      "videos": {
+        "copied": 0,
+        "planned": 0
+      }
+    },
+    "brokeOff": false,
+    "byStatus": {
+      "converted": 0,
+      "copied": 30,
+      "failed": 2,
+      "needs-action": 1,
+      "reinstalled": 0,
+      "skipped-by-user": 1
+    },
+    "bytesChecked": 1100000,
+    "checkedFromMemory": 3,
+    "keptOnline": {
+      "copied": 40,
+      "downloadedBytes": 2400000000,
+      "paused": "no-space",
+      "safeInCloud": 3,
+      "stillOnOldLaptopBytes": 52000000,
+      "stillOnOldLaptopFiles": 1
+    },
+    "notCopied": 0,
+    "people": [
+      {
+        "atSignIn": true,
+        "copied": 120,
+        "failed": 1,
+        "name": "Bea",
+        "needsAction": 0
+      }
+    ],
+    "stopped": false
   }
 ]

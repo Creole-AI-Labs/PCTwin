@@ -21,9 +21,16 @@ cap-fs-ext = { version = "4.0.3", default-features = false }
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
+# Local copies kept during the move itself are read through the send's own opener
+# (src/local_copy_send.rs).
+pctwin-transfer = { path = "../pctwin-transfer" }
+# Which file a kept copy is, so undo on the new laptop can still tell its copy.
+pctwin-journal = { path = "../pctwin-journal" }
 # Every item ends one honest result; a plan only ever names the needs-action ones.
 pctwin-types = { path = "../pctwin-types" }
 serde = { version = "1", features = ["derive"] }
+# The durable list of files made local on the old laptop (src/local_copy_send.rs).
+serde_json = "1"
 # Whether a rescued drive is mounted read-only, as the system reports it (vetted; safe calls).
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 thiserror = "2.0.21"
