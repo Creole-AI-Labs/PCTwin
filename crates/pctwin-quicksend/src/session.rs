@@ -398,7 +398,11 @@ mod tests {
         assert_eq!(s.cancel(one), None);
         assert!(!s.set_paused(one, true));
         let three = s.add("b", 1, 1, 3);
+        let four = s.add("c", 1, 1, 4);
         assert_eq!(s.session_ended("b"), vec![three]);
+        assert_eq!(s.list().len(), 1, "another laptop's send stays");
+        assert_eq!(s.session_of(four).as_deref(), Some("c"));
+        s.finished(four);
         assert!(s.list().is_empty());
         assert_eq!(s.session_of(three), None);
     }
