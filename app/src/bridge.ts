@@ -587,9 +587,11 @@ export function parseMoveProgress(value: unknown): MoveProgress | null {
   if (!groups || !counts || !bytes || !isCount(bytes.checked) || !isCount(bytes.total)) return null;
   const progress: MoveProgress = { state: f.state, laptops: { old }, groups, counts, bytes: { checked: bytes.checked, total: bytes.total } };
   if ("current" in f) {
-    const c = exactly(f.current, ["name", "step"]);
+    // `openIn`: the app that has this file open while it is copied (2.6), when the engine says so.
+    const c = exactly(f.current, ["name", "step"]) ?? exactly(f.current, ["name", "step", "openIn"]);
     if (!c || typeof c.name !== "string" || !oneOf(c.step, ["copying", "checking"] as const)) return null;
-    progress.current = { name: c.name, step: c.step };
+    if ("openIn" in c && typeof c.openIn !== "string") return null;
+    progress.current = typeof c.openIn === "string" ? { name: c.name, step: c.step, openIn: c.openIn } : { name: c.name, step: c.step };
   }
   for (const key of ["speed", "minutesLeft"] as const) {
     if (!(key in f)) continue;

@@ -24,7 +24,7 @@ import {
   type MoveProgress,
   type ReportItem,
 } from "../move";
-import { parseReportItem } from "../bridge";
+import { parseMoveProgress, parseReportItem } from "../bridge";
 import * as sample from "../moveSamples";
 import { counts } from "../moveSamples";
 import { FooterProvider } from "./FrameFooter";
@@ -228,6 +228,24 @@ describe("a group's state", () => {
 
 describe("X01 Move progress, compact", () => {
   const groupRow = (name: string) => screen.getAllByRole("listitem").find((li) => li.textContent.includes(name)) as HTMLElement;
+
+  it("a live file being copied: the app that has it open cannot save to it, said in plain words (2.6)", async () => {
+    const live = { ...sample.running, current: { name: "Budget.xlsx", step: "copying" as const, openIn: "Excel" } };
+    inApp(<ProgressCompact progress={live} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+    expect(screen.getByText(hasText(plain(text("progress-current-open-in", { name: "Budget.xlsx", app: "Excel" }))))).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    cleanup();
+    // No app named, or only checking: no such line.
+    inApp(<ProgressCompact progress={{ ...live, current: { name: "Budget.xlsx", step: "copying" } }} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+    expect(screen.queryByText(hasText("Excel"))).toBeNull();
+  });
+
+  it("the engine's live-file word is read, and anything else in it refuses the progress", () => {
+    const base = { state: "running", laptops: { old: null }, groups: [], counts: { total: 1, waiting: 0, copying: 1, checking: 0, done: 0, needsAction: 0, failed: 0, skippedByUser: 0 }, bytes: { checked: 0, total: 10 } };
+    expect(parseMoveProgress({ ...base, current: { name: "a.docx", step: "copying", openIn: "Writer" } })?.current).toEqual({ name: "a.docx", step: "copying", openIn: "Writer" });
+    expect(parseMoveProgress({ ...base, current: { name: "a.docx", step: "copying" } })?.current).toEqual({ name: "a.docx", step: "copying" });
+    expect(parseMoveProgress({ ...base, current: { name: "a.docx", step: "copying", openIn: 3 } })).toBeNull();
+  });
 
   it("shows what is measured: the bar, sizes, the two laptops and each group", async () => {
     inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);

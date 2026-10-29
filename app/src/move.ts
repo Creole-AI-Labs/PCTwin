@@ -214,7 +214,11 @@ export type MoveProgress = {
   /** Bytes written and read back so far, and bytes in the approved plan. Never estimated. */
   bytes: { checked: number; total: number };
   /** The item being worked on, when one is. */
-  current?: { name: string; step: "copying" | "checking" };
+  /**
+   * `openIn`: the app that has this file open while it is copied (a live file, 2.6): that app
+   * cannot save to it until the copy is done. Absent when no app has it open, or not known.
+   */
+  current?: { name: string; step: "copying" | "checking"; openIn?: string };
   /** Measured, as a range in bytes a second; absent until there is enough to measure. */
   speed?: Range;
   /** Whole minutes left as a range; absent until it can be measured. Never a promise. */

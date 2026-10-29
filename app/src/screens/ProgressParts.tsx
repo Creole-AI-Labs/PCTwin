@@ -199,9 +199,17 @@ export function RouteStrip({ laptops }: { laptops: MoveProgress["laptops"] }) {
 export function NowLine({ current }: { current: MoveProgress["current"] }) {
   if (!current) return null;
   return (
-    <Localized id={current.step === "copying" ? "progress-current-copying" : "progress-current-checking"} vars={{ name: current.name }}>
-      <p className="mv-now" />
-    </Localized>
+    <>
+      <Localized id={current.step === "copying" ? "progress-current-copying" : "progress-current-checking"} vars={{ name: current.name }}>
+        <p className="mv-now" />
+      </Localized>
+      {/* A live file: the app that has it open cannot save to it while it is copied (2.6). */}
+      {current.step === "copying" && current.openIn && (
+        <Localized id="progress-current-open-in" vars={{ name: current.name, app: current.openIn }}>
+          <p className="mv-now mv-now-note" />
+        </Localized>
+      )}
+    </>
   );
 }
 
