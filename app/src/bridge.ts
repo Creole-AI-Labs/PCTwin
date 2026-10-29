@@ -380,10 +380,10 @@ export type PlanKey = { revision: number; fingerprint: string };
  * other key must be there. The contract test reads this to know which keys may be missing.
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
-  "plan-view": ["rebuild", "space"],
-  "move-outcome": ["rebuilt", "landed"],
+  "plan-view": ["rebuild", "space", "ownFolderOffered"],
+  "move-outcome": ["rebuilt", "landed", "keptOnline"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
-  "report-item": ["destination", "reason", "evidence", "note", "kind", "bytes"],
+  "report-item": ["destination", "reason", "evidence", "note", "kind", "bytes", "openIn"],
   "qs-picked": ["problem"],
 };
 
@@ -508,6 +508,11 @@ export function parsePlanView(value: unknown): PlanView | null {
   if (first && new Set(first).size !== first.length) return null;
   if (!groups || !leftOut || !preview || !first) return null;
   const plan: PlanView = { revision: f.revision, fingerprint: f.fingerprint, groups, leftOut, preview, first };
+  if ("ownFolderOffered" in f) {
+    // Sent only when offered.
+    if (f.ownFolderOffered !== true) return null;
+    plan.ownFolderOffered = true;
+  }
   if ("rebuild" in f) {
     const rebuild = parseRebuildPlan(f.rebuild);
     if (!rebuild) return null;
@@ -630,6 +635,14 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
     if (!landed) return null;
     outcome.landed = landed;
   }
+  if ("keptOnline" in f) {
+    const k = exactly(f.keptOnline, ["copied", "safeInCloud", "downloadedBytes", "stillOnOldLaptopFiles", "stillOnOldLaptopBytes", "paused"]);
+    if (!k || !isCount(k.copied) || !isCount(k.safeInCloud) || !isCount(k.downloadedBytes) || !isCount(k.stillOnOldLaptopFiles) || !isCount(k.stillOnOldLaptopBytes)) return null;
+    if (!(k.paused === null || k.paused === "metered-now" || k.paused === "no-space")) return null;
+    // Nothing can still take space that was never downloaded.
+    if ((k.stillOnOldLaptopBytes > 0) !== (k.stillOnOldLaptopFiles > 0) || k.stillOnOldLaptopBytes > k.downloadedBytes) return null;
+    outcome.keptOnline = { copied: k.copied, safeInCloud: k.safeInCloud, downloadedBytes: k.downloadedBytes, stillOnOldLaptopFiles: k.stillOnOldLaptopFiles, stillOnOldLaptopBytes: k.stillOnOldLaptopBytes, paused: k.paused };
+  }
   return outcome;
 }
 
@@ -665,6 +678,8 @@ export function parseReportItem(value: unknown): ReportItem | null {
   if ("note" in f && !oneOf(f.note, REPORT_NOTES)) return null;
   if ("kind" in f && !oneOf(f.kind, FILE_KINDS)) return null;
   if ("bytes" in f && !(typeof f.bytes === "number" && Number.isSafeInteger(f.bytes) && f.bytes >= 0)) return null;
+  // The app that had it open: only on a line that says so, and never empty.
+  if ("openIn" in f && (typeof f.openIn !== "string" || f.openIn === "" || f.reason !== "open-in-app")) return null;
   const line = {
     id: f.id,
     name: f.name,
@@ -673,6 +688,7 @@ export function parseReportItem(value: unknown): ReportItem | null {
     ...(oneOf(f.note, REPORT_NOTES) ? { note: f.note } : {}),
     ...(oneOf(f.kind, FILE_KINDS) ? { kind: f.kind } : {}),
     ...(typeof f.bytes === "number" ? { bytes: f.bytes } : {}),
+    ...(typeof f.openIn === "string" ? { openIn: f.openIn } : {}),
   };
   if (result.status === "copied") {
     const evidence = parseReportEvidence(f.evidence);
@@ -722,8 +738,9 @@ export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { ro
 /** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
 /** `secrets`: the secret lines of app data the person ticked, one by one (none unless ticked). */
 /** `leaveBehind`: the person accepted the plan's space proposal (leave those files on the old laptop). */
-export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = [], leaveBehind = false) =>
-  run("move_approve", { plan, approve, leftOut, secrets, updates, leaveBehind });
+/** `ownFolder`: when the plan offered it (`ownFolderOffered`) and the person kept it on, the folder for this old laptop's things in their language ("From Bea's laptop"); one plain folder name. */
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = [], leaveBehind = false, ownFolder: string | null = null) =>
+  run("move_approve", { plan, approve, leftOut, secrets, updates, leaveBehind, ownFolder });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");
@@ -766,13 +783,30 @@ export type ChoiceGroup = { role: FolderRole; files: number; bytes: number };
 export type LeftBehind = { why: (typeof LEFT_OUT_REASONS)[number]; items: number; bytes: number };
 /** One folder of the tree (`parts` empty for the group itself): the files counted in it. */
 export type ChoiceFolder = { role: FolderRole; parts: string[]; files: number; bytes: number };
-export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[] };
-/** The person's choice: the folders whose files move, and whether apps, settings and app data do. */
-export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean };
+/**
+ * The mover's files kept only online in one cloud (`OnlineOnlyGroup`): "Also bring files kept only
+ * online in <name> (N files, X GB): they are downloaded on this laptop first, then put back online
+ * only". `name` is null for a cloud found on the laptop that PCTwin cannot name yet.
+ */
+export type OnlineOnlyGroup = { provider: string; name: string | null; files: number; bytes: number };
+/** `keepLocalHere`: whether this laptop can keep local copies (Windows; not yet on a Mac, said so). */
+export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[]; onlineOnly: OnlineOnlyGroup[]; keepLocalHere: boolean };
+/** The person's consent to bring one cloud's online-only files, also on a connection that may charge (`onMetered`). */
+export type KeepLocalAnswer = { provider: string; onMetered: boolean };
+/** The person's choice: the folders whose files move, whether apps, settings and app data do, and the clouds whose online-only files also come (`keepLocal`, none by default). */
+export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean; keepLocal?: KeepLocalAnswer[] };
 
 export function parseChoiceView(v: unknown): ChoiceView | null {
-  const f = exactly(v, ["groups", "folders", "apps", "leftBehind"]);
-  if (!f || !isCount(f.apps)) return null;
+  const f = exactly(v, ["groups", "folders", "apps", "leftBehind", "onlineOnly", "keepLocalHere"]);
+  if (!f || !isCount(f.apps) || typeof f.keepLocalHere !== "boolean") return null;
+  const onlineOnly = listOf(f.onlineOnly, (x) => {
+    const o = exactly(x, ["provider", "name", "files", "bytes"]);
+    return o && typeof o.provider === "string" && /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/.test(o.provider) && (o.name === null || (typeof o.name === "string" && o.name !== "")) && isCount(o.files) && isCount(o.bytes) && o.files > 0
+      ? { provider: o.provider, name: o.name, files: o.files, bytes: o.bytes }
+      : null;
+  });
+  // Offered only where this laptop can keep local copies.
+  if (!onlineOnly || (!f.keepLocalHere && onlineOnly.length > 0)) return null;
   const groups = listOf(f.groups, (x) => {
     const g = exactly(x, ["role", "files", "bytes"]);
     return g && oneOf(g.role, FOLDER_ROLES) && isCount(g.files) && isCount(g.bytes) ? { role: g.role, files: g.files, bytes: g.bytes } : null;
@@ -786,7 +820,7 @@ export function parseChoiceView(v: unknown): ChoiceView | null {
     const parts = d ? listOf(d.parts, (p) => (typeof p === "string" ? p : null)) : null;
     return d && parts && oneOf(d.role, FOLDER_ROLES) && isCount(d.files) && isCount(d.bytes) ? { role: d.role, parts, files: d.files, bytes: d.bytes } : null;
   });
-  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind } : null;
+  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind, onlineOnly, keepLocalHere: f.keepLocalHere } : null;
 }
 /** The old laptop: the person's choice of what moves. */
 export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });

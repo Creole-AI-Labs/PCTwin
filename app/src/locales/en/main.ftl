@@ -2055,3 +2055,37 @@ accept-needs = Something needs you first. See the details.
 accept-not-now = Not now
 accept-details = See the details
 accept-accept = Accept
+
+# 2.6 wiring
+reason-open-in-app = An app had this file open on the old laptop, so PCTwin did not copy it (a copy made while the app writes could be broken). Close that app on the old laptop, then start a new move that includes this file.
+report-open-in = Open in { $app }
+fullmove-close-files = These files are open in an app on this laptop, so PCTwin will not copy them yet: { $files }. Close the app using them, then choose Try again.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Also bring the file kept only online in { $provider } (1 file, { $size }). It is downloaded on this laptop first, then put back online only.
+       *[other] Also bring the files kept only online in { $provider } ({ $count } files, { $size }). They are downloaded on this laptop first, then put back online only.
+    }
+choose-online-only-unnamed = a cloud folder on this laptop
+choose-online-only-metered = Also on a connection that may charge for data (a phone hotspot)
+choose-online-only-not-here = Files kept only online stay safe online. Bringing a copy of them is not available on a Mac yet.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 file kept only online was downloaded and copied.
+       *[other] { $count } files kept only online were downloaded and copied.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 file kept only online was not copied and is still safe online. Open it on the new laptop from the app that keeps it.
+       *[other] { $count } files kept only online were not copied and are still safe online. Open them on the new laptop from the app that keeps them.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 downloaded file still takes { $size } on this laptop, because its cloud app has not made it online only again. To free the space, right-click it and choose Free up space.
+       *[other] { $count } downloaded files still take { $size } on this laptop, because their cloud app has not made them online only again. To free the space, right-click each one and choose Free up space.
+    }
+kept-online-paused-metered = Downloading stopped because this connection may charge for data. The rest stay safe online.
+kept-online-paused-space = Downloading stopped because this laptop is running out of space. The rest stay safe online.
+plan-own-folder = Put the things from { $laptop } in their own folder
+plan-own-folder-help = This laptop already has things from another old laptop. A folder for each laptop keeps them apart.
+plan-own-folder-name = From { $laptop }
+plan-own-folder-name-unnamed = From the other laptop

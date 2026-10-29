@@ -175,7 +175,8 @@ export function next(view: View, event: MoveEvent): View {
   // Before the files, the old laptop's app data: its progress, and on the old laptop the apps to
   // close. The first measured progress of the files takes the page on.
   if (event.kind === "appdata") return view.kind === "progress" ? view : { kind: "appdata", progress: event.progress };
-  if (event.kind === "appdata-open") return { kind: "close-apps", apps: event.open.apps };
+  // Until the close page shows the held files apart (Director, 2.6 wiring), they are listed after the apps.
+  if (event.kind === "appdata-open") return { kind: "close-apps", apps: [...event.open.apps, ...event.open.files] };
   if (view.kind === "appdata" && event.kind === "stage") return view;
   switch (event.kind) {
     case "link":

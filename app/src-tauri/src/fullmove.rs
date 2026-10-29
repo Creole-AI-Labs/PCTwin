@@ -72,10 +72,49 @@ pub const APPDATA_EVENT: &str = "move-appdata";
 /// The old laptop: apps to close before their data can be read (`move-appdata-open`).
 pub const APPDATA_OPEN_EVENT: &str = "move-appdata-open";
 
-/// The apps the person is asked to close on the old laptop.
+/// The apps the person is asked to close on the old laptop: for their app data, or for files in
+/// the person's own folders that they hold open (`files`, by name; Task List 2.5, 29 October
+/// 2026). An app the system cannot name is not in `apps`; its files still are in `files`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppsOpen {
     pub apps: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// Asks the person on the old laptop to close `apps` (holding `files`), and waits for Try again
+/// (true) or Go on without them (false); no answer in ten minutes, or the move ending, is "go on
+/// without". PCTwin never closes an app itself.
+pub fn ask_to_close<R: Runtime>(
+    app: &AppHandle<R>,
+    moving: &crate::moving::AppMoving,
+    apps: Vec<String>,
+    files: Vec<String>,
+) -> bool {
+    let answer = moving.wait_for_close();
+    let _ = app.emit(APPDATA_OPEN_EVENT, AppsOpen { apps, files });
+    answer
+        .recv_timeout(Duration::from_secs(600))
+        .unwrap_or(false)
+}
+
+/// Whether a program holds files open for writing, with the programs named where the system can
+/// name them: on Windows the share-mode check says whether anyone writes, and Restart Manager
+/// names who holds it ([`pctwin_helper_os::file_holders`]); elsewhere as
+/// [`pctwin_special::capture::SystemHolders`] says.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NamedHolders;
+
+impl pctwin_special::capture::Holders for NamedHolders {
+    fn holding(&self, files: &[std::path::PathBuf]) -> pctwin_special::capture::Holding {
+        use pctwin_special::capture::{Holding, SystemHolders};
+        match SystemHolders.holding(files) {
+            #[cfg(windows)]
+            Holding::Held { by } if by.is_empty() => Holding::Held {
+                by: pctwin_helper_os::file_holders(files).unwrap_or_default(),
+            },
+            other => other,
+        }
+    }
 }
 
 fn made() -> Option<AppFullMove> {
@@ -1006,16 +1045,12 @@ pub fn data_source<R: Runtime>(
     // on without them (no answer in time is "go on without").
     let (app, moving) = (app.clone(), moving.clone());
     let ask = Box::new(move |apps: &[String]| {
-        let answer = moving.wait_for_close();
-        let _ = app.emit(
-            APPDATA_OPEN_EVENT,
-            AppsOpen {
-                apps: apps.iter().map(|a| name(a)).collect(),
-            },
-        );
-        answer
-            .recv_timeout(Duration::from_secs(600))
-            .unwrap_or(false)
+        ask_to_close(
+            &app,
+            &moving,
+            apps.iter().map(|a| name(a)).collect(),
+            Vec::new(),
+        )
     });
     Some(
         pctwin_fullmove::data::Source::new(

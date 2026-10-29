@@ -35,11 +35,26 @@
         "role": "pictures"
       }
     ],
+    "keepLocalHere": true,
     "leftBehind": [
       {
         "bytes": 900000000,
         "items": 3,
         "why": "rebuildable"
+      }
+    ],
+    "onlineOnly": [
+      {
+        "bytes": 6400000000,
+        "files": 320,
+        "name": "OneDrive",
+        "provider": "one-drive"
+      },
+      {
+        "bytes": 4000000,
+        "files": 2,
+        "name": null,
+        "provider": "nextcloud"
       }
     ]
   },
@@ -47,6 +62,8 @@
     "apps": 0,
     "folders": [],
     "groups": [],
-    "leftBehind": []
+    "keepLocalHere": false,
+    "leftBehind": [],
+    "onlineOnly": []
   }
 ]

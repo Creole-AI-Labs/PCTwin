@@ -294,6 +294,9 @@ struct Run {
     updates: Vec<u32>,
     /// The new laptop: the person accepted leaving the proposed files on the old laptop (2.6).
     leave_behind: bool,
+    /// The new laptop: the folder the person chose for this old laptop's things ("From Bea's
+    /// laptop"), when the plan offered one (several old laptops into one, 2.6).
+    own_folder: Option<String>,
     /// The old laptop: where the person's answer about apps to close goes.
     close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
@@ -357,6 +360,132 @@ pub struct ChoiceView {
     /// Apps found (their settings and app data come with them).
     pub apps: u64,
     pub left_behind: Vec<LeftBehind>,
+    /// The mover's files kept only online, by the cloud that keeps them: what "Also bring files
+    /// kept only online in <provider>" offers (Task List 2.6, with consent). Empty when there are
+    /// none, or when this laptop cannot keep local copies (`keep_local_here`).
+    pub online_only: Vec<OnlineOnlyGroup>,
+    /// Whether this laptop can download online-only files to move them and make them online only
+    /// again afterwards (Windows; a Mac not yet, said so).
+    pub keep_local_here: bool,
+}
+
+/// The mover's online-only files in one cloud.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineOnlyGroup {
+    /// The cloud's ID (`one-drive`, or one made from the name the system gave it).
+    pub provider: pctwin_record::CloudProvider,
+    /// Its name to show, when the catalogue knows it.
+    pub name: Option<String>,
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// Whether this laptop can keep local copies of online-only files for the move: Windows only
+/// (the cloud app is asked to make each one online only again with the system's own `attrib`);
+/// macOS has no supported command for that yet.
+pub const KEEP_LOCAL_HERE: bool = cfg!(windows);
+
+/// The person's consent to keep a copy of their files kept only online in one cloud: they are
+/// downloaded on the old laptop first, sent, then made online only again.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeepLocalAnswer {
+    pub provider: pctwin_record::CloudProvider,
+    /// Also on a connection that may charge for data (a phone's hotspot).
+    #[serde(default)]
+    pub on_metered: bool,
+}
+
+/// The mover's own online-only files: left out as stored online only, in a cloud.
+fn kept_online<'a>(
+    record: &'a Record,
+    mover: &'a str,
+) -> impl Iterator<Item = (&'a Item, pctwin_record::CloudProvider)> {
+    record.items.iter().filter_map(move |i| {
+        let pctwin_record::Storage::Cloud { provider } = i.place.storage else {
+            return None;
+        };
+        (matches!(i.kind, pctwin_record::ItemKind::File)
+            && i.inclusion
+                == (pctwin_record::Inclusion::LeftOut {
+                    reason: pctwin_record::LeftOutReason::CloudOnly,
+                })
+            && matches!(&i.owner, Owner::Person { account_id } if account_id == mover))
+        .then_some((i, provider))
+    })
+}
+
+/// The mover's online-only files by cloud, for the choice (none where this laptop cannot keep
+/// local copies).
+fn online_only_groups(record: &Record, mover: &str, here: bool) -> Vec<OnlineOnlyGroup> {
+    if !here {
+        return Vec::new();
+    }
+    let mut by: BTreeMap<pctwin_record::CloudProvider, (u64, u64)> = BTreeMap::new();
+    for (item, provider) in kept_online(record, mover) {
+        let g = by.entry(provider).or_default();
+        g.0 += 1;
+        g.1 = g.1.saturating_add(item.size_bytes);
+    }
+    by.into_iter()
+        .map(|(provider, (files, bytes))| OnlineOnlyGroup {
+            provider,
+            name: pctwin_scan::clouds::provider_name(provider).map(str::to_string),
+            files,
+            bytes,
+        })
+        .collect()
+}
+
+/// With the person's consent (`choice.keep_local`, only clouds shown to them), their online-only
+/// files of those clouds in the folders they chose move too: they are put back in the plan, and
+/// returned to be kept locally while they are sent. `depth`: the tree's depth the person chose
+/// from.
+fn include_kept_online(
+    record: &mut Record,
+    choice: &Choice,
+    mover: &str,
+    depth: usize,
+) -> Vec<ItemId> {
+    let shown: std::collections::BTreeSet<pctwin_record::CloudProvider> =
+        online_only_groups(record, mover, true)
+            .into_iter()
+            .map(|g| g.provider)
+            .collect();
+    let consented: std::collections::BTreeSet<pctwin_record::CloudProvider> = choice
+        .keep_local
+        .iter()
+        .map(|k| k.provider)
+        .filter(|p| shown.contains(p))
+        .collect();
+    let kept: std::collections::BTreeSet<Node> = choice
+        .folders
+        .iter()
+        .map(|f| (f.role, f.parts.clone()))
+        .collect();
+    let in_chosen_folder = |item: &Item| {
+        let parts: Vec<String> = item
+            .path
+            .parts()
+            .iter()
+            .map(|n| n.display().to_string())
+            .collect();
+        let folders = &parts[..parts.len().saturating_sub(1)];
+        let shown = &folders[..folders.len().min(depth)];
+        kept.iter()
+            .any(|(role, k)| *role == item.place.role && shown.starts_with(k))
+    };
+    let ids: Vec<ItemId> = kept_online(record, mover)
+        .filter(|(item, provider)| consented.contains(provider) && in_chosen_folder(item))
+        .map(|(item, _)| item.id)
+        .collect();
+    for item in &mut record.items {
+        if ids.contains(&item.id) {
+            item.inclusion = pctwin_record::Inclusion::Included;
+        }
+    }
+    ids
 }
 
 /// One folder of the tree, as the person's choice names it.
@@ -375,6 +504,10 @@ pub struct FolderKey {
 pub struct Choice {
     pub folders: Vec<FolderKey>,
     pub apps: bool,
+    /// The clouds whose online-only files the person also chose to bring (Task List 2.6, with
+    /// consent); none by default.
+    #[serde(default)]
+    pub keep_local: Vec<KeepLocalAnswer>,
 }
 
 /// One folder of the tree: its group and the folders inside it.
@@ -473,6 +606,8 @@ fn choice_view(record: &Record) -> ChoiceView {
             .into_values()
             .map(|(why, items, bytes)| LeftBehind { why, items, bytes })
             .collect(),
+        online_only: Vec::new(),
+        keep_local_here: KEEP_LOCAL_HERE,
     }
 }
 
@@ -568,6 +703,7 @@ impl Moving {
             secrets: Vec::new(),
             updates: Vec::new(),
             leave_behind: false,
+            own_folder: None,
             close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
@@ -660,8 +796,12 @@ impl Moving {
         yes: bool,
         left_out: &[FolderRole],
         secrets: &[u32],
-        (updates, leave_behind): (&[u32], bool),
+        (updates, leave_behind, own_folder): (&[u32], bool, Option<&str>),
     ) -> Result<(), MoveProblem> {
+        // The old laptop's own folder is one plain folder name, as fallback names are checked.
+        if own_folder.is_some_and(|o| !pctwin_move::landing::own_folder_fine(o)) {
+            return Err(MoveProblem::Failed);
+        }
         self.with_run(|run| match run.waiting.take() {
             Some((shown, groups, tx)) if shown == *key => {
                 if left_out.iter().any(|r| !groups.contains(r)) {
@@ -672,6 +812,7 @@ impl Moving {
                 run.secrets = secrets.to_vec();
                 run.updates = updates.to_vec();
                 run.leave_behind = leave_behind;
+                run.own_folder = own_folder.map(str::to_string);
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -744,6 +885,10 @@ impl Moving {
 
     fn leave_behind(&self) -> bool {
         lock(&self.run).as_ref().is_some_and(|r| r.leave_behind)
+    }
+
+    fn own_folder(&self) -> Option<String> {
+        lock(&self.run).as_ref().and_then(|r| r.own_folder.clone())
     }
 
     fn updates(&self) -> Vec<u32> {
@@ -1091,6 +1236,12 @@ pub struct PlanView {
     /// fits (2.6), changed only if the person accepts it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub space: Option<SpaceView>,
+    /// Several old laptops into one (2.6): this laptop already holds a move from another old
+    /// laptop, so the plan offers "Put <laptop>'s things in their own folder" (on unless the person
+    /// turns it off); the screen sends the folder's name ("From Bea's laptop") with the approval.
+    /// Only with an old laptop that can follow it (move protocol 7 and later).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub own_folder_offered: bool,
 }
 
 /// The proposal for a new laptop too small for the plan (2.6, `pctwin_orchestrate::capacity`):
@@ -1274,6 +1425,7 @@ fn plan_view(
         first,
         rebuild: None,
         space: None,
+        own_folder_offered: false,
         revision: record.revision,
         fingerprint: record.fingerprint().to_hex(),
         groups: groups
@@ -1561,6 +1713,10 @@ pub struct MoveOutcome {
     /// folder (asked for in the first real test, 28 October 2026). Only groups something landed in.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub landed: Vec<LandedPlace>,
+    /// The old laptop: what keeping copies of online-only files did, when the person chose it
+    /// (Task List 2.6): downloaded, copied, safe in its cloud, and still taking space here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept_online: Option<crate::keep_local::KeptOnlineView>,
 }
 
 /// One group's folder on the new laptop.
@@ -1713,6 +1869,10 @@ pub struct ReportItem {
     /// What else the report says of this line, beside its result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<ReportNote>,
+    /// The old laptop: the app that had it open, so it was not copied (`open-in-app`), by the
+    /// name the system shows, when the system could name it.
+    #[serde(rename = "openIn", skip_serializing_if = "Option::is_none")]
+    pub open_in: Option<String>,
 }
 
 /// A word the report adds to a line ("Changed since the scan", Product Spec, 16 October 2026).
@@ -1741,7 +1901,9 @@ fn status_of(cause: Cause) -> (ItemStatus, Reason) {
     match cause {
         Cause::NoSpace | Cause::TooBigForDrive => failed(Reason::NotEnoughSpace),
         Cause::ChangedDuringMove => failed(Reason::ChangedDuringMove),
-        Cause::Unreadable | Cause::NoLongerThere | Cause::InUse => failed(Reason::Unreadable),
+        Cause::Unreadable | Cause::NoLongerThere => failed(Reason::Unreadable),
+        // Never torn: it waits on the old laptop for its app to close (Task List 2.5).
+        Cause::InUse => (ItemStatus::NeedsAction, Reason::OpenInApp),
         Cause::OnlineOnly => (ItemStatus::NeedsAction, Reason::OnlineOnly),
         Cause::RefusedBySafetyCheck => failed(Reason::RefusedBySafetyCheck),
         Cause::NameNotAllowed => failed(Reason::NameNotAllowed),
@@ -1868,6 +2030,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
             reason,
             evidence,
             note,
+            open_in: None,
         });
     }
     let wholes = whole_lines(&received.record, mover, &report, &mut outcome);
@@ -1953,6 +2116,7 @@ fn whole_lines(
             reason,
             evidence: None,
             note: None,
+            open_in: None,
         });
     }
     lines
@@ -1960,7 +2124,12 @@ fn whole_lines(
 
 /// The old laptop's outcome: what it sent and how the new laptop answered. The new laptop's
 /// report is the one that counts; this one never says more than was confirmed.
-fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<ReportItem>) {
+fn sent_outcome(
+    sent: &Sent,
+    record: &Record,
+    mover: &str,
+    open_in: &HashMap<ItemId, Vec<String>>,
+) -> (MoveOutcome, Vec<ReportItem>) {
     // Another person's files are neither named nor counted for the mover.
     let items: HashMap<ItemId, &Item> = record
         .items
@@ -1986,6 +2155,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
                 Some(SendOutcome::Arrived | SendOutcome::AlreadyThere)
             ),
         );
+        let mut held_by = None;
         let (status, reason, evidence, note) = match &file.outcome {
             Some(SendOutcome::Arrived) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
@@ -2001,6 +2171,12 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             }
             Some(SendOutcome::Failed(f)) => {
                 let (s, r) = status_of(f.cause());
+                if r == Reason::OpenInApp {
+                    held_by = open_in
+                        .get(&item.id)
+                        .filter(|apps| !apps.is_empty())
+                        .map(|apps| apps.join(", "));
+                }
                 (s, Some(r), None, ReportNote::of_failure(f))
             }
             None if stopped => {
@@ -2022,6 +2198,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             reason,
             evidence,
             note,
+            open_in: held_by,
         });
     }
     for not in &sent.not_sent {
@@ -2049,6 +2226,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             reason: None,
             evidence: None,
             note: None,
+            open_in: None,
         });
     }
     let wholes = whole_lines(record, mover, &report, &mut outcome);
@@ -2095,6 +2273,10 @@ struct AppSteps<R: Runtime> {
     /// The files the plan proposes leaving on the old laptop (2.6), and those the person accepted.
     proposed: std::collections::BTreeSet<ItemId>,
     leaving: std::collections::BTreeSet<ItemId>,
+    /// The old laptops whose moves this laptop holds (its journal, never a Quick Send's, not
+    /// undone), and the move protocol the old laptop speaks: whether to offer its own folder.
+    moved_here: std::collections::BTreeSet<pctwin_record::LaptopId>,
+    version: u16,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -2361,6 +2543,7 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
         let mut view = plan_view(record, preview, &self.rules, &self.shown);
+        view.own_folder_offered = own_folder_offered(self.version, &self.moved_here, record);
         // Too small a laptop: what to leave on the old one, proposed (changed only if accepted).
         let (space, proposed) = space_proposal(record, preview, &self.rules);
         view.space = space;
@@ -2436,6 +2619,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
                 }
                 // The folders the person unticked: none of their files is sent or received.
                 self.rules.left_out = self.moving.left_out();
+                // This old laptop's own folder, when it was offered and the person kept it on.
+                self.rules.own_folder = own_folder_offered(self.version, &self.moved_here, record)
+                    .then(|| self.moving.own_folder())
+                    .flatten();
                 // The files the person agreed to leave on the old laptop so the plan fits.
                 if self.moving.leave_behind() {
                     self.leaving = std::mem::take(&mut self.proposed);
@@ -2734,7 +2921,9 @@ async fn run_old<R: Runtime>(
     }
     // The person chooses what moves here, where their things are (decided 28 October 2026): it
     // only ever leaves things out of what was found; the new laptop still accepts what comes.
-    let view = choice_view(&record);
+    let mut view = choice_view(&record);
+    view.online_only = online_only_groups(&record, &mover, KEEP_LOCAL_HERE);
+    let (choice_depth, _) = folder_tree(&record);
     let shown = shown_folders(&record);
     let answer = moving.wait_for_choice(shown);
     let _ = app.emit(CHOOSE_EVENT, &view);
@@ -2743,10 +2932,105 @@ async fn run_old<R: Runtime>(
     })
     .await?;
     apply_choice(&mut record, &choice);
+    // With the person's consent, their files kept only online in the clouds they chose come too:
+    // downloaded here one at a time within this laptop's free space while they are sent, then
+    // made online only again (Task List 2.6). Only on a laptop that can do that.
+    let kept_ids = if KEEP_LOCAL_HERE {
+        include_kept_online(&mut record, &choice, &mover, choice_depth)
+    } else {
+        Vec::new()
+    };
     let special = if choice.apps { special } else { None };
     let extras = crate::fullmove::extras_here(special.as_ref(), sweep.links, choice.apps);
     // The app data the new laptop chooses is captured from these (read only), after its approval.
     let mut source = crate::fullmove::data_source(app, moving, special.as_ref());
+    // Files in the mover's own folders that are live while their app runs (a mail store, a
+    // database; Task List 2.5, 29 October 2026), found by kind from the catalogue: the person is
+    // asked here to close only the apps holding them (Try again, or Go on without them); PCTwin
+    // never closes an app. During the send each is read only while no program can write to it;
+    // one still held is not read and ends needs-action ("open in <app>"), never copied.
+    let path_of = |item: &Item| {
+        let mut path = roots.get(&item.id)?.clone();
+        for part in item.path.parts() {
+            path.push(part.on_disk());
+        }
+        Some(path)
+    };
+    let live_files = pctwin_fullmove::live::find_live(
+        record
+            .items
+            .iter()
+            .filter(|i| {
+                i.inclusion == pctwin_record::Inclusion::Included
+                    && matches!(i.kind, pctwin_record::ItemKind::File)
+                    && !handles.contains_key(&i.id)
+            })
+            .filter_map(|i| Some((i.id, path_of(i)?))),
+        pctwin_special::live::LiveKinds::built_in(),
+    );
+    #[cfg(windows)]
+    let keep_opener = if kept_ids.is_empty() {
+        None
+    } else {
+        let home = pctwin_scan::list_people()
+            .into_iter()
+            .find(|p| p.is_me)
+            .map(|p| p.home)
+            .unwrap_or_default();
+        let folders = crate::keep_local::cloud_folders(&home);
+        let (files, unmatched) =
+            crate::keep_local::match_files(&record, &kept_ids, &mover, &folders, &path_of);
+        crate::keep_local::leave_unmatched(&mut record, &unmatched);
+        let consents = crate::keep_local::consents(&choice.keep_local, &mover, &home, &folders);
+        (!files.is_empty()).then(|| {
+            Arc::new(crate::keep_local::opener(
+                Arc::clone(&opener),
+                consents,
+                files,
+                &folders,
+            ))
+        })
+    };
+    #[cfg(not(windows))]
+    let keep_opener: Option<Arc<pctwin_orchestrate::local_copy_send::KeepOpener>> = {
+        // Not offered here; never consented.
+        let _ = &kept_ids;
+        None
+    };
+    if let Some(k) = &keep_opener {
+        opener = k.clone();
+    }
+    let holders: Arc<dyn pctwin_special::capture::Holders + Send + Sync> =
+        Arc::new(crate::fullmove::NamedHolders);
+    if !live_files.is_empty() {
+        let (app, moving, files, holders) = (
+            app.clone(),
+            moving.clone(),
+            live_files.clone(),
+            Arc::clone(&holders),
+        );
+        pctwin_move::or_stop(&live.control, async move {
+            tauri::async_runtime::spawn_blocking(move || {
+                pctwin_fullmove::live::until_closed(&files, holders.as_ref(), &mut |held| {
+                    crate::fullmove::ask_to_close(
+                        &app,
+                        &moving,
+                        pctwin_fullmove::live::apps_to_close(held),
+                        held.iter().map(|h| h.file.name.clone()).collect(),
+                    )
+                })
+            })
+            .await
+            .map_err(|_| MoveError::from(Stop::Cancelled))
+        })
+        .await?;
+    }
+    let live_opener = Arc::new(pctwin_fullmove::live::LiveOpener::new(
+        opener,
+        &live_files,
+        holders,
+    ));
+    let opener: Arc<dyn pctwin_transfer::Opener> = live_opener.clone();
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let who = pctwin_move::Who {
         mover: &mover,
@@ -2759,13 +3043,7 @@ async fn run_old<R: Runtime>(
         &who,
         |item| match handles.get(&item.id) {
             Some(h) => Some(pctwin_move::people::helper_source(*h)),
-            None => {
-                let mut path = roots.get(&item.id)?.clone();
-                for part in item.path.parts() {
-                    path.push(part.on_disk());
-                }
-                Some(path)
-            }
+            None => path_of(item),
         },
         live,
         opener,
@@ -2782,7 +3060,23 @@ async fn run_old<R: Runtime>(
         let _ = client.bye();
     }
     let (sent, _rules) = sent?;
-    let (outcome, report) = sent_outcome(&sent, &record, &mover);
+    let (mut outcome, report) = sent_outcome(&sent, &record, &mover, &live_opener.held());
+    // Every file brought down is made online only again now, and what that did is said.
+    if let Some(k) = &keep_opener {
+        let arrived: std::collections::BTreeSet<ItemId> = sent
+            .files
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.outcome,
+                    Some(SendOutcome::Arrived | SendOutcome::AlreadyThere)
+                )
+            })
+            .map(|f| f.item)
+            .collect();
+        let kept = k.finish(&|id| arrived.contains(&id));
+        outcome.kept_online = Some(crate::keep_local::KeptOnlineView::of(&kept));
+    }
     Ok(Ran {
         outcome,
         report,
@@ -2841,6 +3135,7 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         held: BTreeMap::new(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     let shown = found
         .iter()
@@ -2979,12 +3274,16 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         picked: Vec::new(),
         proposed: Default::default(),
         leaving: Default::default(),
+        // The old laptops whose moves are here already (an unreadable journal offers nothing).
+        moved_here: journal.moved_here_from().unwrap_or_default(),
+        version: 0,
     };
     // A stop ends the greeting at once.
     let mut link = pctwin_move::or_stop(&live.control, async {
         Ok(greet(app, link, pctwin_move::greeting::Side::New, other).await?)
     })
     .await?;
+    steps.version = link.greeting().version;
     let here = pctwin_move::Here {
         journal: &ledger,
         account: &me,
@@ -3314,6 +3613,18 @@ fn spawn_run<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
+/// Whether the plan for `record` offers its old laptop its own folder (several old laptops into
+/// one, Task List 2.6): this laptop holds a move from a different old laptop (`moved_here`), and
+/// the old laptop speaks a move protocol that can follow it (`version`).
+fn own_folder_offered(
+    version: u16,
+    moved_here: &std::collections::BTreeSet<pctwin_record::LaptopId>,
+    record: &Record,
+) -> bool {
+    version >= pctwin_transfer::OWN_FOLDER_SINCE
+        && moved_here.iter().any(|l| *l != record.source_laptop)
+}
+
 fn check_fallback(fallback: &BTreeMap<FolderRole, String>) -> Result<(), MoveProblem> {
     let fine = fallback.values().all(|name| {
         !name.is_empty() && name.len() <= MAX_FALLBACK && !name.chars().any(char::is_control)
@@ -3521,7 +3832,10 @@ pub async fn rescue_begin<R: Runtime>(
 }
 
 /// The person's answer to the plan on screen (M23), for exactly that revision, with the folders
-/// they unticked (`left_out`): none of those is moved.
+/// they unticked (`left_out`): none of those is moved. `own_folder`: the folder for this old
+/// laptop's things, when the plan offered one (several old laptops into one, 2.6).
+// Each answer is its own named argument of the command, as the screens call it.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn move_approve(
     moving: State<'_, AppMoving>,
@@ -3531,6 +3845,7 @@ pub fn move_approve(
     secrets: Option<Vec<u32>>,
     updates: Option<Vec<u32>>,
     leave_behind: Option<bool>,
+    own_folder: Option<String>,
 ) -> Result<(), MoveProblem> {
     let secrets = secrets.unwrap_or_default();
     let updates = updates.unwrap_or_default();
@@ -3539,7 +3854,11 @@ pub fn move_approve(
         approve,
         &left_out,
         &secrets,
-        (&updates, leave_behind.unwrap_or(false)),
+        (
+            &updates,
+            leave_behind.unwrap_or(false),
+            own_folder.as_deref(),
+        ),
     )
 }
 
@@ -3806,6 +4125,7 @@ mod tests {
                     parts: vec!["Work".into()],
                 }],
                 apps: false,
+                keep_local: vec![],
             },
         );
         let inclusion = |name: &str| {
@@ -3876,6 +4196,7 @@ mod tests {
             &Choice {
                 folders: chosen,
                 apps: false,
+                keep_local: vec![],
             },
         );
         let folder = |role, name: &str| {
@@ -3934,7 +4255,8 @@ mod tests {
             assert_eq!(
                 moving.choose_what(Choice {
                     folders: vec![wrong],
-                    apps: true
+                    apps: true,
+                    keep_local: vec![],
                 }),
                 Err(MoveProblem::PlanChanged)
             );
@@ -3944,6 +4266,7 @@ mod tests {
             .choose_what(Choice {
                 folders: vec![key(FolderRole::Documents, &[])],
                 apps: true,
+                keep_local: vec![],
             })
             .unwrap();
         assert_eq!(
@@ -4263,7 +4586,7 @@ mod tests {
             not_sent: Vec::new(),
             ended: Ended::Finished,
         };
-        let (outcome, report) = sent_outcome(&sent, &record, "1000");
+        let (outcome, report) = sent_outcome(&sent, &record, "1000", &HashMap::new());
         assert_eq!(outcome.by_status.copied, 1);
         assert_eq!(outcome.bytes_checked, 10);
         assert_eq!(report.len(), 1);
@@ -4417,7 +4740,7 @@ mod tests {
             not_sent: Vec::new(),
             ended: Ended::Finished,
         };
-        let (outcome, _) = sent_outcome(&sent, &record, "1000");
+        let (outcome, _) = sent_outcome(&sent, &record, "1000", &HashMap::new());
         assert_eq!(
             outcome.after_move.photos,
             KindCount {
@@ -4500,6 +4823,10 @@ mod tests {
         assert_eq!(
             status_of(Cause::OnlineOnly),
             (ItemStatus::NeedsAction, Reason::OnlineOnly)
+        ); // A file its app held open is never shown copied or failed: it waits for that app.
+        assert_eq!(
+            status_of(Cause::InUse),
+            (ItemStatus::NeedsAction, Reason::OpenInApp)
         );
     }
 
@@ -4540,7 +4867,7 @@ mod tests {
         // Back to the usual folder.
         moving.choose(FolderRole::Videos, None).unwrap();
         moving
-            .answer(&key, true, &[FolderRole::Music], &[], (&[], false))
+            .answer(&key, true, &[FolderRole::Music], &[], (&[], false, None))
             .unwrap();
         // Once approved, nothing more is chosen.
         assert_eq!(
@@ -4570,25 +4897,84 @@ mod tests {
             fingerprint: "ab".into(),
         };
         assert_eq!(
-            moving.answer(&stale, true, &[], &[], (&[], false)),
+            moving.answer(&stale, true, &[], &[], (&[], false, None)),
             Err(MoveProblem::PlanChanged)
         );
         assert!(rx.try_recv().is_err(), "no answer yet");
         // Leaving out a folder the plan does not show is refused, and the plan still waits.
         assert_eq!(
-            moving.answer(&key, true, &[FolderRole::Music], &[], (&[], false)),
+            moving.answer(&key, true, &[FolderRole::Music], &[], (&[], false, None)),
             Err(MoveProblem::PlanChanged)
         );
         moving
-            .answer(&key, true, &[FolderRole::Documents], &[], (&[], false))
+            .answer(
+                &key,
+                true,
+                &[FolderRole::Documents],
+                &[],
+                (&[], false, None),
+            )
             .unwrap();
         assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
         assert_eq!(
-            moving.answer(&key, true, &[], &[], (&[], false)),
+            moving.answer(&key, true, &[], &[], (&[], false, None)),
             Err(MoveProblem::PlanChanged)
         );
+    }
+
+    /// Several old laptops into one (2.6): the plan offers the old laptop its own folder only
+    /// when this laptop holds a move from a different old laptop and the old laptop can follow it;
+    /// the folder named with the approval must be one plain folder name.
+    #[test]
+    fn an_own_folder_is_offered_only_for_a_second_old_laptop_that_can_follow_it() {
+        let mut record = Record::new(laptop());
+        record.source_laptop = laptop();
+        let other = LaptopId::from_hex("ffeeddccbbaa99887766554433221100").unwrap();
+        let since = pctwin_transfer::OWN_FOLDER_SINCE;
+        assert!(!own_folder_offered(since, &Default::default(), &record));
+        assert!(
+            !own_folder_offered(since, &[laptop()].into(), &record),
+            "the same laptop again"
+        );
+        assert!(own_folder_offered(since, &[other].into(), &record));
+        assert!(own_folder_offered(
+            since,
+            &[laptop(), other].into(),
+            &record
+        ));
+        assert!(
+            !own_folder_offered(since - 1, &[other].into(), &record),
+            "an older laptop"
+        );
+
+        let moving = Moving::default();
+        moving.begin().unwrap();
+        let key = PlanKey {
+            revision: 1,
+            fingerprint: "ab".into(),
+        };
+        let mut rx = moving.wait_for_answer(key.clone(), [FolderRole::Documents].into());
+        for bad in ["", "a/b", "..", " x"] {
+            assert_eq!(
+                moving.answer(&key, true, &[], &[], (&[], false, Some(bad))),
+                Err(MoveProblem::Failed),
+                "{bad:?}"
+            );
+        }
+        assert!(rx.try_recv().is_err(), "still waiting");
+        moving
+            .answer(
+                &key,
+                true,
+                &[],
+                &[],
+                (&[], false, Some("From Bea's laptop")),
+            )
+            .unwrap();
+        assert_eq!(moving.own_folder().as_deref(), Some("From Bea's laptop"));
+        assert_eq!(rx.try_recv(), Ok(true));
     }
 
     #[test]
@@ -4802,6 +5188,7 @@ mod tests {
             held: BTreeMap::new(),
             left_out: Default::default(),
             chosen: Default::default(),
+            own_folder: None,
         }
     }
 

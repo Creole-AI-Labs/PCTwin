@@ -2250,3 +2250,41 @@ accept-needs = Algo precisa de você primeiro. Veja os detalhes.
 accept-not-now = Agora não
 accept-details = Ver os detalhes
 accept-accept = Aceitar
+
+# 2.6 wiring
+reason-open-in-app = Um app estava com este arquivo aberto no notebook antigo, então o PCTwin não o copiou (uma cópia feita enquanto o app escreve poderia sair estragada). Feche esse app no notebook antigo e depois comece uma nova transferência que inclua este arquivo.
+report-open-in = Aberto em { $app }
+fullmove-close-files = Estes arquivos estão abertos em um app neste notebook, então o PCTwin ainda não vai copiá-los: { $files }. Feche o app que os usa e depois escolha Tentar de novo.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Trazer também o arquivo guardado só online no { $provider } (1 arquivo, { $size }). Ele é baixado primeiro neste notebook e depois volta a ficar só online.
+        [many] Trazer também os arquivos guardados só online no { $provider } ({ $count } de arquivos, { $size }). Eles são baixados primeiro neste notebook e depois voltam a ficar só online.
+       *[other] Trazer também os arquivos guardados só online no { $provider } ({ $count } arquivos, { $size }). Eles são baixados primeiro neste notebook e depois voltam a ficar só online.
+    }
+choose-online-only-unnamed = uma pasta na nuvem deste notebook
+choose-online-only-metered = Também numa conexão que pode cobrar pelos dados (o roteador de um celular)
+choose-online-only-not-here = Os arquivos guardados só online continuam seguros online. Trazer uma cópia deles ainda não está disponível no Mac.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 arquivo guardado só online foi baixado e copiado.
+        [many] { $count } de arquivos guardados só online foram baixados e copiados.
+       *[other] { $count } arquivos guardados só online foram baixados e copiados.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 arquivo guardado só online não foi copiado e continua seguro online. Abra-o no notebook novo pelo app que o guarda.
+        [many] { $count } de arquivos guardados só online não foram copiados e continuam seguros online. Abra-os no notebook novo pelo app que os guarda.
+       *[other] { $count } arquivos guardados só online não foram copiados e continuam seguros online. Abra-os no notebook novo pelo app que os guarda.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 arquivo baixado ainda ocupa { $size } neste notebook, porque o app da nuvem ainda não o deixou só online de novo. Para liberar o espaço, clique nele com o botão direito e escolha Liberar espaço.
+        [many] { $count } de arquivos baixados ainda ocupam { $size } neste notebook, porque o app da nuvem ainda não os deixou só online de novo. Para liberar o espaço, clique em cada um com o botão direito e escolha Liberar espaço.
+       *[other] { $count } arquivos baixados ainda ocupam { $size } neste notebook, porque o app da nuvem ainda não os deixou só online de novo. Para liberar o espaço, clique em cada um com o botão direito e escolha Liberar espaço.
+    }
+kept-online-paused-metered = O download parou porque esta conexão pode cobrar pelos dados. O resto continua seguro online.
+kept-online-paused-space = O download parou porque este notebook está ficando sem espaço. O resto continua seguro online.
+plan-own-folder = Colocar as coisas de { $laptop } numa pasta só delas
+plan-own-folder-help = Este notebook já tem coisas de outro notebook antigo. Uma pasta para cada notebook as mantém separadas.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = Do outro notebook

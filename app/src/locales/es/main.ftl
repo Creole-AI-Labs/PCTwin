@@ -2246,3 +2246,41 @@ accept-needs = Algo necesita tu atención primero. Mira los detalles.
 accept-not-now = Ahora no
 accept-details = Ver los detalles
 accept-accept = Aceptar
+
+# 2.6 wiring
+reason-open-in-app = Una aplicación tenía este archivo abierto en el portátil antiguo, así que PCTwin no lo copió (una copia hecha mientras la aplicación escribe podría quedar dañada). Cierra esa aplicación en el portátil antiguo y luego inicia un traslado nuevo que incluya este archivo.
+report-open-in = Abierto en { $app }
+fullmove-close-files = Estos archivos están abiertos en una aplicación de este portátil, así que PCTwin todavía no los copiará: { $files }. Cierra la aplicación que los usa y luego elige Intentar de nuevo.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Traer también el archivo guardado solo en línea en { $provider } (1 archivo, { $size }). Primero se descarga en este portátil y después vuelve a quedar solo en línea.
+        [many] Traer también los archivos guardados solo en línea en { $provider } ({ $count } de archivos, { $size }). Primero se descargan en este portátil y después vuelven a quedar solo en línea.
+       *[other] Traer también los archivos guardados solo en línea en { $provider } ({ $count } archivos, { $size }). Primero se descargan en este portátil y después vuelven a quedar solo en línea.
+    }
+choose-online-only-unnamed = una carpeta en la nube de este portátil
+choose-online-only-metered = También con una conexión que puede cobrar por los datos (la zona Wi-Fi de un teléfono)
+choose-online-only-not-here = Los archivos guardados solo en línea siguen a salvo en línea. Traer una copia de ellos todavía no está disponible en un Mac.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] Se descargó y se copió 1 archivo guardado solo en línea.
+        [many] Se descargaron y se copiaron { $count } de archivos guardados solo en línea.
+       *[other] Se descargaron y se copiaron { $count } archivos guardados solo en línea.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 archivo guardado solo en línea no se copió y sigue a salvo en línea. Ábrelo en el portátil nuevo desde la aplicación que lo guarda.
+        [many] { $count } de archivos guardados solo en línea no se copiaron y siguen a salvo en línea. Ábrelos en el portátil nuevo desde la aplicación que los guarda.
+       *[other] { $count } archivos guardados solo en línea no se copiaron y siguen a salvo en línea. Ábrelos en el portátil nuevo desde la aplicación que los guarda.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 archivo descargado todavía ocupa { $size } en este portátil, porque su aplicación de la nube no lo ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en él y elige Liberar espacio.
+        [many] { $count } de archivos descargados todavía ocupan { $size } en este portátil, porque su aplicación de la nube no los ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en cada uno y elige Liberar espacio.
+       *[other] { $count } archivos descargados todavía ocupan { $size } en este portátil, porque su aplicación de la nube no los ha vuelto a dejar solo en línea. Para liberar el espacio, haz clic derecho en cada uno y elige Liberar espacio.
+    }
+kept-online-paused-metered = La descarga se detuvo porque esta conexión puede cobrar por los datos. El resto sigue a salvo en línea.
+kept-online-paused-space = La descarga se detuvo porque este portátil se está quedando sin espacio. El resto sigue a salvo en línea.
+plan-own-folder = Poner las cosas de { $laptop } en su propia carpeta
+plan-own-folder-help = Este portátil ya tiene cosas de otro portátil antiguo. Una carpeta para cada portátil las mantiene separadas.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = Del otro portátil

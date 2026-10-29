@@ -3,6 +3,16 @@
     "apps": [
       "Chromey",
       "Mail"
+    ],
+    "files": []
+  },
+  {
+    "apps": [
+      "Outlook"
+    ],
+    "files": [
+      "Outlook.pst",
+      "Accounts.db"
     ]
   }
 ]

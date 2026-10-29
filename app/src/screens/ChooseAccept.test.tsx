@@ -58,6 +58,13 @@ describe("choosing what moves, on the old laptop", () => {
     expect(parseChoiceView({ groups: [], apps: 1 })).toBeNull();
     expect(parseChoiceView({ groups: [], folders: [{ role: "documents", parts: [1], files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
     expect(parseChoiceView({ groups: [{ role: "nowhere", files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
+    // Online-only files (2.6): offered only where this laptop can keep local copies, each cloud by a plain ID.
+    const ok = { groups: [], folders: [], apps: 0, leftBehind: [], keepLocalHere: true, onlineOnly: [{ provider: "one-drive", name: "OneDrive", files: 2, bytes: 9 }] };
+    expect(parseChoiceView(ok)?.onlineOnly).toEqual(ok.onlineOnly);
+    expect(parseChoiceView({ ...ok, keepLocalHere: false })).toBeNull();
+    expect(parseChoiceView({ ...ok, onlineOnly: [{ provider: "One Drive", name: null, files: 2, bytes: 9 }] })).toBeNull();
+    expect(parseChoiceView({ ...ok, onlineOnly: [{ provider: "one-drive", name: "", files: 2, bytes: 9 }] })).toBeNull();
+    expect(parseChoiceView({ ...ok, onlineOnly: [{ provider: "one-drive", name: null, files: 0, bytes: 0 }] })).toBeNull();
   });
 
   it("Everything moves every folder and the apps; the others move exactly the ticked folders", () => {
@@ -79,6 +86,8 @@ describe("choosing what moves, on the old laptop", () => {
       ],
       apps: 0,
       leftBehind: [],
+      onlineOnly: [],
+      keepLocalHere: true,
     };
     expect(stateOf(v, v.folders[0], new Set([keyOf(v.folders[1])]))).toBe("on");
     expect(stateOf(v, v.folders[0], new Set())).toBe("off");

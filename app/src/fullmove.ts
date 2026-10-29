@@ -243,10 +243,12 @@ export function parseDataProgress(v: unknown): DataProgress | null {
 }
 
 /** The apps to close on the old laptop before their data can be read (`AppsOpen`, event `move-appdata-open`). */
-export type AppsOpen = { apps: string[] };
+/** `files`: files in the person's own folders an app holds open (2.5), by name; empty for app data. */
+export type AppsOpen = { apps: string[]; files: string[] };
 
 export function parseAppsOpen(v: unknown): AppsOpen | null {
-  const f = exactly(v, ["apps"]);
+  const f = exactly(v, ["apps", "files"]);
   const apps = f ? listOf(f.apps, (x) => (typeof x === "string" ? x : null)) : null;
-  return apps ? { apps } : null;
+  const files = f ? listOf(f.files, (x) => (typeof x === "string" ? x : null)) : null;
+  return apps && files && apps.length + files.length > 0 ? { apps, files } : null;
 }

@@ -182,6 +182,10 @@
         [
           "leaveBehind",
           true
+        ],
+        [
+          "ownFolder",
+          "From Bea's laptop"
         ]
       ],
       "name": "move_approve"

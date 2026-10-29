@@ -1933,3 +1933,33 @@ accept-needs = 有一项需要你先处理。请查看详情。
 accept-not-now = 暂不
 accept-details = 查看详情
 accept-accept = 接受
+
+# 2.6 wiring
+reason-open-in-app = 旧笔记本电脑上有一个应用打开着这个文件，所以 PCTwin 没有复制它（在应用写入时复制可能会损坏）。请在旧电脑上关闭那个应用，然后开始一次包含这个文件的新迁移。
+report-open-in = 在 { $app } 中打开着
+fullmove-close-files = 这些文件在这台电脑上的某个应用中打开着，所以 PCTwin 暂时不会复制它们：{ $files }。请关闭正在使用它们的应用，然后选择“重试”。
+choose-online-only =
+    { NUMBER($count) ->
+       *[other] 同时带上仅在线保存在 { $provider } 中的文件（{ $count } 个文件，{ $size }）。它们会先下载到这台电脑上，之后再恢复为仅在线。
+    }
+choose-online-only-unnamed = 这台电脑上的一个云文件夹
+choose-online-only-metered = 在可能按流量收费的网络上也这样做（例如手机热点）
+choose-online-only-not-here = 仅在线保存的文件会继续安全地保存在网上。在 Mac 上暂时还不能带上它们的副本。
+kept-online-copied =
+    { NUMBER($count) ->
+       *[other] 已下载并复制 { $count } 个仅在线保存的文件。
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个仅在线保存的文件没有复制，它们仍安全地保存在网上。请在新电脑上从保存它们的应用中打开。
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个已下载的文件仍在这台电脑上占用 { $size }，因为它们的云应用还没有把它们恢复为仅在线。要释放空间，请右键点击每个文件，然后选择“释放空间”。
+    }
+kept-online-paused-metered = 下载已停止，因为这个网络可能按流量收费。其余文件仍安全地保存在网上。
+kept-online-paused-space = 下载已停止，因为这台电脑的空间快用完了。其余文件仍安全地保存在网上。
+plan-own-folder = 把来自 { $laptop } 的东西放进单独的文件夹
+plan-own-folder-help = 这台电脑上已经有另一台旧电脑的东西。每台电脑一个文件夹，可以让它们分开。
+plan-own-folder-name = 来自 { $laptop }
+plan-own-folder-name-unnamed = 来自另一台电脑

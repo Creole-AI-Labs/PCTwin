@@ -231,7 +231,9 @@ describe("the app data before the files", () => {
     expect(coming.kind).toBe("appdata");
     expect(next(coming, { kind: "stage", stage: { kind: "moving" } })).toBe(coming);
     expect(next(coming, { kind: "progress", progress: {} as never }).kind).toBe("progress");
-    expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"] } })).toEqual({ kind: "close-apps", apps: ["Mail"] });
+    expect(next(wait, { kind: "appdata-open", open: { apps: ["Mail"], files: [] } })).toEqual({ kind: "close-apps", apps: ["Mail"] });
+    // Files an app holds open whose app the system could not name are still shown (2.5), until the page names them apart.
+    expect(next(wait, { kind: "appdata-open", open: { apps: ["Outlook"], files: ["Accounts.db"] } })).toEqual({ kind: "close-apps", apps: ["Outlook", "Accounts.db"] });
   });
 
   // Found by the first real test (28 October 2026): progress before approval took both laptops

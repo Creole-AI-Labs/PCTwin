@@ -2255,3 +2255,41 @@ accept-needs = Quelque chose demande votre attention d'abord. Voyez les détails
 accept-not-now = Pas maintenant
 accept-details = Voir les détails
 accept-accept = Accepter
+
+# 2.6 wiring
+reason-open-in-app = Une appli avait ce fichier ouvert sur l’ancien ordinateur, donc PCTwin ne l’a pas copié (une copie faite pendant que l’appli écrit pourrait être abîmée). Fermez cette appli sur l’ancien ordinateur, puis lancez un nouveau transfert qui inclut ce fichier.
+report-open-in = Ouvert dans { $app }
+fullmove-close-files = Ces fichiers sont ouverts dans une appli sur cet ordinateur, donc PCTwin ne les copiera pas encore : { $files }. Fermez l’appli qui les utilise, puis choisissez Réessayer.
+choose-online-only =
+    { NUMBER($count) ->
+        [one] Apporter aussi le fichier gardé seulement en ligne dans { $provider } (1 fichier, { $size }). Il est d’abord téléchargé sur cet ordinateur, puis remis seulement en ligne.
+        [many] Apporter aussi les fichiers gardés seulement en ligne dans { $provider } ({ $count } de fichiers, { $size }). Ils sont d’abord téléchargés sur cet ordinateur, puis remis seulement en ligne.
+       *[other] Apporter aussi les fichiers gardés seulement en ligne dans { $provider } ({ $count } fichiers, { $size }). Ils sont d’abord téléchargés sur cet ordinateur, puis remis seulement en ligne.
+    }
+choose-online-only-unnamed = un dossier cloud de cet ordinateur
+choose-online-only-metered = Aussi sur une connexion qui peut facturer les données (le partage de connexion d’un téléphone)
+choose-online-only-not-here = Les fichiers gardés seulement en ligne restent en sécurité en ligne. Apporter une copie de ces fichiers n’est pas encore possible sur un Mac.
+kept-online-copied =
+    { NUMBER($count) ->
+        [one] 1 fichier gardé seulement en ligne a été téléchargé et copié.
+        [many] { $count } de fichiers gardés seulement en ligne ont été téléchargés et copiés.
+       *[other] { $count } fichiers gardés seulement en ligne ont été téléchargés et copiés.
+    }
+kept-online-safe =
+    { NUMBER($count) ->
+        [one] 1 fichier gardé seulement en ligne n’a pas été copié et reste en sécurité en ligne. Ouvrez-le sur le nouvel ordinateur depuis l’appli qui le garde.
+        [many] { $count } de fichiers gardés seulement en ligne n’ont pas été copiés et restent en sécurité en ligne. Ouvrez-les sur le nouvel ordinateur depuis l’appli qui les garde.
+       *[other] { $count } fichiers gardés seulement en ligne n’ont pas été copiés et restent en sécurité en ligne. Ouvrez-les sur le nouvel ordinateur depuis l’appli qui les garde.
+    }
+kept-online-still-here =
+    { NUMBER($count) ->
+        [one] 1 fichier téléchargé prend encore { $size } sur cet ordinateur, car son appli cloud ne l’a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit dessus et choisissez Libérer de l’espace.
+        [many] { $count } de fichiers téléchargés prennent encore { $size } sur cet ordinateur, car leur appli cloud ne les a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit sur chacun et choisissez Libérer de l’espace.
+       *[other] { $count } fichiers téléchargés prennent encore { $size } sur cet ordinateur, car leur appli cloud ne les a pas encore remis seulement en ligne. Pour libérer la place, faites un clic droit sur chacun et choisissez Libérer de l’espace.
+    }
+kept-online-paused-metered = Le téléchargement s’est arrêté, car cette connexion peut facturer les données. Le reste est en sécurité en ligne.
+kept-online-paused-space = Le téléchargement s’est arrêté, car cet ordinateur manque de place. Le reste est en sécurité en ligne.
+plan-own-folder = Mettre les affaires de { $laptop } dans leur propre dossier
+plan-own-folder-help = Cet ordinateur a déjà des affaires d’un autre ancien ordinateur. Un dossier par ordinateur les garde séparées.
+plan-own-folder-name = De { $laptop }
+plan-own-folder-name-unnamed = De l’autre ordinateur

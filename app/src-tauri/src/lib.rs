@@ -27,6 +27,7 @@ mod help;
 mod history;
 #[cfg(test)]
 mod info_plist;
+mod keep_local;
 mod laptop_name;
 pub mod launch;
 pub mod limits;
