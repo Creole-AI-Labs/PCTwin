@@ -777,7 +777,7 @@ pub struct ReportView {
 /* ---------- What a move leaves (kept when it ends) ---------- */
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use pctwin_journal::{Journal, UndoGate};
@@ -891,6 +891,29 @@ fn lines_of(r: &crate::fullmove::RebuiltView) -> Vec<KeptLine> {
             })
         })
         .collect()
+}
+
+/// What the recovery kit of the move `id` (a My PCTwin history ID) is made from: its record (the
+/// mover's own items), its ledger checked against the journal now, and its before-wipe list when
+/// one was made. `None`: nothing is kept for that move here.
+pub(crate) fn kit_parts<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Option<(pctwin_record::Record, Ledger, Option<Checklist>)> {
+    kit_parts_in(&store::root(app)?, journal(app).as_ref(), id)
+}
+
+/// [`kit_parts`], from the moves kept under `root`, checked against the journal `j`.
+fn kit_parts_in(
+    root: &Path,
+    j: Option<&Journal>,
+    id: &str,
+) -> Option<(pctwin_record::Record, Ledger, Option<Checklist>)> {
+    let kept = store::kept(root, id)?;
+    let folder = store::folder(root, id)?;
+    let (ledger, _) = ledger_of(&kept, j);
+    let list: Option<Checklist> = store::load(&folder, "goodbye.json");
+    Some((kept.record, ledger, list))
 }
 
 /// Keeps what the move left under its history entry `id`. Failing to keep it never fails a move.
@@ -2647,6 +2670,21 @@ mod tests {
             undo_id: None,
             searched: vec!["documents".into()],
         }
+    }
+
+    /// Task List 2.9 joined to 2.7: the recovery kit of a kept move is made from that move's own
+    /// record and ledger; an ID with nothing kept makes no kit.
+    #[test]
+    fn the_kit_of_a_kept_move_holds_its_record_and_results() {
+        let t = tempfile::tempdir().unwrap();
+        let k = kept();
+        let folder = store::folder(t.path(), &k.history_id).unwrap();
+        store::save(&folder, "move.json", &k).unwrap();
+        let (record, ledger, list) = kit_parts_in(t.path(), None, &k.history_id).unwrap();
+        assert_eq!(record, k.record);
+        assert_eq!(ledger.id(), k.move_id);
+        assert!(list.is_none());
+        assert!(kit_parts_in(t.path(), None, "999-0").is_none());
     }
 
     /// A folder is not an item of its own (its files are), and what the person chose to leave

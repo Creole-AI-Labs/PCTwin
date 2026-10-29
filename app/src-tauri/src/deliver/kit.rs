@@ -89,16 +89,18 @@ pub fn save(kit: &Kit, folder: &Path) -> Result<KitSaved, MoveProblem> {
     })
 }
 
-/// The kit of the move `id` (a My PCTwin history ID), from what the move left for finishing it.
-/// `None`: nothing is kept for that move here.
-///
-/// The record and results of each move are kept by the finishing part (Task List 2.7,
-/// `finish_store::kept` and its ledger); until that part is joined on this branch, no move has
-/// them kept, so no kit can be made and the screens are told so (`NotMoving`), never shown an
-/// empty kit.
-fn kit_of<R: Runtime>(_app: &AppHandle<R>, id: &str) -> Option<Kit> {
-    let _ = id;
-    None
+/// The kit of the move `id` (a My PCTwin history ID), from what the move left for finishing it
+/// (Task List 2.7: its record, its ledger checked against the journal now, its before-wipe list).
+/// `None`: nothing is kept for that move here, so the screens are told so (`NotMoving`), never
+/// shown an empty kit.
+fn kit_of<R: Runtime>(app: &AppHandle<R>, id: &str) -> Option<Kit> {
+    let (record, ledger, checklist) = crate::finish::kit_parts(app, id)?;
+    Some(Kit::new(
+        record,
+        ledger,
+        checklist,
+        crate::finish_store::now(),
+    ))
 }
 
 /// Saves the recovery kit of the move `id` (an ID from My PCTwin history) in a folder the person
