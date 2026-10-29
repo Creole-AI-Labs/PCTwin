@@ -315,6 +315,26 @@ impl KeepLocal {
             .find(|c| c.account_id == w.account_id && c.provider == w.provider)
     }
 
+    /// Whether `w` may be brought down at all: its person chose this for its provider, it is one
+    /// of their own synced files (anything that cannot be told apart from the app's own is not),
+    /// and it is online only now. The same checks [`run`](Self::run) makes, for one file.
+    pub fn check_one(&self, cloud: &dyn CloudFiles, w: &Wanted) -> Result<(), WhyNot> {
+        let consent = self.consent(w).ok_or(WhyNot::NoConsent)?;
+        if !consent.covers(self.os, &w.path) || cloud.marked_as_apps_own(&w.path).unwrap_or(true) {
+            return Err(WhyNot::OutOfScope);
+        }
+        if !cloud.is_online_only(&w.path).unwrap_or(true) {
+            return Err(WhyNot::AlreadyOnLaptop);
+        }
+        Ok(())
+    }
+
+    /// Whether `w` may come down on `network`: a free connection, or its person allowed one that
+    /// may charge for data.
+    pub fn allowed_on(&self, w: &Wanted, network: Network) -> bool {
+        network == Network::Unmetered || self.consent(w).is_some_and(|c| c.on_metered)
+    }
+
     /// Brings `wanted` down batch by batch, hands each batch's good files to `send` (which says
     /// which it took), and puts every file it brought down back online only.
     pub fn run(
@@ -339,18 +359,9 @@ impl KeepLocal {
         };
         let mut queue = Vec::new();
         for w in wanted {
-            let consent = self.consent(&w);
-            if consent.is_none() {
-                mark(&mut report, &w, Some(WhyNot::NoConsent));
-            } else if !consent.is_some_and(|c| c.covers(self.os, &w.path))
-                || cloud.marked_as_apps_own(&w.path).unwrap_or(true)
-            {
-                // Anything that cannot be told apart from the app's own is not taken.
-                mark(&mut report, &w, Some(WhyNot::OutOfScope));
-            } else if !cloud.is_online_only(&w.path).unwrap_or(true) {
-                mark(&mut report, &w, Some(WhyNot::AlreadyOnLaptop));
-            } else {
-                queue.push(w);
+            match self.check_one(cloud, &w) {
+                Ok(()) => queue.push(w),
+                Err(why) => mark(&mut report, &w, Some(why)),
             }
         }
         // Files that can never fit, even with nothing else down.
@@ -366,9 +377,7 @@ impl KeepLocal {
         });
         let mut queue = std::collections::VecDeque::from(queue);
         while let Some(next) = queue.front() {
-            let allowed =
-                network() == Network::Unmetered || self.consent(next).is_some_and(|c| c.on_metered);
-            if !allowed {
+            if !self.allowed_on(next, network()) {
                 report.stopped = Some(Stopped::MeteredNow);
                 break;
             }

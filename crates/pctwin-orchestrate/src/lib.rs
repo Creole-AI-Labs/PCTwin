@@ -33,5 +33,6 @@ pub mod capacity;
 pub mod cloud;
 pub mod jobs;
 pub mod local_copy;
+pub mod local_copy_send;
 pub mod rescue;
 pub mod topology;
