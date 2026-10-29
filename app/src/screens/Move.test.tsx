@@ -109,7 +109,7 @@ const plan = plans[0] as Omit<(typeof plans)[0], "rebuild">;
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(15);
+    expect(tauri.handlers.size).toBe(16);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };

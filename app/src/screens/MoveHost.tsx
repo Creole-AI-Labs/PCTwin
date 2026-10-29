@@ -5,6 +5,7 @@ import {
   fullmoveUndo,
   moveAppdataAnswer,
   helpCode,
+  listenFinishDelta,
   listenMove,
   moveApprove,
   moveBegin,
@@ -47,6 +48,7 @@ import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
 import { setWindowMode, type WindowMode } from "../native";
 import MiniPanel from "./MiniPanel";
+import type { DeltaView } from "../finish";
 import type { Approval, FolderRole, PlanView } from "../plan";
 import DriveProblem from "./DriveProblem";
 import MoveEnded, { type MoveEnd } from "./MoveEnded";
@@ -70,6 +72,8 @@ import { ownFolderName } from "../ownFolder";
 import StopMove from "./StopMove";
 import MoveChanged from "./MoveChanged";
 import type { ChangesView } from "../deliver";
+import FinishCatchup from "./FinishCatchup";
+import RepairItems from "./RepairItems";
 
 /** What the move page shows now. */
 type View =
@@ -99,6 +103,10 @@ type View =
   | { kind: "undo"; outcome: MoveOutcome }
   /** Finishing the move (2.7), from the outcome on the new laptop: the newest move. */
   | { kind: "finish"; outcome: MoveOutcome }
+  /** The new laptop: fix what did not finish, from the outcome (the newest move). */
+  | { kind: "repair"; outcome: MoveOutcome }
+  /** The new laptop, paired to bring it up to date: what changed on the old laptop, to review. `null` could not be read. */
+  | { kind: "catchup"; delta: DeltaView | null }
   /** The new laptop: the old laptop's app data coming, before the files. */
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
@@ -172,13 +180,23 @@ export function stepOf(view: View, old: boolean): HelpStep {
       return "moving";
     case "undo":
     case "finish":
+    case "repair":
       return "finished";
+    case "catchup":
+      return "approving";
   }
 }
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
-  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo" || view.kind === "finish") return view;
+  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo" || view.kind === "finish" || view.kind === "repair") return view;
+  // The catch-up review stays until the approved changes start moving, or the move ends.
+  if (view.kind === "catchup") {
+    if (event.kind === "progress") return { kind: "progress", progress: event.progress };
+    if (event.kind === "finished") return { kind: "outcome", outcome: event.outcome };
+    if (event.kind === "problem") return { kind: "end", end: { kind: "ended", why: event.problem } };
+    return view;
+  }
   // What changed after approval takes the page until the person answers, wherever the move is.
   if (event.kind === "changed") return { kind: "changed", changes: event.changes };
   // After the files, the full move sets up apps and settings: only its own steps, the outcome or a problem move the page on.
@@ -342,6 +360,23 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
       },
     );
   };
+
+  // Bring me up to date: the new laptop gets the old laptop's changes to review instead of a plan.
+  useEffect(() => {
+    if (old) return;
+    let live = true;
+    let unlisten: (() => void) | null = null;
+    void listenFinishDelta((delta) => {
+      if (live) setView((v) => (v.kind === "wait" || v.kind === "catchup" || v.kind === "plan" ? { kind: "catchup", delta } : v));
+    }).then((stop) => {
+      if (live) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, [old]);
 
   useEffect(() => {
     let live = true;
@@ -708,6 +743,13 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
             );
           }}
           onHome={onHome}
+          onRepair={
+            old
+              ? undefined
+              : () => {
+                  setView({ kind: "repair", outcome: view.outcome });
+                }
+          }
           onFinish={
             old
               ? undefined
@@ -768,8 +810,19 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
           onBack={() => {
             setView({ kind: "outcome", outcome: view.outcome });
           }}
+          onPair={onPairAgain}
         />
       );
+    case "repair":
+      return (
+        <RepairItems
+          onBack={() => {
+            setView({ kind: "outcome", outcome: view.outcome });
+          }}
+        />
+      );
+    case "catchup":
+      return <FinishCatchup id={null} delta={view.delta} onBack={onHome} />;
     case "report":
       return <Report items={view.items} rebuilt={view.outcome.rebuilt} people={view.outcome.people} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
     case "reconnecting":

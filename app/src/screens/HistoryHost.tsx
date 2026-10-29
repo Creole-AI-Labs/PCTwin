@@ -10,15 +10,16 @@ import Report from "./Report";
 import UndoHost from "./UndoHost";
 import FinishHost from "./FinishHost";
 import RecoveryKit from "./RecoveryKit";
+import RepairItems from "./RepairItems";
 
-type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "undo" } | { kind: "finish"; id: string } | { kind: "kit"; id: string };
+type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "undo" } | { kind: "finish"; id: string } | { kind: "kit"; id: string } | { kind: "repair" };
 
 /**
  * F08 My PCTwin history, from what the app recorded on this laptop when each move ended (never from
  * the screens): the list, each move's report opened again, and an export to a folder the person
  * chooses in the system's picker. Quick Send keeps nothing here.
  */
-export default function HistoryHost({ onStart, onBack }: { onStart: () => void; onBack: () => void }) {
+export default function HistoryHost({ onStart, onBack, onPair }: { onStart: () => void; onBack: () => void; /** Pair with the old laptop again (Bring me up to date). */ onPair?: () => void }) {
   const { l10n } = useLocalization();
   const [entries, setEntries] = useState<HistoryEntryRaw[]>([]);
   const [view, setView] = useState<View>({ kind: "list" });
@@ -71,6 +72,16 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
         onBack={() => {
           setView({ kind: "list" });
         }}
+        onPair={onPair}
+      />
+    );
+  }
+  if (view.kind === "repair") {
+    return (
+      <RepairItems
+        onBack={() => {
+          setView({ kind: "list" });
+        }}
       />
     );
   }
@@ -109,6 +120,9 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       onContinue={() => undefined}
       onFinish={(id) => {
         setView({ kind: "finish", id });
+      }}
+      onRepair={() => {
+        setView({ kind: "repair" });
       }}
       onKit={(id) => {
         setView({ kind: "kit", id });

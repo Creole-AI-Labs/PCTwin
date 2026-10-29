@@ -22,7 +22,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * documents) that the plan held, with how many arrived copied and checked, counted the way the
  * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
-export default function Outcome({ outcome, onReport, onHome, onUndo, onFinish, old = false }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void; /** Finish your move (2.7): on the new laptop only. */ onFinish?: () => void; /** This is the old laptop: it sent, it is not where the person arrives. */ old?: boolean }) {
+export default function Outcome({ outcome, onReport, onHome, onUndo, onFinish, onRepair, old = false }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void; /** Finish your move (2.7): on the new laptop only. */ onFinish?: () => void; /** Fix what did not finish (the newest move): on the new laptop only. */ onRepair?: () => void; /** This is the old laptop: it sent, it is not where the person arrives. */ old?: boolean }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   const drive = useRescueDrive();
@@ -123,6 +123,11 @@ export default function Outcome({ outcome, onReport, onHome, onUndo, onFinish, o
         {onHome && (
           <Button variant="quiet" onClick={onHome}>
             {l10n.getString("outcome-home")}
+          </Button>
+        )}
+        {onRepair && byStatus.failed + needsAction > 0 && (
+          <Button variant="secondary" onClick={onRepair}>
+            {l10n.getString("repair-strip")}
           </Button>
         )}
         {onFinish && (

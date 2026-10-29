@@ -28,6 +28,7 @@ export default function History({
   onUndo,
   onFinish,
   onKit,
+  onRepair,
   onExport,
   onStart,
   onBack,
@@ -42,6 +43,8 @@ export default function History({
   onFinish?: (id: string) => void;
   /** Save a recovery kit for a move, by its history entry. */
   onKit?: (id: string) => void;
+  /** Fix what did not finish: the engine always offers the newest move, so only its row has it. */
+  onRepair?: () => void;
   onExport: () => void;
   onStart: () => void;
   onBack: () => void;
@@ -74,7 +77,7 @@ export default function History({
         </div>
       ) : (
         <QsRowList>
-          {sorted.map((e) => (
+          {sorted.map((e, index) => (
             <Row
               key={e.id}
               icon={
@@ -119,6 +122,15 @@ export default function History({
                       }}
                     >
                       {l10n.getString("finish-title")}
+                    </Button>
+                  )}
+                  {onRepair && index === 0 && (e.state === "steps-left" || e.state === "stopped" || e.state === "finished") && (
+                    <Button
+                      variant="quiet"
+                      aria-label={l10n.getString("history-open-name", { what: l10n.getString("history-repair"), title: title(e) })}
+                      onClick={onRepair}
+                    >
+                      {l10n.getString("history-repair")}
                     </Button>
                   )}
                   {onKit && (

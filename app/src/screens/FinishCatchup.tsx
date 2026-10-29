@@ -14,9 +14,9 @@ const PURPOSES: readonly CatchupPurpose[] = ["check", "catch-up"];
  * choose for each changed item what the engine allows, and send only the reviewed changes. Nothing
  * is chosen for the person; other people's changes are only counted.
  */
-export default function FinishCatchup({ id, onBack, onPair }: { id: string | null; onBack: () => void; onPair?: () => void }) {
+export default function FinishCatchup({ id, onBack, onPair, delta }: { id: string | null; onBack: () => void; onPair?: () => void; /** The list already arrived (the new laptop paired for it): shown at once. `null` is a list that could not be read. */ delta?: DeltaView | null }) {
   const { l10n } = useLocalization();
-  const [stage, setStage] = useState<Stage>({ kind: "choose" });
+  const [stage, setStage] = useState<Stage>(() => (delta === undefined ? { kind: "choose" } : delta === null ? { kind: "unreadable" } : { kind: "delta", delta }));
   const [problem, setProblem] = useState<FinishProblem | null>(null);
   useEffect(() => {
     let live = true;
