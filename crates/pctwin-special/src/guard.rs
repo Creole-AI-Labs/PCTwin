@@ -35,25 +35,20 @@ pub enum Kind {
     NotAFile,
 }
 
-/// Windows file attributes that mean "not here: reading recalls it".
-#[cfg(windows)]
-const OFFLINE: u32 = 0x0000_1000;
-#[cfg(windows)]
-const RECALL_ON_OPEN: u32 = 0x0004_0000;
-#[cfg(windows)]
-const RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
 #[cfg(windows)]
 const REPARSE_POINT: u32 = 0x0000_0400;
 
 /// The kind of the entry with metadata `m` (from `symlink_metadata`, which opens nothing).
 pub fn kind_of(m: &std::fs::Metadata) -> Kind {
+    // Every system's mark, Windows and macOS alike (a dataless Mac file was opened before, 29
+    // October 2026).
+    if pctwin_types::cloud::is_cloud_only(m) {
+        return Kind::OnlineOnly;
+    }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
         let a = m.file_attributes();
-        if a & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0 {
-            return Kind::OnlineOnly;
-        }
         if a & REPARSE_POINT != 0 {
             return Kind::Link;
         }

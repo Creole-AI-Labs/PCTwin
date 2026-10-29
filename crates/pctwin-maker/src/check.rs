@@ -110,6 +110,18 @@ pub enum CheckError {
 }
 
 fn open_held(path: &Path) -> io::Result<File> {
+    let f = open_held_raw(path)?;
+    // Asked of the handle, before any byte is read: a file stored online only would be
+    // downloaded by reading it (an installer kept in a OneDrive folder, say; 29 October 2026).
+    if pctwin_types::cloud::is_cloud_only(&f.metadata()?) {
+        return Err(io::Error::other(
+            "stored online only by a cloud app: not downloaded or looked into",
+        ));
+    }
+    Ok(f)
+}
+
+fn open_held_raw(path: &Path) -> io::Result<File> {
     let mut o = std::fs::OpenOptions::new();
     o.read(true);
     #[cfg(windows)]
