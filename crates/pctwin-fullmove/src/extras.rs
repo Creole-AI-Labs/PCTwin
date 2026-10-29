@@ -759,12 +759,13 @@ pub const SPECIAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(3
 
 #[cfg(test)]
 mod tests {
-    use super::{local_folder, page_ok};
+    use super::page_ok;
 
     /// Only a folder on a drive of this laptop is taken from an environment value (F3).
     #[cfg(windows)]
     #[test]
     fn only_a_local_drive_folder_is_taken_from_the_environment() {
+        use super::local_folder;
         assert!(local_folder(std::path::Path::new(r"C:\Program Files")));
         for bad in [
             r"\\server\share\x",
