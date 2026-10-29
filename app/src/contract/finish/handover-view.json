@@ -28,7 +28,8 @@
         "windows-clean-drive"
       ],
       "system": "windows"
-    }
+    },
+    "ticket": "00000000000000000000000000000007"
   },
   {
     "action": "remove-my-account",

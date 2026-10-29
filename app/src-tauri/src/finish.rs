@@ -486,6 +486,9 @@ pub enum HandoverView {
     Ready {
         action: HandoverAction,
         digest: String,
+        /// The one-time ticket for this preview: the confirmation must bring it back, once, within
+        /// [`gate::FRESH`] and no sooner than [`MIN_THINK`] seconds after it was given.
+        ticket: String,
         /// What would be removed, by name (the mover's account, the drive).
         removes: Vec<String>,
         /// What stays, by name (other people's accounts).
@@ -1498,6 +1501,99 @@ impl GateNow {
     }
 }
 
+/// The old laptop must have been looked at again this recently for a handover or goodbye to be
+/// offered or confirmed: a scan of any age is never "the old laptop as it is now" (security
+/// review of 2.7, 29 October 2026, F1).
+pub const OLD_SCAN_FRESH: u64 = 15 * 60;
+
+/// The fewest seconds between a preview and its confirmation: a confirmation made in the same
+/// instant as its preview is not the person's own (F2).
+pub const MIN_THINK: u64 = 2;
+
+/// Whether `old` was looked at again within [`OLD_SCAN_FRESH`] of `now`.
+fn scan_is_fresh(old: Option<&store::OldNow>, now: u64) -> bool {
+    old.is_some_and(|o| o.at <= now && now - o.at <= OLD_SCAN_FRESH)
+}
+
+/// The preview the person sees, bound to the very scan it was made from: a confirmation of it
+/// is refused once the old laptop has been looked at again (F1).
+fn bound_digest(preview: &[u8; 32], old: &store::OldNow) -> [u8; 32] {
+    let mut h = blake3::Hasher::new();
+    h.update(b"pctwin/v1/handover-preview\0");
+    h.update(preview);
+    h.update(&old.at.to_le_bytes());
+    h.update(old.record.fingerprint().to_hex().as_bytes());
+    *h.finalize().as_bytes()
+}
+
+/// A preview's one-time ticket, held here, never by the screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ticket {
+    action: Action,
+    digest: [u8; 32],
+    issued: u64,
+}
+
+/// Why a ticket was not accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TicketRefused {
+    /// Not one this app gave, or already used.
+    Unknown,
+    /// For another action or another preview.
+    Wrong,
+    /// Brought back too soon or too late.
+    Timing,
+}
+
+/// The tickets given and not yet used.
+#[derive(Debug, Default)]
+struct Tickets(BTreeMap<[u8; 16], Ticket>);
+
+impl Tickets {
+    fn give(&mut self, id: [u8; 16], ticket: Ticket) {
+        // Old tickets go, so the set stays small.
+        self.0
+            .retain(|_, t| ticket.issued.saturating_sub(t.issued) <= gate::FRESH);
+        self.0.insert(id, ticket);
+    }
+
+    /// Takes the ticket `id` (it can never be used again, whatever the answer) and checks it is
+    /// for `action` and `digest`, and brought back in time.
+    fn take(
+        &mut self,
+        id: &[u8; 16],
+        action: Action,
+        digest: &[u8; 32],
+        now: u64,
+    ) -> Result<Ticket, TicketRefused> {
+        let t = self.0.remove(id).ok_or(TicketRefused::Unknown)?;
+        if t.action != action || t.digest != *digest {
+            return Err(TicketRefused::Wrong);
+        }
+        let age = now.checked_sub(t.issued).ok_or(TicketRefused::Timing)?;
+        if !(MIN_THINK..=gate::FRESH).contains(&age) {
+            return Err(TicketRefused::Timing);
+        }
+        Ok(t)
+    }
+}
+
+fn tickets() -> &'static Mutex<Tickets> {
+    static T: OnceLock<Mutex<Tickets>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(Tickets::default()))
+}
+
+fn unhex16(s: &str) -> Option<[u8; 16]> {
+    if s.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
 fn used() -> &'static Mutex<gate::Used> {
     static U: OnceLock<Mutex<gate::Used>> = OnceLock::new();
     U.get_or_init(|| Mutex::new(gate::Used::default()))
@@ -1811,15 +1907,41 @@ pub fn handover_preview<R: Runtime>(
     action: HandoverAction,
 ) -> Result<HandoverView, FinishProblem> {
     let g = gate_now(&app, id)?;
-    Ok(match gate::preview(action_of(action), &g.facts()) {
-        Ok(p) => HandoverView::Ready {
-            action,
-            digest: hex(&p.digest()),
-            removes: p.removes.iter().map(|a| g.shown_name(a)).collect(),
-            keeps: p.keeps.iter().map(|a| g.shown_name(a)).collect(),
-            notes: p.notes.iter().map(|n| note_key(*n)).collect(),
-            route: route(action, g.system()),
-        },
+    let facts = g.facts();
+    // The old laptop must have been looked at again just now (F1).
+    let old = match g.old.as_ref() {
+        Some(o) if scan_is_fresh(Some(o), facts.now) => o,
+        _ => {
+            return Ok(HandoverView::Refused {
+                action,
+                why: RefusalKey::OldLaptopNotChecked,
+                open: 0,
+            });
+        }
+    };
+    Ok(match gate::preview(action_of(action), &facts) {
+        Ok(p) => {
+            let digest = bound_digest(&p.digest(), old);
+            let mut id = [0u8; 16];
+            getrandom::fill(&mut id).map_err(|_| FinishProblem::Failed)?;
+            tickets().lock().map_err(|_| FinishProblem::Failed)?.give(
+                id,
+                Ticket {
+                    action: action_of(action),
+                    digest,
+                    issued: facts.now,
+                },
+            );
+            HandoverView::Ready {
+                action,
+                digest: hex(&digest),
+                ticket: hex(&id),
+                removes: p.removes.iter().map(|a| g.shown_name(a)).collect(),
+                keeps: p.keeps.iter().map(|a| g.shown_name(a)).collect(),
+                notes: p.notes.iter().map(|n| note_key(*n)).collect(),
+                route: route(action, g.system()),
+            }
+        }
         Err(r) => {
             let (why, open) = refusal_key(&r);
             HandoverView::Refused { action, why, open }
@@ -1835,13 +1957,30 @@ pub fn handover_confirm<R: Runtime>(
     id: Option<String>,
     action: HandoverAction,
     digest: String,
+    ticket: String,
 ) -> Result<HandoverStarted, FinishProblem> {
     let seen = unhex32(&digest).ok_or(FinishProblem::Changed)?;
+    let ticket_id = unhex16(&ticket).ok_or(FinishProblem::Changed)?;
     let g = gate_now(&app, id)?;
     let facts = g.facts();
-    let mut nonce = [0u8; 16];
-    getrandom::fill(&mut nonce).map_err(|_| FinishProblem::Failed)?;
-    let c = gate::confirm(action_of(action), seen, facts.now, nonce);
+    // The preview's own one-time ticket, brought back once and in time (F2).
+    let t = tickets()
+        .lock()
+        .map_err(|_| FinishProblem::Failed)?
+        .take(&ticket_id, action_of(action), &seen, facts.now)
+        .map_err(|_| FinishProblem::Changed)?;
+    // The old laptop still looked at just now, and exactly the scan the preview was made from.
+    let old = g
+        .old
+        .as_ref()
+        .filter(|o| scan_is_fresh(Some(o), facts.now))
+        .ok_or(FinishProblem::NotAllowed)?;
+    let preview =
+        gate::preview(action_of(action), &facts).map_err(|_| FinishProblem::NotAllowed)?;
+    if bound_digest(&preview.digest(), old) != seen {
+        return Err(FinishProblem::Changed);
+    }
+    let c = gate::confirm(action_of(action), preview.digest(), t.issued, ticket_id);
     let mut used = used().lock().map_err(|_| FinishProblem::Failed)?;
     let request =
         gate::request(action_of(action), &facts, Some(&c), &mut used).map_err(|r| match r {
@@ -2151,6 +2290,106 @@ pub async fn report_save<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn old_now(at: u64) -> store::OldNow {
+        store::OldNow {
+            at,
+            record: Record::new(pctwin_record::LaptopId::from_hex(&"ab".repeat(16)).unwrap()),
+            others: Vec::new(),
+        }
+    }
+
+    /// A handover is offered only on a scan of the old laptop from just now; none, a scan of any
+    /// age, or one from the future is not "the old laptop now" (security review F1).
+    #[test]
+    fn only_a_scan_from_just_now_counts_as_the_old_laptop_now() {
+        let now = 10_000_000;
+        assert!(!scan_is_fresh(None, now));
+        assert!(scan_is_fresh(Some(&old_now(now)), now));
+        assert!(scan_is_fresh(Some(&old_now(now - OLD_SCAN_FRESH)), now));
+        assert!(!scan_is_fresh(
+            Some(&old_now(now - OLD_SCAN_FRESH - 1)),
+            now
+        ));
+        assert!(!scan_is_fresh(Some(&old_now(now + 1)), now));
+    }
+
+    /// A preview is bound to the scan it was made from: the same preview over a later scan, or a
+    /// different one, gives another code, so a confirmation of the old one is refused (F1).
+    #[test]
+    fn a_preview_is_bound_to_its_scan() {
+        let p = [7u8; 32];
+        let a = bound_digest(&p, &old_now(100));
+        assert_eq!(a, bound_digest(&p, &old_now(100)));
+        assert_ne!(a, bound_digest(&p, &old_now(101)));
+        assert_ne!(a, bound_digest(&[8u8; 32], &old_now(100)));
+        let mut other = old_now(100);
+        other.record.revision += 1;
+        assert_ne!(a, bound_digest(&p, &other));
+    }
+
+    /// A ticket is for its own action and preview, works once, and only between MIN_THINK and
+    /// FRESH seconds after it was given; one never given is refused (security review F2).
+    #[test]
+    fn a_ticket_works_once_in_time_for_its_own_preview() {
+        let (id, digest) = ([1u8; 16], [9u8; 32]);
+        let give = |t: &mut Tickets| {
+            t.give(
+                id,
+                Ticket {
+                    action: Action::EraseOldLaptop,
+                    digest,
+                    issued: 1000,
+                },
+            )
+        };
+        let mut t = Tickets::default();
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &digest, 1010).err(),
+            Some(TicketRefused::Unknown),
+            "never given"
+        );
+        give(&mut t);
+        assert!(t.take(&id, Action::EraseOldLaptop, &digest, 1010).is_ok());
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &digest, 1011).err(),
+            Some(TicketRefused::Unknown),
+            "used once already"
+        );
+        give(&mut t);
+        assert_eq!(
+            t.take(&id, Action::RemoveMoversAccount, &digest, 1010)
+                .err(),
+            Some(TicketRefused::Wrong)
+        );
+        give(&mut t);
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &[0u8; 32], 1010).err(),
+            Some(TicketRefused::Wrong)
+        );
+        give(&mut t);
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &digest, 1000 + MIN_THINK - 1)
+                .err(),
+            Some(TicketRefused::Timing),
+            "the same instant as its preview"
+        );
+        give(&mut t);
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &digest, 1000 + gate::FRESH + 1)
+                .err(),
+            Some(TicketRefused::Timing),
+            "too late"
+        );
+        give(&mut t);
+        assert_eq!(
+            t.take(&id, Action::EraseOldLaptop, &digest, 999).err(),
+            Some(TicketRefused::Timing),
+            "from the future"
+        );
+        assert_eq!(unhex16(&hex(&id)), Some(id));
+        assert_eq!(unhex16("ab"), None);
+    }
 
     /// Every route in the catalogue is well formed, and every action has a route for every system
     /// and one for a system that cannot be told.

@@ -1570,6 +1570,7 @@ mod finish_examples {
         let mut v = vec![HandoverView::Ready {
             action: HandoverAction::EraseOldLaptop,
             digest: format!("{:064x}", 9),
+            ticket: format!("{:032x}", 7),
             removes: vec!["Samsung SSD 980".into()],
             keeps: vec![],
             notes: HandoverNote::ALL.to_vec(),
@@ -1781,7 +1782,7 @@ mod finish_examples {
                 { "name": "catchup_arm", "args": [["id", ID], ["purpose", "check"]] },
                 { "name": "catchup_approve", "args": [["id", ID], ["digest", format!("{:064x}", 7)], ["choices", [{ "id": ITEM, "choice": "keep-both" }]]] },
                 { "name": "handover_preview", "args": [["id", ID], ["action", "remove-my-account"]] },
-                { "name": "handover_confirm", "args": [["id", ID], ["action", "erase-old-laptop"], ["digest", format!("{:064x}", 9)]] },
+                { "name": "handover_confirm", "args": [["id", ID], ["action", "erase-old-laptop"], ["digest", format!("{:064x}", 9)], ["ticket", format!("{:032x}", 7)]] },
                 { "name": "handover_result", "args": [["id", ID], ["action", "erase-old-laptop"], ["says", "cannot-tell"]] },
                 { "name": "doctor_run", "args": [["role", "new"]] },
                 { "name": "setup_checklist", "args": [["id", ID]] },
