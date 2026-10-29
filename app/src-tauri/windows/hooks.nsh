@@ -34,10 +34,40 @@
 ; While PCTwin is in the middle of a step that must not be cut part way (moving files, installing
 ; apps and settings, placing app data, an undo), it holds safe-stop.lock in its local app data
 ; folder open with no sharing, so FileOpen here fails; the file is free again the moment the
-; step ends. The installer waits up to a minute, then asks. The file is the signed-in person's
-; (the account that started this installer); another account's PCTwin is not seen here.
+; step ends.
+;
+; Every account's PCTwin is looked at, not only the one that started this installer: the
+; installer is for everyone and runs elevated (an administrator's password typed over the
+; person's shoulder, SYSTEM from a management tool), so its own $LOCALAPPDATA is not the person's.
+; Each profile in the system's list (HKLM ProfileList) is checked. A file that cannot be opened
+; for any reason counts as busy: PCTwin is never closed while the answer is unknown.
+;
+; Between finding every PCTwin at a safe point and closing them, no step may start: the
+; installer first makes safe-stop-closing beside the program and keeps it open, then checks
+; every account again, and only then closes PCTwin. A first step in PCTwin takes its own file and
+; then looks for this one (held: it does not start), so one of the two always sees the other.
+;
+; A normal run waits up to a minute, then asks Retry or Cancel. A silent or passive run waits the
+; same minute and then gives up (the install or removal is cancelled; nothing is closed).
 !ifndef PCTWIN_SAFE_STOP_FILE
   !define PCTWIN_SAFE_STOP_FILE "com.creoleailabs.pctwin\safe-stop.lock"
+!endif
+!ifndef PCTWIN_CLOSING_FILE
+  !define PCTWIN_CLOSING_FILE "safe-stop-closing"
+!endif
+; The system's list of profiles (a test build can point this elsewhere).
+!ifndef PCTWIN_PROFILES_ROOT
+  !define PCTWIN_PROFILES_ROOT HKLM
+!endif
+!ifndef PCTWIN_PROFILES_KEY
+  !define PCTWIN_PROFILES_KEY "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+!endif
+; How often, and how long apart (milliseconds), the installer looks again before it asks.
+!ifndef PCTWIN_SAFE_TRIES
+  !define PCTWIN_SAFE_TRIES 30
+!endif
+!ifndef PCTWIN_SAFE_PAUSE
+  !define PCTWIN_SAFE_PAUSE 2000
 !endif
 
 !macro PCTWIN_BUSY_WORDS
@@ -60,26 +90,72 @@
   ${EndIf}
 !macroend
 
-; Waits for PCTwin's safe stopping point. Leaves $R7 = 1 when it is safe to go on, 0 when the
-; person chose Cancel (or, in a silent or passive run, it never became safe).
-!macro PCTWIN_WAIT_SAFE_STOP
-  ; The person's own local app data folder, even in an install for everyone.
-  SetShellVarContext current
-  StrCpy $R6 "$LOCALAPPDATA\${PCTWIN_SAFE_STOP_FILE}"
-  SetShellVarContext all
+; Whether any account's PCTwin is in the middle of a step: $R6 = 1 busy (or not known), 0 when
+; every account's file is absent or free. Opened to read only, for an instant. Uses $R1 to $R4.
+!macro PCTWIN_ANY_BUSY_FUNCTION PREFIX
+  Function ${PREFIX}PCTwinAnyBusy
+    StrCpy $R6 0
+    StrCpy $R3 0
+    ${If} ${RunningX64}
+      SetRegView 64
+    ${EndIf}
+    pctwin_busy_next:
+      ClearErrors
+      EnumRegKey $R2 ${PCTWIN_PROFILES_ROOT} "${PCTWIN_PROFILES_KEY}" $R3
+      ${If} ${Errors}
+      ${AndIf} $R3 == 0
+        ; The list itself cannot be read: not known.
+        StrCpy $R6 1
+        Goto pctwin_busy_end
+      ${EndIf}
+      StrCmp $R2 "" pctwin_busy_end
+      IntOp $R3 $R3 + 1
+      ReadRegStr $R1 ${PCTWIN_PROFILES_ROOT} "${PCTWIN_PROFILES_KEY}\$R2" "ProfileImagePath"
+      StrCmp $R1 "" pctwin_busy_next
+      ExpandEnvStrings $R1 "$R1"
+      StrCpy $R1 "$R1\AppData\Local\${PCTWIN_SAFE_STOP_FILE}"
+      IfFileExists "$R1" 0 pctwin_busy_next
+      ClearErrors
+      FileOpen $R4 "$R1" r
+      ${If} ${Errors}
+        StrCpy $R6 1
+        Goto pctwin_busy_end
+      ${EndIf}
+      FileClose $R4
+      Goto pctwin_busy_next
+    pctwin_busy_end:
+    ${If} ${RunningX64}
+      SetRegView lastused
+    ${EndIf}
+  FunctionEnd
+!macroend
+!insertmacro PCTWIN_ANY_BUSY_FUNCTION ""
+!insertmacro PCTWIN_ANY_BUSY_FUNCTION "un."
+
+; Waits for every account's PCTwin to be at a safe stopping point, then keeps any from leaving it:
+; $R7 = 1 with safe-stop-closing made and held open in $R0 (close it with PCTWIN_CLOSED once
+; PCTwin is closed), or $R7 = 0 when the person chose Cancel (or, in a silent or passive run, it
+; never became safe), with nothing held.
+!macro PCTWIN_WAIT_SAFE_STOP PREFIX
   StrCpy $R7 1
   StrCpy $R5 0
   pctwin_safe_try:
-    IfFileExists "$R6" 0 pctwin_safe_done
+    Call ${PREFIX}PCTwinAnyBusy
+    StrCmp $R6 1 pctwin_safe_busy
+    ; Free a moment ago: from now on no first step may start, then every account is looked at
+    ; again (a step that started in between is seen now).
+    CreateDirectory "$INSTDIR"
     ClearErrors
-    FileOpen $R4 "$R6" a
+    FileOpen $R0 "$INSTDIR\${PCTWIN_CLOSING_FILE}" w
     IfErrors pctwin_safe_busy
-    FileClose $R4
-    Goto pctwin_safe_done
+    Call ${PREFIX}PCTwinAnyBusy
+    StrCmp $R6 1 0 pctwin_safe_done
+    FileClose $R0
+    Delete "$INSTDIR\${PCTWIN_CLOSING_FILE}"
   pctwin_safe_busy:
     IntOp $R5 $R5 + 1
-    ${If} $R5 < 30
-      Sleep 2000
+    ${If} $R5 < ${PCTWIN_SAFE_TRIES}
+      Sleep ${PCTWIN_SAFE_PAUSE}
       Goto pctwin_safe_try
     ${EndIf}
     !insertmacro PCTWIN_BUSY_WORDS
@@ -92,16 +168,29 @@
   pctwin_safe_done:
 !macroend
 
+; PCTwin is closed: the installer's file goes (PCTwin started again later finds nothing held).
+!macro PCTWIN_CLOSED
+  FileClose $R0
+  Delete "$INSTDIR\${PCTWIN_CLOSING_FILE}"
+!macroend
+
+; A test build can look at what happens just before PCTwin is closed.
+!ifmacrondef PCTWIN_BEFORE_CLOSE
+  !macro PCTWIN_BEFORE_CLOSE
+  !macroend
+!endif
+
 !macro NSIS_HOOK_PREINSTALL
   ; A PCTwin still open (in the tray, or another person's on this laptop) holds its own files, and
   ; the installer then stopped at "Error opening file for writing" (first real test, 28 October
   ; 2026). Close PCTwin and its helpers first, for every account; each by its exact name, never a
   ; pattern that could match this installer. A move that was running picks up again from its
-  ; journal the next time PCTwin opens. First, wait for PCTwin's safe stopping point.
-  !insertmacro PCTWIN_WAIT_SAFE_STOP
+  ; journal the next time PCTwin opens. First, wait for every PCTwin's safe stopping point.
+  !insertmacro PCTWIN_WAIT_SAFE_STOP ""
   ${If} $R7 != 1
     Abort
   ${EndIf}
+  !insertmacro PCTWIN_BEFORE_CLOSE
   nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "${MAINBINARYNAME}.exe"'
   Pop $R8
   nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-helper.exe"'
@@ -109,6 +198,7 @@
   nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-handover.exe"'
   Pop $R8
   Sleep 500
+  !insertmacro PCTWIN_CLOSED
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -126,10 +216,20 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  !insertmacro PCTWIN_WAIT_SAFE_STOP
+  !insertmacro PCTWIN_WAIT_SAFE_STOP "un."
   ${If} $R7 != 1
     Abort
   ${EndIf}
+  ; Closed while the installer's file is held, as for an install, so no step starts in between.
+  !insertmacro PCTWIN_BEFORE_CLOSE
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "${MAINBINARYNAME}.exe"'
+  Pop $R8
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-helper.exe"'
+  Pop $R8
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /f /t /im "pctwin-handover.exe"'
+  Pop $R8
+  Sleep 500
+  !insertmacro PCTWIN_CLOSED
   nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${PCTWIN_FIREWALL_RULE}"'
   Pop $R8
 !macroend

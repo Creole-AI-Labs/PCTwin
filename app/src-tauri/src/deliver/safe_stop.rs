@@ -11,6 +11,16 @@
 //!   cannot be opened, before they close PCTwin: NSIS's own `FileOpen` fails on a file another
 //!   program holds with no sharing, which is the only case its check can see, so the file is held
 //!   exactly that way. The file is closed when the last step ends, so the installer then goes on.
+//!   The installer looks at every account's file (each profile in the system's list), so a move
+//!   another signed-in person runs is waited for too;
+//! - between the installer finding PCTwin at a safe point and closing it, no step may start: the
+//!   installer keeps [`CLOSING_FILE`] beside the program open while it checks again and closes
+//!   PCTwin, and a first step that finds that file held does not start ([`SafeStop::hold`] waits;
+//!   PCTwin is closed a moment later). A step takes its own file first and then looks for the
+//!   installer's; the installer makes its file first and then looks at the steps' files; so one of
+//!   the two always sees the other;
+//! - while an update is being installed ([`SafeStop::begin_update`]), no step starts at all: a
+//!   step asked for then waits, and [`SafeStop::try_hold`] refuses.
 //!
 //! Stopping the move (X10) is a safe point: what is copied and checked stays, and the journal
 //! picks up the rest. A pause that has not been reached is not.
@@ -20,8 +30,9 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -55,11 +66,24 @@ pub const EVENT: &str = "safe-stop";
 /// The lock file's name in PCTwin's local app data folder (windows/hooks.nsh names it too).
 pub const LOCK_FILE: &str = "safe-stop.lock";
 
+/// The file the Windows installer keeps open beside the program while it closes PCTwin
+/// (windows/hooks.nsh names it too).
+pub const CLOSING_FILE: &str = "safe-stop-closing";
+
+/// How long a first step waits for an installer that is closing PCTwin before it starts anyway
+/// (an installer that stopped part way may leave its file behind, but no longer holds it open).
+const CLOSING_WAIT: Duration = Duration::from_secs(60);
+
+/// How long a step tries again to take its file while the installer is looking at it.
+const PROBE_WAIT: Duration = Duration::from_secs(3);
+
 type Notify = Box<dyn Fn(&SafeStopView) + Send + Sync>;
 
 /// The steps going on now, and the lock file while any is.
 pub struct SafeStop {
     inner: Mutex<Inner>,
+    /// Told when an update stops being installed.
+    changed: Condvar,
 }
 
 #[derive(Default)]
@@ -67,7 +91,11 @@ struct Inner {
     busy: BTreeMap<BusyWith, u32>,
     file: Option<File>,
     lock: Option<PathBuf>,
+    /// The installer's file while it closes PCTwin ([`CLOSING_FILE`]).
+    closing: Option<PathBuf>,
     notify: Option<Notify>,
+    /// An update is being installed: no step starts.
+    updating: bool,
 }
 
 impl Inner {
@@ -93,17 +121,71 @@ impl Drop for Hold {
     }
 }
 
-/// Opens `path` so that no other program may open it at all while PCTwin holds it (Windows:
-/// share mode 0, through the standard library's safe API).
-fn open_exclusive(path: &std::path::Path) -> std::io::Result<File> {
-    let mut o = std::fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
+/// An update being installed; when this is dropped (the install failed), steps may start again.
+#[must_use = "steps may start again as soon as this is dropped"]
+pub struct Staged {
+    stop: &'static SafeStop,
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        self.stop.lock().updating = false;
+        self.stop.changed.notify_all();
+    }
+}
+
+fn no_sharing(o: &mut std::fs::OpenOptions) {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
         o.share_mode(0);
     }
+    #[cfg(not(windows))]
+    let _ = o;
+}
+
+/// Opens `path` so that no other program may open it at all while PCTwin holds it (Windows:
+/// share mode 0, through the standard library's safe API).
+fn open_exclusive(path: &Path) -> std::io::Result<File> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    no_sharing(&mut o);
     o.open(path)
+}
+
+/// Whether `err` is Windows saying another program has the file open (`ERROR_SHARING_VIOLATION`).
+fn shared_elsewhere(err: &std::io::Error) -> bool {
+    cfg!(windows) && err.raw_os_error() == Some(32)
+}
+
+/// [`open_exclusive`], tried again for a moment while another program has the file open: the
+/// installer opens it for an instant to see whether PCTwin holds it.
+fn open_exclusive_waiting(path: &Path) -> Option<File> {
+    let until = Instant::now() + PROBE_WAIT;
+    loop {
+        match open_exclusive(path) {
+            Ok(f) => return Some(f),
+            Err(e) if shared_elsewhere(&e) && Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Whether the installer is closing PCTwin now: its file is there and another program (the
+/// installer) has it open. A file left behind by an installer that stopped is not held.
+fn installer_closing(path: &Path) -> bool {
+    if std::fs::symlink_metadata(path).is_err() {
+        return false;
+    }
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true);
+    no_sharing(&mut o);
+    match o.open(path) {
+        Ok(_) => false,
+        Err(e) => shared_elsewhere(&e),
+    }
 }
 
 impl SafeStop {
@@ -114,8 +196,11 @@ impl SafeStop {
                 busy: BTreeMap::new(),
                 file: None,
                 lock: None,
+                closing: None,
                 notify: None,
+                updating: false,
             }),
+            changed: Condvar::new(),
         }
     }
 
@@ -124,29 +209,85 @@ impl SafeStop {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Where the lock file goes, and who is told when the view changes. A step already going on
-    /// takes the file at once.
-    pub fn set_up(&self, lock: Option<PathBuf>, notify: Option<Notify>) {
+    /// Where the lock file goes, where the installer's file is ([`CLOSING_FILE`]), and who is
+    /// told when the view changes. A step already going on takes the file at once.
+    pub fn set_up(&self, lock: Option<PathBuf>, closing: Option<PathBuf>, notify: Option<Notify>) {
         let mut inner = self.lock();
         inner.lock = lock;
+        inner.closing = closing;
         inner.notify = notify;
         if !inner.busy.is_empty() && inner.file.is_none() {
-            inner.file = inner.lock.as_deref().and_then(|p| open_exclusive(p).ok());
+            inner.file = inner.lock.as_deref().and_then(open_exclusive_waiting);
         }
     }
 
-    /// Starts a step of kind `what`.
-    pub fn hold(&'static self, what: BusyWith) -> Hold {
-        let mut inner = self.lock();
-        let was = inner.view();
-        if inner.busy.is_empty() && inner.file.is_none() {
-            // Held before the step starts: an installer that could open the file a moment ago
-            // finds it held now. If it cannot be made, the in-app update still waits.
-            inner.file = inner.lock.as_deref().and_then(|p| open_exclusive(p).ok());
+    /// Takes the file for a first step. `false`: the installer is closing PCTwin right now, so
+    /// the step must not start (the file is let go again, so the installer sees PCTwin idle).
+    fn take_file(inner: &mut Inner) -> bool {
+        if !inner.busy.is_empty() || inner.file.is_some() {
+            return true;
         }
+        // Held before the step starts: an installer that could open the file a moment ago finds
+        // it held now. If it cannot be made, the in-app update still waits.
+        inner.file = inner.lock.as_deref().and_then(open_exclusive_waiting);
+        // Only then is the installer's file looked at (see the module's notes).
+        if inner.closing.as_deref().is_some_and(installer_closing) {
+            inner.file = None;
+            return false;
+        }
+        true
+    }
+
+    fn start(&'static self, inner: &mut Inner, what: BusyWith) -> Hold {
+        let was = inner.view();
         *inner.busy.entry(what).or_insert(0) += 1;
-        Self::told(&inner, &was);
+        Self::told(inner, &was);
         Hold { stop: self, what }
+    }
+
+    /// Starts a step of kind `what`. While an update is being installed, or the installer is
+    /// closing PCTwin, it waits first (PCTwin is about to close; an update that failed lets it
+    /// start).
+    pub fn hold(&'static self, what: BusyWith) -> Hold {
+        let closing_until = Instant::now() + CLOSING_WAIT;
+        let mut inner = self.lock();
+        loop {
+            if inner.updating {
+                inner = self.changed.wait(inner).unwrap_or_else(|e| e.into_inner());
+                continue;
+            }
+            if Self::take_file(&mut inner) || Instant::now() >= closing_until {
+                return self.start(&mut inner, what);
+            }
+            inner = self
+                .changed
+                .wait_timeout(inner, Duration::from_millis(250))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
+
+    /// Starts a step of kind `what` only if nothing else is going on, no update is being
+    /// installed and the installer is not closing PCTwin: checked and held in one go, so two
+    /// steps can never both find PCTwin free.
+    pub fn try_hold(&'static self, what: BusyWith) -> Option<Hold> {
+        let mut inner = self.lock();
+        if inner.updating || !inner.busy.is_empty() || !Self::take_file(&mut inner) {
+            return None;
+        }
+        Some(self.start(&mut inner, what))
+    }
+
+    /// Stops any step from starting while an update is installed: `None` when a step is going
+    /// on now. Checked and set in one go, so no step can start between the check and the
+    /// install.
+    pub fn begin_update(&'static self) -> Option<Staged> {
+        let mut inner = self.lock();
+        if inner.updating || !inner.busy.is_empty() {
+            return None;
+        }
+        inner.updating = true;
+        Some(Staged { stop: self })
     }
 
     fn end(&self, what: BusyWith) {
@@ -205,9 +346,19 @@ pub fn set_up<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         std::fs::create_dir_all(&d).ok()?;
         Some(d.join(LOCK_FILE))
     });
+    // The installer's file, beside the program it installed (Windows only: nothing else runs a
+    // hook).
+    let closing = if cfg!(windows) {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| Some(exe.parent()?.join(CLOSING_FILE)))
+    } else {
+        None
+    };
     let app = app.clone();
     gate().set_up(
         lock,
+        closing,
         Some(Box::new(move |v: &SafeStopView| {
             let _ = app.emit(EVENT, v.clone());
         })),
@@ -235,6 +386,7 @@ mod tests {
         let told = Arc::new(Mutex::new(Vec::new()));
         let t = told.clone();
         gate.set_up(
+            None,
             None,
             Some(Box::new(move |v: &SafeStopView| {
                 t.lock().unwrap().push(v.clone())
@@ -291,7 +443,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(LOCK_FILE);
         let gate = leaked();
-        gate.set_up(Some(path.clone()), None);
+        gate.set_up(Some(path.clone()), None, None);
         let opens = || {
             std::fs::OpenOptions::new()
                 .read(true)
@@ -311,11 +463,126 @@ mod tests {
         // A step started before the gate knew its file takes it as soon as it does.
         let gate = leaked();
         let early = gate.hold(BusyWith::Undoing);
-        gate.set_up(Some(path.clone()), None);
+        gate.set_up(Some(path.clone()), None, None);
         if cfg!(windows) {
             assert!(!opens());
         }
         drop(early);
         assert!(opens());
+    }
+
+    /// Fresh-context review F7: "is anything going on?" and taking the step are one act, so two
+    /// steps can never both find PCTwin free.
+    #[test]
+    fn try_hold_checks_and_holds_in_one_go() {
+        let gate = leaked();
+        let first = gate.try_hold(BusyWith::Rebuilding).expect("free");
+        assert!(gate.try_hold(BusyWith::Undoing).is_none());
+        assert!(gate.try_hold(BusyWith::Rebuilding).is_none());
+        assert_eq!(gate.view().busy, vec![BusyWith::Rebuilding]);
+        drop(first);
+        assert!(gate.try_hold(BusyWith::Undoing).is_some());
+        assert!(gate.view().safe);
+    }
+
+    /// Fresh-context review F2: once an update is being installed no step starts: a step asked
+    /// for waits until the install failed, and `try_hold` refuses. An update cannot be staged
+    /// while a step runs.
+    #[test]
+    fn no_step_starts_while_an_update_is_installed() {
+        let gate = leaked();
+        let step = gate.hold(BusyWith::Moving);
+        assert!(gate.begin_update().is_none(), "a step is going on");
+        drop(step);
+        let staged = gate.begin_update().expect("safe now");
+        assert!(gate.begin_update().is_none(), "one update at a time");
+        assert!(gate.try_hold(BusyWith::Undoing).is_none());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let h = gate.hold(BusyWith::Rebuilding);
+            tx.send(()).unwrap();
+            drop(h);
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_millis(400)).is_err(),
+            "the step waits while the update is installed"
+        );
+        assert!(gate.view().safe);
+        drop(staged);
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the step starts once the install failed");
+        waiter.join().unwrap();
+    }
+
+    /// Fresh-context review F4: the installer opens the lock file for an instant to see whether
+    /// PCTwin holds it; a step starting in that instant still takes the file once the installer
+    /// lets go, instead of running with nothing held.
+    #[cfg(windows)]
+    #[test]
+    fn a_step_takes_its_file_after_the_installers_look() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(LOCK_FILE);
+        std::fs::write(&path, b"").unwrap();
+        let gate = leaked();
+        gate.set_up(Some(path.clone()), None, None);
+        // The installer's look: ordinary sharing, held for a moment.
+        let look = std::fs::File::open(&path).unwrap();
+        let let_go = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(look);
+        });
+        let step = gate.hold(BusyWith::Moving);
+        let_go.join().unwrap();
+        assert!(
+            std::fs::File::open(&path).is_err(),
+            "the step holds the file with no sharing"
+        );
+        drop(step);
+        assert!(std::fs::File::open(&path).is_ok());
+    }
+
+    /// Fresh-context review F4 (the gap between the installer's check and its closing PCTwin):
+    /// while the installer holds its file open, a first step does not start, and its own file
+    /// stays free so the installer, checking again, sees PCTwin idle. A file the installer left
+    /// behind and no longer holds stops nothing.
+    #[cfg(windows)]
+    #[test]
+    fn a_first_step_waits_while_the_installer_closes_pctwin() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join(LOCK_FILE);
+        let closing = dir.path().join(CLOSING_FILE);
+        std::fs::write(&closing, b"").unwrap();
+        let gate = leaked();
+        gate.set_up(Some(lock.clone()), Some(closing.clone()), None);
+        // Left behind, not held: the step starts at once.
+        let h = gate
+            .try_hold(BusyWith::Moving)
+            .expect("a file left behind stops nothing");
+        drop(h);
+        let installer = std::fs::File::open(&closing).unwrap();
+        assert!(gate.try_hold(BusyWith::Moving).is_none());
+        assert!(gate.view().safe);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let h = gate.hold(BusyWith::Rebuilding);
+            tx.send(()).unwrap();
+            drop(h);
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_millis(600)).is_err(),
+            "no step starts while the installer closes PCTwin"
+        );
+        assert!(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&lock)
+                .is_ok(),
+            "the installer, checking again, finds PCTwin idle"
+        );
+        drop(installer);
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("the step starts once the installer let go");
+        waiter.join().unwrap();
     }
 }

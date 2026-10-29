@@ -41,12 +41,15 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Option<UpdateView> {
 /// while a move is under way or PCTwin is in the middle of a step that must not be cut part way
 /// (rebuilding, app data, an undo: `Busy`; the screens say what it waits for with `safe_stop`);
 /// `NotMoving` when there is no update after all.
+///
+/// The download can take minutes, and a move, a rebuild or an undo may start meanwhile: so it is
+/// only downloaded first, and installed only if PCTwin is still at a safe point right then, with
+/// every step kept from starting from that moment on ([`install_when_safe`]).
 #[tauri::command]
 pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), MoveProblem> {
-    if !may_update(
-        app.state::<AppMoving>().underway(),
-        &crate::deliver::safe_stop::gate().view(),
-    ) {
+    let gate = crate::deliver::safe_stop::gate();
+    let underway = || app.state::<AppMoving>().underway();
+    if !may_update(underway(), &gate.view()) {
         return Err(MoveProblem::Busy);
     }
     let update = app
@@ -56,12 +59,33 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), MovePro
         .await
         .map_err(|_| MoveProblem::Failed)?
         .ok_or(MoveProblem::NotMoving)?;
-    // The signature is checked before anything is installed; a bad one fails here.
-    update
-        .download_and_install(|_, _| {}, || {})
+    // The signature is checked here, and again just before anything is installed.
+    let bytes = update
+        .download(|_, _| {}, || {})
         .await
         .map_err(|_| MoveProblem::Failed)?;
+    let _staged = install_when_safe(gate, underway, || {
+        update.install(&bytes).map_err(|_| MoveProblem::Failed)
+    })?;
+    // Windows: the installer has taken over and this app has already closed. Elsewhere: no step
+    // starts before the new build opens.
     app.restart()
+}
+
+/// Installs (`install`) only if nothing is going on right now (`underway`: a move), keeping every
+/// step from starting from the check on: the hold is kept by the caller until PCTwin restarts,
+/// and let go if the install fails.
+fn install_when_safe(
+    gate: &'static crate::deliver::safe_stop::SafeStop,
+    underway: impl Fn() -> bool,
+    install: impl FnOnce() -> Result<(), MoveProblem>,
+) -> Result<crate::deliver::safe_stop::Staged, MoveProblem> {
+    let staged = gate.begin_update().ok_or(MoveProblem::Busy)?;
+    if underway() {
+        return Err(MoveProblem::Busy);
+    }
+    install()?;
+    Ok(staged)
 }
 
 /// Whether an update may start: no move under way, and PCTwin at a safe stopping point.
@@ -88,5 +112,48 @@ mod tests {
         assert!(!may_update(true, &safe));
         assert!(!may_update(false, &undoing));
         assert!(!may_update(true, &undoing));
+    }
+
+    /// Fresh-context review F2: the gate is checked again right before the install, and no step
+    /// can start from then on; a step that started during the download stops the install, and a
+    /// failed install lets steps start again.
+    #[test]
+    fn the_install_checks_again_and_keeps_steps_from_starting() {
+        use crate::deliver::safe_stop::SafeStop;
+        let gate: &'static SafeStop = Box::leak(Box::new(SafeStop::new()));
+        // A rebuild started while the update downloaded: nothing is installed.
+        let step = gate.hold(BusyWith::Rebuilding);
+        let mut ran = false;
+        let r = install_when_safe(
+            gate,
+            || false,
+            || {
+                ran = true;
+                Ok(())
+            },
+        );
+        assert!(matches!(r, Err(MoveProblem::Busy)));
+        assert!(!ran);
+        drop(step);
+        // A move under way: nothing is installed, and steps may start again.
+        let r = install_when_safe(gate, || true, || Ok(()));
+        assert!(matches!(r, Err(MoveProblem::Busy)));
+        assert!(gate.try_hold(BusyWith::Moving).is_some());
+        // While installing, no step can start; after a failure they can.
+        let r = install_when_safe(
+            gate,
+            || false,
+            || {
+                assert!(gate.try_hold(BusyWith::Undoing).is_none());
+                Err(MoveProblem::Failed)
+            },
+        );
+        assert!(matches!(r, Err(MoveProblem::Failed)));
+        assert!(gate.try_hold(BusyWith::Undoing).is_some());
+        // A good install keeps steps from starting until PCTwin restarts.
+        let staged = install_when_safe(gate, || false, || Ok(())).ok();
+        assert!(staged.is_some());
+        assert!(gate.try_hold(BusyWith::Undoing).is_none());
+        drop(staged);
     }
 }
