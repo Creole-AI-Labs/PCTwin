@@ -1,0 +1,67 @@
+/* Finishing a move (Task List 2.7). Spacing and colour come from the design system's tokens. */
+.fin-block {
+  margin-block-start: var(--space-4);
+}
+
+.fin-block > h2 {
+  margin-block-end: var(--space-2);
+  font-size: var(--type-body);
+}
+
+.fin-headline {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  margin-block-start: var(--space-3);
+}
+
+.fin-headline h2 {
+  font-size: var(--type-body);
+  margin: 0;
+}
+
+.fin-headline p {
+  margin-block-start: var(--space-1);
+  color: var(--colour-muted);
+}
+
+.fin-list {
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-5);
+}
+
+.fin-list li + li {
+  margin-block-start: var(--space-1);
+}
+
+.fin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+}
+
+.fin-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  font: inherit;
+  max-block-size: 20rem;
+  overflow: auto;
+}
+
+.fin-field {
+  margin-block-start: var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fin-field input[type="date"] {
+  min-block-size: var(--control-small);
+  max-inline-size: 16rem;
+}
