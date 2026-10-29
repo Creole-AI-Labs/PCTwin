@@ -283,3 +283,206 @@ pub fn tested(rows: &Catalogue<CompatRow>, app: &FoundApp, to: AppSystem) -> Tes
         version: Some(row.version.clone()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pctwin_record::{AppArch, AppMaker, FoundWhere, Owner, RegistryView, SignerId};
+
+    const CODE: &str = "{11111111-2222-3333-4444-555555555555}";
+
+    fn writer() -> FoundApp {
+        FoundApp {
+            name: "Writer".into(),
+            version: Some("3.1".into()),
+            publisher: Some("Example Ltd".into()),
+            owner: Owner::Shared,
+            system: AppSystem::Windows,
+            found: FoundWhere::WindowsEntry {
+                view: RegistryView::Machine,
+                key: "Writer".into(),
+                product_code: Some(CODE.into()),
+            },
+            arch: AppArch::UNKNOWN,
+            maker: AppMaker::Windows(Box::new(SignerId {
+                organization: Some("Example Ltd".into()),
+                country: Some("GB".into()),
+                ..Default::default()
+            })),
+            web: None,
+            update_feed: None,
+            installers: vec![],
+            notes: vec![],
+        }
+    }
+
+    fn file(rows: &str) -> Catalogue<CompatRow> {
+        Catalogue::shipped(&format!(
+            r#"{{"format":1,"catalogue":"app-compat","version":1,"rows":[{rows}]}}"#
+        ))
+    }
+
+    fn row(extra: &str) -> String {
+        format!(
+            r#"{{"id":"writer-win-win","from":"windows","to":"windows",
+                "match":{{"product-code":"{CODE}"}},
+                "checked-on":"2026-10-29","how":"lab","version":"3.1",{extra}}}"#
+        )
+    }
+
+    fn map(pairs: &[(Aspect, AspectResult)]) -> BTreeMap<Aspect, AspectResult> {
+        pairs.iter().copied().collect()
+    }
+
+    #[test]
+    fn the_outcome_is_never_more_than_the_tests_showed() {
+        use Aspect::*;
+        use AspectResult::*;
+        assert_eq!(outcome(&map(&[])), Outcome::NotTested);
+        // An install that was not tested is "not tested", whatever else was.
+        assert_eq!(
+            outcome(&map(&[(Settings, Works), (Launch, Works)])),
+            Outcome::NotTested
+        );
+        assert_eq!(
+            outcome(&map(&[(Install, NotApplicable)])),
+            Outcome::NotTested
+        );
+        assert_eq!(
+            outcome(&map(&[(Install, NotSupported)])),
+            Outcome::NotSupported
+        );
+        assert_eq!(
+            outcome(&map(&[(Install, NotSupported), (Launch, Works)])),
+            Outcome::NotSupported
+        );
+        assert_eq!(outcome(&map(&[(Install, Works)])), Outcome::Works);
+        assert_eq!(
+            outcome(&map(&[(Install, Works), (Settings, NotApplicable)])),
+            Outcome::Works
+        );
+        assert_eq!(
+            outcome(&map(&[(Install, Works), (Launch, Guided)])),
+            Outcome::WorksWithSteps
+        );
+        assert_eq!(outcome(&map(&[(Install, Guided)])), Outcome::WorksWithSteps);
+        assert_eq!(
+            outcome(&map(&[
+                (Install, Works),
+                (Launch, Guided),
+                (Undo, NotSupported)
+            ])),
+            Outcome::Partly
+        );
+        assert_eq!(
+            outcome(&map(&[(Install, Works), (DataImport, NotSupported)])),
+            Outcome::Partly
+        );
+    }
+
+    #[test]
+    fn an_app_with_no_row_is_not_tested_and_never_presumed_to_work() {
+        let t = tested(shipped(), &writer(), AppSystem::Windows);
+        assert_eq!(t.outcome, Outcome::NotTested);
+        assert_eq!(t.aspects.len(), Aspect::ALL.len());
+        assert!(
+            t.aspects
+                .iter()
+                .all(|a| a.result == AspectResult::NotTested)
+        );
+        assert_eq!((t.checked_on, t.how, t.version), (None, None, None));
+        assert!(
+            shipped().report().refused.is_none(),
+            "the shipped file reads"
+        );
+    }
+
+    /// ADOPTION change 7: a new app added only as a catalogue row works end to end, with no
+    /// code change.
+    #[test]
+    fn a_row_added_as_data_alone_shows_its_real_tested_outcome() {
+        let cat = file(&row(
+            r#""tested":{"install":"works","settings":"works","launch":"guided","undo":"works"},
+               "steps":["sign-in"]"#,
+        ));
+        assert!(cat.report().skipped.is_empty(), "{:?}", cat.report());
+        let t = tested(&cat, &writer(), AppSystem::Windows);
+        assert_eq!(t.outcome, Outcome::WorksWithSteps);
+        let of = |a| t.aspects.iter().find(|l| l.aspect == a).unwrap().result;
+        assert_eq!(of(Aspect::Install), AspectResult::Works);
+        assert_eq!(of(Aspect::Launch), AspectResult::Guided);
+        // Left out of the row: not tested, never presumed.
+        assert_eq!(of(Aspect::DataImport), AspectResult::NotTested);
+        assert_eq!(t.steps, vec![GuidedStep::SignIn]);
+        assert_eq!(t.checked_on.as_deref(), Some("2026-10-29"));
+        assert_eq!(t.how, Some(TestedHow::Lab));
+        assert_eq!(t.version.as_deref(), Some("3.1"));
+        // Another pair of systems is another test.
+        assert_eq!(
+            tested(&cat, &writer(), AppSystem::Mac).outcome,
+            Outcome::NotTested
+        );
+        let mut mac = writer();
+        mac.system = AppSystem::Mac;
+        assert_eq!(
+            tested(&cat, &mac, AppSystem::Windows).outcome,
+            Outcome::NotTested
+        );
+        // Another app (another product code, a similar name) is not this row's.
+        let mut other = writer();
+        other.found = FoundWhere::WindowsEntry {
+            view: RegistryView::Machine,
+            key: "Writer".into(),
+            product_code: Some("{99999999-2222-3333-4444-555555555555}".into()),
+        };
+        assert_eq!(
+            tested(&cat, &other, AppSystem::Windows).outcome,
+            Outcome::NotTested
+        );
+    }
+
+    #[test]
+    fn a_row_that_claims_more_than_a_test_can_show_is_skipped() {
+        let bad = [
+            // No identity: a name alone never matches.
+            r#"{"id":"x","from":"windows","to":"windows","match":{},"tested":{"install":"works"},
+                "checked-on":"2026-10-29","how":"lab","version":"1"}"#
+                .to_string(),
+            // An aspect written as "not tested".
+            row(r#""tested":{"install":"works","undo":"not-tested"}"#),
+            // Nothing tested.
+            row(r#""tested":{}"#),
+            // A guided part with no steps, and steps with no guided part.
+            row(r#""tested":{"install":"guided"}"#),
+            row(r#""tested":{"install":"works"},"steps":["restart"]"#),
+            // No date, or not a date.
+            row(r#""tested":{"install":"works"}"#).replace("2026-10-29", "29/10/2026"),
+            row(r#""tested":{"install":"works"}"#).replace("2026-10-29", "2026-13-01"),
+            row(r#""tested":{"install":"works"}"#).replace("2026-10-29", "2026-10-32"),
+            row(r#""tested":{"install":"works"}"#).replace("2026-10-29", "2026x10-29"),
+            row(r#""tested":{"install":"works"}"#).replace("2026-10-29", "20x6-10-29"),
+            // No version.
+            row(r#""tested":{"install":"works"}"#)
+                .replace(r#""version":"3.1""#, r#""version":" ""#),
+            // A row ID with a slash.
+            row(r#""tested":{"install":"works"}"#).replace("writer-win-win", "a/b"),
+            row(r#""tested":{"install":"works"}"#).replace("writer-win-win", ""),
+        ];
+        for b in &bad {
+            let cat = file(b);
+            assert!(cat.rows().is_empty(), "accepted: {b}");
+        }
+        let good = file(&row(r#""tested":{"install":"works"}"#));
+        assert_eq!(good.rows().len(), 1, "{:?}", good.report());
+        assert!(date_ok("2026-01-01") && date_ok("2026-12-31"));
+        assert!(!date_ok("2026-00-10") && !date_ok("2026-10-00") && !date_ok("2026-10-1"));
+    }
+
+    #[test]
+    fn two_rows_for_one_app_and_pair_are_both_skipped() {
+        let a = row(r#""tested":{"install":"works"}"#);
+        let b = a.replace("writer-win-win", "writer-again");
+        let cat = file(&format!("{a},{b}"));
+        assert!(cat.rows().is_empty());
+    }
+}

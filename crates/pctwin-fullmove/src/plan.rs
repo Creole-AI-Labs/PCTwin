@@ -940,6 +940,8 @@ mod tests {
         assert!(plan.to_install().is_empty(), "nothing installed twice");
         // No route PCTwin installs from: nothing to offer.
         assert_eq!(changes[0].update, None);
+        // ...and no word about undo after an update that cannot happen (Task List 2.9).
+        assert_eq!(changes[0].undo_if_updated, None);
 
         // With a winget route, the older app offers "Update it", and only a tick installs it.
         let found = |a: &FoundApp| {
@@ -970,6 +972,189 @@ mod tests {
         // A tick on an app that is not an older one here installs nothing.
         plan.updates = vec![1];
         assert!(plan.to_install().is_empty());
+    }
+
+    fn routes(routes: Vec<Route>) -> AppPlan {
+        AppPlan {
+            disposition: Disposition::Install,
+            routes,
+            flags: vec![],
+            card: routes::Card {
+                name: "X".into(),
+                version: None,
+                maker: None,
+                web: None,
+                licence_key: false,
+                sign_in: false,
+                registration: vec![],
+                why: None,
+            },
+        }
+    }
+
+    /// Task List 2.9: what undo can do for an install is said by the route PCTwin installs from:
+    /// on Windows (winget) undo removes a Windows Installer package it installed; a Linux package
+    /// tool's install is the person's to remove (undo lists it there).
+    #[test]
+    fn an_install_says_honestly_whether_undo_can_remove_it() {
+        let winget = || Route::Winget {
+            id: "Example.Writer".into(),
+            by: WingetBy::ProductCode,
+        };
+        let apt = || Route::Apt {
+            package: "writer".into(),
+        };
+        assert_eq!(
+            install_promise(&routes(vec![winget()])),
+            Promise::RemovesIfPackage
+        );
+        assert_eq!(
+            install_promise(&routes(vec![apt()])),
+            Promise::RemoveYourself
+        );
+        // The first route PCTwin installs from decides, never a later one.
+        assert_eq!(
+            install_promise(&routes(vec![apt(), winget()])),
+            Promise::RemoveYourself
+        );
+        assert_eq!(
+            install_promise(&routes(vec![winget(), apt()])),
+            Promise::RemovesIfPackage
+        );
+        let store = Route::StoreListing {
+            family_name: "Example.Writer_abc".into(),
+        };
+        assert_eq!(
+            install_promise(&routes(vec![store, winget()])),
+            Promise::RemovesIfPackage
+        );
+        assert_eq!(install_promise(&routes(vec![])), Promise::RemoveYourself);
+    }
+
+    /// Task List 2.9: every special category's step is said with what undo can do: app data PCTwin
+    /// places is put back; a sign-in or relinking is the maker's; anything PCTwin does not change
+    /// is left.
+    #[test]
+    fn every_special_step_has_an_honest_undo_explanation() {
+        use SpecialStep::*;
+        assert_eq!(special_promise(Copy), Promise::CanReverse);
+        assert_eq!(special_promise(SignIn), Promise::NeedsYouMaker);
+        assert_eq!(special_promise(Relink), Promise::NeedsYouMaker);
+        for step in [ExportFirst, NotYet, LookAtIt] {
+            assert_eq!(special_promise(step), Promise::MustKeep);
+        }
+    }
+
+    /// Task List 2.9: every change on the plan carries an undo explanation that fits what it does
+    /// (an install is never "kept", nothing left alone is "reversed"), an older app PCTwin may
+    /// update says undo keeps the newer one, the preview counts what needs the internet, and each
+    /// app carries its compatibility record ("not tested" with no row).
+    #[test]
+    fn the_preview_explains_undo_for_every_change_and_counts_what_needs_the_internet() {
+        let mut record =
+            Record::new(LaptopId::from_hex("01010101010101010101010101010101").unwrap());
+        let mut notes = app("Notes", Owner::Shared, signed(), Some("{C}"));
+        notes.version = Some("3.0".into());
+        record.apps.found = vec![
+            app("Writer", Owner::Shared, signed(), Some("{A}")),
+            notes,
+            app("Unsigned Tool", Owner::Shared, AppMaker::Unsigned, None),
+        ];
+        let mut older = app("Notes", Owner::Shared, signed(), Some("{c}"));
+        older.version = Some("2.0".into());
+        let installed = AppList {
+            found: vec![older],
+            not_read: vec![],
+        };
+        let winget = |a: &FoundApp| match a.name.as_str() {
+            "Writer" => vec![("Example.Writer".to_string(), WingetBy::ProductCode)],
+            "Notes" => vec![("Example.Notes".to_string(), WingetBy::ProductCode)],
+            _ => vec![],
+        };
+        let here = NewLaptop {
+            system: System::Windows,
+            target: target(),
+            installed: &installed,
+            folders: vec![],
+            winget: &winget,
+        };
+        let mut plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
+        let line = |p: &FullPlan, n: &str| {
+            p.changes()
+                .into_iter()
+                .find(|c| c.title == Title::Name(n.into()))
+                .unwrap()
+        };
+        let writer = line(&plan, "Writer");
+        assert_eq!(
+            (writer.action, writer.undo),
+            (Action::Install, Promise::RemovesIfPackage)
+        );
+        assert_eq!(writer.undo_if_updated, None);
+        let notes = line(&plan, "Notes");
+        assert_eq!(
+            (notes.action, notes.undo),
+            (Action::LeaveAlone, Promise::MustKeep)
+        );
+        assert_eq!(notes.undo_if_updated, Some(Promise::KeepsNewer));
+        let tool = line(&plan, "Unsigned Tool");
+        assert_eq!(tool.undo_if_updated, None);
+        for c in plan.changes() {
+            match c.action {
+                Action::Install => assert!(
+                    matches!(c.undo, Promise::RemovesIfPackage | Promise::RemoveYourself),
+                    "{c:?}"
+                ),
+                Action::LeaveAlone => assert!(
+                    matches!(c.undo, Promise::MustKeep | Promise::NeedsYouMaker),
+                    "{c:?}"
+                ),
+                Action::Merge | Action::Replace => {
+                    assert_eq!(c.undo, Promise::CanReverse, "{c:?}")
+                }
+            }
+            // Apps carry their record; with no row each is "not tested".
+            if c.kind == Kind::App {
+                let t = c.tested.expect("every app has its record");
+                assert_eq!(t.outcome, pctwin_apps::compat::Outcome::NotTested);
+            } else {
+                assert!(c.tested.is_none());
+            }
+        }
+        assert_eq!(plan.to, Some(AppSystem::Windows));
+        // One download (Writer) until the person ticks "Update it" for Notes.
+        assert_eq!(
+            plan.internet(),
+            Internet {
+                downloads: 1,
+                sign_ins: 0
+            }
+        );
+        plan.updates = vec![1];
+        assert_eq!(plan.internet().downloads, 2);
+        // Sign-ins and relinking count; copies and steps PCTwin does not take do not.
+        let special = |name: &str, step| SpecialLine {
+            name: name.into(),
+            step,
+            files: 1,
+            secret: false,
+            ids: vec![],
+            sites: false,
+        };
+        plan.special = vec![
+            special("Mail", SpecialStep::SignIn),
+            special("Browser", SpecialStep::Relink),
+            special("Notes data", SpecialStep::Copy),
+            special("Game", SpecialStep::ExportFirst),
+        ];
+        assert_eq!(plan.internet().sign_ins, 2);
+        // A plan with no idea of this laptop's system says "not tested", never a row's word.
+        plan.to = None;
+        let app = plan.apps[0].app.clone();
+        assert_eq!(
+            plan.tested(&app).outcome,
+            pctwin_apps::compat::Outcome::NotTested
+        );
     }
 
     #[test]
