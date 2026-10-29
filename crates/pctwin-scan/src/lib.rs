@@ -44,6 +44,7 @@ mod mail;
 mod marks;
 mod measure;
 mod people;
+pub mod programs;
 mod recognise;
 mod rules;
 mod scan;

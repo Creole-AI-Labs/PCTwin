@@ -999,6 +999,8 @@ cancel-keep = Keep moving
 outcome-eyebrow = Move results
 outcome-title = Welcome to your next laptop.
 outcome-body = Here is what happened to everything you approved.
+outcome-title-old = Your things are on your new laptop.
+outcome-body-old = Here is what happened to everything you sent. This laptop stays as it was.
 outcome-files-title = Selected files
 outcome-status-partial = Partly done
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
@@ -1080,7 +1082,7 @@ move-found = Found so far: { $size } of your things.
 move-wait-approval-title = Waiting for your new laptop.
 move-wait-approval-body = Your files are ready to go. Check the plan on your new laptop and approve it to start.
 move-wait-list-title = Waiting for your old laptop.
-move-wait-list-body = Your old laptop is finding your files. When it has finished, the plan appears here for you to approve. This can take a few minutes.
+move-wait-list-body = Your old laptop is finding your things, then its person chooses what moves. When that is done, what is coming appears here for you to accept. This can take a few minutes.
 move-wait-starting-title = Starting the move.
 move-wait-starting-body = The plan is approved. Copying starts in a moment.
 move-wait-admin-title = Waiting for an administrator.
@@ -1169,8 +1171,27 @@ drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Your move, item by item.
-report-body = What happened to each item, why, and where it came from and went.
+report-title = Your move, by kind.
+report-body = Open a kind to see its files. Anything that needs you comes first.
+report-needs-title = { $count ->
+        [one] 1 thing needs you
+       *[other] { $count } things need you
+    }
+report-group-photos = Photos
+report-group-videos = Videos
+report-group-music = Music
+report-group-documents = Documents
+report-group-other = Other files
+report-group-size = { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } · { $size }
+report-group-done = All copied and checked
+report-group-some = { $done } of { $total } copied and checked
+report-group-left = { $count ->
+        [one] 1 left on your old laptop, as you chose
+       *[other] { $count } left on your old laptop, as you chose
+    }
 report-filter-label = Show
 report-col-item = Item
 report-col-result = Outcome
@@ -1396,6 +1417,7 @@ history-status-steps-left =
 history-status-paused = Paused
 history-status-stopped = Stopped safely
 history-open-report = Report
+history-undo = Undo
 history-continue = Continue
 history-export = Export history
 history-exported = History saved as { $path }.
@@ -1659,7 +1681,7 @@ guard-undo-legend-can = PCTwin can undo it.
 guard-undo-legend-keeps = PCTwin keeps it. Undo leaves it alone.
 guard-undo-legend-you = Needs you. Only its service or maker can undo it.
 guard-undo-can-reverse = PCTwin can undo it
-guard-undo-can-remove-app = PCTwin can remove it, keeping your work
+guard-undo-can-remove-app = PCTwin can remove the app. It does not touch files you made.
 guard-undo-must-keep = Kept: it was already here
 guard-undo-needs-you-service = Needs you: only the online service can undo it
 guard-undo-needs-you-maker = Needs you: sign-ins and licences are the maker’s
@@ -1849,8 +1871,9 @@ guard-undo-preview-title = What undo will do
 guard-undo-preview-body = PCTwin looked at each change just now. Anything you changed after the move is kept. Nothing happens until you choose Undo.
 guard-undo-preview-which = This undoes the move that finished on { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") }. Your other moves are not changed.
 guard-undo-preview-which-earlier = This undoes the move made with an earlier version of PCTwin. Your other moves are not changed.
+guard-undo-preview-admin = To remove apps, this laptop will ask an administrator to approve.
 guard-undo-plan-put-back = Put back as it was
-guard-undo-plan-remove-app = App removed, your work kept
+guard-undo-plan-remove-app = PCTwin removes the app. PCTwin does not touch files you made.
 guard-undo-plan-keep-changed = Kept: you changed it
 guard-undo-plan-elsewhere = Needs you: done elsewhere
 guard-undo-plan-leave-alone = Left alone: it was already here
@@ -1886,6 +1909,13 @@ fullmove-step-sign-in = Sign in to it again on this laptop.
 fullmove-step-relink = Set it up again on this laptop, or link it again from the app.
 fullmove-step-not-yet = PCTwin does not move this app’s data yet. It is still safe on your old laptop.
 fullmove-step-look-at-it = PCTwin could not tell what this is. Look at it on your old laptop.
+fullmove-group-update =
+    { $count ->
+        [one] An older version is on this laptop
+       *[other] Older versions are on this laptop
+    }
+fullmove-update-it = Update { $name }
+fullmove-update-hint = PCTwin installs the newer version. Your settings for it stay.
 fullmove-special-not-yet = App data such as email, browsers and games
 fullmove-left-by-person = Apps, settings and app data: left on your old laptop, as you chose
 fullmove-special-finish = PCTwin did not move this. It is still safe on your old laptop.
@@ -1914,6 +1944,11 @@ fullmove-restore-not-windows = This laptop has no restore points. PCTwin’s own
 guard-undo-remove-yourself = Remove it yourself if you want
 guard-undo-plan-remove-yourself = You can remove it in your laptop’s settings
 guard-undo-result-remove-yourself = Left for you to remove in your laptop’s settings
+guard-undo-plan-keep-other-version = Kept: it changed since the move
+guard-undo-plan-already-gone = Already removed
+guard-undo-result-kept-other-version = Kept because it changed since the move
+guard-undo-result-removed-restart = Removed. Restart your laptop to finish.
+guard-undo-result-not-removed = Not removed. You can remove it in your laptop’s settings.
 guard-undo-close = Done
 move-wait-appdata-title = Looking at your app data.
 move-wait-appdata-body = Your files are found. PCTwin is still looking at the data your apps keep, such as email and browsers. This takes at most ten minutes. Nothing on this laptop is changed.
@@ -1967,7 +2002,14 @@ choose-mode = What to move
 choose-everything = Everything
 choose-except = Everything except
 choose-only = Only what I choose
-choose-except-hint = Tick what to leave behind.
+choose-except-hint = Untick what to leave behind.
+choose-open = Open { $name }
+choose-close = Close { $name }
+choose-total =
+    { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } · Chosen: { $size }
 choose-only-hint = Tick what to bring.
 choose-apps = Apps, settings and app data
 choose-apps-count =

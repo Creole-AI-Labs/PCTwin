@@ -642,6 +642,23 @@ pub enum Stop {
     NotApproved,
     #[error("the move was cancelled")]
     Cancelled,
+    /// The other laptop went while this one waited on its person (found in the two-copy test,
+    /// 29 October 2026: the old laptop had already said the connection was lost).
+    #[error("the other laptop went before the plan was answered")]
+    LinkLost,
+}
+
+/// Waits for `answer` (a person's choice), unless the other laptop goes first (`gone`
+/// resolves): then [`Stop::LinkLost`], so a person is never asked about a move that cannot run.
+pub async fn or_gone<T>(
+    gone: impl Future<Output = ()>,
+    answer: impl Future<Output = Result<T, Stop>>,
+) -> Result<T, Stop> {
+    tokio::select! {
+        biased;
+        done = answer => done,
+        () = gone => Err(Stop::LinkLost),
+    }
 }
 
 /// The choices a person makes on the new laptop during a move. The test lab answers them by
@@ -1291,5 +1308,24 @@ mod sign_in {
             "notes about startup/plan.txt"
         ));
         assert!(!runs_at_sign_in(None, "Documents/letter.txt"));
+    }
+}
+
+#[cfg(test)]
+mod gone {
+    use super::{Stop, or_gone};
+
+    /// A person's answer wins while the other laptop is there; once it goes, the wait ends with
+    /// the link lost, never left hanging on a page that cannot lead anywhere.
+    #[tokio::test]
+    async fn the_answer_counts_until_the_other_laptop_goes() {
+        let here = std::future::pending::<()>();
+        assert_eq!(
+            or_gone(here, async { Ok::<_, Stop>(7) }).await.ok(),
+            Some(7)
+        );
+        let went = std::future::ready(());
+        let waiting = std::future::pending::<Result<u8, Stop>>();
+        assert!(matches!(or_gone(went, waiting).await, Err(Stop::LinkLost)));
     }
 }

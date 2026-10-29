@@ -92,7 +92,7 @@ export type MoveHistoryState = "finished" | "steps-left" | "paused" | "stopped";
  * keeps nothing: what was sent or received is not remembered (decided 26 October 2026). `when` is an
  * ISO 8601 date and time; `from` and `to` are the laptops' names as the person saw them.
  */
-export type HistoryEntry = { id: string; kind: "move"; when: string; from: string; to: string; state: MoveHistoryState; stepsLeft?: number };
+export type HistoryEntry = { id: string; kind: "move"; when: string; from: string; to: string; state: MoveHistoryState; stepsLeft?: number; /** The move's undo, when its apps and settings can be undone. */ undoId?: string };
 
 /* ---------- Rules the words depend on ---------- */
 

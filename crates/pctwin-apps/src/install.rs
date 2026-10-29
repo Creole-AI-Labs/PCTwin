@@ -18,7 +18,8 @@
 use std::io::Read;
 
 use pctwin_helper::broker::actions::{
-    Action, ExeKind, Hex32, Id, InstallScope, InstallVerifiedPackage, PackageKind, PlannedOperation,
+    Action, ExeKind, Hex16, Hex32, Id, InstallScope, InstallVerifiedPackage, PackageKind,
+    PlannedOperation, ProductCode,
 };
 use pctwin_record::{AppMaker, FoundApp};
 
@@ -82,13 +83,18 @@ pub fn kind_of(installer_type: &str, scope: Option<&str>) -> Result<PackageKind,
 }
 
 /// The plan operation that installs `sha256` (staged as `artifact`) for `app`, checked by the
-/// helper against the old laptop's own maker.
+/// helper against the old laptop's own maker. `product_code`, the manifest's, goes with a
+/// Windows Installer package only: the helper records it for undo when its install made it
+/// appear, for the move `for_move` (only an undo of that move can remove it). An installer
+/// program never carries either (PCTwin never removes those).
 pub fn operation(
     action_id: &str,
     artifact: u64,
     sha256: [u8; 32],
     kind: PackageKind,
     app: &FoundApp,
+    product_code: Option<ProductCode>,
+    for_move: Option<[u8; 16]>,
 ) -> Result<PlannedOperation, NotInstallable> {
     let AppMaker::Windows(signer) = &app.maker else {
         return Err(NotInstallable::NoMaker);
@@ -102,6 +108,10 @@ pub fn operation(
             kind,
             scope: InstallScope::Machine,
             maker: Box::new(crate::found::windows_signer(signer)),
+            product_code: product_code.filter(|_| kind == PackageKind::Msi),
+            for_move: for_move
+                .filter(|_| kind == PackageKind::Msi && product_code.is_some())
+                .map(Hex16),
         }),
     })
 }
@@ -173,7 +183,17 @@ mod tests {
             installers: vec![],
             notes: vec![],
         };
-        let op = operation("install.writer", 3, [9; 32], PackageKind::Msi, &app).unwrap();
+        let code = ProductCode::parse("{11111111-2222-3333-4444-555555555555}");
+        let op = operation(
+            "install.writer",
+            3,
+            [9; 32],
+            PackageKind::Msi,
+            &app,
+            code,
+            Some([5; 16]),
+        )
+        .unwrap();
         let Action::InstallVerifiedPackage(p) = &op.action else {
             panic!()
         };
@@ -181,9 +201,50 @@ mod tests {
         assert_eq!(p.sha256, Hex32([9; 32]));
         assert_eq!(p.scope, InstallScope::Machine);
         assert_eq!(p.maker.certificate, pctwin_maker::Sha256([4; 32]));
+        // A Windows Installer package carries its product code for undo; an installer program
+        // never does, even when its manifest names one.
+        assert_eq!(p.product_code, code);
+        assert_eq!(p.for_move, Some(Hex16([5; 16])));
+        // No product code: no move either (nothing would be recorded).
+        let unnamed = operation(
+            "install.writer",
+            3,
+            [9; 32],
+            PackageKind::Msi,
+            &app,
+            None,
+            Some([5; 16]),
+        )
+        .unwrap();
+        let Action::InstallVerifiedPackage(u) = &unnamed.action else {
+            panic!()
+        };
+        assert_eq!((u.product_code, u.for_move), (None, None));
+        let exe = operation(
+            "install.writer",
+            3,
+            [9; 32],
+            PackageKind::Exe(ExeKind::Inno),
+            &app,
+            code,
+            Some([5; 16]),
+        )
+        .unwrap();
+        let Action::InstallVerifiedPackage(e) = &exe.action else {
+            panic!()
+        };
+        assert_eq!((e.product_code, e.for_move), (None, None));
         app.maker = AppMaker::Unsigned;
         assert_eq!(
-            operation("install.writer", 3, [9; 32], PackageKind::Msi, &app),
+            operation(
+                "install.writer",
+                3,
+                [9; 32],
+                PackageKind::Msi,
+                &app,
+                code,
+                None
+            ),
             Err(NotInstallable::NoMaker)
         );
     }

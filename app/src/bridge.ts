@@ -14,7 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import { FILE_KINDS, ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
@@ -383,7 +383,7 @@ export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "plan-view": ["rebuild"],
   "move-outcome": ["rebuilt", "landed"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
-  "report-item": ["destination", "reason", "evidence", "note"],
+  "report-item": ["destination", "reason", "evidence", "note", "kind", "bytes"],
   "qs-picked": ["problem"],
 };
 
@@ -658,12 +658,16 @@ export function parseReportItem(value: unknown): ReportItem | null {
   const result = parseResult("reason" in f ? { status: f.status, reason: f.reason } : { status: f.status });
   if (!result) return null;
   if ("note" in f && !oneOf(f.note, REPORT_NOTES)) return null;
+  if ("kind" in f && !oneOf(f.kind, FILE_KINDS)) return null;
+  if ("bytes" in f && !(typeof f.bytes === "number" && Number.isSafeInteger(f.bytes) && f.bytes >= 0)) return null;
   const line = {
     id: f.id,
     name: f.name,
     source: f.source,
     ...(typeof f.destination === "string" ? { destination: f.destination } : {}),
     ...(oneOf(f.note, REPORT_NOTES) ? { note: f.note } : {}),
+    ...(oneOf(f.kind, FILE_KINDS) ? { kind: f.kind } : {}),
+    ...(typeof f.bytes === "number" ? { bytes: f.bytes } : {}),
   };
   if (result.status === "copied") {
     const evidence = parseReportEvidence(f.evidence);
@@ -697,7 +701,7 @@ export const moveChoosePlace = (role: FolderRole) => ask("move_choose_place", pa
 export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { role });
 /** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
 /** `secrets`: the secret lines of app data the person ticked, one by one (none unless ticked). */
-export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = []) => run("move_approve", { plan, approve, leftOut, secrets });
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = []) => run("move_approve", { plan, approve, leftOut, secrets, updates });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");
@@ -738,12 +742,14 @@ export const moveAppdataAnswer = (retry: boolean) => run("move_appdata_answer", 
 /** The old laptop: what it found, for the person to choose what moves (`ChoiceView`, event `move-choose`). */
 export type ChoiceGroup = { role: FolderRole; files: number; bytes: number };
 export type LeftBehind = { why: (typeof LEFT_OUT_REASONS)[number]; items: number; bytes: number };
-export type ChoiceView = { groups: ChoiceGroup[]; apps: number; leftBehind: LeftBehind[] };
-/** The person's choice: the groups that move, and whether apps, settings and app data do. */
-export type Choice = { groups: FolderRole[]; apps: boolean };
+/** One folder of the tree (`parts` empty for the group itself): the files counted in it. */
+export type ChoiceFolder = { role: FolderRole; parts: string[]; files: number; bytes: number };
+export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[] };
+/** The person's choice: the folders whose files move, and whether apps, settings and app data do. */
+export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean };
 
 export function parseChoiceView(v: unknown): ChoiceView | null {
-  const f = exactly(v, ["groups", "apps", "leftBehind"]);
+  const f = exactly(v, ["groups", "folders", "apps", "leftBehind"]);
   if (!f || !isCount(f.apps)) return null;
   const groups = listOf(f.groups, (x) => {
     const g = exactly(x, ["role", "files", "bytes"]);
@@ -753,7 +759,12 @@ export function parseChoiceView(v: unknown): ChoiceView | null {
     const l = exactly(x, ["why", "items", "bytes"]);
     return l && oneOf(l.why, LEFT_OUT_REASONS) && isCount(l.items) && isCount(l.bytes) ? { why: l.why, items: l.items, bytes: l.bytes } : null;
   });
-  return groups && leftBehind ? { groups, apps: f.apps, leftBehind } : null;
+  const folders = listOf(f.folders, (x) => {
+    const d = exactly(x, ["role", "parts", "files", "bytes"]);
+    const parts = d ? listOf(d.parts, (p) => (typeof p === "string" ? p : null)) : null;
+    return d && parts && oneOf(d.role, FOLDER_ROLES) && isCount(d.files) && isCount(d.bytes) ? { role: d.role, parts, files: d.files, bytes: d.bytes } : null;
+  });
+  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind } : null;
 }
 /** The old laptop: the person's choice of what moves. */
 export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });
@@ -1041,19 +1052,22 @@ export type HistoryEntryRaw = {
   other: Label | null;
   /** The new laptop's name, when known. */
   newName: Label | null;
+  /** The move's undo book, when its apps and settings can be undone. */
+  undoId: string | null;
   state: "finished" | "steps-left" | "stopped";
   stepsLeft: number;
 };
 
 export function parseHistoryEntry(value: unknown): HistoryEntryRaw | null {
-  const f = exactly(value, ["id", "kind", "when", "other", "newName", "state", "stepsLeft"]);
+  const f = exactly(value, ["id", "kind", "when", "other", "newName", "undoId", "state", "stepsLeft"]);
   if (!f || typeof f.id !== "string" || typeof f.when !== "string" || !isCount(f.stepsLeft)) return null;
   if (!oneOf(f.kind, ["move"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped"] as const)) return null;
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
   const newName = f.newName === null ? null : parseLabelView(f.newName);
   if (f.newName !== null && newName === null) return null;
-  return { id: f.id, kind: f.kind, when: f.when, other, newName, state: f.state, stepsLeft: f.stepsLeft };
+  if (f.undoId !== null && !(typeof f.undoId === "string" && /^[0-9a-f]{32}$/.test(f.undoId))) return null;
+  return { id: f.id, kind: f.kind, when: f.when, other, newName, undoId: f.undoId, state: f.state, stepsLeft: f.stepsLeft };
 }
 
 /** What an entry kept: the move's report. */

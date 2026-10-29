@@ -1,14 +1,15 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useState } from "react";
 import { useSettle } from "../motion/screen";
-import { historyExport, historyList, historyOpen, type HistoryEntryRaw } from "../bridge";
+import { fullmoveUndo, historyExport, historyList, historyOpen, type HistoryEntryRaw } from "../bridge";
 import type { ReportItem } from "../move";
 import type { HistoryEntry } from "../quicksend";
 import { labelShownSafely } from "../pairing";
 import History, { type ExportResult } from "./History";
 import Report from "./Report";
+import UndoHost from "./UndoHost";
 
-type View = { kind: "list" } | { kind: "report"; items: ReportItem[] };
+type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "undo" };
 
 /**
  * F08 My PCTwin history, from what the app recorded on this laptop when each move ended (never from
@@ -47,9 +48,20 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       to: newName ?? l10n.getString("progress-route-new"),
       state: e.state,
       stepsLeft: e.stepsLeft,
+      undoId: e.undoId ?? undefined,
     };
   });
 
+  // Undo of a past move's apps and settings, through the flow guard (R05, R06), as from its result.
+  if (view.kind === "undo") {
+    return (
+      <UndoHost
+        onClosed={() => {
+          setView({ kind: "list" });
+        }}
+      />
+    );
+  }
   if (view.kind === "report") {
     return (
       <Report
@@ -73,6 +85,14 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
         );
       }}
       onContinue={() => undefined}
+      onUndo={(undoId) => {
+        fullmoveUndo(undoId).then(
+          () => {
+            setView({ kind: "undo" });
+          },
+          () => undefined,
+        );
+      }}
       onExport={() => {
         historyExport().then(
           (path) => {

@@ -52,7 +52,20 @@ function Changes({ titleId, changes }: { titleId: string; changes: ChangeView[] 
 }
 
 /** M23's section for the full move: every app, setting and special category, with what undo can do for each. */
-export function RebuildPlanSection({ rebuild, picked = [], onPick }: { rebuild: RebuildPlan; picked?: readonly number[]; onPick?: (line: number, bring: boolean) => void }) {
+export function RebuildPlanSection({
+  rebuild,
+  picked = [],
+  onPick,
+  updates = [],
+  onUpdate,
+}: {
+  rebuild: RebuildPlan;
+  picked?: readonly number[];
+  onPick?: (line: number, bring: boolean) => void;
+  /** The older apps here ticked "Update it", by their place in the plan. */
+  updates?: readonly number[];
+  onUpdate?: (app: number, update: boolean) => void;
+}) {
   const { l10n } = useLocalization();
   const install = rebuild.changes.filter((c) => c.kind === "app" && c.action === "install");
   const settings = rebuild.changes.filter((c) => c.kind === "settings");
@@ -61,6 +74,7 @@ export function RebuildPlanSection({ rebuild, picked = [], onPick }: { rebuild: 
   const needs = rebuild.changes.filter((c) => c.needs !== null);
   const here = rebuild.changes.filter((c) => c.kind === "app" && c.action === "leave-alone" && c.needs === null);
   const left = rebuild.notMoved.filter((n) => n.count > 0);
+  const older = rebuild.changes.filter((c) => c.update !== null);
   return (
     <section className="fm-plan" aria-labelledby="fm-plan-title">
       <h2 id="fm-plan-title" className="plan-box-title">
@@ -96,6 +110,29 @@ export function RebuildPlanSection({ rebuild, picked = [], onPick }: { rebuild: 
       )}
       <Changes titleId="fullmove-group-needs" changes={needs} />
       <Changes titleId="fullmove-group-here" changes={here} />
+      {older.length > 0 && onUpdate && (
+        // An older version is here: left as it is unless the person ticks Update it.
+        <PlanBox title={l10n.getString("fullmove-group-update", { count: older.length })}>
+          <ul className="plan-items">
+            {older.map((c) => {
+              const at = c.update ?? -1;
+              const name = c.title.kind === "name" ? c.title.value : l10n.getString(c.title.value);
+              return (
+                <li key={at} className="plan-item">
+                  <Checkbox
+                    checked={updates.includes(at)}
+                    onChange={(on) => {
+                      onUpdate(at, on);
+                    }}
+                    label={l10n.getString("fullmove-update-it", { name })}
+                    hint={l10n.getString("fullmove-update-hint")}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        </PlanBox>
+      )}
       {rebuild.more > 0 && <p className="subhead">{l10n.getString("fullmove-more", { count: rebuild.more })}</p>}
       {(left.length > 0 || rebuild.specialNotMoved > 0) && (
         <PlanBox title={l10n.getString("fullmove-not-moved-title")}>

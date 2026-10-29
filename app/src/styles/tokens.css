@@ -24,6 +24,12 @@
   --colour-error-text: #a93240;
   --colour-error-surface: #fff0f0;
   --colour-focus: #2454f2;
+  /* The report's kinds of file (R02), each also named in words beside it. */
+  --colour-kind-photos: #2454f2;
+  --colour-kind-videos: #8a3ffc;
+  --colour-kind-music: #d0457a;
+  --colour-kind-documents: #1f8a70;
+  --colour-kind-other: #8d95a8;
 
   /* Spacing (four-pixel base) */
   --space-1: 4px;

@@ -39,6 +39,41 @@ pub struct AppResult {
     /// PCTwin installed it here (the laptop's own list shows it), whatever is left to do: undo
     /// lists it for the person to remove if they do not want it.
     pub installed: bool,
+    /// A Windows Installer product this install added, as the helper recorded it and Windows'
+    /// list confirmed: undo may remove it through the helper.
+    pub removable: Option<Box<Removable>>,
+}
+
+/// What undo needs to remove an app PCTwin installed: the product the helper recorded (its
+/// code and version) and the key of that install in the helper's own journal (from its
+/// receipt), which the helper checks before removing anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Removable {
+    pub product: pctwin_helper::broker::actions::InstalledProduct,
+    pub installed_by: pctwin_helper::broker::actions::Hex32,
+}
+
+/// An app undo may remove, by its name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovableApp {
+    pub name: String,
+    pub removable: Removable,
+    /// How an earlier undo of this move left it, once that undo ended for it (removed, found
+    /// already gone, or kept because it changed): a later undo never asks for it again (review
+    /// finding F1). `None` while it is still to be removed.
+    #[serde(default)]
+    pub settled: Option<Settled>,
+}
+
+/// How an undo ended for an app it may remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Settled {
+    Removed,
+    AlreadyGone,
+    KeptOtherVersion,
 }
 
 impl AppResult {
@@ -47,6 +82,7 @@ impl AppResult {
             result: ItemResult::because(reason),
             todo: Vec::new(),
             installed: false,
+            removable: None,
         }
     }
 
@@ -68,6 +104,7 @@ impl AppResult {
             result,
             todo,
             installed: true,
+            removable: None,
         }
     }
 }
@@ -136,8 +173,13 @@ pub struct UndoBook {
     pub recipes: Vec<Recipe>,
     /// Each setting's group (the app or part of the system), by its executor key.
     pub labels: BTreeMap<String, String>,
-    /// The apps PCTwin installed, by name (undo leaves them for the person to remove).
+    /// The apps PCTwin installed that undo leaves for the person to remove, by name (installed by
+    /// an installer program, or with nothing recorded to remove them by).
     pub apps: Vec<String>,
+    /// The Windows Installer apps PCTwin installed that undo removes itself, while each is still
+    /// the version installed.
+    #[serde(default)]
+    pub removable: Vec<RemovableApp>,
     /// App data landed (2.5): its app's name and its landing in the journal.
     #[serde(default)]
     pub landed: Vec<(String, u64)>,
@@ -151,10 +193,41 @@ pub struct UndoBook {
 }
 
 impl UndoBook {
+    /// Whether undo has anything to do for this move: settings, apps to remove or list, or app
+    /// data that landed.
+    pub fn has_anything(&self) -> bool {
+        !self.recipes.is_empty()
+            || !self.apps.is_empty()
+            || !self.removable.is_empty()
+            || !self.landed.is_empty()
+    }
+
     /// The book's ID: its move's scope, as hex (one book per move).
     pub fn id(&self) -> String {
         self.scope.iter().map(|b| format!("{b:02x}")).collect()
     }
+}
+
+/// The apps PCTwin installed, as undo keeps them: those it can remove itself (a Windows
+/// Installer product the helper recorded), and the rest, which undo lists for the person, by
+/// name.
+pub fn installed_apps(apps: &[(String, AppResult)]) -> (Vec<String>, Vec<RemovableApp>) {
+    let mut listed = Vec::new();
+    let mut removable = Vec::new();
+    for (name, a) in apps {
+        match a.removable.as_deref() {
+            Some(r) => removable.push(RemovableApp {
+                name: name.clone(),
+                removable: r.clone(),
+                settled: None,
+            }),
+            None if a.installed || a.result.status() == ItemStatus::Reinstalled => {
+                listed.push(name.clone());
+            }
+            None => {}
+        }
+    }
+    (listed, removable)
 }
 
 /// How one line of app data (an app's components with one step) ended.
@@ -712,16 +785,14 @@ pub fn rebuild(
         .iter()
         .map(|m| (m.key.clone(), m.label.clone()))
         .collect();
+    let (listed, removable) = installed_apps(&apps);
     let undo = UndoBook {
         scope: scope.0,
         book: plan.settings.book(),
         recipes: ran.recipes,
         labels,
-        apps: apps
-            .iter()
-            .filter(|(_, a)| a.installed || a.result.status() == ItemStatus::Reinstalled)
-            .map(|(n, _)| n.clone())
-            .collect(),
+        apps: listed,
+        removable,
         landed: data.effects.clone(),
         home: data.home.clone(),
         when: std::time::SystemTime::now()
@@ -737,5 +808,77 @@ pub fn rebuild(
         restore_point: ran.point.or(point),
         stopped: ran.stopped,
         undo,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pctwin_helper::broker::actions::{
+        Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
+    };
+
+    fn removable() -> Box<Removable> {
+        Box::new(Removable {
+            product: InstalledProduct {
+                code: ProductCode::parse("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}").unwrap(),
+                version: ProductVersion::parse("2.1.0").unwrap(),
+                installed_on: InstallDate::parse("20261028").unwrap(),
+            },
+            installed_by: Hex32([1; 32]),
+        })
+    }
+
+    /// Undo removes what the helper recorded, lists the rest PCTwin installed for the person,
+    /// and leaves out apps PCTwin did not install.
+    #[test]
+    fn the_undo_book_keeps_each_installed_app_once_in_its_place() {
+        let reinstalled = ItemResult::done(ItemStatus::Reinstalled).unwrap();
+        let mut msi = AppResult::installed(reinstalled, vec![]);
+        msi.removable = Some(removable());
+        let exe = AppResult::installed(reinstalled, vec![]);
+        let mut signs_in = AppResult::installed(ItemResult::because(Reason::SignIn), vec![]);
+        signs_in.installed = true;
+        let manual = AppResult::because(Reason::ManualInstall);
+        let apps = vec![
+            ("Writer".to_string(), msi),
+            ("Tool".to_string(), exe),
+            ("Chat".to_string(), signs_in),
+            ("Game".to_string(), manual),
+        ];
+        let (listed, kept) = installed_apps(&apps);
+        assert_eq!(listed, ["Tool", "Chat"]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].name, "Writer");
+        assert_eq!(kept[0].removable, *removable());
+        // An old book without the field still reads.
+        let old: UndoBook = serde_json::from_str(
+            r#"{"scope":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"book":{},"recipes":[],"labels":{},"apps":["Tool"]}"#,
+        )
+        .unwrap();
+        assert!(old.removable.is_empty());
+        assert!(old.has_anything());
+        let mut empty = old.clone();
+        empty.apps.clear();
+        assert!(!empty.has_anything());
+        // A move whose only change was an app undo removes still has an undo.
+        let mut only_removable = empty.clone();
+        only_removable.removable = kept.clone();
+        assert!(only_removable.has_anything());
+        let mut only_landed = empty.clone();
+        only_landed.landed = vec![("Mail".into(), 1)];
+        assert!(only_landed.has_anything());
+        let mut only_settings = empty.clone();
+        only_settings.recipes = vec![
+            serde_json::from_str(
+                r#"{"format":1,"id":"org.example.app","version":1,"platforms":[],"steps":[]}"#,
+            )
+            .unwrap(),
+        ];
+        assert!(only_settings.has_anything());
+        let mut book = old.clone();
+        book.removable = kept;
+        let json = serde_json::to_string(&book).unwrap();
+        assert_eq!(serde_json::from_str::<UndoBook>(&json).unwrap(), book);
     }
 }

@@ -1,90 +1,110 @@
 [
   {
+    "bytes": 1200,
     "destination": "1.txt",
     "evidence": {
       "from": "drive"
     },
     "id": "00000000000000000000000000000001",
+    "kind": "documents",
     "name": "1.txt",
     "source": "documents/1.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "destination": "2.txt",
     "evidence": {
       "from": "memory",
       "why": "too-small"
     },
     "id": "00000000000000000000000000000002",
+    "kind": "documents",
     "name": "2.txt",
     "source": "documents/2.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "destination": "6.txt",
     "evidence": {
       "from": "already-there"
     },
     "id": "00000000000000000000000000000006",
+    "kind": "documents",
     "name": "6.txt",
     "source": "documents/6.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "destination": "7.txt",
     "evidence": {
       "from": "recovered"
     },
     "id": "00000000000000000000000000000007",
+    "kind": "documents",
     "name": "7.txt",
     "source": "documents/7.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "destination": "8.txt",
     "evidence": {
       "from": "new-laptop"
     },
     "id": "00000000000000000000000000000008",
+    "kind": "documents",
     "name": "8.txt",
     "source": "documents/8.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "id": "00000000000000000000000000000003",
+    "kind": "documents",
     "name": "3.txt",
     "reason": "unreadable",
     "source": "documents/3.txt",
     "status": "failed"
   },
   {
+    "bytes": 1200,
     "destination": "4.txt",
     "id": "00000000000000000000000000000004",
+    "kind": "documents",
     "name": "4.txt",
     "reason": "online-only",
     "source": "documents/4.txt",
     "status": "needs-action"
   },
   {
+    "bytes": 1200,
     "destination": "5.txt",
     "id": "00000000000000000000000000000005",
+    "kind": "documents",
     "name": "5.txt",
     "source": "documents/5.txt",
     "status": "skipped-by-user"
   },
   {
+    "bytes": 1200,
     "destination": "9.txt",
     "evidence": {
       "from": "drive"
     },
     "id": "00000000000000000000000000000009",
+    "kind": "documents",
     "name": "9.txt",
     "note": "changed-since-scan",
     "source": "documents/9.txt",
     "status": "copied"
   },
   {
+    "bytes": 1200,
     "id": "00000000000000000000000000000010",
+    "kind": "documents",
     "name": "10.txt",
     "note": "no-longer-there",
     "reason": "unreadable",

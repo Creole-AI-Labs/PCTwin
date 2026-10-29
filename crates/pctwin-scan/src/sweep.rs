@@ -1151,13 +1151,14 @@ pub fn this_laptop_facts(laptop: LaptopId) -> SweepFacts {
     let usage = crate::usage::usage_of(&census);
     let mut remembered: Vec<PathBuf> = usage.recent.into_iter().map(|(p, _)| p).collect();
     remembered.extend(usage.pinned);
+    let volumes = crate::volumes::volumes_this_laptop();
     SweepFacts {
         laptop,
         census,
-        volumes: crate::volumes::volumes_this_laptop(),
+        rules: Rules::shipped().with_programs(crate::programs::program_places(&volumes)),
+        volumes,
         known_folders: crate::folders::find_special_folders(),
         remembered,
-        rules: Rules::shipped(),
     }
 }
 
@@ -2215,16 +2216,22 @@ impl Sweeper<'_> {
                     continue;
                 }
             }
-            let row = if job.depth == 0 {
-                self.facts.rules.at_root(&text, is_system)
-            } else {
-                None
-            }
-            .or_else(|| {
-                (kind == EntryKind::Dir)
-                    .then(|| self.facts.rules.anywhere(&text))
-                    .flatten()
-            });
+            // A folder the laptop names as an installed program's place is counted as a program,
+            // never offered as the person's files; one holding someone's home never is.
+            let program = (kind == EntryKind::Dir && !self.holds_people(&path))
+                .then(|| self.facts.rules.program_at(&path))
+                .flatten();
+            let row = program
+                .or_else(|| {
+                    (job.depth == 0)
+                        .then(|| self.facts.rules.at_root(&text, is_system))
+                        .flatten()
+                })
+                .or_else(|| {
+                    (kind == EntryKind::Dir)
+                        .then(|| self.facts.rules.anywhere(&text))
+                        .flatten()
+                });
             if kind == EntryKind::Dir
                 && let Some(r) = row
                 && r.kind == Kind::OldSystem
@@ -2865,6 +2872,24 @@ impl Sweeper<'_> {
             fresh = true;
         }
         let around = self.state.places[here].placement.clone();
+        // A folder the laptop names as an installed program's place, outside anyone's home: the
+        // program's, counted (a game library or a program installed on another drive).
+        if !in_home
+            && !self.holds_people(path)
+            && let Some(row) = self.facts.rules.program_at(path)
+        {
+            let placement = place_with(row, &around, &self.state.census);
+            let p = self.new_place(
+                job.volume,
+                Some(path.to_string_lossy().into_owned()),
+                placement,
+                Fate::Counted,
+                counted_meta(Space::TheSystem),
+            );
+            let child = self.child(job, name, Zone::Count { place: p }, None);
+            self.enqueue(child);
+            return;
+        }
         // App data, junk and the system's own files inside a home.
         if in_home && let Some(row) = self.facts.rules.in_home(&with(home_parts, &text)) {
             let placement = place_with(row, &around, &self.state.census);

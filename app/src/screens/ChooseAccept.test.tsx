@@ -14,9 +14,12 @@ import { violations } from "../testing/a11y";
 import AcceptMove from "./AcceptMove";
 import { RouteStrip } from "./ProgressParts";
 import Outcome from "./Outcome";
+import History from "./History";
+import { RebuildPlanSection } from "./FullMoveParts";
+import plansFull from "../contract/plan-view.json";
 import outcomes from "../contract/move-outcome.json";
 import { parseMoveOutcome } from "../bridge";
-import ChooseWhat, { choiceOf } from "./ChooseWhat";
+import ChooseWhat, { choiceOf, keyOf, stateOf } from "./ChooseWhat";
 import { next } from "./MoveHost";
 
 const l10n = localization("en");
@@ -53,15 +56,47 @@ describe("choosing what moves, on the old laptop", () => {
   it("every example the engine writes parses, and anything else is refused", () => {
     for (const c of chooses) expect(parseChoiceView(c)).not.toBeNull();
     expect(parseChoiceView({ groups: [], apps: 1 })).toBeNull();
+    expect(parseChoiceView({ groups: [], folders: [{ role: "documents", parts: [1], files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
     expect(parseChoiceView({ groups: [{ role: "nowhere", files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
   });
 
-  it("Everything moves every group and the apps; Everything except leaves the ticked; Only moves the ticked", () => {
+  it("Everything moves every folder and the apps; the others move exactly the ticked folders", () => {
     const v = found();
-    expect(choiceOf(v, "everything", [], false)).toEqual({ groups: ["documents", "pictures"], apps: true });
-    expect(choiceOf(v, "except", ["pictures"], true)).toEqual({ groups: ["documents"], apps: false });
-    expect(choiceOf(v, "only", ["pictures"], false)).toEqual({ groups: ["pictures"], apps: false });
-    expect(choiceOf(v, "only", [], true)).toEqual({ groups: [], apps: true });
+    const all = new Set(v.folders.map(keyOf));
+    expect(choiceOf(v, "everything", new Set(), false)).toEqual({ folders: v.folders.map((f) => ({ role: f.role, parts: f.parts })), apps: true });
+    const work = keyOf({ role: "documents", parts: ["Work"] });
+    expect(choiceOf(v, "only", new Set([work]), false)).toEqual({ folders: [{ role: "documents", parts: ["Work"] }], apps: false });
+    all.delete(work);
+    expect(choiceOf(v, "except", all, true).folders).not.toContainEqual({ role: "documents", parts: ["Work"] });
+  });
+
+  it("a folder with no files of its own is ticked when everything in it is (Documents holding only Lab)", () => {
+    const v: ChoiceView = {
+      groups: [],
+      folders: [
+        { role: "documents", parts: [], files: 0, bytes: 0 },
+        { role: "documents", parts: ["Lab"], files: 426, bytes: 1 },
+      ],
+      apps: 0,
+      leftBehind: [],
+    };
+    expect(stateOf(v, v.folders[0], new Set([keyOf(v.folders[1])]))).toBe("on");
+    expect(stateOf(v, v.folders[0], new Set())).toBe("off");
+  });
+
+  it("a folder with some of its folders ticked is partly ticked, and ticking it ticks all of it", () => {
+    const v = found();
+    const docs = v.folders.find((f) => f.role === "documents" && f.parts.length === 0);
+    if (!docs) throw new Error("Documents is in the example");
+    expect(stateOf(v, docs, new Set([keyOf({ role: "documents", parts: ["Work"] })]))).toBe("mixed");
+    inApp(<ChooseWhat view={v} onContinue={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: text("choose-only") }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-open", { name: text("plan-role-documents") }) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith("Work") }));
+    const box = screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-documents")) });
+    expect(box.getAttribute("aria-checked")).toBe("mixed");
+    fireEvent.click(box);
+    expect(box.getAttribute("aria-checked")).toBe("true");
   });
 
   it("Everything except starts with what PCTwin leaves behind anyway, caches first", () => {
@@ -78,15 +113,16 @@ describe("choosing what moves, on the old laptop", () => {
     const go = screen.getByRole("button", { name: text("choose-continue") });
     expect((go as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(text("choose-nothing"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-documents")) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-pictures")) }));
     fireEvent.click(go);
-    expect(onContinue).toHaveBeenCalledWith({ groups: ["documents"], apps: false });
+    expect(onContinue).toHaveBeenCalledWith({ folders: [{ role: "pictures", parts: [] }], apps: false });
   });
 
   it("has no accessibility violations in any of the three choices", async () => {
     inApp(<ChooseWhat view={found()} onContinue={vi.fn()} />);
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("radio", { name: text("choose-except") }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-open", { name: text("plan-role-documents") }) }));
     expect(await violations()).toEqual([]);
   });
 
@@ -127,6 +163,47 @@ describe("where things landed", () => {
   });
 });
 
+describe("undo from the history", () => {
+  it("a past move that can be undone offers Undo, by its own undo book; one that cannot, does not", () => {
+    const onUndo = vi.fn();
+    const base = { kind: "move", when: "2026-10-28T20:22:00Z", from: "Amun", to: "Ada", state: "finished" } as const;
+    inApp(
+      <History
+        entries={[
+          { ...base, id: "1", undoId: "0123456789abcdef0123456789abcdef" },
+          { ...base, id: "2", when: "2026-10-27T20:22:00Z" },
+        ]}
+        onOpen={vi.fn()}
+        onContinue={vi.fn()}
+        onUndo={onUndo}
+        onExport={vi.fn()}
+        onStart={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    const undo = screen.getAllByRole("button", { name: (n) => n.includes(text("history-undo")) });
+    expect(undo).toHaveLength(1);
+    fireEvent.click(undo[0]);
+    expect(onUndo).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef");
+  });
+});
+
+describe("updating an older app already here", () => {
+  it("an older app offers Update it, off unless ticked, and the tick names its place in the plan", () => {
+    const full = parsePlanView(plansFull[1])?.rebuild;
+    if (!full) throw new Error("the engine's full plan example parses");
+    const line = { ...full.changes[0], action: "leave-alone" as const, needs: null, update: 4 };
+    const rebuild = { ...full, changes: [line] };
+    const onUpdate = vi.fn();
+    inApp(<RebuildPlanSection rebuild={rebuild} onUpdate={onUpdate} />);
+    const name = line.title.kind === "name" ? line.title.value : text(line.title.value);
+    const box: HTMLInputElement = screen.getByRole("checkbox", { name: (n) => n.startsWith(text("fullmove-update-it", { name })) });
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    expect(onUpdate).toHaveBeenCalledWith(4, true);
+  });
+});
+
 describe("accepting on the new laptop", () => {
   const plan = () => {
     const p = parsePlanView(plans[0]);
@@ -151,6 +228,15 @@ describe("accepting on the new laptop", () => {
     } else {
       expect(screen.getByText(text("accept-needs"))).toBeTruthy();
     }
+  });
+
+  it("lists only what changes this laptop: an app already here or a line about what stays is not coming", () => {
+    const withRebuild = plans.map(parsePlanView).find((p) => p?.rebuild && p.rebuild.changes.length > 0);
+    if (!withRebuild?.rebuild) throw new Error("the engine's examples include a plan with changes");
+    const changes = withRebuild.rebuild.changes.map((c) => ({ ...c, action: "leave-alone" as const }));
+    const p = { ...withRebuild, rebuild: { ...withRebuild.rebuild, changes } };
+    inApp(<AcceptMove plan={p} from="Yellow Wolf" onAccept={vi.fn()} onDetails={vi.fn()} onNotNow={vi.fn()} />);
+    expect(screen.queryByText(text("accept-settings"))).toBeNull();
   });
 
   it("never offers Accept while something needs the person", () => {

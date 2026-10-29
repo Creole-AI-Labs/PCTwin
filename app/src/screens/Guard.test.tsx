@@ -341,6 +341,56 @@ describe("what is shown (T28-005, T28-010 to T28-012, T28-014, T28-022)", () => 
     expect(screen.getAllByText(text("guard-undo-must-keep")).length).toBeGreaterThan(0);
   });
 
+  it("undo of apps PCTwin installed says each one plainly: removed, kept at another version, already gone, or left for you", async () => {
+    const preview = {
+      ...g.undoPreview,
+      screen: {
+        ...g.undoPreview.screen,
+        lines: [
+          { name: "Writer", plan: "remove-app" },
+          { name: "Viewer", plan: "keep-other-version" },
+          { name: "Player", plan: "already-gone" },
+          { name: "Tool", plan: "remove-yourself" },
+        ],
+      },
+    } as Projection;
+    const engine = fakeEngine(ready(preview));
+    render(wrap(<GuardHost bridge={engine.bridge} />));
+    await screen.findByRole("heading", { name: text("guard-undo-preview-title") });
+    for (const id of ["guard-undo-plan-remove-app", "guard-undo-plan-keep-other-version", "guard-undo-plan-already-gone", "guard-undo-plan-remove-yourself"]) {
+      expect(screen.getByText(text(id))).toBeTruthy();
+    }
+    // Removing an app needs an administrator's approval, and the preview says so beforehand.
+    expect(screen.getByText(text("guard-undo-preview-admin"))).toBeTruthy();
+    cleanup();
+    const nothingToRemove = { ...preview, screen: { ...preview.screen, lines: [{ name: "Tool", plan: "remove-yourself" }] } } as Projection;
+    const quiet = fakeEngine(ready(nothingToRemove));
+    render(wrap(<GuardHost bridge={quiet.bridge} />));
+    await screen.findByRole("heading", { name: text("guard-undo-preview-title") });
+    expect(screen.queryByText(text("guard-undo-preview-admin"))).toBeNull();
+    cleanup();
+    const done = {
+      ...g.undoDone,
+      screen: {
+        kind: "undo-done",
+        lines: [
+          { name: "Writer", result: { kind: "removed-restart" }, detail: null },
+          { name: "Viewer", result: { kind: "kept-other-version" }, detail: null },
+          { name: "Player", result: { kind: "not-removed" }, detail: null },
+        ],
+        more: 0,
+      },
+    } as Projection;
+    const again = fakeEngine(ready(done));
+    render(wrap(<GuardHost bridge={again.bridge} />));
+    await screen.findByRole("heading", { name: text("guard-undo-done-title") });
+    for (const id of ["guard-undo-result-removed-restart", "guard-undo-result-kept-other-version", "guard-undo-result-not-removed"]) {
+      expect(screen.getByText(text(id))).toBeTruthy();
+    }
+    // Nothing reads as a raw key.
+    expect(document.body.textContent).not.toMatch(/guard-undo-/);
+  });
+
   it("an unknown total is an indeterminate bar with the measured amount, never a percent", async () => {
     const engine = fakeEngine(ready(g.undoRunning));
     render(wrap(<GuardHost bridge={engine.bridge} />));

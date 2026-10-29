@@ -252,6 +252,8 @@ export default function MoveHost({
   const [leftOut, setLeftOut] = useState<FolderRole[]>([]);
   // The secret lines of app data the person ticked, one by one: none unless ticked.
   const [picked, setPicked] = useState<number[]>([]);
+  // The older apps here the person ticked "Update it" for: none unless ticked.
+  const [updates, setUpdates] = useState<number[]>([]);
   // The places the person chose for some folders (M05), and why the last one was not taken.
   const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
@@ -569,8 +571,12 @@ export default function MoveHost({
           onPick={(line, bring) => {
             setPicked((p) => (bring ? (p.includes(line) ? p : [...p, line]) : p.filter((l) => l !== line)));
           }}
+          updates={updates}
+          onUpdate={(app, update) => {
+            setUpdates((u) => (update ? (u.includes(app) ? u : [...u, app]) : u.filter((a) => a !== app)));
+          }}
           onStart={(a) => {
-            moveApprove(a, true, leftOut, picked).then(
+            moveApprove(a, true, leftOut, picked, updates).then(
               () => {
                 setView({ kind: "wait", stage: "moving" });
               },
@@ -581,7 +587,9 @@ export default function MoveHost({
             );
           }}
           onBack={() => {
-            void moveApprove({ revision: view.plan.revision, fingerprint: view.plan.fingerprint }, false).catch(() => undefined);
+            // Back from the details is back to Accept, never a "no": declining is Not now
+            // (found in the two-copy test, 29 October 2026).
+            setOverviewSeen(false);
           }}
         />
       );
@@ -643,6 +651,7 @@ export default function MoveHost({
     case "outcome":
       return (
         <Outcome
+          old={old}
           outcome={view.outcome}
           onReport={() => {
             const outcome = view.outcome;

@@ -492,7 +492,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         },
     };
     let rebuild_rec = Rebuild::new(&journal, &keys().install, &keys().setting);
-    let rebuilt = rebuild(
+    let mut rebuilt = rebuild(
         &plan,
         &done,
         &mut NoApps,
@@ -615,9 +615,10 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     let mut adapter = settings;
     let lines = pctwin_fullmove::undo::undo(
         &rebuild_rec,
-        &rebuilt.undo,
+        &mut rebuilt.undo,
         &mut adapter,
         Some((&keys().capture, &home)),
+        &mut pctwin_fullmove::undo::ListOnly,
     )
     .unwrap();
     assert!(!lines.is_empty());
@@ -688,7 +689,7 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
         let mover = Owner::Person {
             account_id: MOVER.into(),
         };
-        let found = SpecialScan::start(&mover, &old)
+        let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
             .unwrap()
             .wait(&|| false)
             .unwrap();
@@ -804,7 +805,7 @@ async fn staged_app_data_never_outlives_the_move_that_brought_it() {
     let mover = Owner::Person {
         account_id: MOVER.into(),
     };
-    let found = SpecialScan::start(&mover, &old)
+    let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
         .unwrap()
         .wait(&|| false)
         .unwrap();

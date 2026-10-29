@@ -290,6 +290,8 @@ struct Run {
     /// The new laptop: the secret lines of app data the person ticked, one by one, when they
     /// approved (none unless ticked).
     secrets: Vec<u32>,
+    /// The new laptop: the older apps here the person ticked "Update it" for, when they approved.
+    updates: Vec<u32>,
     /// The old laptop: where the person's answer about apps to close goes.
     close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
@@ -302,10 +304,7 @@ struct Run {
     privacy: Option<oneshot::Sender<bool>>,
     /// The old laptop: the groups shown for the person to choose from, and where their choice of
     /// what moves goes (decided 28 October 2026).
-    choosing: Option<(
-        std::collections::BTreeSet<FolderRole>,
-        oneshot::Sender<Choice>,
-    )>,
+    choosing: Option<(std::collections::BTreeSet<Node>, oneshot::Sender<Choice>)>,
     /// The new laptop's name for the history: its own here, the one it said in its greeting on
     /// the old laptop.
     new_name: Option<LabelView>,
@@ -334,28 +333,101 @@ pub struct LeftBehind {
     pub bytes: u64,
 }
 
-/// What the old laptop's person chooses from.
+/// One folder of the person's files the old laptop found, by its group and the folders inside it
+/// (`parts`, empty for the group itself): the files directly in it (or, at the deepest level shown,
+/// anywhere below it), counted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceFolder {
+    pub role: FolderRole,
+    pub parts: Vec<String>,
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// What the old laptop's person chooses from: each group, its folders as a tree (opened one level
+/// at a time on screen), the apps, and what is left behind anyway.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChoiceView {
     pub groups: Vec<ChoiceGroup>,
+    pub folders: Vec<ChoiceFolder>,
     /// Apps found (their settings and app data come with them).
     pub apps: u64,
     pub left_behind: Vec<LeftBehind>,
 }
 
-/// The person's choice: the groups that move, and whether apps, settings and app data do. The
-/// screens turn Everything, Everything except and Only what I choose into this; it can only
-/// leave things out of what was shown, never add to it.
+/// One folder of the tree, as the person's choice names it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FolderKey {
+    pub role: FolderRole,
+    pub parts: Vec<String>,
+}
+
+/// The person's choice: the folders whose files move, and whether apps, settings and app data
+/// do. The screens turn Everything, Everything except and Only what I choose into this; it can
+/// only name folders that were shown, so it only ever leaves things out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Choice {
-    pub groups: Vec<FolderRole>,
+    pub folders: Vec<FolderKey>,
     pub apps: bool,
 }
 
-/// What the person can choose from in `record`: their included files by group, and what is left
-/// out anyway (not their own choice), counted.
+/// One folder of the tree: its group and the folders inside it.
+type Node = (FolderRole, Vec<String>);
+
+/// How deep the tree goes, at most, and how many folders it shows at most (a deeper tree is cut
+/// to fewer levels, never cut off in the middle of a level).
+const CHOICE_DEPTH: usize = 4;
+const MAX_CHOICE_FOLDERS: usize = 4000;
+
+/// Each included file of the person's, by the folder of the tree it counts in (at most `depth`
+/// folders below its group).
+fn node_of(item: &Item, depth: usize) -> Node {
+    let parts = item.path.parts();
+    let folders = &parts[..parts.len().saturating_sub(1)];
+    let shown = folders
+        .iter()
+        .take(depth)
+        .map(|n| n.display().to_string())
+        .collect();
+    (item.place.role, shown)
+}
+
+/// The tree of the person's included files: every folder with its own count, and every folder
+/// above one (so the tree is whole); the depth that keeps it within [`MAX_CHOICE_FOLDERS`].
+fn folder_tree(record: &Record) -> (usize, BTreeMap<Node, (u64, u64)>) {
+    let files: Vec<&Item> = record
+        .items
+        .iter()
+        .filter(|i| {
+            i.inclusion == pctwin_record::Inclusion::Included
+                && matches!(i.kind, pctwin_record::ItemKind::File)
+        })
+        .collect();
+    let mut depth = CHOICE_DEPTH;
+    loop {
+        let mut tree: BTreeMap<Node, (u64, u64)> = BTreeMap::new();
+        for item in &files {
+            let (role, parts) = node_of(item, depth);
+            for n in 0..parts.len() {
+                tree.entry((role, parts[..n].to_vec())).or_default();
+            }
+            let own = tree.entry((role, parts)).or_default();
+            own.0 += 1;
+            own.1 = own.1.saturating_add(item.size_bytes);
+        }
+        if tree.len() <= MAX_CHOICE_FOLDERS || depth == 0 {
+            return (depth, tree);
+        }
+        depth -= 1;
+    }
+}
+
+/// What the person can choose from in `record`: their included files by group and by folder,
+/// and what is left out anyway (not their own choice), counted.
 fn choice_view(record: &Record) -> ChoiceView {
     let mut groups: BTreeMap<FolderRole, (u64, u64)> = BTreeMap::new();
     let mut left: BTreeMap<String, (pctwin_record::LeftOutReason, u64, u64)> = BTreeMap::new();
@@ -379,10 +451,20 @@ fn choice_view(record: &Record) -> ChoiceView {
             }
         }
     }
+    let (_, tree) = folder_tree(record);
     ChoiceView {
         groups: groups
             .into_iter()
             .map(|(role, (files, bytes))| ChoiceGroup { role, files, bytes })
+            .collect(),
+        folders: tree
+            .into_iter()
+            .map(|((role, parts), (files, bytes))| ChoiceFolder {
+                role,
+                parts,
+                files,
+                bytes,
+            })
             .collect(),
         apps: record.apps.found.len() as u64,
         left_behind: left
@@ -392,13 +474,41 @@ fn choice_view(record: &Record) -> ChoiceView {
     }
 }
 
-/// Leaves out of `record` every file in a group the person did not choose (their own choice,
+/// The folders the person may name: the tree `choice_view` showed for `record`.
+fn shown_folders(record: &Record) -> std::collections::BTreeSet<Node> {
+    folder_tree(record).1.into_keys().collect()
+}
+
+/// Leaves out of `record` every file whose folder the person did not choose (their own choice,
 /// said as such on the new laptop), and the apps when they chose none.
 fn apply_choice(record: &mut Record, choice: &Choice) {
-    let kept: std::collections::BTreeSet<FolderRole> = choice.groups.iter().copied().collect();
+    let (depth, _) = folder_tree(record);
+    let kept: std::collections::BTreeSet<Node> = choice
+        .folders
+        .iter()
+        .map(|f| (f.role, f.parts.clone()))
+        .collect();
+    // A folder stays when it is chosen, inside a chosen folder, or on the way to one; any other
+    // is left out with the files in it, so a group with nothing chosen is not in the plan.
+    let folder_kept = |item: &Item| {
+        let parts: Vec<String> = item
+            .path
+            .parts()
+            .iter()
+            .map(|n| n.display().to_string())
+            .collect();
+        let shown = &parts[..parts.len().min(depth)];
+        kept.iter().any(|(role, k)| {
+            *role == item.place.role && (k.starts_with(shown) || shown.starts_with(k))
+        })
+    };
     for item in &mut record.items {
-        if item.inclusion == pctwin_record::Inclusion::Included && !kept.contains(&item.place.role)
-        {
+        let moves = match item.kind {
+            pctwin_record::ItemKind::File => kept.contains(&node_of(item, depth)),
+            pctwin_record::ItemKind::Folder | pctwin_record::ItemKind::Package => folder_kept(item),
+            _ => true,
+        };
+        if item.inclusion == pctwin_record::Inclusion::Included && !moves {
             item.inclusion = pctwin_record::Inclusion::LeftOut {
                 reason: pctwin_record::LeftOutReason::ChosenByUser,
             };
@@ -454,6 +564,7 @@ impl Moving {
             scan_stop: scan_stop.clone(),
             waiting: None,
             secrets: Vec::new(),
+            updates: Vec::new(),
             close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
@@ -486,7 +597,7 @@ impl Moving {
     /// The old laptop: waits for the person's choice of what moves among `groups`.
     fn wait_for_choice(
         &self,
-        groups: std::collections::BTreeSet<FolderRole>,
+        groups: std::collections::BTreeSet<Node>,
     ) -> oneshot::Receiver<Choice> {
         let (tx, rx) = oneshot::channel();
         if let Some(run) = lock(&self.run).as_mut() {
@@ -498,7 +609,12 @@ impl Moving {
     /// The person's choice of what moves: only groups that were shown, once.
     fn choose_what(&self, choice: Choice) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.choosing.take() {
-            Some((shown, tx)) if choice.groups.iter().all(|g| shown.contains(g)) => {
+            Some((shown, tx))
+                if choice
+                    .folders
+                    .iter()
+                    .all(|f| shown.contains(&(f.role, f.parts.clone()))) =>
+            {
                 let _ = tx.send(choice);
                 Ok(())
             }
@@ -541,6 +657,7 @@ impl Moving {
         yes: bool,
         left_out: &[FolderRole],
         secrets: &[u32],
+        updates: &[u32],
     ) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.waiting.take() {
             Some((shown, groups, tx)) if shown == *key => {
@@ -550,6 +667,7 @@ impl Moving {
                 }
                 run.left_out = left_out.iter().copied().collect();
                 run.secrets = secrets.to_vec();
+                run.updates = updates.to_vec();
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -618,6 +736,13 @@ impl Moving {
             }
             None => Err(MoveProblem::NotMoving),
         })?
+    }
+
+    fn updates(&self) -> Vec<u32> {
+        lock(&self.run)
+            .as_ref()
+            .map(|r| r.updates.clone())
+            .unwrap_or_default()
     }
 
     fn secrets(&self) -> Vec<u32> {
@@ -804,6 +929,9 @@ pctwin_types::listed_enum! {
 impl EndedEarly {
     fn of(e: &MoveError) -> Self {
         match e {
+            MoveError::Stopped(Stop::LinkLost) => Self::LinkLost {
+                detail: e.to_string(),
+            },
             MoveError::Stopped(_) => Self::NotApproved,
             MoveError::Transfer(TransferError::VersionGap(gap)) => match gap {
                 pctwin_transfer::VersionGap::ThisLaptopOlder => Self::UpdateHere,
@@ -1005,7 +1133,10 @@ fn plan_view(
                     (0, 0, to)
                 });
                 g.0 = g.0.saturating_add(item.size_bytes);
-                g.1 += 1;
+                // Files are counted, not folders, as the old laptop's choice counted them.
+                if matches!(item.kind, pctwin_record::ItemKind::File) {
+                    g.1 += 1;
+                }
             }
             Inclusion::LeftOut { reason } if shown_to_mover(item, mover) => {
                 left.entry(format!("{reason:?}")).or_insert((reason, 0)).1 += 1;
@@ -1342,20 +1473,32 @@ pub struct LandedPlace {
 
 /// Where the person's things landed: each shown place that holds at least one item now on this
 /// laptop (copied, reinstalled or converted).
-fn landed_places(shown: &BTreeMap<String, String>, report: &[ReportItem]) -> Vec<LandedPlace> {
+fn landed_places(
+    shown: &BTreeMap<String, String>,
+    received: &Received,
+    mover: &str,
+    landing: impl Fn(&Item) -> Option<LandingPlace>,
+) -> Vec<LandedPlace> {
+    // By where each of the mover's arrived files was placed (its destination's label), not by
+    // its path: a report's path is inside its place, never the folder itself (found in the
+    // two-copy test, 29 October 2026, when no place was ever named).
+    let items: HashMap<ItemId, &Item> = received.record.items.iter().map(|i| (i.id, i)).collect();
+    let used: std::collections::BTreeSet<String> = received
+        .files
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.outcome,
+                Some(ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_))
+            )
+        })
+        .filter_map(|f| items.get(&f.item))
+        .filter(|i| shown_to_mover(i, mover))
+        .filter_map(|i| landing(i).map(|p| p.destination))
+        .collect();
     shown
         .iter()
-        .filter(|(_, folder)| {
-            report.iter().any(|i| {
-                matches!(
-                    i.status,
-                    ItemStatus::Copied | ItemStatus::Reinstalled | ItemStatus::Converted
-                ) && i
-                    .destination
-                    .as_deref()
-                    .is_some_and(|d| d.starts_with(folder.as_str()))
-            })
-        })
+        .filter(|(label, _)| used.contains(label.as_str()))
         .map(|(label, folder)| LandedPlace {
             name: group_name(label),
             folder: folder.clone(),
@@ -1398,6 +1541,30 @@ impl AfterMove {
     }
 }
 
+/// A file's kind in the report, the way the scan counts kinds (`pctwin_scan::category`): the
+/// groups the person sees, like a phone's storage page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileKind {
+    Photos,
+    Videos,
+    Music,
+    Documents,
+    Other,
+}
+
+impl FileKind {
+    pub fn of(name: &str) -> Self {
+        match pctwin_scan::category(name) {
+            pctwin_scan::Category::Photo => Self::Photos,
+            pctwin_scan::Category::Video => Self::Videos,
+            pctwin_scan::Category::Music => Self::Music,
+            pctwin_scan::Category::Document => Self::Documents,
+            pctwin_scan::Category::Other => Self::Other,
+        }
+    }
+}
+
 /// How a copied file is known to be a true copy: every copied line says which, and they are never
 /// shown as the same line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1430,6 +1597,10 @@ impl Evidence {
 pub struct ReportItem {
     pub id: String,
     pub name: String,
+    /// What kind of file it is, so the report can show it in its group (photos, videos, ...).
+    pub kind: FileKind,
+    /// Its size on the old laptop.
+    pub bytes: u64,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
@@ -1589,6 +1760,8 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination,
             status,
@@ -1672,6 +1845,8 @@ fn whole_lines(
         lines.push(ReportItem {
             id: whole.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: whole.size_bytes,
             source,
             destination,
             status,
@@ -1739,6 +1914,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination: None,
             status,
@@ -1764,6 +1941,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination: None,
             status: ItemStatus::SkippedByUser,
@@ -1782,6 +1961,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
 /// The new laptop's answers: the mover's things go to the signed-in person here, other people
 /// are not moved by this version of the app's flow, and the person approves on M23.
 struct AppSteps<R: Runtime> {
+    /// A watch on the link while the person decides on the plan (see [`pctwin_link::Link::watch`]).
+    watch: Option<pctwin_link::LinkWatch>,
     app: AppHandle<R>,
     moving: AppMoving,
     me: String,
@@ -2115,7 +2296,15 @@ impl<R: Runtime> Steps for AppSteps<R> {
             groups,
         );
         let _ = self.app.emit(PLAN_EVENT, view);
-        match answer.await {
+        // While the person decides, the link is watched: if the old laptop goes, the plan page
+        // gives way to "connection lost" instead of offering a move that cannot run.
+        let answered = match &self.watch {
+            Some(w) => pctwin_move::or_gone(w.closed(), async { Ok(answer.await) }).await?,
+            None => answer.await,
+        };
+        // The watch holds the connection open while it lives: let it go once the person answered.
+        self.watch = None;
+        match answered {
             Ok(true) => {
                 // The app data to bring: what copies, and only the secrets the person ticked,
                 // one by one (a tick on anything but a secret line counts for nothing).
@@ -2316,7 +2505,14 @@ async fn run_old<R: Runtime>(
                 &me.home,
             )
         });
-    let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
+    // The same ID every time this laptop sends, so a second move from it carries on in the
+    // folders the first one made instead of making "(2)" copies (gap 3 of the audit).
+    let laptop = this_laptops_id(
+        journal_path(app)
+            .as_deref()
+            .and_then(std::path::Path::parent),
+    )
+    .map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
         let _ = app.emit(
             FOUND_EVENT,
@@ -2427,7 +2623,7 @@ async fn run_old<R: Runtime>(
     // The person chooses what moves here, where their things are (decided 28 October 2026): it
     // only ever leaves things out of what was found; the new laptop still accepts what comes.
     let view = choice_view(&record);
-    let shown = view.groups.iter().map(|g| g.role).collect();
+    let shown = shown_folders(&record);
     let answer = moving.wait_for_choice(shown);
     let _ = app.emit(CHOOSE_EVENT, &view);
     let choice = pctwin_move::or_stop(&live.control, async {
@@ -2557,6 +2753,27 @@ pub(crate) fn this_laptops_places() -> Result<(Destinations, Vec<FolderLookup>),
     Ok((table, found))
 }
 
+/// This laptop's own ID as an old laptop: made once and kept in PCTwin's data folder (`dir`), so
+/// every move from this laptop names its things the same way. A kept ID that cannot be read is
+/// made again; one that cannot be kept is still used for this move.
+pub(crate) fn this_laptops_id(
+    dir: Option<&std::path::Path>,
+) -> Result<LaptopId, pctwin_record::RecordError> {
+    let file = dir.map(|d| d.join("laptop-id"));
+    if let Some(id) = file
+        .as_ref()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| LaptopId::from_hex(t.trim()).ok())
+    {
+        return Ok(id);
+    }
+    let id = LaptopId::generate()?;
+    if let (Some(dir), Some(file)) = (dir, &file) {
+        let _ = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(file, id.to_hex()));
+    }
+    Ok(id)
+}
+
 /// Where this laptop's journal of writes is kept (`None`: the app has no data folder).
 pub(crate) fn journal_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
     app.path()
@@ -2597,6 +2814,7 @@ async fn run_new<R: Runtime>(
     let held_places = pctwin_move::held_journal::HeldPlaces::default();
     let ledger = pctwin_move::held_journal::SplitLedger::new(&journal, held_places.clone());
     let mut steps = AppSteps {
+        watch: link.watch().ok(),
         app: app.clone(),
         moving,
         me: me.clone(),
@@ -2642,14 +2860,26 @@ async fn run_new<R: Runtime>(
     let not_handed = steps.finish_others();
     let received = received?;
     let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
-    outcome.landed = landed_places(&steps.shown, &report);
+    outcome.landed = landed_places(&steps.shown, &received, &steps.rules.mover, |i| {
+        steps.rules.landing(i)
+    });
     outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
     // The full move, once every file is in: apps, settings and special categories, each with its
     // result. A move that was stopped or broke off changes nothing more.
     if received.ended == Ended::Finished
-        && let Some(full) = steps.full.take()
+        && let Some(mut full) = steps.full.take()
     {
-        let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
+        // Only the older apps the person ticked "Update it" for are updated.
+        full.updates = steps.moving.updates();
+        // "Setting up your apps and settings" only when there is something to set up: not when
+        // the person left all of it on the old laptop (found in the two-copy test).
+        if full
+            .changes()
+            .iter()
+            .any(|c| c.action != pctwin_fullmove::plan::Action::LeaveAlone)
+        {
+            let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
+        }
         // Counted on their own lines: the files' counts stay the files'.
         let data = steps.sink.take();
         let picked = std::mem::take(&mut steps.picked);
@@ -2792,8 +3022,8 @@ fn spawn_run<R: Runtime>(
                     crate::history::add(
                         &app,
                         "move",
-                        label.as_ref(),
-                        new_name.as_ref(),
+                        (label.as_ref(), new_name.as_ref()),
+                        outcome.rebuilt.as_ref().and_then(|r| r.undo_id.as_deref()),
                         state,
                         left,
                         &crate::history::report_kept(&report),
@@ -2903,9 +3133,11 @@ pub fn move_approve(
     approve: bool,
     left_out: Vec<FolderRole>,
     secrets: Option<Vec<u32>>,
+    updates: Option<Vec<u32>>,
 ) -> Result<(), MoveProblem> {
     let secrets = secrets.unwrap_or_default();
-    moving.answer(&plan, approve, &left_out, &secrets)
+    let updates = updates.unwrap_or_default();
+    moving.answer(&plan, approve, &left_out, &secrets, &updates)
 }
 
 /// What came of choosing a place for a group of folders (M05).
@@ -3100,7 +3332,7 @@ mod tests {
                 role,
                 storage: Storage::SystemDrive,
             };
-            let path = ItemPath::new(vec![ItemName::from_text(name)]).unwrap();
+            let path = ItemPath::new(name.split('/').map(ItemName::from_text).collect()).unwrap();
             record.items.push(Item {
                 id: ItemId::derive(&laptop, &owner, &place, &path),
                 kind: ItemKind::File,
@@ -3118,6 +3350,17 @@ mod tests {
         for (n, role) in roles.iter().enumerate() {
             add(*role, &format!("f{n}.txt"), Inclusion::Included);
         }
+        // Two folders inside Documents, to choose between.
+        add(
+            FolderRole::Documents,
+            "Work/report.docx",
+            Inclusion::Included,
+        );
+        add(
+            FolderRole::Documents,
+            "Home/budget.xlsx",
+            Inclusion::Included,
+        );
         add(
             FolderRole::Other,
             "node_modules",
@@ -3144,13 +3387,47 @@ mod tests {
             1,
             "what is left out anyway is shown"
         );
+        // The tree: each group, and the two folders inside Documents.
+        let shown: Vec<(FolderRole, Vec<String>)> = view
+            .folders
+            .iter()
+            .map(|f| (f.role, f.parts.clone()))
+            .collect();
+        assert!(shown.contains(&(FolderRole::Documents, vec![])));
+        assert!(shown.contains(&(FolderRole::Documents, vec!["Work".into()])));
+        assert!(shown.contains(&(FolderRole::Documents, vec!["Home".into()])));
+        // Only the Work folder inside Documents.
         apply_choice(
             &mut record,
             &Choice {
-                groups: vec![FolderRole::Documents],
+                folders: vec![FolderKey {
+                    role: FolderRole::Documents,
+                    parts: vec!["Work".into()],
+                }],
                 apps: false,
             },
         );
+        let inclusion = |name: &str| {
+            record
+                .items
+                .iter()
+                .find(|i| i.path.parts().last().is_some_and(|n| n.display() == name))
+                .map(|i| i.inclusion)
+        };
+        let left = Some(pctwin_record::Inclusion::LeftOut {
+            reason: pctwin_record::LeftOutReason::ChosenByUser,
+        });
+        assert_eq!(
+            inclusion("report.docx"),
+            Some(pctwin_record::Inclusion::Included)
+        );
+        assert_eq!(inclusion("budget.xlsx"), left, "the other folder stays");
+        assert_eq!(
+            inclusion("f0.txt"),
+            left,
+            "a file directly in Documents stays"
+        );
+        assert_eq!(inclusion("f1.txt"), left, "Pictures stays");
         let inclusion = |role| {
             record
                 .items
@@ -3158,16 +3435,6 @@ mod tests {
                 .find(|i| i.place.role == role)
                 .map(|i| i.inclusion)
         };
-        assert_eq!(
-            inclusion(FolderRole::Documents),
-            Some(pctwin_record::Inclusion::Included)
-        );
-        assert_eq!(
-            inclusion(FolderRole::Pictures),
-            Some(pctwin_record::Inclusion::LeftOut {
-                reason: pctwin_record::LeftOutReason::ChosenByUser
-            })
-        );
         // What was left out anyway stays left out for its own reason, never brought back.
         assert_eq!(
             inclusion(FolderRole::Other),
@@ -3178,27 +3445,127 @@ mod tests {
         assert!(record.apps.is_empty());
     }
 
-    /// A choice naming a group that was never shown is refused, and the page still waits.
+    /// A folder outside the choice is left out with its files, so a group with nothing chosen is
+    /// not in the plan; a folder on the way to a chosen one, or inside it, still moves (found in
+    /// the two-copy test, 29 October 2026).
+    #[test]
+    fn folders_outside_the_choice_are_left_out_too() {
+        let mut record = found_in(&[FolderRole::Documents, FolderRole::Pictures]);
+        let template = record.items[0].clone();
+        for (role, name) in [
+            (FolderRole::Documents, "Work"),
+            (FolderRole::Documents, "Work/Old"),
+            (FolderRole::Documents, "Home"),
+            (FolderRole::Pictures, "Trip"),
+        ] {
+            let mut folder = template.clone();
+            folder.kind = ItemKind::Folder;
+            folder.place.role = role;
+            folder.path =
+                ItemPath::new(name.split('/').map(ItemName::from_text).collect()).unwrap();
+            folder.size_bytes = 0;
+            record.items.push(folder);
+        }
+        let chosen = vec![FolderKey {
+            role: FolderRole::Documents,
+            parts: vec!["Work".into(), "Old".into()],
+        }];
+        apply_choice(
+            &mut record,
+            &Choice {
+                folders: chosen,
+                apps: false,
+            },
+        );
+        let folder = |role, name: &str| {
+            record
+                .items
+                .iter()
+                .find(|i| {
+                    i.kind == ItemKind::Folder
+                        && i.place.role == role
+                        && i.path
+                            .parts()
+                            .iter()
+                            .map(|n| n.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                            == name
+                })
+                .map(|i| i.inclusion)
+        };
+        let left = Some(pctwin_record::Inclusion::LeftOut {
+            reason: pctwin_record::LeftOutReason::ChosenByUser,
+        });
+        let moves = Some(pctwin_record::Inclusion::Included);
+        assert_eq!(
+            folder(FolderRole::Documents, "Work"),
+            moves,
+            "on the way to the chosen folder"
+        );
+        assert_eq!(
+            folder(FolderRole::Documents, "Work/Old"),
+            moves,
+            "the chosen folder"
+        );
+        assert_eq!(folder(FolderRole::Documents, "Home"), left);
+        assert_eq!(
+            folder(FolderRole::Pictures, "Trip"),
+            left,
+            "a group with nothing chosen"
+        );
+    }
+
+    /// A choice naming a folder that was never shown is refused, and the page still waits.
     #[test]
     fn a_choice_of_something_never_shown_is_refused() {
         let moving = AppMoving::default();
         moving.begin().unwrap();
-        let mut rx = moving.wait_for_choice([FolderRole::Documents].into());
-        assert_eq!(
-            moving.choose_what(Choice {
-                groups: vec![FolderRole::Music],
-                apps: true
-            }),
-            Err(MoveProblem::PlanChanged)
-        );
+        let mut rx = moving.wait_for_choice([(FolderRole::Documents, vec![])].into());
+        let key = |role, parts: &[&str]| FolderKey {
+            role,
+            parts: parts.iter().map(|p| p.to_string()).collect(),
+        };
+        for wrong in [
+            key(FolderRole::Music, &[]),
+            key(FolderRole::Documents, &["Secret"]),
+        ] {
+            assert_eq!(
+                moving.choose_what(Choice {
+                    folders: vec![wrong],
+                    apps: true
+                }),
+                Err(MoveProblem::PlanChanged)
+            );
+        }
         assert!(rx.try_recv().is_err(), "no answer yet");
         moving
             .choose_what(Choice {
-                groups: vec![FolderRole::Documents],
+                folders: vec![key(FolderRole::Documents, &[])],
                 apps: true,
             })
             .unwrap();
-        assert_eq!(rx.try_recv().unwrap().groups, [FolderRole::Documents]);
+        assert_eq!(
+            rx.try_recv().unwrap().folders,
+            [key(FolderRole::Documents, &[])]
+        );
+    }
+
+    /// The old laptop's ID is made once and kept: a second move from it names its things the
+    /// same way, so it carries on in the folders the first move made (gap 3 of the audit).
+    #[test]
+    fn this_laptop_keeps_one_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = this_laptops_id(Some(dir.path())).unwrap();
+        assert_eq!(this_laptops_id(Some(dir.path())).unwrap(), first);
+        std::fs::write(dir.path().join("laptop-id"), "not an id").unwrap();
+        let made_again = this_laptops_id(Some(dir.path())).unwrap();
+        assert_ne!(made_again, first, "an unreadable ID is made again");
+        assert_eq!(this_laptops_id(Some(dir.path())).unwrap(), made_again);
+        assert!(
+            this_laptops_id(None).is_ok(),
+            "with no data folder, one for this move"
+        );
     }
 
     /// The sending and the receiving laptop show the same figure: only files the new laptop has
@@ -3325,6 +3692,40 @@ mod tests {
                 .collect(),
             ended,
         }
+    }
+
+    /// The results name each place the mover's files arrived in, by where they were placed (the
+    /// report's paths are inside the place, never the folder itself), and no place nothing went to.
+    #[test]
+    fn the_results_name_where_the_files_landed() {
+        let docs = item(person("1000"), FolderRole::Documents, &["Lab", "a.txt"], 4);
+        let pics = item(person("1000"), FolderRole::Pictures, &["b.jpg"], 3);
+        let r = received(
+            vec![
+                (
+                    docs.clone(),
+                    Some(finished("Lab/a.txt", CheckedFrom::Drive)),
+                ),
+                (pics.clone(), None),
+            ],
+            Ended::Finished,
+        );
+        let shown: BTreeMap<String, String> = [
+            (
+                "documents".to_string(),
+                "C:/Users/ada/Documents".to_string(),
+            ),
+            ("pictures".to_string(), "C:/Users/ada/Pictures".to_string()),
+        ]
+        .into();
+        let landed = landed_places(&shown, &r, "1000", |i| {
+            Some(LandingPlace::new(role_label(i.place.role), ""))
+        });
+        assert_eq!(
+            landed.iter().map(|l| l.folder.as_str()).collect::<Vec<_>>(),
+            ["C:/Users/ada/Documents"],
+            "Pictures got nothing, so it is not named"
+        );
     }
 
     /// A folder that moves as one whole (here a Photos Library) has its own line: moved only when
@@ -3719,7 +4120,7 @@ mod tests {
         // Back to the usual folder.
         moving.choose(FolderRole::Videos, None).unwrap();
         moving
-            .answer(&key, true, &[FolderRole::Music], &[])
+            .answer(&key, true, &[FolderRole::Music], &[], &[])
             .unwrap();
         // Once approved, nothing more is chosen.
         assert_eq!(
@@ -3749,23 +4150,23 @@ mod tests {
             fingerprint: "ab".into(),
         };
         assert_eq!(
-            moving.answer(&stale, true, &[], &[]),
+            moving.answer(&stale, true, &[], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
         assert!(rx.try_recv().is_err(), "no answer yet");
         // Leaving out a folder the plan does not show is refused, and the plan still waits.
         assert_eq!(
-            moving.answer(&key, true, &[FolderRole::Music], &[]),
+            moving.answer(&key, true, &[FolderRole::Music], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
         moving
-            .answer(&key, true, &[FolderRole::Documents], &[])
+            .answer(&key, true, &[FolderRole::Documents], &[], &[])
             .unwrap();
         assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
         assert_eq!(
-            moving.answer(&key, true, &[], &[]),
+            moving.answer(&key, true, &[], &[], &[]),
             Err(MoveProblem::PlanChanged)
         );
     }

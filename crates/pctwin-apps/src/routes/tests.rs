@@ -219,6 +219,10 @@ fn an_app_already_on_the_new_laptop_is_never_installed_again_or_replaced() {
     );
     assert_eq!(older.disposition, Disposition::AlreadyHere);
     assert!(matches!(older.flags[0], Flag::OlderHere { .. }));
+    // "Update it": an older one carries the routes it could be updated by, the same as for an
+    // app not here, used only if the person chooses; a same or newer one carries none.
+    let absent = plan(&signed_windows(None), win_target(), &Here::Absent, &h);
+    assert_eq!(older.routes, absent.routes);
     let unknown = plan(
         &signed_windows(None),
         win_target(),

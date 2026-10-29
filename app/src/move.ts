@@ -142,8 +142,15 @@ export type Outcome =
 export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept"] as const;
 export type ReportNote = (typeof REPORT_NOTES)[number];
 
-/** One line of the detailed report (R02). Names and paths are the person's own text. */
-export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote } & Outcome;
+/** The groups the report shows files in, like a phone's storage page (as the scan counts kinds). */
+export const FILE_KINDS = ["photos", "videos", "music", "documents", "other"] as const;
+export type FileKind = (typeof FILE_KINDS)[number];
+
+/**
+ * One line of the detailed report (R02). Names and paths are the person's own text. Its kind and
+ * size are absent only in a report kept by an older version (shown under other files).
+ */
+export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote; kind?: FileKind; bytes?: number } & Outcome;
 
 /* ---------- Progress: measured numbers only ---------- */
 
@@ -299,6 +306,11 @@ const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
 export function formatBytes(bytes: number, locale: string): string {
   let n = Math.max(0, bytes);
   let u = 0;
+  // Under a kilobyte reads as a share of one ("0.3 kB", "0 kB"), never "0 byte".
+  if (n < 1000) {
+    n /= 1000;
+    u = 1;
+  }
   while (n >= 1000 && u < UNITS.length - 1) {
     n /= 1000;
     u++;

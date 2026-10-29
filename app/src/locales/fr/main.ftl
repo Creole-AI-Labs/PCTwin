@@ -1156,6 +1156,8 @@ cancel-keep = Continuer le transfert
 outcome-eyebrow = Résultats du transfert
 outcome-title = Bienvenue sur votre nouvel ordinateur portable.
 outcome-body = Voici ce qui est arrivé à tout ce que vous avez approuvé.
+outcome-title-old = Vos affaires sont sur votre nouvel ordinateur portable.
+outcome-body-old = Voici ce qui est arrivé à tout ce que vous avez envoyé. Cet ordinateur reste tel qu'il était.
 outcome-files-title = Fichiers sélectionnés
 outcome-status-partial = Fait en partie
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
@@ -1244,7 +1246,7 @@ move-found = Trouvé jusqu’ici : { $size } de vos affaires.
 move-wait-approval-title = En attente du nouveau portable.
 move-wait-approval-body = Vos fichiers sont prêts. Vérifiez le plan sur le nouveau portable et approuvez-le pour commencer.
 move-wait-list-title = En attente de l’ancien portable.
-move-wait-list-body = Votre ancien portable cherche vos fichiers. Ensuite, le plan s’affiche ici pour que vous l’approuviez. Cela peut prendre quelques minutes.
+move-wait-list-body = Votre ancien portable trouve vos affaires, puis on y choisit ce qui part. Ensuite, ce qui arrive s'affiche ici pour que vous l'acceptiez. Cela peut prendre quelques minutes.
 move-wait-starting-title = Début du transfert.
 move-wait-starting-body = Le plan est approuvé. La copie commence dans un instant.
 move-wait-admin-title = En attente d’un administrateur.
@@ -1336,8 +1338,30 @@ drive-problem-carry-on = Continuer
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Votre transfert, élément par élément.
-report-body = Ce qui est arrivé à chaque élément, pourquoi, d’où il vient et où il est allé.
+report-title = Votre transfert, par type.
+report-body = Ouvrez un type pour voir ses fichiers. Ce qui demande votre attention vient en premier.
+report-needs-title = { $count ->
+        [one] { $count } élément demande votre attention
+        [many] { $count } éléments demandent votre attention
+       *[other] { $count } éléments demandent votre attention
+    }
+report-group-photos = Photos
+report-group-videos = Vidéos
+report-group-music = Musique
+report-group-documents = Documents
+report-group-other = Autres fichiers
+report-group-size = { $files ->
+        [one] { $files } fichier
+        [many] { $files } fichiers
+       *[other] { $files } fichiers
+    } · { $size }
+report-group-done = Tout est copié et vérifié
+report-group-some = { $done } sur { $total } copiés et vérifiés
+report-group-left = { $count ->
+        [one] { $count } laissé sur votre ancien portable, comme vous l'avez choisi
+        [many] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
+       *[other] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
+    }
 report-filter-label = Afficher
 report-col-item = Élément
 report-col-result = Résultat
@@ -1570,6 +1594,7 @@ history-status-steps-left =
 history-status-paused = En pause
 history-status-stopped = Arrêté en toute sécurité
 history-open-report = Rapport
+history-undo = Annuler
 history-continue = Continuer
 history-export = Exporter l’historique
 history-exported = Historique enregistré sous { $path }.
@@ -1846,7 +1871,7 @@ guard-undo-legend-can = PCTwin peut l’annuler.
 guard-undo-legend-keeps = PCTwin le garde. L’annulation n’y touche pas.
 guard-undo-legend-you = À vous d’agir. Seuls son service ou son créateur peuvent l’annuler.
 guard-undo-can-reverse = PCTwin peut l’annuler
-guard-undo-can-remove-app = PCTwin peut la supprimer, en gardant votre travail
+guard-undo-can-remove-app = PCTwin peut supprimer l’appli. Il ne touche pas aux fichiers que vous avez créés.
 guard-undo-must-keep = Gardé : c’était déjà là
 guard-undo-needs-you-service = À vous d’agir : seul le service en ligne peut l’annuler
 guard-undo-needs-you-maker = À vous d’agir : les connexions et les licences dépendent du créateur
@@ -2043,8 +2068,9 @@ guard-undo-preview-title = Ce que l’annulation va faire
 guard-undo-preview-body = PCTwin vient de regarder chaque changement. Tout ce que vous avez modifié après le transfert est gardé. Rien ne se passe tant que vous ne choisissez pas Annuler.
 guard-undo-preview-which = Ceci annule le transfert terminé le { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") }. Vos autres transferts ne changent pas.
 guard-undo-preview-which-earlier = Ceci annule le transfert fait avec une version précédente de PCTwin. Vos autres transferts ne changent pas.
+guard-undo-preview-admin = Pour supprimer des applis, cet ordinateur demandera l’accord d’un administrateur.
 guard-undo-plan-put-back = Remis comme avant
-guard-undo-plan-remove-app = Appli supprimée, votre travail gardé
+guard-undo-plan-remove-app = PCTwin supprime l’appli. PCTwin ne touche pas aux fichiers que vous avez créés.
 guard-undo-plan-keep-changed = Gardé : vous l’avez modifié
 guard-undo-plan-elsewhere = À vous d’agir : fait ailleurs
 guard-undo-plan-leave-alone = Laissé tel quel : c’était déjà là
@@ -2080,6 +2106,14 @@ fullmove-step-sign-in = Reconnectez-vous sur cet ordinateur.
 fullmove-step-relink = Configurez-la à nouveau sur cet ordinateur, ou reliez-la depuis l’application.
 fullmove-step-not-yet = PCTwin ne transfère pas encore les données de cette application. Elles restent en sécurité sur votre ancien ordinateur.
 fullmove-step-look-at-it = PCTwin n’a pas pu savoir ce que c’est. Regardez-le sur votre ancien ordinateur.
+fullmove-group-update =
+    { $count ->
+        [one] Une version plus ancienne est sur ce portable
+        [many] Des versions plus anciennes sont sur ce portable
+       *[other] Des versions plus anciennes sont sur ce portable
+    }
+fullmove-update-it = Mettre à jour { $name }
+fullmove-update-hint = PCTwin installe la version plus récente. Vos réglages restent.
 fullmove-special-not-yet = Données d’applications comme les e-mails, les navigateurs et les jeux
 fullmove-left-by-person = Applications, réglages et données d'applications : laissés sur votre ancien portable, comme vous l'avez choisi
 fullmove-special-finish = PCTwin n’a pas transféré ceci. C’est toujours en sécurité sur votre ancien ordinateur.
@@ -2108,6 +2142,11 @@ fullmove-restore-not-windows = Cet ordinateur n’a pas de points de restauratio
 guard-undo-remove-yourself = Supprimez-la vous-même si vous voulez
 guard-undo-plan-remove-yourself = Vous pouvez la supprimer dans les paramètres de votre ordinateur
 guard-undo-result-remove-yourself = À supprimer vous-même dans les paramètres de votre ordinateur
+guard-undo-plan-keep-other-version = Gardée : elle a changé depuis le transfert
+guard-undo-plan-already-gone = Déjà supprimé
+guard-undo-result-kept-other-version = Gardée, car elle a changé depuis le transfert
+guard-undo-result-removed-restart = Supprimé. Redémarrez votre ordinateur pour terminer.
+guard-undo-result-not-removed = Non supprimé. Vous pouvez le supprimer dans les paramètres de votre ordinateur.
 guard-undo-close = Terminé
 move-wait-appdata-title = Examen des données de vos applications.
 move-wait-appdata-body = Vos fichiers sont trouvés. PCTwin examine encore les données que gardent vos applications, comme les e-mails et les navigateurs. Cela prend dix minutes au plus. Rien n’est modifié sur cet ordinateur.
@@ -2158,7 +2197,15 @@ choose-mode = Quoi déplacer
 choose-everything = Tout
 choose-except = Tout sauf
 choose-only = Seulement ce que je choisis
-choose-except-hint = Cochez ce qu'il faut laisser.
+choose-except-hint = Décochez ce qu'il faut laisser.
+choose-open = Ouvrir { $name }
+choose-close = Fermer { $name }
+choose-total =
+    { $files ->
+        [one] 1 fichier
+        [many] { $files } fichiers
+       *[other] { $files } fichiers
+    } · Choisi : { $size }
 choose-only-hint = Cochez ce qu'il faut emporter.
 choose-apps = Applications, réglages et données d'applications
 choose-apps-count =

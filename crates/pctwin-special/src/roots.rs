@@ -152,6 +152,139 @@ pub fn roots_of(
     }
 }
 
+/// The `XDG_*_HOME` names [`roots_of`] asks for.
+pub const XDG_NAMES: [&str; 4] = [
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+];
+
+/// The largest `environment.d` or start-up file read.
+const MAX_ENV_FILE: u64 = 64 * 1024;
+/// The most `environment.d` files read.
+const MAX_ENV_FILES: usize = 64;
+
+/// A Linux person's own `XDG_*_HOME` settings, for the home folder `home` (CI review, decided 28
+/// October 2026: each person's own, never the mover's for everyone).
+///
+/// - **The person PCTwin runs as** (`home` is `session_home`, this program's own home): this
+///   session's values (`session`), which are theirs.
+/// - **Anyone else**: their own declared settings, the systemd per-person environment files
+///   `~/.config/environment.d/*.conf` (plain `NAME=value` lines, read in name order, a later line
+///   winning; `$HOME` and `${HOME}` stand for their home). Only absolute results count.
+///
+/// The second answer lists that person's shell start-up files that mention one of these names: a
+/// value set there is code PCTwin never runs, so where it points is not checked, and the report
+/// says so ([`find_folders_for`]). A file that is a link or too large is never read.
+pub fn xdg_of(
+    home: &Path,
+    session_home: Option<&Path>,
+    session: &dyn Fn(&str) -> Option<PathBuf>,
+) -> (std::collections::BTreeMap<String, PathBuf>, Vec<PathBuf>) {
+    let mut out = std::collections::BTreeMap::new();
+    if session_home == Some(home) {
+        for n in XDG_NAMES {
+            if let Some(p) = session(n).filter(|p| p.is_absolute()) {
+                out.insert(n.to_string(), p);
+            }
+        }
+        return (out, Vec::new());
+    }
+    let small = |p: &Path| -> Option<String> {
+        let m = std::fs::symlink_metadata(p).ok()?;
+        if !m.is_file() || m.len() > MAX_ENV_FILE {
+            return None;
+        }
+        std::fs::read_to_string(p).ok()
+    };
+    let dir = home.join(".config").join("environment.d");
+    let mut files: Vec<PathBuf> = std::fs::symlink_metadata(&dir)
+        .ok()
+        .filter(std::fs::Metadata::is_dir)
+        .and_then(|_| std::fs::read_dir(&dir).ok())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "conf"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files.truncate(MAX_ENV_FILES);
+    let home_text = home.to_string_lossy();
+    for f in files {
+        let Some(text) = small(&f) else { continue };
+        for line in text.lines().map(str::trim) {
+            let Some((name, value)) = line.split_once('=') else {
+                continue;
+            };
+            let name = name.trim();
+            if line.starts_with('#') || !XDG_NAMES.contains(&name) {
+                continue;
+            }
+            let value = value.trim().trim_matches('"');
+            let value = if let Some(rest) = value.strip_prefix("${HOME}") {
+                format!("{home_text}{rest}")
+            } else if let Some(rest) = value.strip_prefix("$HOME") {
+                format!("{home_text}{rest}")
+            } else {
+                value.to_string()
+            };
+            // Any other `$` is a value PCTwin does not know for this person: the standard place.
+            let p = PathBuf::from(&value);
+            if value.contains('$') || !p.is_absolute() {
+                out.remove(name);
+            } else {
+                out.insert(name.to_string(), p);
+            }
+        }
+    }
+    let shell = [
+        ".profile",
+        ".bash_profile",
+        ".bash_login",
+        ".bashrc",
+        ".zshenv",
+        ".zprofile",
+        ".zshrc",
+        ".pam_environment",
+    ];
+    let mentioned = shell
+        .iter()
+        .map(|n| home.join(n))
+        .filter(|p| small(p).is_some_and(|t| XDG_NAMES.iter().any(|n| t.contains(n))))
+        .collect();
+    (out, mentioned)
+}
+
+/// [`roots_of`] and [`find_folders`] for the person with home folder `home` on `system`, with
+/// that person's own `XDG_*_HOME` settings on Linux ([`xdg_of`]): a start-up file that may move
+/// one of their folders elsewhere is said in the coverage as not checked, never silently assumed.
+pub fn find_folders_for(
+    system: System,
+    owner: &Owner,
+    home: &Path,
+    apps: &[FoundApp],
+    session_home: Option<&Path>,
+    session: &dyn Fn(&str) -> Option<PathBuf>,
+) -> (Vec<AppDataFolder>, Coverage) {
+    let (xdg, mentioned) = if system == System::Linux {
+        xdg_of(home, session_home, session)
+    } else {
+        Default::default()
+    };
+    let roots = roots_of(system, home, &|v| xdg.get(v).cloned());
+    let (folders, mut cov) = find_folders(owner, home, &roots, apps);
+    for f in mentioned {
+        cov.unreadable.push((
+            f,
+            "this person's start-up file may keep app data somewhere else; PCTwin does not run it, so that place is not checked".into(),
+        ));
+    }
+    (folders, cov)
+}
+
 /// How a folder was tied to an app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -222,6 +355,23 @@ fn not_looked_into(kind: crate::guard::Kind) -> Option<&'static str> {
         Kind::OnlineOnly => Some("kept online by a cloud app: not downloaded or looked into"),
         Kind::NotAFile => Some("not a file or folder"),
         Kind::File | Kind::Folder => None,
+    }
+}
+
+/// Why a start-up place is not moved.
+pub const STARTS_AT_SIGN_IN: &str = "programs or commands that start when you sign in: PCTwin never turns these on for you; set up the ones you want yourself";
+
+/// Whether `name` in `root` is a place the system or the desktop runs from at sign-in (T26-026:
+/// a moved setting must never switch a command on): the freedesktop autostart folder, systemd's
+/// per-person services and environment, and KDE's sign-in and sign-out scripts and environment.
+/// The system's own rule, so code (the deny region), never a catalogue row.
+pub fn starts_at_sign_in(root: RootKind, name: &str) -> bool {
+    match root {
+        RootKind::XdgConfig => matches!(
+            name,
+            "autostart" | "autostart-scripts" | "systemd" | "environment.d" | "plasma-workspace"
+        ),
+        _ => false,
     }
 }
 
@@ -388,6 +538,12 @@ pub fn find_folders(
                 }
                 _ if !is_dir => continue,
                 _ => {}
+            }
+            // What the system runs at sign-in (T26-026): never landed where it would run.
+            if starts_at_sign_in(root.kind, &name) {
+                cov.skipped
+                    .push((root.path.join(&name), STARTS_AT_SIGN_IN.to_string()));
+                continue;
             }
             // `Local\Packages` is a root of its own; `Local\Temp` is the cache root.
             if root.kind == RootKind::Local
@@ -682,5 +838,74 @@ mod tests {
         assert!(by(".config").is_none() && by(".var").is_none() && by(".cache").is_none());
         assert!(by(".local").is_none());
         assert_eq!(cov.caches.len(), 1);
+    }
+
+    /// CI review (28 October 2026): every person's app data is looked for where their own
+    /// settings put it, never where the mover's session does.
+    #[test]
+    fn each_person_s_own_xdg_settings_not_the_mover_s() {
+        let base = tempfile::tempdir().unwrap();
+        let mine = base.path().join("me");
+        let theirs = base.path().join("them");
+        mk(&mine);
+        mk(&theirs.join(".config").join("environment.d"));
+        let session_conf = base.path().join("session-conf");
+        let session = |v: &str| (v == "XDG_CONFIG_HOME").then(|| session_conf.clone());
+        // The mover's own home: this session's values.
+        let (x, shell) = xdg_of(&mine, Some(&mine), &session);
+        assert_eq!(x.get("XDG_CONFIG_HOME"), Some(&session_conf));
+        assert!(shell.is_empty());
+        // Another person: never the session's; their own environment.d, later files winning,
+        // $HOME as theirs, anything unknown left at the standard place.
+        std::fs::write(
+            theirs.join(".config/environment.d/10-a.conf"),
+            "# mine
+XDG_DATA_HOME=/nowhere
+XDG_STATE_HOME=$XDG_DATA_HOME/state
+PATH=/bin
+",
+        )
+        .unwrap();
+        std::fs::write(
+            theirs.join(".config/environment.d/20-b.conf"),
+            "XDG_DATA_HOME=\"${HOME}/data\"
+XDG_CACHE_HOME=relative
+",
+        )
+        .unwrap();
+        let (x, shell) = xdg_of(&theirs, Some(&mine), &session);
+        assert_eq!(x.get("XDG_CONFIG_HOME"), None);
+        assert_eq!(x.get("XDG_DATA_HOME"), Some(&theirs.join("data")));
+        assert_eq!(x.get("XDG_STATE_HOME"), None);
+        assert_eq!(x.get("XDG_CACHE_HOME"), None);
+        assert!(shell.is_empty());
+        // A value set in their shell start-up file is code PCTwin never runs: said, not checked.
+        std::fs::write(
+            theirs.join(".profile"),
+            "export XDG_CONFIG_HOME=$HOME/cfg
+",
+        )
+        .unwrap();
+        let (_, shell) = xdg_of(&theirs, Some(&mine), &session);
+        assert_eq!(shell, vec![theirs.join(".profile")]);
+        mk(&theirs.join("data").join("someapp"));
+        let (folders, cov) =
+            find_folders_for(System::Linux, &me(), &theirs, &[], Some(&mine), &session);
+        assert!(
+            folders
+                .iter()
+                .any(|f| f.root == RootKind::XdgData && f.root_path == theirs.join("data"))
+        );
+        assert!(
+            folders
+                .iter()
+                .all(|f| !f.root_path.starts_with(&session_conf)),
+            "the mover's own settings are never used for another person"
+        );
+        assert!(
+            cov.unreadable
+                .iter()
+                .any(|(p, _)| *p == theirs.join(".profile"))
+        );
     }
 }

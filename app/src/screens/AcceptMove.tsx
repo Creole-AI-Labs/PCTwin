@@ -31,7 +31,9 @@ export default function AcceptMove({
   const { chosen } = overviewOf(plan);
   const attention = planAttention(plan);
   const needs = attention.space || attention.files > 0 || plan.blocked !== undefined;
-  const changes = plan.rebuild?.changes ?? [];
+  // Only what changes this laptop is listed: an app already here, or a line about what stays
+  // behind, is not coming.
+  const changes = (plan.rebuild?.changes ?? []).filter((c) => c.action !== "leave-alone");
   const apps = changes.filter((c) => c.kind === "app").length;
   const settings = changes.some((c) => c.kind !== "app");
   return (

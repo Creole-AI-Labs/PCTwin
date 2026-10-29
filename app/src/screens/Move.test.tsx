@@ -209,7 +209,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(start);
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [] });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [], secrets: [], updates: [] });
     });
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-starting-title"));
@@ -223,7 +223,7 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [] });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"], secrets: [], updates: [] });
     });
   });
 
@@ -274,11 +274,13 @@ describe("the move, once paired", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("plan-title"));
   });
 
-  it("going back from the plan declines it", async () => {
+  it("going back from the details returns to Accept, and only Not now declines", async () => {
     await host(false);
     showPlan(plan);
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
-    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [] });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("move_approve", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: text("accept-not-now") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [], secrets: [], updates: [] });
   });
 
   it("shows the measured progress, then pausing and paused with a way to stop that asks first", async () => {
@@ -323,6 +325,13 @@ describe("the move, once paired", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("move_resume");
   });
 
+  it("the old laptop's results say the things are on the new laptop, never welcome it", async () => {
+    await host(true);
+    send("move-progress", runningQuiet);
+    send("move-finished", outcomes[0]);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-title-old"));
+  });
+
   it("ends with the outcome, then the report the engine gives", async () => {
     replies.move_report = () => reportItems;
     const { onHome } = await host(false);
@@ -333,9 +342,10 @@ describe("the move, once paired", () => {
     send("move-progress", running);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-title"));
     fireEvent.click(screen.getByRole("button", { name: text("outcome-report") }));
-    await waitFor(() => {
-      expect(screen.getByText("1.txt")).toBeTruthy();
-    });
+    // The engine's lines come sorted by kind: open Documents to see them.
+    const documents = await screen.findByRole("button", { name: (n) => n.startsWith(text("report-group-documents")) });
+    fireEvent.click(documents);
+    expect(screen.getByText("1.txt")).toBeTruthy();
     expect(screen.getByText(text("evidence-already-there"))).toBeTruthy();
     expect(screen.getByText(text("evidence-new-laptop"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));

@@ -935,6 +935,8 @@ cancel-keep = 继续迁移
 outcome-eyebrow = 迁移结果
 outcome-title = 欢迎使用你的新笔记本电脑。
 outcome-body = 以下是你同意的每项内容的结果。
+outcome-title-old = 你的东西已在新笔记本电脑上。
+outcome-body-old = 以下是你发送的每项内容的结果。这台笔记本电脑保持原样。
 outcome-files-title = 已选文件
 outcome-status-partial = 部分完成
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
@@ -1009,7 +1011,7 @@ move-found = 目前已找到：你的内容 { $size }。
 move-wait-approval-title = 正在等待新笔记本电脑。
 move-wait-approval-body = 你的文件已准备好。在新笔记本电脑上查看计划并批准即可开始。
 move-wait-list-title = 正在等待旧笔记本电脑。
-move-wait-list-body = 旧笔记本电脑正在查找你的文件。完成后，计划会显示在这里供你批准。这可能需要几分钟。
+move-wait-list-body = 你的旧笔记本电脑正在查找你的东西，然后在那台电脑上选择要搬的内容。完成后，要过来的内容会显示在这里，等你接受。这可能需要几分钟。
 move-wait-starting-title = 正在开始移动。
 move-wait-starting-body = 计划已批准。复制马上开始。
 move-wait-admin-title = 正在等待管理员。
@@ -1095,8 +1097,24 @@ drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = 你的迁移，逐项查看。
-report-body = 每个项目的结果、原因，以及它的来源和去向。
+report-title = 你的搬迁，按类型。
+report-body = 打开一个类型即可查看其中的文件。需要你处理的内容排在最前。
+report-needs-title = { $count ->
+       *[other] { $count } 项需要你处理
+    }
+report-group-photos = 照片
+report-group-videos = 视频
+report-group-music = 音乐
+report-group-documents = 文档
+report-group-other = 其他文件
+report-group-size = { $files ->
+       *[other] { $files } 个文件
+    } · { $size }
+report-group-done = 全部已复制并检查
+report-group-some = { $total } 个中的 { $done } 个已复制并检查
+report-group-left = { $count ->
+       *[other] 按你的选择，{ $count } 个留在旧笔记本电脑上
+    }
 report-filter-label = 显示
 report-col-item = 项目
 report-col-result = 结果
@@ -1306,6 +1324,7 @@ history-status-steps-left =
 history-status-paused = 已暂停
 history-status-stopped = 已安全停止
 history-open-report = 报告
+history-undo = 撤销
 history-continue = 继续
 history-export = 导出历史记录
 history-exported = 历史记录已保存为{ $path }。
@@ -1556,7 +1575,7 @@ guard-undo-legend-can = PCTwin 可以撤销。
 guard-undo-legend-keeps = PCTwin 会保留。撤销不会动它。
 guard-undo-legend-you = 需要你处理。只有它的服务或开发者才能撤销。
 guard-undo-can-reverse = PCTwin 可以撤销
-guard-undo-can-remove-app = PCTwin 可以删除它，并保留你的工作
+guard-undo-can-remove-app = PCTwin 可以删除这个应用。它不会动你创建的文件。
 guard-undo-must-keep = 保留：它本来就在这里
 guard-undo-needs-you-service = 需要你处理：只有在线服务才能撤销
 guard-undo-needs-you-maker = 需要你处理：登录和许可证归开发者管
@@ -1739,8 +1758,9 @@ guard-undo-preview-title = 撤销会做什么
 guard-undo-preview-body = PCTwin 刚刚查看了每一项更改。迁移之后你改动过的内容都会保留。在你选择“撤销”之前，什么都不会发生。
 guard-undo-preview-which = 这会撤销在 { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") } 完成的那次迁移。你的其他迁移不会改变。
 guard-undo-preview-which-earlier = 这会撤销用旧版 PCTwin 完成的那次迁移。你的其他迁移不会改变。
+guard-undo-preview-admin = 要删除应用，这台电脑会请管理员批准。
 guard-undo-plan-put-back = 恢复原样
-guard-undo-plan-remove-app = 应用已删除，你的工作已保留
+guard-undo-plan-remove-app = PCTwin 会删除这个应用。PCTwin 不会动你创建的文件。
 guard-undo-plan-keep-changed = 保留：你改动过它
 guard-undo-plan-elsewhere = 需要你处理：在别处完成
 guard-undo-plan-leave-alone = 不动：它本来就在这里
@@ -1776,6 +1796,12 @@ fullmove-step-sign-in = 在这台电脑上重新登录。
 fullmove-step-relink = 在这台电脑上重新设置，或从应用里重新关联。
 fullmove-step-not-yet = PCTwin 暂时还不迁移这个应用的数据。它仍安全地保存在你的旧电脑上。
 fullmove-step-look-at-it = PCTwin 无法判断这是什么。请在旧电脑上查看。
+fullmove-group-update =
+    { $count ->
+       *[other] 这台笔记本电脑上有较旧的版本
+    }
+fullmove-update-it = 更新 { $name }
+fullmove-update-hint = PCTwin 会安装较新的版本，你的设置保持不变。
 fullmove-special-not-yet = 应用数据，例如邮件、浏览器和游戏
 fullmove-left-by-person = 应用、设置和应用数据：按你的选择留在旧笔记本电脑上
 fullmove-special-finish = PCTwin 没有迁移这个。它仍安全地保存在你的旧电脑上。
@@ -1804,6 +1830,11 @@ fullmove-restore-not-windows = 这台电脑没有还原点。PCTwin 自己的撤
 guard-undo-remove-yourself = 如有需要请自行删除
 guard-undo-plan-remove-yourself = 你可以在电脑的设置中删除它
 guard-undo-result-remove-yourself = 留给你在电脑的设置中删除
+guard-undo-plan-keep-other-version = 保留：迁移之后它有了变化
+guard-undo-plan-already-gone = 已经删除了
+guard-undo-result-kept-other-version = 已保留，因为迁移之后它有了变化
+guard-undo-result-removed-restart = 已删除。请重启电脑以完成。
+guard-undo-result-not-removed = 没有删除。你可以在电脑的设置中删除它。
 guard-undo-close = 完成
 move-wait-appdata-title = 正在查看你的应用数据。
 move-wait-appdata-body = 已找到你的文件。PCTwin 仍在查看你的应用保存的数据，例如邮件和浏览器。最多需要十分钟。这台电脑上不会做任何更改。
@@ -1854,7 +1885,13 @@ choose-mode = 要搬什么
 choose-everything = 全部
 choose-except = 全部，除了
 choose-only = 只搬我选的
-choose-except-hint = 勾选要留下的内容。
+choose-except-hint = 取消勾选要留下的内容。
+choose-open = 打开 { $name }
+choose-close = 收起 { $name }
+choose-total =
+    { $files ->
+       *[other] { $files } 个文件
+    } · 已选：{ $size }
 choose-only-hint = 勾选要带走的内容。
 choose-apps = 应用、设置和应用数据
 choose-apps-count =

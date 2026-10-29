@@ -742,3 +742,33 @@ fn a_folder_link_swapped_during_the_check_never_approves_other_bytes() {
 fn own() -> pctwin_maker::InThisProcess {
     pctwin_maker::InThisProcess::new(pctwin_parse_seal::in_child())
 }
+
+/// An installer found among the person's files that is stored online only (a OneDrive folder) is
+/// never opened for reading: reading it would download it. Marked here with Windows' own
+/// `attrib +O` (offline), the mark cloud apps set (29 October 2026).
+#[test]
+fn an_installer_stored_online_only_is_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let copy = copy_into(&dir, &system32("notepad.exe"));
+    let attrib = |flag: &str| {
+        let ok = pctwin_types::process::quiet("attrib")
+            .arg(flag)
+            .arg(&copy)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "attrib {flag}");
+    };
+    attrib("+O");
+    let read = pctwin_maker::windows_old_copy(&copy, &own());
+    attrib("-O");
+    match read.maker {
+        pctwin_maker::OldMaker::NotRead(why) => assert!(why.contains("online only"), "{why}"),
+        other => panic!("an online-only file was read: {other:?}"),
+    }
+    // The same file, back on the laptop, is read as before.
+    assert!(!matches!(
+        pctwin_maker::windows_old_copy(&copy, &own()).maker,
+        pctwin_maker::OldMaker::NotRead(_)
+    ));
+}

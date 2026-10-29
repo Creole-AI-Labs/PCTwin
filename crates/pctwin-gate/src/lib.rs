@@ -2405,15 +2405,7 @@ fn remove_checked(
 #[cfg(windows)]
 fn not_plain(attributes: u32) -> Option<Removed> {
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
-    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
-    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
-    if attributes
-        & (FILE_ATTRIBUTE_OFFLINE
-            | FILE_ATTRIBUTE_RECALL_ON_OPEN
-            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
-        != 0
-    {
+    if pctwin_types::cloud::cloud_only_windows(attributes) {
         return Some(Removed::CloudOnly);
     }
     (attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(Removed::NotThatFile)

@@ -174,6 +174,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         special,
         files,
         secret: None,
+        update: None,
         source: None,
         note: None,
     };
@@ -697,6 +698,8 @@ fn report_items() -> Vec<ReportItem> {
     let line = |n: &str, status, reason, evidence| ReportItem {
         id: format!("{n:0>32}"),
         name: format!("{n}.txt"),
+        kind: crate::moving::FileKind::Documents,
+        bytes: 1200,
         source: format!("documents/{n}.txt"),
         destination: (status != ItemStatus::Failed).then(|| format!("{n}.txt")),
         status,
@@ -913,6 +916,26 @@ fn families() -> Vec<(&'static str, Value)> {
                             bytes: 41_000_000_000,
                         },
                     ],
+                    folders: vec![
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Documents,
+                            parts: Vec::new(),
+                            files: 40,
+                            bytes: 200_000_000,
+                        },
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Documents,
+                            parts: vec!["Work".into()],
+                            files: 1_200,
+                            bytes: 3_000_000_000,
+                        },
+                        crate::moving::ChoiceFolder {
+                            role: FolderRole::Pictures,
+                            parts: Vec::new(),
+                            files: 8_400,
+                            bytes: 41_000_000_000,
+                        },
+                    ],
                     apps: 12,
                     left_behind: vec![crate::moving::LeftBehind {
                         why: pctwin_record::LeftOutReason::Rebuildable,
@@ -922,6 +945,7 @@ fn families() -> Vec<(&'static str, Value)> {
                 },
                 crate::moving::ChoiceView {
                     groups: Vec::new(),
+                    folders: Vec::new(),
                     apps: 0,
                     left_behind: Vec::new(),
                 },
@@ -952,6 +976,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     when: "2026-10-22T00:00:00Z".into(),
                     other: Some(json(picked())),
                     new_name: None,
+                    undo_id: None,
                     state: "steps-left".into(),
                     steps_left: 2,
                 },
@@ -961,6 +986,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     when: "2026-10-22T00:05:00Z".into(),
                     other: None,
                     new_name: None,
+                    undo_id: None,
                     state: "finished".into(),
                     steps_left: 0,
                 },
@@ -1237,7 +1263,7 @@ fn calls() -> Value {
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
-            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },
@@ -1280,7 +1306,7 @@ fn calls() -> Value {
             { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
             { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
-            { "name": "move_choose_what", "args": [["choice", { "groups": ["documents"], "apps": true }]] },
+            { "name": "move_choose_what", "args": [["choice", { "folders": [{ "role": "documents", "parts": ["Work"] }], "apps": true }]] },
         ],
         "events": {
             "old": OLD_EVENT,

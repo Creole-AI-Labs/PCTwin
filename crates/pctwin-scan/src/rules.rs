@@ -80,6 +80,9 @@ pub struct Row {
 impl Row {
     /// How a placement names this rule: `places.txt:12 node_modules`.
     pub fn label(&self) -> String {
+        if self.line == 0 {
+            return format!("installed program {}", self.name);
+        }
         format!("places.txt:{} {}", self.line, self.name)
     }
 }
@@ -89,6 +92,9 @@ impl Row {
 pub struct Rules {
     rows: Vec<Row>,
     system: System,
+    /// Installed programs' places the laptop names ([`crate::programs`]), each counted as a
+    /// program, by its whole path.
+    programs: Vec<(Vec<String>, Row)>,
 }
 
 const PLACES: &str = include_str!("../rules/places.txt");
@@ -163,7 +169,11 @@ impl Rules {
                 });
             }
         }
-        Ok(Self { rows, system })
+        Ok(Self {
+            rows,
+            system,
+            programs: Vec::new(),
+        })
     }
 
     /// Whether the row's name `a` names `b`: exactly (ignoring case where the system does), with
@@ -221,6 +231,55 @@ impl Rules {
         self.rows
             .iter()
             .find(|r| r.place == Where::Any && self.same(&r.name, name))
+    }
+
+    /// These rules, also counting each of `places` as an installed program's.
+    pub fn with_programs(mut self, places: impl IntoIterator<Item = std::path::PathBuf>) -> Self {
+        for place in places {
+            let key = self.path_key(&place);
+            if !key.is_empty() && !self.programs.iter().any(|(k, _)| *k == key) {
+                self.programs.push((
+                    key,
+                    Row {
+                        system: self.system,
+                        place: Where::Any,
+                        name: place.display().to_string(),
+                        kind: Kind::App,
+                        line: 0,
+                    },
+                ));
+            }
+        }
+        self
+    }
+
+    /// The row for `path` when it is exactly an installed program's place.
+    pub fn program_at(&self, path: &std::path::Path) -> Option<&Row> {
+        let key = self.path_key(path);
+        self.programs
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, row)| row)
+    }
+
+    /// A path's drive and folders, compared the way this system compares names.
+    fn path_key(&self, path: &std::path::Path) -> Vec<String> {
+        path.components()
+            .filter(|c| {
+                matches!(
+                    c,
+                    std::path::Component::Prefix(_) | std::path::Component::Normal(_)
+                )
+            })
+            .map(|c| {
+                let n = c.as_os_str().to_string_lossy();
+                if self.system.ignores_case() {
+                    n.to_lowercase()
+                } else {
+                    n.into_owned()
+                }
+            })
+            .collect()
     }
 
     pub fn rows(&self) -> &[Row] {

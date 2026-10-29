@@ -133,7 +133,13 @@ pub fn extras_here(
     x.with_special(special);
     x.links = links;
     if !settings {
+        // "Apps, settings and app data" unticked: none of it comes, so nothing of it is counted
+        // either (found in the two-copy test, 29 October 2026).
         x.settings.clear();
+        x.not_moved.clear();
+        x.special.clear();
+        x.special_not_moved = 0;
+        x.special_not_checked = 0;
         x.left_out_by_person = true;
     }
     x.encode()
@@ -155,6 +161,8 @@ pub struct ChangeView {
     pub files: u64,
     /// A secret the person may tick to bring: its line (none unless ticked).
     pub secret: Option<u32>,
+    /// An older version is here and PCTwin can update it if ticked: the app's place in the plan.
+    pub update: Option<u32>,
     pub source: Option<String>,
     /// What else the person should know (an older version here, saved sign-ins to websites).
     pub note: Option<ChangeNote>,
@@ -204,9 +212,33 @@ fn winget_here() -> Option<std::path::PathBuf> {
     path.exists().then_some(path)
 }
 
-/// Whether this laptop installs apps itself (Windows with winget: the administrator helper's chain).
+/// Whether this laptop installs apps itself (Windows with winget: the administrator helper's
+/// chain; Linux with one of its own package tools, which ask the system's prompt themselves).
 fn installs_here() -> bool {
+    if cfg!(all(unix, not(target_os = "macos"))) {
+        return pctwin_fullmove::unix::Tools::here().any();
+    }
     winget_here().is_some()
+}
+
+/// Linux: which package system this laptop uses (dpkg's list for apt, rpm with dnf for dnf),
+/// when PCTwin can install from it (PackageKit is here); otherwise no package is planned as
+/// PCTwin's to install.
+fn linux_packages() -> Option<pctwin_apps::routes::LinuxPackages> {
+    use pctwin_apps::routes::LinuxPackages;
+    if !cfg!(all(unix, not(target_os = "macos")))
+        || pctwin_fullmove::unix::Tools::here().pkcon.is_none()
+    {
+        return None;
+    }
+    let file = |p: &str| std::fs::metadata(p).is_ok_and(|m| m.is_file());
+    if file("/var/lib/dpkg/status") {
+        Some(LinuxPackages::Apt)
+    } else if file("/usr/bin/rpm") && file("/usr/bin/dnf") {
+        Some(LinuxPackages::Dnf)
+    } else {
+        None
+    }
 }
 
 /// This laptop's processor, as winget names it.
@@ -312,6 +344,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             special: c.special,
             files: c.files,
             secret: c.secret,
+            update: c.update,
             source: c.source.map(|n| name(&n)),
             note: c.note.map(|n| match n {
                 ChangeNote::OlderHere { version } => ChangeNote::OlderHere {
@@ -367,7 +400,7 @@ fn this_target() -> pctwin_apps::routes::Target {
             x64: cfg!(target_arch = "x86_64"),
             arm64: cfg!(target_arch = "aarch64"),
         },
-        linux: None,
+        linux: linux_packages(),
     }
 }
 
@@ -643,7 +676,8 @@ pub fn rebuild_here<R: Runtime>(
     // What landed where: a moved setting points only at a file that is there.
     let data_done = pctwin_fullmove::run::DataDone { files, ..data_done };
     // Windows with winget: the real chain (winget as the person, then the administrator helper
-    // once). Elsewhere: every app needs the person, and no administrator is asked for.
+    // once). Linux: the system's own package tools. Elsewhere (a Mac, for now): every app needs
+    // the person, and no administrator is asked for.
     let mut no_installer = NoInstaller {
         why: "this laptop has no way for PCTwin to install apps yet",
     };
@@ -678,13 +712,54 @@ pub fn rebuild_here<R: Runtime>(
             &machine,
             &mut nonce,
         )
+        // The move these installs belong to: only its own undo can remove what it installs.
+        .for_move(scope.0)
     });
     #[cfg(windows)]
     let installer: &mut dyn Installer = match chain.as_mut() {
         Some(c) => c,
         None => &mut no_installer,
     };
-    #[cfg(not(windows))]
+    // Linux: the system's own package tools, each asking the system's prompt itself; then the
+    // laptop's own lists read again.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let people: Vec<(String, Option<std::path::PathBuf>)> = pctwin_scan::list_people()
+        .into_iter()
+        .map(|p| (p.account_id, Some(p.home)))
+        .collect();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let home = home_here().unwrap_or_default();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let key_home = home.clone();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let key = move |remote: &str, wide: bool| {
+        pctwin_apps::found::linux::keyring_hash(remote, wide, &key_home)
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let list = || pctwin_apps::found::read_here(&people, me);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut linux = pctwin_fullmove::unix::LinuxInstaller {
+        runner: &pctwin_maker::run::SystemRunner,
+        tools: pctwin_fullmove::unix::Tools::here(),
+        home,
+        session: [
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_DATA_HOME",
+        ]
+        .into_iter()
+        .filter_map(|n| Some((std::ffi::OsString::from(n), std::env::var_os(n)?)))
+        .collect(),
+        flatpak_key: &key,
+        list: &list,
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let installer: &mut dyn Installer = if linux.tools.any() {
+        &mut linux
+    } else {
+        &mut no_installer
+    };
+    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
     let installer: &mut dyn Installer = &mut no_installer;
     let mut progress = |step: Progress| {
         let _ = app.emit(REBUILD_EVENT, step);
@@ -796,8 +871,7 @@ pub fn rebuild_here<R: Runtime>(
         Some(RestorePoint::NotMade { .. }) if !installs_here() => RestoreWord::NotAsked,
         Some(RestorePoint::NotMade { .. }) => RestoreWord::NotMade,
     };
-    let can_undo =
-        !done.undo.recipes.is_empty() || !done.undo.apps.is_empty() || !done.undo.landed.is_empty();
+    let can_undo = done.undo.has_anything();
     // One book per move, never over another move's: kept here and beside the journal, so Undo
     // still works after PCTwin restarts, for this move and every earlier one.
     let undo_id = can_undo.then(|| done.undo.id());
@@ -1055,6 +1129,9 @@ fn plan_line(l: pctwin_fullmove::undo::PlanLine) -> UndoPlanLine {
             pctwin_fullmove::undo::UndoPlan::PutBack => UndoPlan::PutBack,
             pctwin_fullmove::undo::UndoPlan::KeepChanged => UndoPlan::KeepChanged,
             pctwin_fullmove::undo::UndoPlan::RemoveYourself => UndoPlan::RemoveYourself,
+            pctwin_fullmove::undo::UndoPlan::RemoveApp => UndoPlan::RemoveApp,
+            pctwin_fullmove::undo::UndoPlan::KeepOtherVersion => UndoPlan::KeepOtherVersion,
+            pctwin_fullmove::undo::UndoPlan::AlreadyGone => UndoPlan::AlreadyGone,
         },
     }
 }
@@ -1075,6 +1152,14 @@ fn undo_line(l: pctwin_fullmove::undo::Line) -> UndoLine {
             Some(format!("{left} could not be put back this time")),
         ),
         R::RemoveYourself => (UndoResult::RemoveYourself, None),
+        R::Removed {
+            restart_needed: false,
+        } => (UndoResult::Removed, None),
+        R::Removed {
+            restart_needed: true,
+        } => (UndoResult::RemovedRestart, None),
+        R::KeptOtherVersion => (UndoResult::KeptOtherVersion, None),
+        R::NotRemoved => (UndoResult::NotRemoved, None),
     };
     UndoLine {
         name: name(&l.name),
@@ -1157,12 +1242,13 @@ pub fn fullmove_undo<R: Runtime>(
     let app2 = app.clone();
     std::thread::Builder::new()
         .name("pctwin-undo".into())
-        .spawn(move || run_undo(&app2, epoch, &book))
+        .spawn(move || run_undo(&app2, epoch, book))
         .map(|_| ())
         .map_err(|_| crate::moving::MoveProblem::Failed)
 }
 
-fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
+fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
+    let book = &mut book;
     let guard = app.state::<AppGuard>();
     let state = app.state::<AppFullMove>();
     let close = || {
@@ -1191,7 +1277,46 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
         close();
         return;
     };
-    let preview = pctwin_fullmove::undo::preview(&journal, book, &mut adapter)
+    // Apps PCTwin installed from a Windows Installer package: removed through the administrator
+    // helper (one system prompt, only if any is to be removed). Elsewhere: listed for the person.
+    let mut list_only = pctwin_fullmove::undo::ListOnly;
+    #[cfg(windows)]
+    let me = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.account_id);
+    #[cfg(windows)]
+    let mut helper = match (me, LaptopId::generate()) {
+        (Some(me), Ok(laptop)) => Some(AppHelper {
+            me,
+            laptop,
+            client: None,
+        }),
+        _ => None,
+    };
+    #[cfg(windows)]
+    let machine = WindowsList;
+    #[cfg(windows)]
+    let mut nonce = || {
+        let mut b = [0u8; 16];
+        getrandom::fill(&mut b).ok().map(|()| b)
+    };
+    #[cfg(windows)]
+    let mut through_helper = helper
+        .as_mut()
+        .map(|helper| pctwin_fullmove::undo::HelperUndo {
+            helper,
+            machine: &machine,
+            nonce: &mut nonce,
+        });
+    #[cfg(windows)]
+    let apps: &mut dyn pctwin_fullmove::undo::AppUndo = match through_helper.as_mut() {
+        Some(h) => h,
+        None => &mut list_only,
+    };
+    #[cfg(not(windows))]
+    let apps: &mut dyn pctwin_fullmove::undo::AppUndo = &mut list_only;
+    let preview = pctwin_fullmove::undo::preview(&journal, book, &mut adapter, apps)
         .map(|l| l.into_iter().map(plan_line).collect::<Vec<_>>())
         .unwrap_or_default();
     let (lines, more) = bounded(preview);
@@ -1243,13 +1368,20 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
                         .and_then(|h| pctwin_gate::Destination::open(std::path::Path::new(h)).ok());
                     let data = home.as_ref().map(|h| (&state.keys.capture, h));
                     let (lines, display) =
-                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter, data) {
+                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter, data, apps)
+                        {
                             Ok(lines) => (
                                 lines.into_iter().map(undo_line).collect::<Vec<_>>(),
                                 DisplayState::Complete,
                             ),
                             Err(_) => (Vec::new(), DisplayState::Failed),
                         };
+                    // Apps whose removal ended are settled in the book, kept here and beside
+                    // the journal: a later undo never asks for them again.
+                    lock(&state.books).insert(book.id(), book.clone());
+                    if let Some(folder) = books_folder(app) {
+                        let _ = crate::undo_books::save(&folder, book);
+                    }
                     let (lines, more) = bounded(lines);
                     publish(
                         app,
@@ -1281,6 +1413,46 @@ mod tests {
 
     /// Gap 1: an app's to-do list reaches the outcome as notes (a restart is the line's own
     /// reason; a registration with nothing in it says nothing).
+    /// Undo of apps PCTwin installed reaches the screen in its own words: removed (with a
+    /// restart when one finishes it), kept at another version, not removed.
+    #[test]
+    fn app_undo_results_and_plans_reach_the_screen_in_their_own_words() {
+        use pctwin_fullmove::undo::{Line, PlanLine, Result as R, UndoPlan as P};
+        let line = |result| {
+            undo_line(Line {
+                name: "Writer".into(),
+                result,
+            })
+            .result
+        };
+        assert_eq!(
+            line(R::Removed {
+                restart_needed: false
+            }),
+            UndoResult::Removed
+        );
+        assert_eq!(
+            line(R::Removed {
+                restart_needed: true
+            }),
+            UndoResult::RemovedRestart
+        );
+        assert_eq!(line(R::KeptOtherVersion), UndoResult::KeptOtherVersion);
+        assert_eq!(line(R::NotRemoved), UndoResult::NotRemoved);
+        assert_eq!(line(R::RemoveYourself), UndoResult::RemoveYourself);
+        let plan = |plan| {
+            plan_line(PlanLine {
+                name: "Writer".into(),
+                plan,
+            })
+            .plan
+        };
+        assert_eq!(plan(P::RemoveApp), UndoPlan::RemoveApp);
+        assert_eq!(plan(P::KeepOtherVersion), UndoPlan::KeepOtherVersion);
+        assert_eq!(plan(P::AlreadyGone), UndoPlan::AlreadyGone);
+        assert_eq!(plan(P::RemoveYourself), UndoPlan::RemoveYourself);
+    }
+
     #[test]
     fn an_apps_to_do_list_becomes_its_outcome_notes() {
         use pctwin_apps::after::Todo;

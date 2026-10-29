@@ -1124,6 +1124,8 @@ cancel-keep = स्थानांतरण जारी रखें
 outcome-eyebrow = स्थानांतरण के नतीजे
 outcome-title = आपके अगले लैपटॉप पर आपका स्वागत है।
 outcome-body = आपने जो कुछ मंज़ूर किया था, उसके साथ क्या हुआ, यहाँ देखें।
+outcome-title-old = आपकी चीज़ें आपके नए लैपटॉप पर हैं।
+outcome-body-old = आपने जो कुछ भेजा, उसके साथ क्या हुआ, यहाँ देखें। यह लैपटॉप जैसा था वैसा ही है।
 outcome-files-title = चुनी गई फ़ाइलें
 outcome-status-partial = कुछ हिस्सा पूरा
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
@@ -1205,7 +1207,7 @@ move-found = अब तक मिला: आपकी चीज़ों मे�
 move-wait-approval-title = नए लैपटॉप का इंतज़ार है।
 move-wait-approval-body = आपकी फ़ाइलें तैयार हैं। नए लैपटॉप पर योजना देखें और शुरू करने के लिए उसे मंज़ूर करें।
 move-wait-list-title = पुराने लैपटॉप का इंतज़ार है।
-move-wait-list-body = आपका पुराना लैपटॉप आपकी फ़ाइलें ढूँढ रहा है। पूरा होने पर योजना यहाँ मंज़ूरी के लिए दिखेगी। इसमें कुछ मिनट लग सकते हैं।
+move-wait-list-body = आपका पुराना लैपटॉप आपकी चीज़ें ढूँढ रहा है, फिर वहीं चुना जाता है कि क्या ले जाना है। उसके बाद जो आ रहा है वह यहाँ दिखेगा, ताकि आप उसे स्वीकार कर सकें। इसमें कुछ मिनट लग सकते हैं।
 move-wait-starting-title = स्थानांतरण शुरू हो रहा है।
 move-wait-starting-body = योजना मंज़ूर हो गई है। कॉपी करना कुछ ही पल में शुरू होगा।
 move-wait-admin-title = एडमिनिस्ट्रेटर का इंतज़ार है।
@@ -1294,8 +1296,27 @@ drive-problem-carry-on = जारी रखें
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = आपका स्थानांतरण, एक-एक आइटम।
-report-body = हर आइटम के साथ क्या हुआ, क्यों हुआ, और वह कहाँ से आया और कहाँ गया।
+report-title = आपका स्थानांतरण, प्रकार के अनुसार।
+report-body = किसी प्रकार को खोलकर उसकी फ़ाइलें देखें। जिन चीज़ों पर आपका ध्यान चाहिए, वे सबसे पहले हैं।
+report-needs-title = { $count ->
+        [one] { $count } चीज़ पर आपका ध्यान चाहिए
+       *[other] { $count } चीज़ों पर आपका ध्यान चाहिए
+    }
+report-group-photos = फ़ोटो
+report-group-videos = वीडियो
+report-group-music = संगीत
+report-group-documents = दस्तावेज़
+report-group-other = अन्य फ़ाइलें
+report-group-size = { $files ->
+        [one] { $files } फ़ाइल
+       *[other] { $files } फ़ाइलें
+    } · { $size }
+report-group-done = सब कॉपी और जाँच लिया गया
+report-group-some = { $total } में से { $done } कॉपी और जाँच लिए गए
+report-group-left = { $count ->
+        [one] { $count } आपके पुराने लैपटॉप पर रहा, जैसा आपने चुना
+       *[other] { $count } आपके पुराने लैपटॉप पर रहे, जैसा आपने चुना
+    }
 report-filter-label = दिखाएं
 report-col-item = आइटम
 report-col-result = नतीजा
@@ -1521,6 +1542,7 @@ history-status-steps-left =
 history-status-paused = रुका हुआ
 history-status-stopped = सुरक्षित रूप से बंद
 history-open-report = रिपोर्ट
+history-undo = पहले जैसा करें
 history-continue = आगे बढ़ें
 history-export = इतिहास फ़ाइल में सहेजें
 history-exported = इतिहास { $path } में सहेजा गया।
@@ -1784,7 +1806,7 @@ guard-undo-legend-can = PCTwin इसे पूर्ववत कर सकत�
 guard-undo-legend-keeps = PCTwin इसे रखता है। पूर्ववत करना इसे नहीं छूता।
 guard-undo-legend-you = आपको करना होगा। इसे सिर्फ़ इसकी सेवा या बनाने वाला ही पूर्ववत कर सकता है।
 guard-undo-can-reverse = PCTwin इसे पूर्ववत कर सकता है
-guard-undo-can-remove-app = PCTwin इसे हटा सकता है, आपका काम रखते हुए
+guard-undo-can-remove-app = PCTwin ऐप हटा सकता है। यह आपकी बनाई फ़ाइलों को नहीं छूता।
 guard-undo-must-keep = रखा गया: यह पहले से यहाँ था
 guard-undo-needs-you-service = आपको करना होगा: इसे सिर्फ़ ऑनलाइन सेवा पूर्ववत कर सकती है
 guard-undo-needs-you-maker = आपको करना होगा: साइन-इन और लाइसेंस बनाने वाले के होते हैं
@@ -1974,8 +1996,9 @@ guard-undo-preview-title = पूर्ववत करना क्या क�
 guard-undo-preview-body = PCTwin ने अभी हर बदलाव को देखा। स्थानांतरण के बाद आपने जो बदला, वह रखा जाता है। जब तक आप पूर्ववत करें नहीं चुनते, कुछ नहीं होता।
 guard-undo-preview-which = यह { DATETIME($when, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit") } को पूरे हुए स्थानांतरण को पूर्ववत करता है। आपके दूसरे स्थानांतरण नहीं बदलते।
 guard-undo-preview-which-earlier = यह PCTwin के पुराने वर्शन से किए गए स्थानांतरण को पूर्ववत करता है। आपके दूसरे स्थानांतरण नहीं बदलते।
+guard-undo-preview-admin = ऐप हटाने के लिए यह लैपटॉप किसी व्यवस्थापक से मंज़ूरी मांगेगा।
 guard-undo-plan-put-back = जैसा था वैसा वापस रखा गया
-guard-undo-plan-remove-app = ऐप हटाया गया, आपका काम रखा गया
+guard-undo-plan-remove-app = PCTwin ऐप हटाता है। PCTwin आपकी बनाई फ़ाइलों को नहीं छूता।
 guard-undo-plan-keep-changed = रखा गया: आपने इसे बदला है
 guard-undo-plan-elsewhere = आपको करना होगा: कहीं और किया गया
 guard-undo-plan-leave-alone = छोड़ दिया गया: यह पहले से यहाँ था
@@ -2011,6 +2034,13 @@ fullmove-step-sign-in = इस लैपटॉप पर इसमें फि�
 fullmove-step-relink = इसे इस लैपटॉप पर फिर से सेट करें, या ऐप से फिर से जोड़ें।
 fullmove-step-not-yet = PCTwin अभी इस ऐप का डेटा नहीं ले जाता। यह आपके पुराने लैपटॉप पर सुरक्षित है।
 fullmove-step-look-at-it = PCTwin पता नहीं लगा सका कि यह क्या है। इसे अपने पुराने लैपटॉप पर देखें।
+fullmove-group-update =
+    { $count ->
+        [one] इस लैपटॉप पर एक पुराना संस्करण है
+       *[other] इस लैपटॉप पर पुराने संस्करण हैं
+    }
+fullmove-update-it = { $name } अपडेट करें
+fullmove-update-hint = PCTwin नया संस्करण इंस्टॉल करेगा। आपकी सेटिंग वैसी ही रहेंगी।
 fullmove-special-not-yet = ऐप डेटा, जैसे ईमेल, ब्राउज़र और गेम
 fullmove-left-by-person = ऐप, सेटिंग और ऐप डेटा: आपकी पसंद के अनुसार पुराने लैपटॉप पर ही रहे
 fullmove-special-finish = PCTwin ने इसे नहीं ले जाया। यह आपके पुराने लैपटॉप पर सुरक्षित है।
@@ -2039,6 +2069,11 @@ fullmove-restore-not-windows = इस लैपटॉप पर रिस्ट�
 guard-undo-remove-yourself = चाहें तो इसे खुद हटाएँ
 guard-undo-plan-remove-yourself = आप इसे अपने लैपटॉप की सेटिंग्स में हटा सकते हैं
 guard-undo-result-remove-yourself = आपके हटाने के लिए छोड़ा गया, लैपटॉप की सेटिंग्स में
+guard-undo-plan-keep-other-version = रखा गया: स्थानांतरण के बाद यह बदल गया
+guard-undo-plan-already-gone = पहले ही हटाया जा चुका है
+guard-undo-result-kept-other-version = रखा गया, क्योंकि स्थानांतरण के बाद यह बदल गया
+guard-undo-result-removed-restart = हटाया गया। पूरा करने के लिए अपना लैपटॉप फिर से चालू करें।
+guard-undo-result-not-removed = नहीं हटाया गया। आप इसे अपने लैपटॉप की सेटिंग्स में हटा सकते हैं।
 guard-undo-close = हो गया
 move-wait-appdata-title = आपके ऐप डेटा को देखा जा रहा है।
 move-wait-appdata-body = आपकी फ़ाइलें मिल गई हैं। PCTwin अभी आपके ऐप्स का रखा डेटा देख रहा है, जैसे ईमेल और ब्राउज़र। इसमें ज़्यादा से ज़्यादा दस मिनट लगते हैं। इस लैपटॉप पर कुछ नहीं बदलता।
@@ -2089,7 +2124,14 @@ choose-mode = क्या ले जाएँ
 choose-everything = सब कुछ
 choose-except = सब कुछ, इनके सिवा
 choose-only = सिर्फ़ जो मैं चुनूँ
-choose-except-hint = जो छोड़ना है उस पर निशान लगाएँ।
+choose-except-hint = जो छोड़ना है उससे निशान हटाएँ।
+choose-open = { $name } खोलें
+choose-close = { $name } बंद करें
+choose-total =
+    { $files ->
+        [one] 1 फ़ाइल
+       *[other] { $files } फ़ाइलें
+    } · चुना गया: { $size }
 choose-only-hint = जो ले जाना है उस पर निशान लगाएँ।
 choose-apps = ऐप, सेटिंग और ऐप डेटा
 choose-apps-count =

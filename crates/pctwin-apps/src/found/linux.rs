@@ -437,7 +437,9 @@ pub fn snap_apps(text: &str) -> Vec<FoundApp> {
         .collect()
 }
 
-fn keyring_hash(remote: &str, system_wide: bool, home: &Path) -> Option<[u8; 32]> {
+/// The SHA-256 of a Flatpak remote's signing keyring (`None`: not there, or not a plain file).
+/// The new laptop compares its own remote's with the old laptop's before installing from it.
+pub fn keyring_hash(remote: &str, system_wide: bool, home: &Path) -> Option<[u8; 32]> {
     if remote.contains(['/', '\\']) || remote.starts_with('.') {
         return None;
     }
