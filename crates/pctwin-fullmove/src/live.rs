@@ -11,7 +11,10 @@
 //!   while it is read is not sent.
 //! - [`LiveOpener`]: during the send, each live file is opened so that no program can start
 //!   writing to it while it is read (Windows: shared for reading only), or, where that cannot be
-//!   done, only after the system says nobody holds it. A file still held is not read at all: it
+//!   done, only after the system says nobody holds it. While it is read, an app started then
+//!   cannot write to it, and may say the file is in use, until the read ends; the old laptop's
+//!   screen says so. A database's own files beside it (its `-wal`, `-shm`, `-journal`, from the
+//!   catalogue) are live files too, held while the database is read, so it is copied whole. A file still held is not read at all: it
 //!   ends "another program had it open" ([`pctwin_transfer::InUse`]), which the report shows as
 //!   needs-action, never as copied; the apps holding it are kept for the old laptop's report.
 
@@ -34,6 +37,9 @@ pub struct LiveFile {
     pub name: String,
     /// Its kind, from the catalogue (`mail-store`, `database`, ...).
     pub kind: String,
+    /// Its own files beside it in the move (a database's `-wal`, `-shm`, `-journal`): held while
+    /// it is read.
+    pub sidecars: Vec<PathBuf>,
 }
 
 /// A live file an app holds open for writing now.
@@ -46,7 +52,7 @@ pub struct HeldFile {
 }
 
 /// Opens `path` to look at its first and last bytes, never downloading a file stored online
-/// only, and sharing it fully, so its app is never disturbed.
+/// only, and sharing it fully, so its app can still write while it is looked at.
 fn head_and_tail(path: &Path) -> io::Result<(Vec<u8>, Vec<u8>, u64)> {
     let meta = std::fs::symlink_metadata(path)?;
     if !meta.is_file() || pctwin_types::cloud::is_cloud_only(&meta) {
@@ -82,8 +88,10 @@ pub fn find_live(
     files: impl IntoIterator<Item = (ItemId, PathBuf)>,
     kinds: &LiveKinds,
 ) -> Vec<LiveFile> {
-    let mut found = Vec::new();
-    for (item, path) in files {
+    let files: Vec<(ItemId, PathBuf)> = files.into_iter().collect();
+    let by_path: HashMap<&Path, ItemId> = files.iter().map(|(i, p)| (p.as_path(), *i)).collect();
+    let mut found: Vec<LiveFile> = Vec::new();
+    for (item, path) in files.iter().cloned() {
         let Some(name) = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -98,14 +106,38 @@ pub fn find_live(
             continue;
         };
         if let Some(kind) = kinds.kind_of(&name, &head, &tail, len) {
+            // Its own files beside it that move too: live files of their own, held with it.
+            let mut sidecars = Vec::new();
+            for suffix in &kind.sidecars {
+                let mut side = path.as_os_str().to_owned();
+                side.push(suffix);
+                let side = PathBuf::from(side);
+                if let Some(&side_item) = by_path.get(side.as_path()) {
+                    sidecars.push(side.clone());
+                    found.push(LiveFile {
+                        item: side_item,
+                        name: side
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        path: side,
+                        kind: kind.kind.clone(),
+                        sidecars: Vec::new(),
+                    });
+                }
+            }
             found.push(LiveFile {
                 item,
                 path,
                 name,
                 kind: kind.kind.clone(),
+                sidecars,
             });
         }
     }
+    // A sidecar named twice (its own ending is a kind's too) is kept once.
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|f| seen.insert(f.item));
     found
 }
 
@@ -159,6 +191,7 @@ pub fn apps_to_close(held: &[HeldFile]) -> Vec<String> {
 pub struct LiveOpener {
     inner: Arc<dyn Opener>,
     live: HashMap<PathBuf, ItemId>,
+    sidecars: HashMap<PathBuf, Vec<PathBuf>>,
     holders: Arc<dyn Holders + Send + Sync>,
     held: Mutex<HashMap<ItemId, Vec<String>>>,
 }
@@ -172,6 +205,10 @@ impl LiveOpener {
         Self {
             inner,
             live: files.iter().map(|f| (f.path.clone(), f.item)).collect(),
+            sidecars: files
+                .iter()
+                .map(|f| (f.path.clone(), f.sidecars.clone()))
+                .collect(),
             holders,
             held: Mutex::new(HashMap::new()),
         }
@@ -209,18 +246,34 @@ impl LiveOpener {
         }
         // Shared for reading only: it fails while anyone has it open for writing, and while it
         // is open nobody can start writing to it, so the copy is whole.
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(FILE_SHARE_READ)
-            .custom_flags(0x0010_0000)
-            .open(path)
-        {
-            Ok(f) => Ok(Box::new(f)),
-            Err(e) if matches!(e.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION)) => {
-                Err(self.refuse(item, path, None))
+        let open = |p: &Path| {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ)
+                .custom_flags(0x0010_0000)
+                .open(p)
+        };
+        let held =
+            |e: &io::Error| matches!(e.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION));
+        let file = match open(path) {
+            Ok(f) => f,
+            Err(e) if held(&e) => return Err(self.refuse(item, path, None)),
+            Err(e) => return Err(e),
+        };
+        // Its own files beside it are held too while it is read; one held by its app means the
+        // database is still open there, so it is not read at all.
+        let mut guards = Vec::new();
+        for side in self.sidecars.get(path).into_iter().flatten() {
+            match open(side) {
+                Ok(g) => guards.push(g),
+                Err(e) if held(&e) => return Err(self.refuse(item, path, None)),
+                Err(_) => {}
             }
-            Err(e) => Err(e),
         }
+        Ok(Box::new(WithSidecars {
+            file,
+            _guards: guards,
+        }))
     }
 
     #[cfg(not(windows))]
@@ -231,6 +284,38 @@ impl LiveOpener {
             Holding::Held { by } => Err(self.refuse(item, path, Some(by))),
             Holding::Free | Holding::CannotTell => self.inner.open(path),
         }
+    }
+}
+
+/// A live file being read, with its own files beside it held so nothing writes to them meanwhile.
+#[cfg(windows)]
+struct WithSidecars {
+    file: std::fs::File,
+    _guards: Vec<std::fs::File>,
+}
+
+#[cfg(windows)]
+impl Read for WithSidecars {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+#[cfg(windows)]
+impl Seek for WithSidecars {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+#[cfg(windows)]
+impl Source for WithSidecars {
+    fn stamp(&mut self) -> io::Result<pctwin_transfer::Stamp> {
+        self.file.stamp()
+    }
+
+    fn identity(&mut self) -> io::Result<Option<pctwin_journal::FileId>> {
+        self.file.identity()
     }
 }
 

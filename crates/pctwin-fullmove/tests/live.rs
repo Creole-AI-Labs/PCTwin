@@ -74,6 +74,7 @@ fn live(dir: &Path, name: &str, n: u8) -> LiveFile {
         path: dir.join(name),
         name: name.into(),
         kind: "database".into(),
+        sidecars: Vec::new(),
     }
 }
 
@@ -238,4 +239,69 @@ fn a_live_file_held_by_its_app_is_never_read() {
     );
     // Closed since: read.
     assert!(opener.open(&f.path).is_ok());
+}
+
+/// A database's own files beside it (its write-ahead log and the like) are live with it: found,
+/// asked about, and held while it is read, so the copy is whole.
+#[test]
+fn a_databases_own_files_beside_it_are_live_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    std::fs::write(d.join("money.db"), sqlite_bytes()).unwrap();
+    std::fs::write(d.join("money.db-wal"), b"log").unwrap();
+    std::fs::write(d.join("money.db-shm"), b"index").unwrap();
+    std::fs::write(d.join("other.db-wal"), b"no database of its own").unwrap();
+    let files = ["money.db", "money.db-wal", "money.db-shm", "other.db-wal"]
+        .iter()
+        .enumerate()
+        .map(|(n, f)| (id(n as u8), d.join(f)));
+    let found = find_live(files, LiveKinds::built_in());
+    let mut names: Vec<&str> = found.iter().map(|f| f.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["money.db", "money.db-shm", "money.db-wal"]);
+    let db = found.iter().find(|f| f.name == "money.db").unwrap();
+    assert_eq!(
+        db.sidecars,
+        [d.join("money.db-wal"), d.join("money.db-shm")]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_database_whose_log_is_held_is_not_read_and_its_log_is_held_while_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    std::fs::write(d.join("money.db"), sqlite_bytes()).unwrap();
+    std::fs::write(d.join("money.db-wal"), b"log").unwrap();
+    let files = [(id(1), d.join("money.db")), (id(2), d.join("money.db-wal"))];
+    let found = find_live(files, LiveKinds::built_in());
+    let opener = LiveOpener::new(
+        Arc::new(FsOpener),
+        &found,
+        Arc::new(Fake::held_for(usize::MAX, &["Money Manager"])),
+    );
+    // The app writes its log: the database is not read.
+    let app = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(d.join("money.db-wal"))
+        .unwrap();
+    let e = opener.open(&d.join("money.db")).err().expect("not read");
+    assert!(is_in_use(&e), "{e}");
+    drop(app);
+    // Closed: read, and its log cannot be written meanwhile.
+    let reading = opener.open(&d.join("money.db")).unwrap();
+    assert!(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(d.join("money.db-wal"))
+            .is_err()
+    );
+    drop(reading);
+    assert!(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(d.join("money.db-wal"))
+            .is_ok()
+    );
 }

@@ -52,6 +52,10 @@ pub struct Kind {
     pub endings: Vec<String>,
     /// The shapes its bytes must show, one of them; empty: the ending is enough.
     pub shapes: Vec<ShapeName>,
+    /// Files its app keeps beside it that belong with it, by what is added to its whole name
+    /// (an SQLite database's `-wal`, `-shm` and `-journal`): held and read together with it.
+    #[serde(default)]
+    pub sidecars: Vec<String>,
 }
 
 /// The catalogue of live kinds.
@@ -86,10 +90,12 @@ impl LiveKinds {
     pub fn parse(json: &str) -> Result<Self, LiveKindsError> {
         let k: LiveKinds =
             serde_json::from_str(json).map_err(|e| LiveKindsError::Unreadable(e.to_string()))?;
+        let plain_sidecar = |s: &String| s.strip_prefix('-').is_some_and(plain_ending);
         if k.kinds.iter().any(|kind| {
             kind.kind.is_empty()
                 || kind.endings.is_empty()
                 || !kind.endings.iter().all(|e| plain_ending(e))
+                || !kind.sidecars.iter().all(plain_sidecar)
         }) {
             return Err(LiveKindsError::BadKind);
         }
@@ -170,6 +176,12 @@ mod tests {
         assert!(!b.may_be("letter.docx"));
         assert!(!b.may_be("pst"));
         assert!(!b.may_be(".db"));
+        let db = b
+            .kinds
+            .iter()
+            .find(|k| k.endings.contains(&"sqlite".to_string()))
+            .unwrap();
+        assert_eq!(db.sidecars, ["-wal", "-shm", "-journal"]);
     }
 
     #[test]
@@ -240,6 +252,8 @@ mod tests {
             r#"{"kinds":[{"kind":"x","endings":["DB"],"shapes":[]}]}"#,
             r#"{"kinds":[{"kind":"x","endings":["db"],"shapes":["nope"]}]}"#,
             r#"{"kinds":[{"kind":"x","endings":["db"],"shapes":[],"app":"Outlook"}]}"#,
+            r#"{"kinds":[{"kind":"x","endings":["db"],"shapes":[],"sidecars":["wal"]}]}"#,
+            r#"{"kinds":[{"kind":"x","endings":["db"],"shapes":[],"sidecars":["-../x"]}]}"#,
             "not json",
         ] {
             assert!(LiveKinds::parse(bad).is_err(), "{bad}");
