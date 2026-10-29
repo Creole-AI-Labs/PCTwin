@@ -292,6 +292,8 @@ struct Run {
     secrets: Vec<u32>,
     /// The new laptop: the older apps here the person ticked "Update it" for, when they approved.
     updates: Vec<u32>,
+    /// The new laptop: the person accepted leaving the proposed files on the old laptop (2.6).
+    leave_behind: bool,
     /// The old laptop: where the person's answer about apps to close goes.
     close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
@@ -565,6 +567,7 @@ impl Moving {
             waiting: None,
             secrets: Vec::new(),
             updates: Vec::new(),
+            leave_behind: false,
             close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
@@ -657,7 +660,7 @@ impl Moving {
         yes: bool,
         left_out: &[FolderRole],
         secrets: &[u32],
-        updates: &[u32],
+        (updates, leave_behind): (&[u32], bool),
     ) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.waiting.take() {
             Some((shown, groups, tx)) if shown == *key => {
@@ -668,6 +671,7 @@ impl Moving {
                 run.left_out = left_out.iter().copied().collect();
                 run.secrets = secrets.to_vec();
                 run.updates = updates.to_vec();
+                run.leave_behind = leave_behind;
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -736,6 +740,10 @@ impl Moving {
             }
             None => Err(MoveProblem::NotMoving),
         })?
+    }
+
+    fn leave_behind(&self) -> bool {
+        lock(&self.run).as_ref().is_some_and(|r| r.leave_behind)
     }
 
     fn updates(&self) -> Vec<u32> {
@@ -1079,6 +1087,97 @@ pub struct PlanView {
     /// (absent when the old laptop sent none of them).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rebuild: Option<crate::fullmove::RebuildPlanView>,
+    /// When the new laptop is too small: what PCTwin proposes to leave on the old laptop so it
+    /// fits (2.6), changed only if the person accepts it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space: Option<SpaceView>,
+}
+
+/// The proposal for a new laptop too small for the plan (2.6, `pctwin_orchestrate::capacity`):
+/// the files used longest ago first, never the ones that move first, only as much as is short.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpaceView {
+    /// How many files it proposes to leave on the old laptop, and their size.
+    pub files: u64,
+    pub bytes: u64,
+    /// What would still be short with them left behind (0 when that makes it fit).
+    pub still_short_bytes: u64,
+}
+
+/// What to propose leaving on the old laptop when the plan does not fit this laptop: the drives
+/// from the plan's own fit (places on one drive share its space), every included file of the
+/// mover's by the drive it lands on, the ones that move first never proposed.
+fn space_proposal(
+    record: &Record,
+    preview: &Preview,
+    rules: &LandingRules,
+) -> (Option<SpaceView>, std::collections::BTreeSet<ItemId>) {
+    use pctwin_orchestrate::capacity::{Candidate, Need, NeedKind, Volume, budget, propose};
+    // A place's fit already counts everything on its drive: one volume per drive's numbers.
+    let mut drive_of: BTreeMap<String, String> = BTreeMap::new();
+    let mut volumes: Vec<Volume> = Vec::new();
+    let mut needs: Vec<Need> = Vec::new();
+    for place in &preview.fit.places {
+        let Some(free) = place.free else { continue };
+        let id = format!("{free}/{}", place.needed);
+        if !volumes.iter().any(|v| v.id == id) {
+            volumes.push(Volume {
+                id: id.clone(),
+                free: Some(free),
+            });
+            needs.push(Need {
+                volume: id.clone(),
+                kind: NeedKind::Files,
+                bytes: place.needed,
+            });
+        }
+        drive_of.insert(place.destination.clone(), id);
+    }
+    let budgets = budget(&volumes, &needs);
+    if budgets.iter().all(|b| b.short_by == 0) {
+        return (None, Default::default());
+    }
+    let first: std::collections::BTreeSet<ItemId> = pctwin_move::move_order(record)
+        .into_iter()
+        .filter(|(_, tier)| pctwin_move::moves_first(*tier))
+        .map(|(id, _)| id)
+        .collect();
+    let candidates: Vec<Candidate> = record
+        .items
+        .iter()
+        .filter(|i| {
+            i.inclusion == Inclusion::Included
+                && matches!(i.kind, pctwin_record::ItemKind::File)
+                && shown_to_mover(i, &rules.mover)
+        })
+        .filter_map(|i| {
+            let volume = drive_of.get(&rules.landing(i)?.destination)?.clone();
+            Some(Candidate {
+                item: i.id,
+                volume,
+                bytes: i.size_bytes,
+                essential: first.contains(&i.id),
+                safe_in_cloud: false,
+                last_changed_ns: i.modified_ns,
+            })
+        })
+        .collect();
+    let proposal = propose(&budgets, &candidates, None);
+    let proposed: std::collections::BTreeSet<ItemId> = proposal.choices.keys().copied().collect();
+    let bytes = candidates
+        .iter()
+        .filter(|c| proposed.contains(&c.item))
+        .fold(0u64, |t, c| t.saturating_add(c.bytes));
+    let view = SpaceView {
+        files: proposed.len() as u64,
+        bytes,
+        still_short_bytes: proposal
+            .still_short
+            .values()
+            .fold(0u64, |t, b| t.saturating_add(*b)),
+    };
+    (Some(view), proposed)
 }
 
 /// Whether `item` is the mover's to see by name: their own and the shared things, never another
@@ -1174,6 +1273,7 @@ fn plan_view(
     PlanView {
         first,
         rebuild: None,
+        space: None,
         revision: record.revision,
         fingerprint: record.fingerprint().to_hex(),
         groups: groups
@@ -1992,6 +2092,9 @@ struct AppSteps<R: Runtime> {
     sink: Option<pctwin_fullmove::data::Sink>,
     /// The secret lines the person ticked.
     picked: Vec<u32>,
+    /// The files the plan proposes leaving on the old laptop (2.6), and those the person accepted.
+    proposed: std::collections::BTreeSet<ItemId>,
+    leaving: std::collections::BTreeSet<ItemId>,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -2258,6 +2361,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
         let mut view = plan_view(record, preview, &self.rules, &self.shown);
+        // Too small a laptop: what to leave on the old one, proposed (changed only if accepted).
+        let (space, proposed) = space_proposal(record, preview, &self.rules);
+        view.space = space;
+        self.proposed = proposed;
         // A place that syncs online on this laptop (Documents kept in a cloud folder, say): said
         // on the plan, as files there upload and use that service's space.
         let folders: Vec<String> = view.groups.iter().map(|g| g.to_folder.clone()).collect();
@@ -2329,6 +2436,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
                 }
                 // The folders the person unticked: none of their files is sent or received.
                 self.rules.left_out = self.moving.left_out();
+                // The files the person agreed to leave on the old laptop so the plan fits.
+                if self.moving.leave_behind() {
+                    self.leaving = std::mem::take(&mut self.proposed);
+                }
                 // The places the person chose: those folders land there, and nowhere else.
                 for (role, (place, shown)) in self.moving.take_chosen() {
                     let label = pctwin_move::landing::chosen_label(role);
@@ -2352,7 +2463,8 @@ impl<R: Runtime> Steps for AppSteps<R> {
             .items
             .iter()
             .filter(|i| {
-                shown_to_mover(i, &self.rules.mover) && self.rules.left_out.contains(&i.place.role)
+                shown_to_mover(i, &self.rules.mover)
+                    && (self.rules.left_out.contains(&i.place.role) || self.leaving.contains(&i.id))
             })
             .map(|i| i.id)
             .collect()
@@ -2865,6 +2977,8 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         full: None,
         sink: None,
         picked: Vec::new(),
+        proposed: Default::default(),
+        leaving: Default::default(),
     };
     // A stop ends the greeting at once.
     let mut link = pctwin_move::or_stop(&live.control, async {
@@ -3416,10 +3530,17 @@ pub fn move_approve(
     left_out: Vec<FolderRole>,
     secrets: Option<Vec<u32>>,
     updates: Option<Vec<u32>>,
+    leave_behind: Option<bool>,
 ) -> Result<(), MoveProblem> {
     let secrets = secrets.unwrap_or_default();
     let updates = updates.unwrap_or_default();
-    moving.answer(&plan, approve, &left_out, &secrets, &updates)
+    moving.answer(
+        &plan,
+        approve,
+        &left_out,
+        &secrets,
+        (&updates, leave_behind.unwrap_or(false)),
+    )
 }
 
 /// What came of choosing a place for a group of folders (M05).
@@ -4419,7 +4540,7 @@ mod tests {
         // Back to the usual folder.
         moving.choose(FolderRole::Videos, None).unwrap();
         moving
-            .answer(&key, true, &[FolderRole::Music], &[], &[])
+            .answer(&key, true, &[FolderRole::Music], &[], (&[], false))
             .unwrap();
         // Once approved, nothing more is chosen.
         assert_eq!(
@@ -4449,23 +4570,23 @@ mod tests {
             fingerprint: "ab".into(),
         };
         assert_eq!(
-            moving.answer(&stale, true, &[], &[], &[]),
+            moving.answer(&stale, true, &[], &[], (&[], false)),
             Err(MoveProblem::PlanChanged)
         );
         assert!(rx.try_recv().is_err(), "no answer yet");
         // Leaving out a folder the plan does not show is refused, and the plan still waits.
         assert_eq!(
-            moving.answer(&key, true, &[FolderRole::Music], &[], &[]),
+            moving.answer(&key, true, &[FolderRole::Music], &[], (&[], false)),
             Err(MoveProblem::PlanChanged)
         );
         moving
-            .answer(&key, true, &[FolderRole::Documents], &[], &[])
+            .answer(&key, true, &[FolderRole::Documents], &[], (&[], false))
             .unwrap();
         assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
         assert_eq!(
-            moving.answer(&key, true, &[], &[], &[]),
+            moving.answer(&key, true, &[], &[], (&[], false)),
             Err(MoveProblem::PlanChanged)
         );
     }
@@ -4682,6 +4803,68 @@ mod tests {
             left_out: Default::default(),
             chosen: Default::default(),
         }
+    }
+
+    /// A new laptop too small for the plan: PCTwin proposes leaving the files used longest ago on
+    /// the old laptop, only as much as is short, never one of the files that move first or one
+    /// that is not the mover's; a plan that fits proposes nothing (2.6).
+    #[test]
+    fn a_plan_too_big_proposes_what_to_leave_on_the_old_laptop() {
+        let day: i64 = 86_400 * 1_000_000_000;
+        let file = |name: &str, size: u64, days: Option<i64>| {
+            let mut i = item(person("1000"), FolderRole::Home, &[name], size);
+            i.modified_ns = days.map(|d| d * day);
+            i
+        };
+        let mut record = Record::new(laptop());
+        record.items = vec![
+            file("old.mp4", 60, Some(100)),
+            file("recent.mp4", 40, Some(900)),
+            file("unknown.mp4", 30, None),
+            item(person("1001"), FolderRole::Home, &["theirs.mp4"], 500),
+        ];
+        // The person's recent file moves first: never proposed, however old its time says.
+        let mut pinned = file("pinned.mp4", 90, Some(1));
+        pinned.path = ItemPath::new(vec![ItemName::from_text("pinned.mp4")]).unwrap();
+        record.personal = vec![pinned.id];
+        record.items.push(pinned);
+        let mut preview = preview();
+        let fit = |free: u64| pctwin_transfer::Fit {
+            places: vec![pctwin_transfer::PlaceFit {
+                destination: "home".into(),
+                needed: 220,
+                free: Some(free),
+                estimated: 0,
+            }],
+        };
+        let keep = pctwin_orchestrate::capacity::KEEP_FREE;
+        preview.fit = fit(keep + 170);
+        let (view, proposed) = space_proposal(&record, &preview, &rules());
+        // 50 short: the file used longest ago alone covers it.
+        let old = record.items[0].id;
+        assert_eq!(proposed.into_iter().collect::<Vec<_>>(), [old]);
+        assert_eq!(
+            view,
+            Some(SpaceView {
+                files: 1,
+                bytes: 60,
+                still_short_bytes: 0
+            })
+        );
+        // Far too small: everything that may be proposed is, and what is still short is said.
+        preview.fit = fit(keep + 10);
+        let (view, proposed) = space_proposal(&record, &preview, &rules());
+        let view = view.expect("a proposal");
+        assert_eq!(
+            view.files, 3,
+            "never the pinned file, never another person's"
+        );
+        assert!(!proposed.contains(&record.items[4].id));
+        assert!(!proposed.contains(&record.items[3].id));
+        assert_eq!(view.still_short_bytes, 210 - 130);
+        // It fits: nothing is proposed.
+        preview.fit = fit(keep + 1000);
+        assert_eq!(space_proposal(&record, &preview, &rules()).0, None);
     }
 
     #[test]

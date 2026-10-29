@@ -605,9 +605,16 @@ fn plans() -> Vec<PlanView> {
             runs_at_sign_in: 1,
         },
         rebuild: None,
+        space: None,
     };
     let full = PlanView {
         rebuild: Some(rebuild_plan()),
+        // Too small a laptop: what PCTwin proposes to leave on the old one.
+        space: Some(crate::moving::SpaceView {
+            files: 1204,
+            bytes: 18_400_000_000,
+            still_short_bytes: 0,
+        }),
         ..files_only.clone()
     };
     vec![files_only, full]
@@ -1420,7 +1427,7 @@ fn calls() -> Value {
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
             { "name": "rescue_drives", "args": [] },
             { "name": "rescue_begin", "args": [["id", "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10"], ["fallback", { "music": "From your old laptop/Music" }]] },
-            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },

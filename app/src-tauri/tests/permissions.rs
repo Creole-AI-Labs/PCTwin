@@ -285,7 +285,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
         "move_begin" => json!({ "fallback": 1, "others": 2 }),
         "rescue_begin" => json!({ "id": 1, "fallback": 2 }),
-        "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3 }),
+        "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3, "leaveBehind": "x" }),
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
         "move_choose_place" | "move_usual_place" => json!({ "role": 1 }),
         "move_privacy_answer" => json!({ "again": "x" }),

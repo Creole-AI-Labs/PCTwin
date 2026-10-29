@@ -178,6 +178,10 @@
           [
             0
           ]
+        ],
+        [
+          "leaveBehind",
+          true
         ]
       ],
       "name": "move_approve"
