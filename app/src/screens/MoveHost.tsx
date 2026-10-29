@@ -18,6 +18,7 @@ import {
   openPrivacySettings,
   moveReport,
   moveResume,
+  rescueBegin,
   moveRetry,
   moveStop,
   toMoveProblem,
@@ -29,6 +30,7 @@ import {
   type OthersWhy,
   type PeopleHere,
   type PeopleToPlace,
+  type RescueDrive as RescueDriveView,
   type Peer,
   type WaitStage,
 } from "../bridge";
@@ -39,6 +41,7 @@ import FullDiskAccess from "./FullDiskAccess";
 import type { BeforeItem } from "../people";
 import PlaceOthers from "./PlaceOthers";
 import WhoHere from "./WhoHere";
+import { RescueDrive } from "./rescueContext";
 import type { HelpCode } from "../people";
 import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
@@ -234,18 +237,26 @@ export function windowFor(view: View, expanded: boolean, mini: boolean): WindowM
   return "everyday";
 }
 
-export default function MoveHost({
-  old,
-  onPairAgain,
-  onHome,
-  onWindow,
-}: {
+type HostProps = {
   old: boolean;
   onPairAgain: () => void;
   onHome: () => void;
   /** The window size the page asks for, so the frame can fit it (the mini panel has no header). */
   onWindow?: (mode: WindowMode) => void;
-}) {
+  /** Rescue a laptop (2.6): the drive chosen, read as the old laptop. This laptop is the new one. */
+  rescue?: RescueDriveView;
+};
+
+/** The move's pages, with the rescued drive's name for the pages whose words must fit a drive. */
+export default function MoveHost(props: HostProps) {
+  return (
+    <RescueDrive.Provider value={props.rescue?.name ?? null}>
+      <MoveHostPages {...props} />
+    </RescueDrive.Provider>
+  );
+}
+
+function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps) {
   const { l10n } = useLocalization();
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
   // Each step of the move settles in like a new screen; one that ends or loses the link arrives without travel.
@@ -270,7 +281,8 @@ export default function MoveHost({
   // The two laptops, as each said when the move started (C06), and the connection (C07): each
   // shown once, as its own page, before the waiting page.
   const [peer, setPeer] = useState<Peer | null>(null);
-  const [intro, setIntro] = useState<"meet" | "check" | "done">("meet");
+  // A rescue has no other laptop to meet or check the connection with (C06, C07).
+  const [intro, setIntro] = useState<"meet" | "check" | "done">(rescue ? "done" : "meet");
   // "Before you leave this laptop": open or not, and the person's own ticks (their word only).
   const [before, setBefore] = useState(false);
   const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
@@ -290,7 +302,7 @@ export default function MoveHost({
     const fallback = Object.fromEntries(MAY_LACK.map((role) => [role, `${l10n.getString("move-fallback-folder")}/${l10n.getString(`plan-role-${role}`)}`]));
     // The place for the names passes through as it is: the engine fills it in a Mac's administrator window.
     const approve = l10n.getString("approve-prompt", { names: "{names}" });
-    moveBegin(fallback, others, approve).catch((error: unknown) => {
+    (rescue ? rescueBegin(rescue.id, fallback) : moveBegin(fallback, others, approve)).catch((error: unknown) => {
       setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
     });
   });

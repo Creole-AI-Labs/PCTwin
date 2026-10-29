@@ -6,6 +6,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import "./progress.css";
+import { useRescueDrive } from "./rescueContext";
 
 /**
  * The new laptop: what the old laptop's person chose to send, for one tap to accept (decided 28
@@ -28,6 +29,8 @@ export default function AcceptMove({
   onNotNow: () => void;
 }) {
   const { l10n } = useLocalization();
+  // A rescue: nobody chose this on another laptop; it is what was found on the drive.
+  const drive = useRescueDrive();
   const { chosen } = overviewOf(plan);
   const attention = planAttention(plan);
   const needs = attention.space || attention.files > 0 || plan.blocked !== undefined;
@@ -39,8 +42,8 @@ export default function AcceptMove({
   return (
     <>
       <TopStrip labelId="move-wait-eyebrow" />
-      <Heading id="accept-title" vars={{ from }} />
-      <p className="subhead">{l10n.getString("accept-body")}</p>
+      {drive !== null ? <Heading id="rescue-accept-title" vars={{ drive }} /> : <Heading id="accept-title" vars={{ from }} />}
+      <p className="subhead">{l10n.getString(drive !== null ? "rescue-accept-body" : "accept-body")}</p>
       <RowList>
         <Row title={l10n.getString("accept-files", { count: chosen.files })} detail={formatBytes(chosen.bytes, pageLocale())} />
         {apps > 0 && <Row title={l10n.getString("accept-apps", { count: apps })} />}

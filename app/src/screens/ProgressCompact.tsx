@@ -4,6 +4,7 @@ import { measuredPercent, type MoveProgress } from "../move";
 import FrameFooter from "./FrameFooter";
 import MoveTips, { type TipContext } from "./MoveTips";
 import Paused from "./Paused";
+import { useRescueDrive } from "./rescueContext";
 import { Eyebrow, GroupRows, Heading, MeasuredBar, Notices, NowLine, PercentValue, ReadyNow, RouteStrip } from "./ProgressParts";
 
 export type ProgressHandlers = {
@@ -32,6 +33,7 @@ export default function ProgressCompact({
   tips,
 }: { progress: MoveProgress; onMinimise: () => void; tips?: Omit<TipContext, "batteryWarning"> } & ProgressHandlers) {
   const { l10n } = useLocalization();
+  const drive = useRescueDrive();
   if (progress.state !== "running") return <Paused progress={progress} onResume={onResume} onStop={onStop} />;
   return (
     <>
@@ -40,7 +42,7 @@ export default function ProgressCompact({
         <div>
           <Eyebrow id="progress-eyebrow" />
           {/* The old laptop sends; the new laptop is being set up: each says its own part. */}
-          <Heading id={tips?.old ? "progress-title-old" : "progress-title"} />
+          {drive !== null ? <Heading id="rescue-progress-title" vars={{ drive }} /> : <Heading id={tips?.old ? "progress-title-old" : "progress-title"} />}
         </div>
         <PercentValue pct={measuredPercent(progress)} />
       </div>
@@ -51,7 +53,7 @@ export default function ProgressCompact({
       <GroupRows groups={progress.groups} />
       <NowLine current={progress.current} />
       <Notices progress={progress} onSeeNeedsAction={onSeeNeedsAction} />
-      <p className="mv-safe">{l10n.getString("progress-old-safe")}</p>
+      <p className="mv-safe">{l10n.getString(drive !== null ? "rescue-safe" : "progress-old-safe")}</p>
       <FrameFooter note="none">
         <Button variant="quiet" onClick={onPause}>
           {l10n.getString("progress-pause")}
