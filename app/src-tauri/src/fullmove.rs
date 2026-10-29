@@ -677,6 +677,10 @@ pub fn rebuild_here<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
 ) -> RebuiltView {
+    use crate::deliver::safe_stop::{BusyWith, hold};
+    // Installing, putting settings in place and placing app data must not be cut part way.
+    let _rebuilding = hold(BusyWith::Rebuilding);
+    let _app_data = data.is_some().then(|| hold(BusyWith::AppData));
     let state = app.state::<AppFullMove>();
     let (Ok(laptop), Ok(scope)) = (LaptopId::generate(), Scope::for_a_move()) else {
         // Nothing is changed without its own record: every group says so.
@@ -1281,6 +1285,7 @@ pub fn fullmove_undo<R: Runtime>(
 }
 
 fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
+    let _undoing = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Undoing);
     let book = &mut book;
     let guard = app.state::<AppGuard>();
     let state = app.state::<AppFullMove>();

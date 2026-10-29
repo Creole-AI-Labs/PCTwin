@@ -366,6 +366,8 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             pctwin_helper::os_probes::install();
             // App data staged by a run that never finished is removed before anything else.
             fullmove::sweep_staging(app.handle());
+            // PCTwin's own update and uninstall wait for its safe stopping points.
+            deliver::safe_stop::set_up(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

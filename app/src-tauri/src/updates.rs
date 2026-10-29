@@ -38,10 +38,15 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Option<UpdateView> {
 }
 
 /// Downloads the newer build, checks its signature, installs it and opens PCTwin again. Refused
-/// while a move is under way (`Busy`); `NotMoving` when there is no update after all.
+/// while a move is under way or PCTwin is in the middle of a step that must not be cut part way
+/// (rebuilding, app data, an undo: `Busy`; the screens say what it waits for with `safe_stop`);
+/// `NotMoving` when there is no update after all.
 #[tauri::command]
 pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), MoveProblem> {
-    if app.state::<AppMoving>().underway() {
+    if !may_update(
+        app.state::<AppMoving>().underway(),
+        &crate::deliver::safe_stop::gate().view(),
+    ) {
         return Err(MoveProblem::Busy);
     }
     let update = app
@@ -57,4 +62,31 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Result<(), MovePro
         .await
         .map_err(|_| MoveProblem::Failed)?;
     app.restart()
+}
+
+/// Whether an update may start: no move under way, and PCTwin at a safe stopping point.
+fn may_update(underway: bool, safe: &crate::deliver::safe_stop::SafeStopView) -> bool {
+    !underway && safe.safe
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deliver::safe_stop::{BusyWith, SafeStopView};
+
+    #[test]
+    fn an_update_waits_for_the_move_and_every_step_that_must_not_be_cut() {
+        let safe = SafeStopView {
+            safe: true,
+            busy: vec![],
+        };
+        let undoing = SafeStopView {
+            safe: false,
+            busy: vec![BusyWith::Undoing],
+        };
+        assert!(may_update(false, &safe));
+        assert!(!may_update(true, &safe));
+        assert!(!may_update(false, &undoing));
+        assert!(!may_update(true, &undoing));
+    }
 }
