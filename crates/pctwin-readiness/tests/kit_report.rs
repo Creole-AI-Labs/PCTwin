@@ -99,6 +99,9 @@ fn the_recovery_kit_is_kept_without_an_account_and_says_what_it_holds() {
     let bare = Kit::new(record.clone(), l.clone(), None, T0);
     assert!(!bare.readme().contains("only on the old laptop"));
     assert!(bare.readme().contains("does not hold"));
+    // Fresh-context review F11: it names files, so it says where not to keep it.
+    assert!(bare.readme().contains("names your files"));
+    assert!(bare.readme().contains("Do not save it in a shared folder"));
 }
 
 #[test]

@@ -282,10 +282,12 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// The label it carries (a check that did not run still needs attention).
+    /// The label it carries (a check that did not run still needs attention, and so does a
+    /// machine check of only part of something: a sample is never "machine-checked").
     pub fn label(&self) -> Label {
         match self {
-            Outcome::MachineChecked { .. } => Label::MachineChecked,
+            Outcome::MachineChecked { coverage } if coverage.is_whole() => Label::MachineChecked,
+            Outcome::MachineChecked { .. } => Label::StillNeedsAttention,
             Outcome::PersonConfirmed { .. } => Label::PersonConfirmed,
             Outcome::NeedsAttention { .. } | Outcome::NotRun { .. } => Label::StillNeedsAttention,
         }
@@ -451,9 +453,11 @@ fn linked_files(root: &Path, links: &[PathBuf]) -> Outcome {
     } else {
         Coverage::sample(checked as u64, links.len() as u64).expect("at least one, at most all")
     };
+    // Looked up through every link to what it finally names: a link or junction whose target is
+    // gone is a missing file, never one that is there.
     let missing: Vec<Missing> = links[..checked]
         .iter()
-        .filter(|l| std::fs::symlink_metadata(root.join(l)).is_err())
+        .filter(|l| std::fs::metadata(root.join(l)).is_err())
         .map(|l| Missing::LinkedFile {
             name: l.to_string_lossy().into_owned(),
         })

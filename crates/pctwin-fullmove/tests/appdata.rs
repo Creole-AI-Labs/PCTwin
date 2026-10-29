@@ -459,6 +459,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             system: pctwin_special::roots::System::Windows,
         },
         &apps_by_id,
+        &Default::default(),
     );
     assert!(!landed.is_empty());
     let done = DataDone {
@@ -751,6 +752,7 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
                 system: pctwin_special::roots::System::Windows,
             },
             &names,
+            &Default::default(),
         );
         let copied = landed
             .iter()

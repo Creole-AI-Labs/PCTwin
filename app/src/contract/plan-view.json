@@ -103,11 +103,43 @@
           "secret": null,
           "source": "Example.Writer",
           "special": null,
+          "tested": {
+            "aspects": [
+              {
+                "aspect": "install",
+                "result": "works"
+              },
+              {
+                "aspect": "data-import",
+                "result": "not-applicable"
+              },
+              {
+                "aspect": "settings",
+                "result": "works"
+              },
+              {
+                "aspect": "launch",
+                "result": "guided"
+              },
+              {
+                "aspect": "undo",
+                "result": "not-tested"
+              }
+            ],
+            "checkedOn": "2026-10-29",
+            "how": "lab",
+            "outcome": "works-with-steps",
+            "steps": [
+              "sign-in"
+            ],
+            "version": "3.1"
+          },
           "title": {
             "kind": "name",
             "value": "Writer"
           },
-          "undo": "remove-yourself",
+          "undo": "removes-if-package",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -122,11 +154,90 @@
           "secret": null,
           "source": null,
           "special": null,
+          "tested": {
+            "aspects": [
+              {
+                "aspect": "install",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "data-import",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "settings",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "launch",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "undo",
+                "result": "not-tested"
+              }
+            ],
+            "checkedOn": null,
+            "how": null,
+            "outcome": "not-tested",
+            "steps": [],
+            "version": null
+          },
           "title": {
             "kind": "name",
             "value": "Sketch Tool"
           },
           "undo": "must-keep",
+          "undoIfUpdated": null,
+          "update": null
+        },
+        {
+          "action": "install",
+          "category": null,
+          "count": 0,
+          "files": 0,
+          "kind": "app",
+          "needs": null,
+          "note": null,
+          "notes": [],
+          "secret": null,
+          "source": "Example.Viewer",
+          "special": null,
+          "tested": {
+            "aspects": [
+              {
+                "aspect": "install",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "data-import",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "settings",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "launch",
+                "result": "not-tested"
+              },
+              {
+                "aspect": "undo",
+                "result": "not-tested"
+              }
+            ],
+            "checkedOn": null,
+            "how": null,
+            "outcome": "not-tested",
+            "steps": [],
+            "version": null
+          },
+          "title": {
+            "kind": "name",
+            "value": "Viewer"
+          },
+          "undo": "remove-yourself",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -141,11 +252,13 @@
           "secret": null,
           "source": null,
           "special": null,
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Writer settings"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -163,12 +276,14 @@
           "secret": null,
           "source": null,
           "special": null,
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Notes"
           },
           "undo": "must-keep",
-          "update": null
+          "undoIfUpdated": "keeps-newer",
+          "update": 3
         },
         {
           "action": "leave-alone",
@@ -192,11 +307,13 @@
           "secret": null,
           "source": null,
           "special": "relink",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Browser"
           },
-          "undo": "must-keep",
+          "undo": "needs-you-maker",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -215,11 +332,13 @@
           "secret": null,
           "source": null,
           "special": "sign-in",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Mail"
           },
-          "undo": "must-keep",
+          "undo": "needs-you-maker",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -238,11 +357,13 @@
           "secret": null,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Mail"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -262,11 +383,13 @@
           "secret": null,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Browser"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -285,11 +408,13 @@
           "secret": null,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Quest"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -311,11 +436,13 @@
           "secret": null,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Model runner"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -337,11 +464,13 @@
           "secret": 2,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Browser"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -356,11 +485,13 @@
           "secret": null,
           "source": null,
           "special": "copy",
+          "tested": null,
           "title": {
             "kind": "name",
             "value": "Notes app"
           },
           "undo": "can-reverse",
+          "undoIfUpdated": null,
           "update": null
         },
         {
@@ -375,11 +506,13 @@
           "secret": null,
           "source": null,
           "special": "not-yet",
+          "tested": null,
           "title": {
             "kind": "key",
             "value": "fullmove-special-not-yet"
           },
           "undo": "must-keep",
+          "undoIfUpdated": null,
           "update": null
         }
       ],
@@ -439,6 +572,10 @@
           }
         ]
       },
+      "internet": {
+        "downloads": 2,
+        "signIns": 2
+      },
       "links": 4,
       "more": 0,
       "notMoved": [
@@ -453,6 +590,10 @@
       ],
       "prompt": false,
       "restorePoint": false,
+      "room": {
+        "appData": 58720256,
+        "installs": 2097152000
+      },
       "specialNotMoved": 7
     },
     "revision": 2,

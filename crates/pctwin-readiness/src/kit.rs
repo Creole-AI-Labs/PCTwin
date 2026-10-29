@@ -126,7 +126,9 @@ impl Kit {
         format!(
             "PCTwin recovery kit, made on {}.\n\nThis kit holds:\n{}\n\nThis kit does not hold:\n{}\n\n\
              You need no account to read it. \"{KIT_FILE}\" is a plain text file (JSON) that any \
-             text editor opens. Keep it somewhere safe: it names your files.\n",
+             text editor opens. Keep it somewhere safe and private: it names your files and \
+             folders. Do not save it in a shared folder, or in one that copies itself online \
+             (a synced cloud folder).\n",
             date(self.made_at),
             has.join("\n"),
             not.join("\n"),

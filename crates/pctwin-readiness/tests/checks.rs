@@ -249,6 +249,55 @@ fn linked_files_are_looked_up_inside_the_project_only() {
         &own()
     )));
     assert!(!any_sample(&run(&pick(vec![links(vec!["a.txt"])]), &own())));
+    // Fresh-context review F3: a machine check of only part is never labelled machine-checked.
+    assert_eq!(
+        only(&pick(vec![links(vec!["a.txt"; 10_001])])).label(),
+        Label::StillNeedsAttention
+    );
+    assert_eq!(
+        only(&pick(vec![links(vec!["a.txt"])])).label(),
+        Label::MachineChecked
+    );
+}
+
+/// Fresh-context review F3: a link (or junction) whose target is gone is a missing file; one
+/// whose target is there is found.
+#[test]
+fn a_link_whose_target_is_gone_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("real")).unwrap();
+    std::fs::create_dir(dir.path().join("gone")).unwrap();
+    // Windows: junctions, which every account can make (file links need Developer Mode).
+    #[cfg(windows)]
+    for (link, to) in [("good.txt", "real"), ("dangling.txt", "gone")] {
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(dir.path().join(link))
+            .arg(dir.path().join(to))
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+    }
+    #[cfg(unix)]
+    for (link, to) in [("good.txt", "real"), ("dangling.txt", "gone")] {
+        std::os::unix::fs::symlink(dir.path().join(to), dir.path().join(link)).unwrap();
+    }
+    // Its target goes: the link is left pointing at nothing.
+    std::fs::remove_dir(dir.path().join("gone")).unwrap();
+    assert!(std::fs::symlink_metadata(dir.path().join("dangling.txt")).is_ok());
+    let links = Goal::LinkedFiles {
+        root: dir.path().to_path_buf(),
+        links: vec![PathBuf::from("good.txt"), PathBuf::from("dangling.txt")],
+    };
+    assert_eq!(
+        only(&pick(vec![links])),
+        Outcome::NeedsAttention {
+            missing: vec![Missing::LinkedFile {
+                name: "dangling.txt".into()
+            }],
+            coverage: Coverage::Whole
+        }
+    );
 }
 
 /// A font is found by the family name inside the font file, never guessed from the file name.

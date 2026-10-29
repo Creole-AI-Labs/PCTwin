@@ -126,33 +126,7 @@ impl Row for AppRouteRow {
         if !name_ok(&self.id, 64) || self.id.contains(['/', '{', '}']) {
             return Err("a row ID is short letters, digits and `.-_`".into());
         }
-        let m = &self.matches;
-        let identity = m.product_code.is_some()
-            || m.bundle_id.is_some()
-            || m.flatpak_id.is_some()
-            || m.windows_org.is_some()
-            || m.team_id.is_some();
-        if !identity {
-            return Err(
-                "a row must name the app's identity or its maker, never a name alone".into(),
-            );
-        }
-        if m.windows_org.is_some() != m.windows_country.is_some() {
-            return Err("a Windows maker is named by organisation and country together".into());
-        }
-        for t in [&m.product_code, &m.bundle_id, &m.flatpak_id, &m.team_id]
-            .into_iter()
-            .flatten()
-        {
-            if !name_ok(t, 255) {
-                return Err("an identity holds characters no identity has".into());
-            }
-        }
-        for t in [&m.windows_org, &m.windows_country].into_iter().flatten() {
-            if t.trim().is_empty() || !pctwin_record::apps::text_ok(t, 256) {
-                return Err("a maker's name is plain text".into());
-            }
-        }
+        check_match(&self.matches)?;
         match &self.route {
             RowRoute::Winget { id } => {
                 if !super::winget::valid_id(id) {
@@ -214,16 +188,49 @@ impl Row for AppRouteRow {
     }
 }
 
+/// Checks a row's identity: it names the app's identity or its maker, never a name alone.
+pub fn check_match(m: &RowMatch) -> Result<(), String> {
+    let identity = m.product_code.is_some()
+        || m.bundle_id.is_some()
+        || m.flatpak_id.is_some()
+        || m.windows_org.is_some()
+        || m.team_id.is_some();
+    if !identity {
+        return Err("a row must name the app's identity or its maker, never a name alone".into());
+    }
+    if m.windows_org.is_some() != m.windows_country.is_some() {
+        return Err("a Windows maker is named by organisation and country together".into());
+    }
+    for t in [&m.product_code, &m.bundle_id, &m.flatpak_id, &m.team_id]
+        .into_iter()
+        .flatten()
+    {
+        if !name_ok(t, 255) {
+            return Err("an identity holds characters no identity has".into());
+        }
+    }
+    for t in [&m.windows_org, &m.windows_country].into_iter().flatten() {
+        if t.trim().is_empty() || !pctwin_record::apps::text_ok(t, 256) {
+            return Err("a maker's name is plain text".into());
+        }
+    }
+    Ok(())
+}
+
 fn same(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
 /// Whether `row` is for `app`: every identity it names is the app's own.
 pub fn row_matches(app: &FoundApp, row: &AppRouteRow) -> bool {
-    if row.system != app.system {
+    identity_matches(app, row.system, &row.matches)
+}
+
+/// Whether every identity `m` names is `app`'s own, for an app of `system`.
+pub fn identity_matches(app: &FoundApp, system: AppSystem, m: &RowMatch) -> bool {
+    if system != app.system {
         return false;
     }
-    let m = &row.matches;
     let product_code = match &app.found {
         FoundWhere::WindowsEntry { product_code, .. } => product_code.as_deref(),
         _ => None,

@@ -312,6 +312,9 @@ struct Run {
     new_name: Option<LabelView>,
     report: Vec<ReportItem>,
     finished: bool,
+    /// The move is going on: PCTwin's own update and uninstall wait for it to end or be stopped
+    /// (Task List 2.9; `deliver::safe_stop`). Dropped when the run finishes.
+    hold: Option<crate::deliver::safe_stop::Hold>,
 }
 
 /// The old laptop: what it found, for the person to choose what moves (`move-choose`).
@@ -553,8 +556,11 @@ impl Moving {
         lock(&self.run).as_ref().is_some_and(|r| !r.finished)
     }
 
-    /// Starts a run, unless one is going.
+    /// Starts a run, unless one is going. The gate is waited for before the run is locked
+    /// (re-check of 2.9, 29 October 2026): an update being installed checks the run while it
+    /// keeps steps from starting, so waiting for the gate with the run locked could hang both.
     fn begin(&self) -> Result<(Live, Arc<AtomicBool>), MoveProblem> {
+        let hold = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Moving);
         let mut run = lock(&self.run);
         if run.as_ref().is_some_and(|r| !r.finished) {
             return Err(MoveProblem::Busy);
@@ -577,6 +583,7 @@ impl Moving {
             new_name: None,
             report: Vec::new(),
             finished: false,
+            hold: Some(hold),
         });
         Ok((live, scan_stop))
     }
@@ -841,6 +848,7 @@ impl Moving {
         if let Some(run) = lock(&self.run).as_mut() {
             run.report = report;
             run.finished = true;
+            run.hold = None;
             run.waiting = None;
             run.placing = None;
         }
@@ -3369,6 +3377,8 @@ pub async fn move_begin<R: Runtime>(
         approve,
     };
     let (live, scan_stop) = moving.begin()?;
+    // A new move changes this laptop: the last move's "Fix these" and fresh approval are spent.
+    crate::deliver::repair::spend();
     // Until the move is over, a restart opens PCTwin again at sign-in (src/restart.rs).
     crate::restart::while_moving(&app);
     let Some((link, paired)) = pairing.take_link().await else {

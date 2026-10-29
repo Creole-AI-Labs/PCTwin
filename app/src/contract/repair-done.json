@@ -1,0 +1,24 @@
+[
+  {
+    "fixed": 2,
+    "generation": 4,
+    "kept": 43,
+    "lines": [
+      {
+        "kind": "special",
+        "line": 0,
+        "reason": "unreadable",
+        "status": "failed",
+        "title": {
+          "kind": "name",
+          "value": "Mail"
+        },
+        "waitsFor": [
+          "old-laptop"
+        ]
+      }
+    ],
+    "more": 0,
+    "undoId": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+  }
+]

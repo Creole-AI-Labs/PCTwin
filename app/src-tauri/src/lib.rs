@@ -12,6 +12,8 @@
 
 #[cfg(test)]
 mod contract;
+// The Phase 2 deliverables made explicit (Task List 2.9) that need their own commands.
+mod deliver;
 // The engine's 2.2, 2.3 and 2.6 runners publish into the guard and take its intents as they are
 // wired in (Task List 2.8 follow-up); until then the conversions and the publishing side are
 // exercised by their tests only.
@@ -61,6 +63,8 @@ pub(crate) enum Files {
     /// an older copy of the system can hold them; elsewhere nothing makes this source yet).
     #[cfg_attr(not(windows), allow(dead_code))]
     FoundInstallers,
+    /// The files a project names, read for its work checks (fonts, archives, databases).
+    WorkChecks,
 }
 
 /// PCTwin's locked-down parser process (adoption change 1) for files from `from`, beside the
@@ -68,9 +72,11 @@ pub(crate) enum Files {
 pub(crate) fn parser(from: Files) -> &'static pctwin_parse::Parser {
     static HERE: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
     static FOUND: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    static WORK: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
     let slot = match from {
         Files::InstalledHere => &HERE,
         Files::FoundInstallers => &FOUND,
+        Files::WorkChecks => &WORK,
     };
     slot.get_or_init(pctwin_parse::Parser::beside_this_program)
 }
@@ -321,6 +327,17 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         fullmove::fullmove_undo,
         fullmove::move_appdata_answer,
         moving::move_choose_what,
+        deliver::work::work_checks,
+        deliver::work::work_check_add,
+        deliver::work::work_check_run,
+        deliver::work::work_check_answer,
+        deliver::work::work_check_remove,
+        deliver::repair::repair_offer,
+        deliver::repair::repair_run,
+        deliver::changes::move_changes,
+        deliver::changes::move_reapprove,
+        deliver::safe_stop::safe_stop,
+        deliver::kit::recovery_kit_save,
     ]
 }
 
@@ -390,6 +407,8 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             pctwin_helper::os_probes::install();
             // App data staged by a run that never finished is removed before anything else.
             fullmove::sweep_staging(app.handle());
+            // PCTwin's own update and uninstall wait for its safe stopping points.
+            deliver::safe_stop::set_up(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

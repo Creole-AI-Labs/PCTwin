@@ -521,3 +521,92 @@ fn a_store_kept_only_as_found_never_lands_where_the_app_opens_it() {
 /// tests may).
 static OWN_READERS: pctwin_special::content::InThisProcess =
     pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());
+
+/// Task List 2.9: a copy whose bytes all match is still "copied", but only a copy read while the
+/// system confirmed the app was closed (or SQLite's own backup and check) is machine-checked as
+/// usable; where nobody could say the app was closed, its readiness stays untested.
+#[test]
+fn matching_bytes_alone_never_label_app_data_machine_checked() {
+    use pctwin_special::component::Readiness;
+    for (holders, want) in [
+        (&Free as &dyn Holders, Readiness::MachineChecked),
+        (&CannotTell as &dyn Holders, Readiness::Untested),
+    ] {
+        let t = temp();
+        let old = t.path().join("old");
+        put(
+            &old.join("AppData/Roaming/Notes App/notes.json"),
+            br#"{"notes":["a","b"]}"#,
+        );
+        let owner = Owner::Person {
+            account_id: "1001".into(),
+        };
+        let cat = Catalogue::<SpecialRow>::shipped(SHIPPED);
+        let plan = plan(&owner, &old, &[], System::Windows, System::Windows, &cat);
+        let p = plan
+            .components
+            .iter()
+            .find(|p| p.component.custody == Custody::Portable)
+            .expect("a plain app data folder is portable");
+        let new = t.path().join("new");
+        std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
+        let home = Destination::open(&new).unwrap();
+        let j = Journal::open_with_record_key(
+            &t.path().join("j.redb"),
+            pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+        )
+        .unwrap();
+        let rec = j.imports(&keys().capture);
+        let stop = Stop::new();
+        let made = MadeFolders::default();
+        let n = NewLaptop {
+            rec: &rec,
+            home: &home,
+            home_path: &new,
+            root: RootRef::new(20),
+            seal: seal(),
+            system: System::Windows,
+            owner_only: &AppOwnerOnly,
+            stop: &stop,
+            made: &made,
+        };
+        let k = &keys().capture;
+        let approved = approve(p, seal(), RootRef::new(10), 1);
+        let work = t.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let grant = |root, effect| {
+            Grant::Ordinary(
+                k.grant(seal(), vec![RootRef::new(root)], effect, MIN, Now::real())
+                    .unwrap(),
+            )
+        };
+        let cap = capture_planned(
+            p,
+            grant(10, CaptureEffect::ReadPrivate),
+            &approved,
+            &work,
+            holders,
+            &stop,
+            Now::real(),
+        )
+        .unwrap();
+        let applied = apply(
+            &n,
+            grant(20, CaptureEffect::Import),
+            &approved,
+            &effect(0),
+            p,
+            &cap,
+            &work,
+            Conflict::KeepBoth,
+            Now::real(),
+        );
+        assert_eq!(
+            applied.result.status(),
+            ItemStatus::Copied,
+            "{}",
+            applied.words
+        );
+        assert_eq!(applied.outcome.readiness, want, "{}", applied.words);
+    }
+}

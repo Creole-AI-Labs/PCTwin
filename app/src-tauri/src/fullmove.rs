@@ -170,6 +170,21 @@ pub struct ChangeView {
     pub category: Option<pctwin_special::category::Category>,
     /// What the person is told because of its category, each said in the screens' own words.
     pub notes: Vec<pctwin_special::category::Note>,
+
+    /// What undo can do if the person ticks "Update it" (only with `update`).
+    pub undo_if_updated: Option<UndoPromise>,
+    /// What tests of this app between these two systems showed (apps only).
+    pub tested: Option<pctwin_apps::compat::Tested>,
+}
+
+/// About how much room the move takes on this laptop beyond the files, at its busiest (installer
+/// downloads and the apps installed; the app data, staged and placed). Margins, said with
+/// "about".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomView {
+    pub installs: u64,
+    pub app_data: u64,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -189,6 +204,11 @@ pub struct RebuildPlanView {
     /// What the forgotten-things finder found on the old laptop: places with their counts and
     /// steps, and printers to add again (2.5).
     pub forgotten: Option<pctwin_special::forgotten::Finding>,
+
+    /// What the move needs from the internet.
+    pub internet: pctwin_fullmove::plan::Internet,
+    /// The room it takes beyond the files.
+    pub room: RoomView,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -205,6 +225,9 @@ fn promise_of(p: Promise) -> UndoPromise {
         Promise::CanReverse => UndoPromise::CanReverse,
         Promise::MustKeep => UndoPromise::MustKeep,
         Promise::RemoveYourself => UndoPromise::RemoveYourself,
+        Promise::RemovesIfPackage => UndoPromise::RemovesIfPackage,
+        Promise::KeepsNewer => UndoPromise::KeepsNewer,
+        Promise::NeedsYouMaker => UndoPromise::NeedsYouMaker,
     }
 }
 
@@ -221,7 +244,7 @@ fn winget_here() -> Option<std::path::PathBuf> {
 
 /// Whether this laptop installs apps itself (Windows with winget: the administrator helper's
 /// chain; Linux with one of its own package tools, which ask the system's prompt themselves).
-fn installs_here() -> bool {
+pub fn installs_here() -> bool {
     if cfg!(all(unix, not(target_os = "macos"))) {
         return pctwin_fullmove::unix::Tools::here().any();
     }
@@ -361,6 +384,12 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
             }),
             category: c.category,
             notes: c.notes,
+
+            undo_if_updated: c.undo_if_updated.map(promise_of),
+            tested: c.tested.map(|mut t| {
+                t.version = t.version.map(|v| name(&v));
+                t
+            }),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -382,6 +411,15 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         prompt: asks,
         restore_point: asks && cfg!(windows),
         forgotten: plan.forgotten.clone(),
+
+        internet: plan.internet(),
+        room: {
+            let r = plan.room_needed();
+            RoomView {
+                installs: r.installs,
+                app_data: r.app_data,
+            }
+        },
     }
 }
 
@@ -432,15 +470,19 @@ fn settings_here(plan: &FullPlan) -> Option<SettingsAdapter> {
     })
 }
 
-/// The new laptop: the full plan for the old laptop's `record` and `extras` (as they arrived),
-/// for the person `mover` there, moving to the signed-in person `me` here.
-pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) -> FullPlan {
+/// This laptop's apps now, as its own lists say, for the signed-in person `me`.
+pub fn installed_here(me: &str) -> pctwin_record::AppList {
     let people: Vec<(String, Option<std::path::PathBuf>)> = pctwin_scan::list_people()
         .into_iter()
         .map(|p| (p.account_id, Some(p.home)))
         .collect();
-    let installed =
-        pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere));
+    pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere))
+}
+
+/// The new laptop: the full plan for the old laptop's `record` and `extras` (as they arrived),
+/// for the person `mover` there, moving to the signed-in person `me` here.
+pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) -> FullPlan {
+    let installed = installed_here(me);
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -646,6 +688,11 @@ pub struct RebuiltView {
 
 /// The new laptop, after the files: rebuilds `plan` (the approved one) for the signed-in person
 /// `me`, journaling in `journal`, and remembers what undo needs.
+///
+/// Changes during the move (Task List 2.9): an app that was installed, updated or removed on this
+/// laptop since the plan was made is held, not installed, and ends needs-action; the person is
+/// asked about it again (`move-changed`, [`crate::deliver::changes`]). What finished and what did
+/// not is kept for "Fix these" ([`crate::deliver::repair`]).
 pub fn rebuild_here<R: Runtime>(
     app: &AppHandle<R>,
     plan: &FullPlan,
@@ -654,20 +701,64 @@ pub fn rebuild_here<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
 ) -> RebuiltView {
+    let mut drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
+    // App data the old laptop refused because it was edited there after the approval: nothing of
+    // it is placed, and the person is asked about it again.
+    if let Some((sink, _)) = &data {
+        drift.extend(pctwin_fullmove::drift::data_changed(plan, |id| {
+            sink.changed_after_approval(id)
+        }));
+    }
+    let mut held = plan.clone();
+    held.hold(&drift);
+    // Kept until the results are remembered (re-check of 2.9): an undo waiting for the gate then
+    // spends them after, never before, so they are never put back once spent.
+    let _keeping = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Rebuilding);
+    let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone());
+    crate::deliver::repair::remember(
+        app,
+        crate::deliver::repair::Last {
+            plan: held,
+            me: me.to_string(),
+            files,
+            lines,
+            drift,
+        },
+    );
+    view
+}
+
+/// Rebuilds `plan` as [`rebuild_here`] does, with no check for changes: the view, and every line
+/// unbounded and in plan order (for "Fix these" to merge into).
+pub fn rebuild_full<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &FullPlan,
+    journal: &Journal,
+    me: &str,
+    data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
+    files: Vec<(String, String)>,
+) -> (RebuiltView, Vec<RebuiltLine>) {
+    use crate::deliver::safe_stop::{BusyWith, hold};
+    // Installing, putting settings in place and placing app data must not be cut part way.
+    let _rebuilding = hold(BusyWith::Rebuilding);
+    let _app_data = data.is_some().then(|| hold(BusyWith::AppData));
     let state = app.state::<AppFullMove>();
     let (Ok(laptop), Ok(scope)) = (LaptopId::generate(), Scope::for_a_move()) else {
         // Nothing is changed without its own record: every group says so.
-        return RebuiltView {
-            lines: Vec::new(),
-            more: 0,
-            here: Vec::new(),
-            here_more: 0,
-            fresh: false,
-            restore_point: RestoreWord::NotAsked,
-            stopped: true,
-            can_undo: false,
-            undo_id: None,
-        };
+        return (
+            RebuiltView {
+                lines: Vec::new(),
+                more: 0,
+                here: Vec::new(),
+                here_more: 0,
+                fresh: false,
+                restore_point: RestoreWord::NotAsked,
+                stopped: true,
+                can_undo: false,
+                undo_id: None,
+            },
+            Vec::new(),
+        );
     };
     let actor = Actor {
         acting_account: me.to_string(),
@@ -679,7 +770,19 @@ pub fn rebuild_here<R: Runtime>(
     // imports journal; whatever did not arrive whole ends needs-action.
     let data_done = match data {
         Some((sink, picked)) => {
-            land_data(sink, picked, journal, &state.keys.capture, scope, &actor)
+            // An app's data is placed whole or not at all: any piece edited after the approval
+            // holds every piece of that line (re-check of 2.9).
+            let edited =
+                pctwin_fullmove::drift::data_held(plan, |id| sink.changed_after_approval(id));
+            land_data(
+                sink,
+                picked,
+                &edited,
+                journal,
+                &state.keys.capture,
+                scope,
+                &actor,
+            )
         }
         None => pctwin_fullmove::run::DataDone::default(),
     };
@@ -788,14 +891,13 @@ pub fn rebuild_here<R: Runtime>(
             &mut progress,
         ),
         None => {
-            // No settings mechanism here: nothing is changed; settings say so.
+            // No settings mechanism here: nothing is changed; settings say so. The rest of the
+            // plan is the approved one as it is (its held apps and ticked updates too): only the
+            // settings are taken out, never a field forgotten.
             let empty = FullPlan {
-                apps: plan.apps.clone(),
-                special: plan.special.clone(),
-                special_searched: plan.special_searched,
-                special_not_checked: plan.special_not_checked,
-                from: plan.from,
-                ..FullPlan::default()
+                settings: Default::default(),
+                groups: Vec::new(),
+                ..plan.clone()
             };
             let mut none = NoSettings;
             let mut done = pctwin_fullmove::run::rebuild(
@@ -867,6 +969,7 @@ pub fn rebuild_here<R: Runtime>(
             .collect(),
     );
     let fresh = done.apps.iter().any(|(_, a)| a.installed);
+    let all_lines = lines.clone();
     // Needs the person first, then failed, then done: what to act on comes first.
     lines.sort_by_key(|l| match l.status {
         ItemStatus::NeedsAction => 0,
@@ -892,17 +995,20 @@ pub fn rebuild_here<R: Runtime>(
             let _ = crate::undo_books::save(&folder, &done.undo);
         }
     }
-    RebuiltView {
-        lines,
-        more,
-        here,
-        here_more,
-        fresh,
-        restore_point,
-        stopped: done.stopped.is_some(),
-        can_undo,
-        undo_id,
-    }
+    (
+        RebuiltView {
+            lines,
+            more,
+            here,
+            here_more,
+            fresh,
+            restore_point,
+            stopped: done.stopped.is_some(),
+            can_undo,
+            undo_id,
+        },
+        all_lines,
+    )
 }
 
 /// Where secrets land owner-only: the system's own private folder.
@@ -931,6 +1037,7 @@ fn home_here() -> Option<std::path::PathBuf> {
 fn land_data(
     sink: &pctwin_fullmove::data::Sink,
     picked: Vec<u32>,
+    edited: &std::collections::BTreeSet<String>,
     journal: &Journal,
     key: &pctwin_grant::CaptureKey,
     scope: Scope,
@@ -966,6 +1073,7 @@ fn land_data(
             system: pctwin_special::roots::System::here(),
         },
         &names,
+        edited,
     );
     done.landed = landed.iter().map(|l| (l.id.clone(), l.result)).collect();
     done.why = landed
@@ -1259,6 +1367,8 @@ pub fn fullmove_undo<R: Runtime>(
 }
 
 fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
+    // The preview changes nothing: the safe-stop gate is held only once the person presses Undo
+    // (below), so an update or uninstall is not kept waiting by a preview left open.
     let book = &mut book;
     let guard = app.state::<AppGuard>();
     let state = app.state::<AppFullMove>();
@@ -1372,6 +1482,17 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
                             more: 0,
                         },
                     );
+                    // Held from the press until the undo has ended, once nothing else is going
+                    // on; "Fix these" and a fresh approval are spent from now (they would put
+                    // back what this takes away).
+                    let Some(_undoing) = crate::deliver::repair::undo_starts(
+                        crate::deliver::safe_stop::gate(),
+                        crate::deliver::repair::store(),
+                        until,
+                    ) else {
+                        close();
+                        return;
+                    };
                     let rebuild = Rebuild::new(&journal, &state.keys.install, &state.keys.setting);
                     let home = book
                         .home
@@ -1393,6 +1514,8 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
                     if let Some(folder) = books_folder(app) {
                         let _ = crate::undo_books::save(&folder, book);
                     }
+                    // Anything kept while it ran no longer describes this laptop either.
+                    crate::deliver::repair::spend();
                     let (lines, more) = bounded(lines);
                     publish(
                         app,
@@ -1421,6 +1544,62 @@ mod tests {
     use super::*;
     use crate::guard_views::MAX_LINES;
     use pctwin_settings::System;
+
+    /// Task List 2.9: the approval screen carries the plan's own internet needs and room, every
+    /// undo word mapped to the screens' word of the same meaning, and each app's record.
+    #[test]
+    fn the_preview_reaches_the_approval_screen_as_the_plan_says() {
+        use pctwin_fullmove::extras::{SpecialLine, SpecialStep};
+        let plan = FullPlan {
+            special: vec![
+                SpecialLine {
+                    name: "Mail".into(),
+                    step: SpecialStep::SignIn,
+                    files: 3,
+                    secret: false,
+                    ids: vec![],
+                    sites: false,
+                    category: Default::default(),
+                    notes: Vec::new(),
+                },
+                SpecialLine {
+                    name: "Notes data".into(),
+                    step: SpecialStep::Copy,
+                    files: 2,
+                    secret: false,
+                    ids: vec![],
+                    sites: false,
+                    category: Default::default(),
+                    notes: Vec::new(),
+                },
+            ],
+            ..FullPlan::default()
+        };
+        let view = plan_view(&plan);
+        assert_eq!(view.internet, plan.internet());
+        assert_eq!(view.internet.sign_ins, 1);
+        let room = plan.room_needed();
+        assert_eq!(view.room.installs, room.installs);
+        assert_eq!(view.room.app_data, room.app_data);
+        assert!(view.room.app_data > 0);
+        let undo: Vec<UndoPromise> = view.changes.iter().map(|c| c.undo).collect();
+        assert_eq!(undo, [UndoPromise::NeedsYouMaker, UndoPromise::CanReverse]);
+        assert_eq!(promise_of(Promise::CanReverse), UndoPromise::CanReverse);
+        assert_eq!(promise_of(Promise::MustKeep), UndoPromise::MustKeep);
+        assert_eq!(
+            promise_of(Promise::RemoveYourself),
+            UndoPromise::RemoveYourself
+        );
+        assert_eq!(
+            promise_of(Promise::RemovesIfPackage),
+            UndoPromise::RemovesIfPackage
+        );
+        assert_eq!(promise_of(Promise::KeepsNewer), UndoPromise::KeepsNewer);
+        assert_eq!(
+            promise_of(Promise::NeedsYouMaker),
+            UndoPromise::NeedsYouMaker
+        );
+    }
 
     /// Gap 1: an app's to-do list reaches the outcome as notes (a restart is the line's own
     /// reason; a registration with nothing in it says nothing).

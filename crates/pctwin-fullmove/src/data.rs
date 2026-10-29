@@ -565,6 +565,15 @@ impl Sink {
         self
     }
 
+    /// Whether the old laptop refused component `id` because it changed after the approval, or
+    /// kept changing while it was read (the capture's own check: `ChangedSinceApproval`,
+    /// `KeptChanging`).
+    pub fn changed_after_approval(&self, id: &str) -> bool {
+        self.arrived
+            .get(id)
+            .is_some_and(|a| a.not_captured == Some(NotCaptured::Changing))
+    }
+
     fn chosen(&self, id: &str) -> bool {
         self.choice.copy.iter().any(|c| c == id) || self.choice.secrets.iter().any(|c| c == id)
     }
@@ -811,8 +820,14 @@ pub struct Landed {
 }
 
 /// Lands every component that arrived whole, secrets first; anything chosen that did not arrive
-/// whole ends needs-action, never landed.
-pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -> Vec<Landed> {
+/// whole ends needs-action, never landed. A component in `held` (its app's data was edited on the
+/// old laptop after the approval) is not landed either: it waits for the person's answer.
+pub fn land_all(
+    sink: &Sink,
+    n: &Landing<'_>,
+    apps: &BTreeMap<String, String>,
+    held: &std::collections::BTreeSet<String>,
+) -> Vec<Landed> {
     let rec = n.journal.imports(n.key);
     let stop = Stop::new();
     let made = MadeFolders::default();
@@ -851,6 +866,13 @@ pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -
             words: words.into(),
             why: Some(why),
         };
+        if held.contains(id) {
+            out.push(needs(
+                "it was changed on the old laptop after you approved; PCTwin asks you again",
+                DataWhy::Changing,
+            ));
+            continue;
+        }
         let Some(a) = sink.arrived.get(id) else {
             out.push(if sink.lost {
                 needs(

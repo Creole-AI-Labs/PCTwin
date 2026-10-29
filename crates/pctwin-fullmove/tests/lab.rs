@@ -564,7 +564,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             .unwrap_or_else(|| panic!("{name} is on the plan: {changes:#?}"))
     };
     assert_eq!(line("Lab Writer").action, Action::Install);
-    assert_eq!(line("Lab Writer").undo, Promise::RemoveYourself);
+    assert_eq!(line("Lab Writer").undo, Promise::RemovesIfPackage);
     assert_eq!(line("Lab Unsigned Tool").needs, Some(Reason::ManualInstall));
     assert_eq!(line("Lab Already Here").action, Action::LeaveAlone);
     assert!(

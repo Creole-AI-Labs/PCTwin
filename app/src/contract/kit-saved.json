@@ -1,0 +1,19 @@
+[
+  {
+    "files": [
+      "PCTwin recovery kit.json",
+      "PCTwin recovery kit - read me.txt"
+    ],
+    "folder": "E:\\Keep",
+    "holds": [
+      "move-record",
+      "results",
+      "before-wipe-list"
+    ],
+    "lacks": [
+      "file-data",
+      "setup-steps",
+      "recovery-tool"
+    ]
+  }
+]

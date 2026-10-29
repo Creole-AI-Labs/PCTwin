@@ -552,10 +552,7 @@ pub fn outcome_of(p: &Planned, capture: Option<&Capture>, landed: Option<&Landed
     });
     let readiness = if blocked {
         Readiness::NeedsAction
-    } else if landed.is_some_and(|l| l.verified)
-        && capture
-            .is_some_and(|k| k.method == Method::OnlineBackup || k.method == Method::SteadyCopy)
-    {
+    } else if landed.is_some_and(|l| l.verified) && capture.is_some_and(usable_proof) {
         Readiness::MachineChecked
     } else {
         Readiness::Untested
@@ -614,4 +611,54 @@ pub fn before_wipe(
         }
     }
     out
+}
+
+/// Whether `capture` proves the app data is usable, beyond its bytes matching (Task List 2.9,
+/// "matching hashes alone never prove app data is usable"): SQLite's own online backup whose
+/// result passed SQLite's own check, or every file read steady while the system confirmed no
+/// program held it (the approved close step). A steady copy where that could not be told, and a
+/// labelled copy, prove only that the bytes agree.
+pub fn usable_proof(capture: &Capture) -> bool {
+    match capture.method {
+        Method::OnlineBackup => true,
+        Method::SteadyCopy => !capture.closed_unconfirmed,
+        Method::PreservedOnly => false,
+    }
+}
+
+#[cfg(test)]
+mod usable_tests {
+    use super::*;
+    use crate::capture::Generation;
+    use crate::component::ComponentId;
+
+    fn capture(method: Method, closed_unconfirmed: bool) -> Capture {
+        Capture {
+            component: ComponentId([1; 32]),
+            method,
+            preservation: Preservation::Captured,
+            generation: Generation {
+                files: Vec::new(),
+                digest: [0; 32],
+            },
+            files: Vec::new(),
+            folded: Vec::new(),
+            evidence: Vec::new(),
+            closed_unconfirmed,
+        }
+    }
+
+    #[test]
+    fn matching_hashes_alone_never_prove_app_data_usable() {
+        // SQLite's own backup and check: usable, whether or not the holder could be asked.
+        assert!(usable_proof(&capture(Method::OnlineBackup, false)));
+        assert!(usable_proof(&capture(Method::OnlineBackup, true)));
+        // Read steady with the app confirmed closed: what the app itself would open.
+        assert!(usable_proof(&capture(Method::SteadyCopy, false)));
+        // Read steady, but nobody could say the app was closed: only the bytes agree.
+        assert!(!usable_proof(&capture(Method::SteadyCopy, true)));
+        // A labelled copy is never proof.
+        assert!(!usable_proof(&capture(Method::PreservedOnly, false)));
+        assert!(!usable_proof(&capture(Method::PreservedOnly, true)));
+    }
 }
