@@ -1161,6 +1161,7 @@ outcome-kind-photos = Fotos
 outcome-kind-videos = Vídeos
 outcome-kind-music = Músicas
 outcome-kind-documents = Documentos
+outcome-kind-other = Outros arquivos
 outcome-kind-count = { $copied } de { $planned } copiados e verificados
 outcome-next-title = O que fazer agora
 outcome-old-safe = O que não terminou continua listado aqui. Nada foi removido do seu notebook antigo.

@@ -962,9 +962,19 @@ fn ledger_of(k: &Kept, j: Option<&Journal>) -> (Ledger, u64) {
     ledger_with(k, &probe)
 }
 
-/// [`ledger_of`], with the journal as `probe` read.
+/// [`ledger_of`], with the journal as `probe` read. A folder or package is left out: it carries
+/// no result of its own in a move, its files do (the report counts files), so it would only ever
+/// be "no result yet" (two-copy run, 29 October 2026: every folder of a moved folder showed as
+/// not finished).
 fn ledger_with(k: &Kept, probe: &JournalProbe) -> (Ledger, u64) {
-    let mut l = Ledger::from_record(&k.record, &k.mover, k.move_id, k.started_at);
+    let mut record = k.record.clone();
+    record.items.retain(|i| {
+        !matches!(
+            i.kind,
+            pctwin_record::ItemKind::Folder | pctwin_record::ItemKind::Package
+        )
+    });
+    let mut l = Ledger::from_record(&record, &k.mover, k.move_id, k.started_at);
     for place in &k.searched {
         l.searched(place);
     }
@@ -1788,6 +1798,22 @@ fn share<R: Runtime>(
 
 /* ---------- Commands ---------- */
 
+/// The mover's items that still need them: never what is done, nor what they chose to leave
+/// behind (two-copy run, 29 October 2026: files left out by the person's own choice were listed
+/// as not finished).
+fn open_items(l: &Ledger) -> Vec<ItemView> {
+    l.lines()
+        .filter(|(id, line)| {
+            line.mine
+                && !matches!(
+                    l.standing(**id),
+                    Some(Standing::Done(_) | Standing::SkippedByUser)
+                )
+        })
+        .filter_map(|(id, _)| item_view(l, *id))
+        .collect()
+}
+
 /// R01 and the after-move check, for the move `id` (none: the newest).
 #[tauri::command]
 pub fn finish_overview<R: Runtime>(
@@ -1809,11 +1835,7 @@ pub fn finish_overview<R: Runtime>(
     if undo_open(j.as_ref()) {
         notes.push(FinishNote::UndoOpen);
     }
-    let open_items: Vec<ItemView> = l
-        .lines()
-        .filter(|(id, line)| line.mine && !matches!(l.standing(**id), Some(Standing::Done(_))))
-        .filter_map(|(id, _)| item_view(&l, *id))
-        .collect();
+    let open_items = open_items(&l);
     let more = (open_items.len() as u64).saturating_sub(MAX_LINES as u64);
     Ok(FinishView {
         id: m.kept.history_id.clone(),
@@ -2621,6 +2643,33 @@ mod tests {
             undo_id: None,
             searched: vec!["documents".into()],
         }
+    }
+
+    /// A folder is not an item of its own (its files are), and what the person chose to leave
+    /// behind is counted as skipped but never listed as not finished (two-copy run, 29 October).
+    #[test]
+    fn folders_and_what_the_person_left_out_are_never_not_finished() {
+        let mut k = kept();
+        let mut folder = item("Lab", Inclusion::Included);
+        folder.kind = ItemKind::Folder;
+        let skipped = item(
+            "old.txt",
+            Inclusion::LeftOut {
+                reason: LeftOutReason::ChosenByUser,
+            },
+        );
+        k.record.items.push(folder.clone());
+        k.record.items.push(skipped.clone());
+        let (l, _) = ledger_with(&k, &JournalProbe::default());
+        assert!(l.line(folder.id).is_none());
+        let t = l.tally();
+        assert_eq!((t.selected, t.skipped), (2, 1));
+        let open = open_items(&l);
+        assert!(!open.is_empty(), "the failed letter is still listed");
+        assert!(
+            open.iter()
+                .all(|v| v.standing != StandingKey::SkippedByUser)
+        );
     }
 
     /// T27-001: with no journal to show it, a copy the move called "copied" is not done: the

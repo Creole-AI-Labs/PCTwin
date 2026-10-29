@@ -1269,6 +1269,7 @@ outcome-kind-photos = الصور
 outcome-kind-videos = الفيديوهات
 outcome-kind-music = الموسيقى
 outcome-kind-documents = المستندات
+outcome-kind-other = ملفات أخرى
 outcome-kind-count = { $copied } من { $planned } نُسخت وتم التحقق منها
 outcome-next-title = الخطوات التالية
 outcome-old-safe = كل ما لم يكتمل يبقى مدرجًا هنا. لم يُحذف أي شيء من حاسوبك المحمول القديم.

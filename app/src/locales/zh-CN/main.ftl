@@ -945,6 +945,7 @@ outcome-kind-photos = 照片
 outcome-kind-videos = 视频
 outcome-kind-music = 音乐
 outcome-kind-documents = 文档
+outcome-kind-other = 其他文件
 outcome-kind-count = { $planned } 个中已复制并检查 { $copied } 个
 outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。

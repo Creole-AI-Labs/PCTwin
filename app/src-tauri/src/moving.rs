@@ -1634,13 +1634,15 @@ pub struct KindCount {
 }
 
 /// What matters to people, counted after the move the way the scan counts it (by each file's
-/// kind, [`pctwin_scan::category`]). Other kinds of file are in the totals, not here.
+/// kind, [`pctwin_scan::category`]); every other kind of file is counted as `other`, so the rows
+/// add up to the files moved (two-copy run, 29 October 2026: 58 other files were in no row).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct AfterMove {
     pub photos: KindCount,
     pub videos: KindCount,
     pub music: KindCount,
     pub documents: KindCount,
+    pub other: KindCount,
 }
 
 impl AfterMove {
@@ -1651,7 +1653,7 @@ impl AfterMove {
             pctwin_scan::Category::Video => &mut self.videos,
             pctwin_scan::Category::Music => &mut self.music,
             pctwin_scan::Category::Document => &mut self.documents,
-            pctwin_scan::Category::Other => return,
+            pctwin_scan::Category::Other => &mut self.other,
         };
         kind.planned += 1;
         if copied {

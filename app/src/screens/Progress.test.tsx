@@ -788,7 +788,7 @@ describe("R01 Welcome to your next laptop", () => {
   });
 
   it("without the after-move check (nothing of those kinds), there is no such section", () => {
-    inApp(<Outcome outcome={{ ...sample.finishedClean, afterMove: { photos: { planned: 0, copied: 0 }, videos: { planned: 0, copied: 0 }, music: { planned: 0, copied: 0 }, documents: { planned: 0, copied: 0 } } }} {...props} />);
+    inApp(<Outcome outcome={{ ...sample.finishedClean, afterMove: { photos: { planned: 0, copied: 0 }, videos: { planned: 0, copied: 0 }, music: { planned: 0, copied: 0 }, documents: { planned: 0, copied: 0 }, other: { planned: 0, copied: 0 } } }} {...props} />);
     expect(screen.queryByText(text("outcome-kinds-title"))).toBeNull();
   });
 

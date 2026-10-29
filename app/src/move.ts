@@ -292,7 +292,7 @@ export type MoveOutcome = {
 export type KindCount = { planned: number; copied: number };
 
 /** The kinds the after-move check counts, in the order it lists them (as the scan counts them). */
-export const KINDS = ["photos", "videos", "music", "documents"] as const;
+export const KINDS = ["photos", "videos", "music", "documents", "other"] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** The mover's photos, videos, music and documents in the plan, each with how many arrived checked. */

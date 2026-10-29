@@ -112,6 +112,7 @@ export const finishedChecked: MoveOutcome = {
     videos: { planned: 96, copied: 96 },
     music: { planned: 0, copied: 0 },
     documents: { planned: 1312, copied: 1312 },
+    other: { planned: 58, copied: 58 },
   },
 };
 

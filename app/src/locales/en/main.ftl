@@ -1009,6 +1009,7 @@ outcome-kind-photos = Photos
 outcome-kind-videos = Videos
 outcome-kind-music = Music
 outcome-kind-documents = Documents
+outcome-kind-other = Other files
 outcome-kind-count = { $copied } of { $planned } copied and checked
 outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.

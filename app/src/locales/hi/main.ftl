@@ -1134,6 +1134,7 @@ outcome-kind-photos = फ़ोटो
 outcome-kind-videos = वीडियो
 outcome-kind-music = संगीत
 outcome-kind-documents = दस्तावेज़
+outcome-kind-other = दूसरी फ़ाइलें
 outcome-kind-count = { $planned } में से { $copied } कॉपी और जाँचे गए
 outcome-next-title = आगे क्या करें
 outcome-old-safe = जो पूरा नहीं हुआ, वह यहाँ सूची में रहता है। आपके पुराने लैपटॉप से कुछ भी नहीं हटाया गया।
