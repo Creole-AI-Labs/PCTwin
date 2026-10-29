@@ -355,6 +355,17 @@ fn a_send_left_preparing_is_removed_only_when_its_lease_ran_out() {
     assert!(!keep.path().join(&w.id).exists());
 }
 
+/// A send folder whose record is not written yet (a copy just beginning) is left alone.
+#[test]
+fn a_send_just_begun_is_not_swept() {
+    let keep = dirs();
+    let store = new_store(keep.path());
+    let fresh = keep.path().join("00112233445566778899aabbccddeeff");
+    std::fs::create_dir_all(fresh.join("files")).unwrap();
+    assert!(store.sweep(T0).is_empty());
+    assert!(fresh.exists());
+}
+
 /// A copy that takes long renews its lease as it goes, so a tidy during it deletes nothing.
 #[test]
 fn a_long_copy_keeps_renewing_its_lease() {

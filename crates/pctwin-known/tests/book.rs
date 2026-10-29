@@ -432,6 +432,31 @@ fn a_laptop_that_cannot_tell_says_so_and_never_same_device() {
     assert_eq!(bo.unwrap().device, Device::CannotTell);
 }
 
+/// At most so many connections; replacing one at the limit is still allowed.
+#[test]
+fn the_book_holds_at_most_its_limit() {
+    use pctwin_known::book::MAX_CONNECTIONS;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mut b = book(dir.path(), &store, "m1");
+    let mut first = String::new();
+    for n in 0..MAX_CONNECTIONS {
+        let (p, _) = pendings();
+        let id = b.remember(p, &format!("L{n}"), T0, None).unwrap();
+        if n == 0 {
+            first = id;
+        }
+    }
+    let (p, _) = pendings();
+    assert_eq!(
+        b.remember(p, "One more", T0, None).err(),
+        Some(BookError::Full)
+    );
+    let (p, _) = pendings();
+    assert!(b.remember(p, "L0", T0, Some(&first)).is_ok());
+    assert_eq!(b.list(T0).len(), MAX_CONNECTIONS);
+}
+
 /// A store that counts its reads.
 struct Counting(MemoryStore, std::sync::atomic::AtomicUsize);
 
@@ -473,6 +498,10 @@ fn hellos_never_read_the_key_store() {
         assert_eq!(b.lookup(t, T0).as_ref(), Some(id));
     }
     assert_eq!(store.1.load(Relaxed), after_first, "no reads for hellos");
+    // A forgotten connection's token names nothing at once, in the same window.
+    b.forget(&ids[1]).unwrap();
+    let gone1 = mine.iter().find(|(id, _)| *id == ids[1]).unwrap().1;
+    assert_eq!(b.lookup(&gone1, T0), None);
     // The next window: worked out once more.
     b.lookup(&[9; 8], T0 + TOKEN_PERIOD);
     let next = store.1.load(Relaxed);
