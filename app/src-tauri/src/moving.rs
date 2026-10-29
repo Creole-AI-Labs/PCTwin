@@ -2835,7 +2835,15 @@ async fn run_new<R: Runtime>(
     {
         // Only the older apps the person ticked "Update it" for are updated.
         full.updates = steps.moving.updates();
-        let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
+        // "Setting up your apps and settings" only when there is something to set up: not when
+        // the person left all of it on the old laptop (found in the two-copy test).
+        if full
+            .changes()
+            .iter()
+            .any(|c| c.action != pctwin_fullmove::plan::Action::LeaveAlone)
+        {
+            let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
+        }
         // Counted on their own lines: the files' counts stay the files'.
         let data = steps.sink.take();
         let picked = std::mem::take(&mut steps.picked);
