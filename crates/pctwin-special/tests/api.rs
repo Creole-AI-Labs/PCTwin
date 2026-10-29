@@ -528,6 +528,7 @@ static OWN_READERS: pctwin_special::content::InThisProcess =
 #[test]
 fn matching_bytes_alone_never_label_app_data_machine_checked() {
     use pctwin_special::component::Readiness;
+    pctwin_special::content::install_reader(&OWN_READERS);
     for (holders, want) in [
         (&Free as &dyn Holders, Readiness::MachineChecked),
         (&CannotTell as &dyn Holders, Readiness::Untested),

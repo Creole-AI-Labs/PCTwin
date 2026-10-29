@@ -279,8 +279,11 @@ impl LiveOpener {
     #[cfg(not(windows))]
     fn open_live(&self, item: ItemId, path: &Path) -> io::Result<Box<dyn Source>> {
         // No way here to keep writers out while it is read: it is read only when the system says
-        // nobody holds it, and the send's own steady check refuses a copy that changed meanwhile.
-        match self.holders.holding(&[path.to_path_buf()]) {
+        // nobody holds it or its own files beside it (a database's journal held means it is still
+        // open), and the send's own steady check refuses a copy that changed meanwhile.
+        let mut asked = vec![path.to_path_buf()];
+        asked.extend(self.sidecars.get(path).into_iter().flatten().cloned());
+        match self.holders.holding(&asked) {
             Holding::Held { by } => Err(self.refuse(item, path, Some(by))),
             Holding::Free | Holding::CannotTell => self.inner.open(path),
         }
