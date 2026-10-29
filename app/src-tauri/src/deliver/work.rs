@@ -593,33 +593,100 @@ pub fn font_folders() -> Vec<PathBuf> {
 
 const FILE: &str = "work-checks.json";
 
+/// The biggest list file read or written (200 checks, each with up to 10,000 linked file names,
+/// fit well inside it); a bigger one is never read whole into memory.
+const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
+
 fn state() -> &'static Mutex<Option<Work>> {
     static WORK: OnceLock<Mutex<Option<Work>>> = OnceLock::new();
     WORK.get_or_init(|| Mutex::new(None))
 }
 
-fn with<R: Runtime, T>(app: &AppHandle<R>, f: impl FnOnce(&mut Work) -> T) -> T {
-    let path = app.path().app_data_dir().ok().map(|d| d.join(FILE));
-    let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
-    let work = guard.get_or_insert_with(|| {
-        path.as_ref()
-            .and_then(|p| std::fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice::<Work>(&b).ok())
-            .filter(|w| w.entries.len() <= MAX_CHECKS)
-            .unwrap_or_default()
+/// The list kept at `path`: a file that is missing, too big, not a list or over the limit is an
+/// empty list.
+fn load(path: &Path) -> Work {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(path)
+        .and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
+        .is_ok();
+    if !read || bytes.len() as u64 > MAX_FILE_BYTES {
+        return Work::default();
+    }
+    serde_json::from_slice::<Work>(&bytes)
+        .ok()
+        .filter(|w| w.entries.len() <= MAX_CHECKS)
+        .unwrap_or_default()
+}
+
+/// Keeps `work` at `path` whole or not at all: written beside it first, then put in its place in
+/// one step, so a crash or a full disk part way leaves the last whole list.
+fn save(path: &Path, work: &Work) -> std::io::Result<()> {
+    use std::io::Write;
+    let bytes = serde_json::to_vec(work).map_err(std::io::Error::other)?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(std::io::Error::other("the list is too big to keep"));
+    }
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    let written = std::fs::File::create(&part).and_then(|mut f| {
+        f.write_all(&bytes)?;
+        f.sync_all()
     });
+    if let Err(e) = written.and_then(|()| std::fs::rename(&part, path)) {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Runs `f` on the list in `state`, read from `path` the first time and kept there whenever it
+/// changes.
+fn with_in<T>(
+    state: &Mutex<Option<Work>>,
+    path: Option<&Path>,
+    f: impl FnOnce(&mut Work) -> T,
+) -> T {
+    let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+    let work = guard.get_or_insert_with(|| path.map(load).unwrap_or_default());
     let before = work.generation;
     let out = f(work);
     if work.generation != before
-        && let Some(p) = &path
-        && let Ok(bytes) = serde_json::to_vec(&*work)
+        && let Some(p) = path
     {
-        if let Some(d) = p.parent() {
-            let _ = std::fs::create_dir_all(d);
-        }
-        let _ = std::fs::write(p, bytes);
+        let _ = save(p, work);
     }
     out
+}
+
+fn with<R: Runtime, T>(app: &AppHandle<R>, f: impl FnOnce(&mut Work) -> T) -> T {
+    let path = app.path().app_data_dir().ok().map(|d| d.join(FILE));
+    with_in(state(), path.as_deref(), f)
+}
+
+/// Runs every check on a copy of the list, with the list itself free meanwhile (reading
+/// thousands of files takes a while); the results are kept only if the list did not change
+/// while they ran (`between` runs while they run: for tests).
+fn run_in(
+    state: &Mutex<Option<Work>>,
+    path: Option<&Path>,
+    between: impl FnOnce(),
+) -> Result<WorkChecks, WorkProblem> {
+    let mut copy = with_in(state, path, |w| w.clone());
+    let started = copy.generation;
+    copy.run();
+    between();
+    with_in(state, path, |w| {
+        if w.generation != started {
+            return Err(WorkProblem::Stale);
+        }
+        *w = copy;
+        Ok(w.view())
+    })
 }
 
 /// The person's checks, with their latest results.
@@ -663,15 +730,14 @@ pub async fn work_check_add<R: Runtime>(
 /// Runs every check that PCTwin can do by reading (never running anything).
 #[tauri::command]
 pub async fn work_check_run<R: Runtime>(app: AppHandle<R>) -> Result<WorkChecks, WorkProblem> {
-    // Reading thousands of linked files or font files takes a moment: off the screens' thread.
+    // Reading thousands of linked files or font files takes a moment: off the screens' thread,
+    // and with the list free meanwhile.
     tauri::async_runtime::spawn_blocking(move || {
-        with(&app, |w| {
-            w.run();
-            w.view()
-        })
+        let path = app.path().app_data_dir().ok().map(|d| d.join(FILE));
+        run_in(state(), path.as_deref(), || {})
     })
     .await
-    .map_err(|_| WorkProblem::Failed)
+    .map_err(|_| WorkProblem::Failed)?
 }
 
 /// The person's answer to a task check: it worked, or it did not.
@@ -944,6 +1010,50 @@ mod tests {
         // A list saved before these counts existed still loads.
         let old = r#"{"generation":1,"entries":[{"what":"task","name":"t","goal":null,"state":null,"outside":0,"outcome":null}]}"#;
         assert_eq!(serde_json::from_str::<Work>(old).unwrap().entries.len(), 1);
+    }
+
+    /// Fresh-context review F9: the list is kept whole or not at all, a file too big is never
+    /// read, and checks run with the list free; results for a list that changed meanwhile are
+    /// refused, never put over the newer list.
+    #[test]
+    fn the_list_is_kept_whole_and_free_while_checks_run() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("data").join(FILE);
+        let state = Mutex::new(None);
+        with_in(&state, Some(&path), |w| w.add_task("Print").unwrap());
+        assert!(path.exists());
+        let mut part = path.as_os_str().to_owned();
+        part.push(".part");
+        assert!(!PathBuf::from(&part).exists(), "nothing left beside it");
+        assert_eq!(load(&path).entries.len(), 1);
+        // A failed write leaves the last whole list (here: the place is a folder).
+        std::fs::create_dir(PathBuf::from(&part)).unwrap();
+        let mut w = load(&path);
+        w.add_task("Scan").unwrap();
+        assert!(save(&path, &w).is_err());
+        assert_eq!(load(&path).entries.len(), 1);
+        std::fs::remove_dir(PathBuf::from(&part)).unwrap();
+        // Too big: never read whole, an empty list instead.
+        let big = t.path().join("big.json");
+        let f = std::fs::File::create(&big).unwrap();
+        f.set_len(MAX_FILE_BYTES + 1).unwrap();
+        assert_eq!(load(&big).entries.len(), 0);
+        // While the checks run the list is free; a change meanwhile wins.
+        let r = run_in(&state, Some(&path), || {
+            with_in(&state, Some(&path), |w| w.add_task("Call").unwrap());
+        });
+        assert_eq!(r, Err(WorkProblem::Stale));
+        let names: Vec<String> = with_in(&state, None, |w| w.view())
+            .checks
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, ["Print", "Call"]);
+        assert_eq!(load(&path).entries.len(), 2);
+        // Nothing changed meanwhile: the results are kept, and saved.
+        let v = run_in(&state, Some(&path), || {}).unwrap();
+        assert_eq!(v.checks[0].state, WorkState::WaitingForYou);
+        assert!(load(&path).entries[0].outcome.is_some());
     }
 
     #[test]
