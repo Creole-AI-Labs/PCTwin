@@ -554,3 +554,72 @@ async fn a_cancelled_send_is_never_delivered_again() {
 fn dirs() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
+
+/// The record's file count must match the sealed list.
+#[test]
+fn a_record_that_disagrees_with_its_sealed_list_is_not_sent() {
+    let (old, keep) = (dirs(), dirs());
+    let store = new_store(keep.path());
+    let w = store
+        .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
+        .unwrap();
+    let manifest = keep.path().join(&w.id).join("waiting.json");
+    let mut v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+    v["files"] = 3.into();
+    std::fs::write(&manifest, v.to_string()).unwrap();
+    assert!(matches!(
+        store.offer_for(&w.id, "alex", T0),
+        Err(WaitingError::CopyDamaged)
+    ));
+}
+
+/// A delivery that ends after the send was cancelled writes nothing back into its record.
+#[tokio::test]
+async fn a_delivery_ending_after_cancel_records_nothing() {
+    let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
+    let store = new_store(keep.path());
+    let w = store
+        .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
+        .unwrap();
+    let (offer, _) = store.offer_for(&w.id, "alex", T0).unwrap();
+    store.mark_cancelled(&w.id).unwrap();
+    let (mut a, mut b) = pair();
+    let live = pctwin_move::Live::default();
+    let (sent, ()) = tokio::join!(
+        store.deliver(&w.id, "alex", offer, &mut a, &live, T0),
+        async {
+            if let Ok(Arrival::Files(incoming)) = receive(&mut b).await {
+                let _ = incoming
+                    .accept(&mut b, dest.path(), None, &journal(j.path()), "1001")
+                    .await;
+            }
+        }
+    );
+    let _ = sent;
+    let text = std::fs::read_to_string(keep.path().join(&w.id).join("waiting.json")).unwrap();
+    assert!(text.contains("\"cancelled\""), "{text}");
+    assert!(!text.contains("delivered"), "{text}");
+}
+
+/// A send cancelled (or its last recipient forgotten) while it is still being copied never turns
+/// into a waiting send.
+#[test]
+fn a_send_cancelled_while_copying_never_starts_waiting() {
+    let (old, keep) = (dirs(), dirs());
+    let store = new_store(keep.path());
+    let root = keep.path().to_path_buf();
+    let clock = || {
+        // Cancel whatever is being prepared, as Cancel or a Forget would.
+        if let Ok(entries) = std::fs::read_dir(&root) {
+            for e in entries.flatten() {
+                let id = e.file_name().to_string_lossy().into_owned();
+                let _ = store.mark_cancelled(&id);
+            }
+        }
+        T0
+    };
+    let got = store.prepare_with_clock(&chosen(old.path()), &[alex()], 7, T0, None, &clock);
+    assert!(got.is_err());
+    assert!(store.list().is_empty());
+}

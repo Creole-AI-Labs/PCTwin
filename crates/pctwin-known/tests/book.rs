@@ -599,3 +599,18 @@ impl SecretStore for Flaky {
         self.0.delete(n)
     }
 }
+
+/// Permission 3's folder is offered for opening only while the permission lasts.
+#[test]
+fn an_ended_permission_names_no_folder_to_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mut b = book(dir.path(), &store, "m1");
+    let (pa, _) = pendings();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
+    assert_eq!(b.grant_folder(&id, T0), None);
+    let inbox = folder(dir.path(), "In");
+    b.allow_folder(&id, inbox.clone(), T0).unwrap();
+    assert_eq!(b.grant_folder(&id, T0), Some(inbox));
+    assert_eq!(b.grant_folder(&id, T0 + GRANT_LIFETIME), None);
+}
