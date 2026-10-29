@@ -625,9 +625,9 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
   }
   if ("landed" in f) {
     const landed = listOf(f.landed, (x) => {
-      const l = exactly(x, ["name", "folder"]);
+      const l = exactly(x, ["name", "folder", "moved"]);
       const name = l && parseGroupName(l.name);
-      return name && typeof l.folder === "string" ? { name, folder: l.folder } : null;
+      return name && typeof l.folder === "string" && typeof l.moved === "boolean" ? { name, folder: l.folder, moved: l.moved } : null;
     });
     if (!landed) return null;
     outcome.landed = landed;

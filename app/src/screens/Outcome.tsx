@@ -107,7 +107,11 @@ export default function Outcome({ outcome, onReport, onHome, onUndo, onFinish, o
         <Section title={l10n.getString("outcome-landed-title")}>
           <RowList>
             {outcome.landed.map((l) => (
-              <Row key={l.folder} title={<GroupLabel name={l.name} />} detail={<bdi dir="auto">{l.folder}</bdi>} />
+              <Row
+                key={l.folder}
+                title={<GroupLabel name={l.name} />}
+                detail={l.moved ? l10n.getString("outcome-landed-moved") : <bdi dir="auto">{l.folder}</bdi>}
+              />
             ))}
           </RowList>
         </Section>

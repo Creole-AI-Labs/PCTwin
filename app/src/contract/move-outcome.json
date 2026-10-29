@@ -82,9 +82,18 @@
     "landed": [
       {
         "folder": "C:\\Users\\Ada\\Documents",
+        "moved": false,
         "name": {
           "kind": "role",
           "role": "documents"
+        }
+      },
+      {
+        "folder": "C:\\Users\\Ada\\Pictures",
+        "moved": true,
+        "name": {
+          "kind": "role",
+          "role": "pictures"
         }
       }
     ],

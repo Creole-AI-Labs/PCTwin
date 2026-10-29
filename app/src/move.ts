@@ -285,7 +285,8 @@ export type MoveOutcome = {
   /** The full move's apps, settings and special categories, each with its result. */
   rebuilt?: Rebuilt;
   /** The new laptop: where each group of the person's things is now (the folder as the person reads it). */
-  landed?: { name: GroupName; folder: string }[];
+  /** `moved`: the folder was moved or replaced during the move, so `folder` is where it was. */
+  landed?: { name: GroupName; folder: string; moved: boolean }[];
 };
 
 /** One kind of file after the move: how many the plan held, and how many are copied and checked. */

@@ -918,6 +918,10 @@ pub struct Received {
     pub record: Record,
     pub files: Vec<ReceivedFile>,
     pub ended: Ended,
+    /// The places whose folder was moved or replaced while the files went in (checked again when
+    /// the move ends; a Mac or Linux can move a folder in use): their files are in that folder,
+    /// wherever it is now, so the path shown at approval is no longer where they are.
+    pub places_moved: Vec<String>,
 }
 
 /// The new laptop, over `link` (already paired): agrees the version, receives the old laptop's
@@ -1080,6 +1084,7 @@ impl ApprovedPlan {
             record: self.record,
             files,
             ended,
+            places_moved: table.changed_since_approved(),
         })
     }
 }

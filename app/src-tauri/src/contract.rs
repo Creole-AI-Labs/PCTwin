@@ -866,10 +866,18 @@ fn outcomes() -> Vec<MoveOutcome> {
     };
     let full = MoveOutcome {
         rebuilt: Some(rebuilt()),
-        landed: vec![crate::moving::LandedPlace {
-            name: crate::moving::group_name("documents"),
-            folder: r"C:\Users\Ada\Documents".into(),
-        }],
+        landed: vec![
+            crate::moving::LandedPlace {
+                name: crate::moving::group_name("documents"),
+                folder: r"C:\Users\Ada\Documents".into(),
+                moved: false,
+            },
+            crate::moving::LandedPlace {
+                name: crate::moving::group_name("pictures"),
+                folder: r"C:\Users\Ada\Pictures".into(),
+                moved: true,
+            },
+        ],
         ..files_only.clone()
     };
     vec![files_only, full]

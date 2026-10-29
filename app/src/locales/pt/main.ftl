@@ -2977,5 +2977,6 @@ qs-where-choose = Escolher outra pasta
 qs-where-stop = Parar
 
 # 2.9 destination changed after approval
+outcome-landed-moved = Esta pasta foi movida durante a mudança. Seus arquivos estão nela, onde quer que ela esteja agora.
 move-place-changed-title = Uma pasta mudou depois da sua aprovação
 move-place-changed-body = Uma pasta de destino foi movida ou substituída depois de você aprovar a mudança. Nada foi copiado. Verifique a pasta e comece a mudança de novo.

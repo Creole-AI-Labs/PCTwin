@@ -146,6 +146,11 @@ pub fn tried_again(first: &Received, again: &Received, tried: &BTreeSet<ItemId>)
             *line = new.clone();
         }
     }
+    for place in &again.places_moved {
+        if !merged.places_moved.contains(place) {
+            merged.places_moved.push(place.clone());
+        }
+    }
     merged
 }
 
@@ -197,6 +202,7 @@ mod tests {
         let failed = |cause, why: &str| Some(ReceiveOutcome::Failed(Failure::new(cause, why)));
         let received = Received {
             record,
+            places_moved: Vec::new(),
             files: vec![
                 ReceivedFile {
                     item: open.id,
@@ -237,6 +243,7 @@ mod tests {
         record.items = vec![mine.clone(), bea.clone()];
         let received = Received {
             record,
+            places_moved: Vec::new(),
             files: [&mine, &bea]
                 .iter()
                 .map(|i| ReceivedFile {

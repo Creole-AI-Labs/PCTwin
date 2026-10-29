@@ -160,6 +160,11 @@ describe("where things landed", () => {
     inApp(<Outcome outcome={outcome} onReport={vi.fn()} />);
     expect(screen.getByText(text("outcome-landed-title"))).toBeTruthy();
     expect(screen.getByText(outcome.landed[0].folder)).toBeTruthy();
+    // A folder moved during the move: said in words, never its old path as if the files were there.
+    const moved = outcome.landed.find((l) => l.moved);
+    if (!moved) throw new Error("the engine's full example has a folder moved during the move");
+    expect(screen.queryByText(moved.folder)).toBeNull();
+    expect(screen.getByText(text("outcome-landed-moved"))).toBeTruthy();
   });
 });
 

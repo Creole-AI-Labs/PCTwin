@@ -2982,5 +2982,6 @@ qs-where-choose = Choisir un autre dossier
 qs-where-stop = Arrêter
 
 # 2.9 destination changed after approval
+outcome-landed-moved = Ce dossier a été déplacé pendant le transfert. Vos fichiers sont dedans, là où il se trouve maintenant.
 move-place-changed-title = Un dossier a changé après votre accord
 move-place-changed-body = Un dossier de destination a été déplacé ou remplacé après votre accord. Rien n’a été copié. Vérifiez le dossier, puis recommencez le transfert.

@@ -1592,6 +1592,9 @@ pub struct MoveOutcome {
 pub struct LandedPlace {
     pub name: GroupName,
     pub folder: String,
+    /// The folder was moved or replaced during the move: `folder` is where it was, not where the
+    /// files are now (the screens say so instead of showing the path).
+    pub moved: bool,
 }
 
 /// Where the person's things landed: each shown place that holds at least one item now on this
@@ -1625,6 +1628,7 @@ fn landed_places(
         .map(|(label, folder)| LandedPlace {
             name: group_name(label),
             folder: folder.clone(),
+            moved: received.places_moved.contains(label),
         })
         .collect()
 }
@@ -4162,6 +4166,7 @@ mod tests {
         let mut record = Record::new(laptop());
         record.items = files.iter().map(|(i, _)| i.clone()).collect();
         Received {
+            places_moved: Vec::new(),
             record,
             files: files
                 .into_iter()
