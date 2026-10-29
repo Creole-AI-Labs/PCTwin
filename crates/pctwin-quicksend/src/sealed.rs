@@ -24,9 +24,18 @@ pub const CHUNK: usize = 64 * 1024;
 pub const TAG: usize = 16;
 /// Bytes in a send's key.
 pub const KEY_LEN: usize = 32;
-/// The stream that holds the send's own list of what it holds; each copied file is the stream
-/// of its number plus one.
+/// The stream that holds the send's own list of what it holds; each copied file has its own
+/// ([`file_stream`]), never this one.
 pub const LIST_STREAM: u32 = 0;
+
+/// The stream of a send's file number `n` (from 0): never [`LIST_STREAM`], never the same for two
+/// files. `None` past the most files one send can seal.
+pub fn file_stream(n: usize) -> Option<u32> {
+    u32::try_from(n)
+        .ok()
+        .and_then(|n| n.checked_add(1))
+        .filter(|s| *s != LIST_STREAM)
+}
 
 fn damaged(why: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, why)
@@ -378,6 +387,24 @@ mod tests {
         v[0] ^= 1;
         std::fs::write(&e, &v).unwrap();
         assert!(all(&mut Unsealed::open(&e, &key, 9, 0).unwrap()).is_err());
+    }
+
+    /// A file's stream is never the list's: a copy put in the list's place does not open as the
+    /// list, nor the list as a copy.
+    #[test]
+    fn a_file_never_opens_as_the_list() {
+        assert_eq!(file_stream(0), Some(1));
+        assert_ne!(file_stream(0), Some(LIST_STREAM));
+        assert_ne!(file_stream(1), file_stream(0));
+        assert_eq!(file_stream(u32::MAX as usize), None);
+        let d = tempfile::tempdir().unwrap();
+        let key = [7u8; 32];
+        let first = d.path().join("0.sealed");
+        seal_bytes(b"[]", &first, &key, file_stream(0).unwrap()).unwrap();
+        assert!(unseal_bytes(&first, &key, LIST_STREAM, 100).is_err());
+        let list = d.path().join("list.sealed");
+        seal_bytes(b"[]", &list, &key, LIST_STREAM).unwrap();
+        assert!(unseal_bytes(&list, &key, file_stream(0).unwrap(), 100).is_err());
     }
 
     /// The same bytes in two streams of one send seal differently, so neither stands in for the

@@ -27,8 +27,9 @@
 //! their own for each send, kept only in the system's key store (as the connection keys are) and
 //! deleted with the send; PCTwin's folder is the person's own (on Mac and Linux made `0700`).
 //! What the send holds (names, folders, sizes, fingerprints, where each was read from) is sealed
-//! too, in the send's own list; the copies are stored under numbers, so the drive alone shows only
-//! how many files wait, their total size, for which connections and until when. On an SSD
+//! too, in the send's own list; the copies are stored under numbers. The drive alone still shows
+//! how many files wait, the size of each (a sealed copy is its file's size and a little more),
+//! for which connections and until when, but no name, folder, content or fingerprint. On an SSD
 //! deleting is not a guaranteed wipe, which is why the key going is what makes a deleted copy
 //! unreadable.
 //!
@@ -487,12 +488,9 @@ impl WaitingStore {
                 if item.kind != ItemKind::File {
                     continue;
                 }
-                let stream = u32::try_from(files.len() + 1)
-                    .ok()
-                    .filter(|n| *n < u32::MAX)
-                    .ok_or(WaitingError::Quick(QuickError::TooMany {
-                        files: files.len(),
-                    }))?;
+                let stream = crate::sealed::file_stream(files.len()).ok_or(WaitingError::Quick(
+                    QuickError::TooMany { files: files.len() },
+                ))?;
                 let to = copy_path(&dir, files.len());
                 let changed = || WaitingError::ChangedWhileCopying(job.path.clone());
                 let before = std::fs::metadata(&job.source).map_err(|_| changed())?;
@@ -713,7 +711,7 @@ impl WaitingStore {
         let mut expected = std::collections::BTreeSet::new();
         for (n, f) in files.iter().enumerate() {
             let at = copy_path(&dir, n);
-            let stream = u32::try_from(n + 1).map_err(|_| WaitingError::CopyDamaged)?;
+            let stream = crate::sealed::file_stream(n).ok_or(WaitingError::CopyDamaged)?;
             let fp = Unsealed::open(&at, key, stream, f.size)
                 .and_then(|mut u| u.fingerprint())
                 .map_err(|_| WaitingError::CopyDamaged)?;
@@ -779,7 +777,7 @@ impl WaitingStore {
         let mut opened = Vec::new();
         for (n, f) in listed.iter().enumerate() {
             let at = copy_path(&dir, n);
-            let stream = u32::try_from(n + 1).map_err(|_| WaitingError::CopyDamaged)?;
+            let stream = crate::sealed::file_stream(n).ok_or(WaitingError::CopyDamaged)?;
             opened.push((at.clone(), stream, f.size));
             files.push((f.item.clone(), f.size, at));
         }
