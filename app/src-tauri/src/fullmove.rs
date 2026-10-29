@@ -736,7 +736,7 @@ pub fn rebuild_here<R: Runtime>(
         pctwin_apps::found::linux::keyring_hash(remote, wide, &key_home)
     };
     #[cfg(all(unix, not(target_os = "macos")))]
-    let list = || pctwin_apps::found::read_here(&people, me);
+    let list = || pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere));
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut linux = pctwin_fullmove::unix::LinuxInstaller {
         runner: &pctwin_maker::run::SystemRunner,
