@@ -19,6 +19,7 @@ import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type P
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
+import { parseCleanupDone, parseCleanupView, parseDeltaView, parseDoctorView, parseFinishProblem, parseFinishView, parseGoodbyeView, parseHandoverRecorded, parseHandoverStarted, parseHandoverView, parseReportView, parseSavedSetup, parseSetupView, parseUndoPreview, type CatchupPurpose, type ChoiceIn, type CleanupWhat, type DeltaView, type Disclosure, type DoctorRole, type FinishProblem, type GoodbyeAnswer, type HandoverAction, type PersonSays } from "./finish";
 
 /* ---------- Shapes ---------- */
 
@@ -1167,4 +1168,46 @@ export async function guardIntent(intent: { job: string; epoch: number; generati
 export const listenGuard = (handler: (view: Projection | null) => void): Promise<UnlistenFn> =>
   listen<unknown>("guard-view", (e) => {
     handler(parseProjection(e.payload));
+  });
+
+/* ---------- Finishing a move (src-tauri/src/finish.rs) ---------- */
+
+/**
+ * A move is named by its My PCTwin history entry ID; none means the newest move. A rejected finishing
+ * command is a `FinishProblem`; anything else is the generic `failed`.
+ */
+export function toFinishProblem(error: unknown): FinishProblem {
+  return parseFinishProblem(error) ?? { kind: "failed" };
+}
+
+export const finishOverview = (id: string | null) => ask("finish_overview", parseFinishView, { id });
+export const goodbyeList = (id: string | null) => ask("goodbye_list", parseGoodbyeView, { id });
+/** `shown` goes back exactly as the list sent it, so an answer is bound to what the person saw. */
+export const goodbyeAnswer = (id: string | null, exception: string, shown: string, answer: GoodbyeAnswer) => ask("goodbye_answer", parseGoodbyeView, { id, exception, shown, answer });
+export const goodbyeKeepUntil = (id: string | null, at: number) => ask("goodbye_keep_until", parseGoodbyeView, { id, at });
+/** Readies the next pairing to look at the old laptop again; its fresh list comes on `finish-delta`. */
+export const catchupArm = (id: string | null, purpose: CatchupPurpose) => run("catchup_arm", { id, purpose });
+/** `digest` goes back exactly as the shown list sent it; only the reviewed changes are sent. */
+export const catchupApprove = (id: string | null, digest: string, choices: ChoiceIn[]) => run("catchup_approve", { id, digest, choices });
+export const handoverPreview = (id: string | null, action: HandoverAction) => ask("handover_preview", parseHandoverView, { id, action });
+/** The separate, irreversible confirmation of exactly the preview with `digest`. */
+export const handoverConfirm = (id: string | null, action: HandoverAction, digest: string) => ask("handover_confirm", parseHandoverStarted, { id, action, digest });
+/** What the person says happened after the system's own route: their word, never a certificate. */
+export const handoverResult = (id: string | null, action: HandoverAction, says: PersonSays) => ask("handover_result", parseHandoverRecorded, { id, action, says });
+export const doctorRun = (role: DoctorRole) => ask("doctor_run", parseDoctorView, { role });
+export const setupChecklist = (id: string | null) => ask("setup_checklist", parseSetupView, { id });
+export const setupMark = (id: string | null, task: string, done: boolean) => ask("setup_mark", parseSetupView, { id, task, done });
+export const setupSave = (id: string | null) => ask("setup_save", parseSavedSetup, { id });
+export const undoPreview = (id: string | null) => ask("undo_preview", parseUndoPreview, { id });
+export const cleanupPreview = (what: CleanupWhat) => ask("cleanup_preview", parseCleanupView, { what });
+export const cleanupConfirm = (what: CleanupWhat, digest: string) => ask("cleanup_confirm", parseCleanupDone, { what, digest });
+export const reportPreview = (id: string | null, disclosure: Disclosure) => ask("report_preview", parseReportView, { id, disclosure });
+/** The path the report was saved to, or null when the person chose no place. */
+export const reportSave = (id: string | null, disclosure: Disclosure, digest: string, text: string) =>
+  ask("report_save", (v) => (v === null ? { path: null } : typeof v === "string" ? { path: v } : null), { id, disclosure, digest, text }).then((r) => r.path);
+
+/** What changed on the old laptop since the move (event `finish-delta`). One that does not parse is `null`: the screen says it could not read it. */
+export const listenFinishDelta = (handler: (delta: DeltaView | null) => void): Promise<UnlistenFn> =>
+  listen<unknown>("finish-delta", (e) => {
+    handler(parseDeltaView(e.payload));
   });
