@@ -165,6 +165,11 @@ fn main() -> ExitCode {
         // Handed over already (or never held): nothing to do.
         return ExitCode::SUCCESS;
     }
+    // Never through a link (or anything but a plain file) planted at the journal's name.
+    if !pctwin_move::handover::journal_place_is_plain(&args.journal) {
+        eprintln!("pctwin-handover: the change journal's place is not a plain file");
+        return ExitCode::FAILURE;
+    }
     let journal = match Journal::open(&args.journal) {
         Ok(j) => j,
         Err(e) => {

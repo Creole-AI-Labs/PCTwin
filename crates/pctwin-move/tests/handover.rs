@@ -115,3 +115,44 @@ async fn a_link_in_the_holding_area_is_never_followed() {
     assert_eq!(done.not_plain.len(), 1);
     assert!(!docs.join("shadow").exists());
 }
+
+/// A link planted at the hand-over journal's name is never followed: the place is refused.
+#[test]
+fn a_link_at_the_journal_name_is_never_followed() {
+    use pctwin_move::handover::journal_place_is_plain;
+    let d = tempfile::tempdir().unwrap();
+    let place = d.path().join("handover.journal");
+    assert!(journal_place_is_plain(&place), "nothing there yet");
+    std::fs::write(&place, b"").unwrap();
+    assert!(journal_place_is_plain(&place), "a plain file");
+    std::fs::remove_file(&place).unwrap();
+    std::fs::create_dir(&place).unwrap();
+    assert!(!journal_place_is_plain(&place), "a folder");
+    std::fs::remove_dir(&place).unwrap();
+    let target = d.path().join("elsewhere");
+    std::fs::create_dir(&target).unwrap();
+    // A junction (Windows, no special right needed) or a link (elsewhere).
+    #[cfg(windows)]
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&place)
+        .arg(&target)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(target.join("journal"), &place).is_ok();
+    assert!(made);
+    assert!(
+        !journal_place_is_plain(&place),
+        "a link planted at the name"
+    );
+    #[cfg(windows)]
+    {
+        let _ = std::fs::remove_dir(&place);
+        let file_target = d.path().join("file");
+        std::fs::write(&file_target, b"").unwrap();
+        if std::os::windows::fs::symlink_file(&file_target, &place).is_ok() {
+            assert!(!journal_place_is_plain(&place), "a file link");
+        }
+    }
+}

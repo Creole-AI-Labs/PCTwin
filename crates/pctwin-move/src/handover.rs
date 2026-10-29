@@ -47,6 +47,26 @@ pub struct ReadyNote {
     pub failed: u64,
 }
 
+/// Whether `path` is a place the hand-over's change journal may be opened at: nothing there yet,
+/// or a plain file (never a link, a junction, a folder or anything else planted at the name, which
+/// the opening would follow or misuse).
+pub fn journal_place_is_plain(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+        Ok(meta) => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+                if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return false;
+                }
+            }
+            meta.is_file() && !meta.file_type().is_symlink()
+        }
+    }
+}
+
 /// The note's file inside an app data folder (`data_dir`, the person's own): the same folder
 /// the app keeps its data in (`<data>/com.creoleailabs.pctwin`).
 pub fn ready_note_path(data_dir: &Path) -> PathBuf {
