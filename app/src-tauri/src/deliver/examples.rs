@@ -162,6 +162,7 @@ pub fn repair_done() -> Vec<RepairDone> {
         )],
         more: 0,
         kept: 43,
+        undo_id: Some("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f".into()),
     }]
 }
 

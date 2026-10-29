@@ -2,10 +2,29 @@
 //! a project is edited after the person approved, only the affected steps are held, checked
 //! again, and asked about again; everything else carries on.
 //!
-//! Contract only (stub): what the screens send and get. The real rules follow in their own
-//! commit.
+//! The rules are `pctwin_fullmove::drift`. Before the first change of the rebuild, every app of
+//! the plan is looked up again on this laptop: one that was installed, updated or removed since
+//! the plan was made is held (never installed over what is there now, never said to be here) and
+//! ends needs-action; the screens are told ([`EVENT`]) and asked again ([`move_reapprove`]):
+//!
+//! - yes: each held app is looked at once more. One that is here now is left as it is (the
+//!   person has it); one that is not is installed through the same rebuild as the move, if PCTwin
+//!   installs it at all;
+//! - no: each held app ends skipped-by-user.
+//!
+//! A project edited on the old laptop after approval is refused by the capture's own check
+//! (`ChangedSinceApproval`) and asked about on the old laptop (`move-appdata-open`); a destination
+//! folder that changed is found by `drift::places_changed` (its rule and test are there; the file
+//! transfer does not call it yet).
 
+use pctwin_fullmove::drift::{Drift, Step, Why};
+use pctwin_fullmove::plan::{Kind, Title};
+use pctwin_types::ItemResult;
 use serde::Serialize;
+use tauri::{AppHandle, Runtime};
+
+use super::repair::{Kept, RepairDone, RepairProblem, merge, offer, run_part, with_kept};
+use crate::guard_views::{bounded, name};
 
 pctwin_types::listed_enum! {
     /// What changed after the approval.
@@ -58,20 +77,322 @@ pub struct ChangesView {
 }
 
 /// The event sent when something changed after approval.
-// Sent once the real rules are wired (next commits).
-#[allow(dead_code)]
 pub const EVENT: &str = "move-changed";
+
+fn why(w: Why) -> AfterWhy {
+    match w {
+        Why::AppUpdated => AfterWhy::AppUpdated,
+        Why::AppRemoved => AfterWhy::AppRemoved,
+        Why::DestinationChanged => AfterWhy::DestinationChanged,
+        Why::ProjectEdited => AfterWhy::ProjectEdited,
+    }
+}
+
+fn step(s: Step) -> Recheck {
+    match s {
+        Step::Install => Recheck::Install,
+        Step::Settings => Recheck::Settings,
+        Step::AppData => Recheck::AppData,
+        Step::Files => Recheck::Files,
+    }
+}
+
+/// What changed after approval in `k` and waits for the person (`None`: nothing).
+pub fn view(k: &Kept) -> Option<ChangesView> {
+    let drift = &k.last.drift;
+    if drift.is_empty() {
+        return None;
+    }
+    let held = drift.iter().map(|d| d.steps.len() as u64).sum();
+    let (lines, more) = bounded(
+        drift
+            .iter()
+            .map(|d| ChangedAfter {
+                name: name(&d.name),
+                why: why(d.why),
+                steps: d.steps.iter().copied().map(step).collect(),
+            })
+            .collect(),
+    );
+    Some(ChangesView {
+        generation: k.generation,
+        lines,
+        more,
+        held,
+    })
+}
 
 /// What changed after approval and waits for the person (`None`: nothing).
 #[tauri::command]
 pub fn move_changes() -> Option<ChangesView> {
-    None
+    with_kept(|k| k.as_ref().and_then(view))
+}
+
+/// The held apps of `drift` (their places in the plan's app list).
+fn held_apps(drift: &[Drift]) -> Vec<u32> {
+    drift.iter().filter_map(|d| d.app).collect()
+}
+
+/// The person said no: each held app ends skipped-by-user; nothing waits any more.
+pub fn decline(k: &mut Kept) {
+    let names: Vec<Title> = held_apps(&k.last.drift)
+        .iter()
+        .filter_map(|at| k.last.plan.apps.get(*at as usize))
+        .map(|e| Title::Name(name(&e.app.name)))
+        .collect();
+    let skipped = ItemResult::skipped_by_user();
+    for l in &mut k.last.lines {
+        if l.kind == Kind::App && names.contains(&l.title) {
+            l.status = skipped.status();
+            l.reason = skipped.reason();
+        }
+    }
+    k.last.drift.clear();
+    k.generation = k.generation.wrapping_add(1);
+}
+
+/// The person said yes: the plan as it is now. With this laptop's apps `installed_now`, each held
+/// app that is here now is left as it is (its line goes: it is the person's, not a result of the
+/// move); each that is not is released to be installed. The places of the released apps.
+pub fn approve_now(k: &mut Kept, installed_now: &pctwin_record::AppList) -> Vec<u32> {
+    use pctwin_apps::routes::Here;
+    let mut release = Vec::new();
+    let mut here_now = Vec::new();
+    for at in held_apps(&k.last.drift) {
+        let Some(e) = k.last.plan.apps.get(at as usize) else {
+            continue;
+        };
+        match pctwin_fullmove::plan::here_of(&e.app, installed_now) {
+            Here::Present { .. } => here_now.push(Title::Name(name(&e.app.name))),
+            _ => release.push(at),
+        }
+    }
+    k.last
+        .lines
+        .retain(|l| !(l.kind == Kind::App && here_now.contains(&l.title)));
+    k.last.plan.held.retain(|at| !release.contains(at));
+    k.last.drift.clear();
+    k.generation = k.generation.wrapping_add(1);
+    release
 }
 
 /// The person's fresh answer for the held steps of `generation`: go ahead with them as they are
-/// now (`approve`), or leave them out.
+/// now (`approve`), or leave them out. What was retried, as "Fix these" says it.
 #[tauri::command]
-pub fn move_reapprove(generation: u64, approve: bool) -> Result<(), crate::moving::MoveProblem> {
-    let _ = (generation, approve);
-    Err(crate::moving::MoveProblem::NotMoving)
+pub async fn move_reapprove<R: Runtime>(
+    app: AppHandle<R>,
+    generation: u64,
+    approve: bool,
+) -> Result<RepairDone, RepairProblem> {
+    tauri::async_runtime::spawn_blocking(move || reapprove(&app, generation, approve))
+        .await
+        .map_err(|_| RepairProblem::Failed)?
+}
+
+fn reapprove<R: Runtime>(
+    app: &AppHandle<R>,
+    generation: u64,
+    approve: bool,
+) -> Result<RepairDone, RepairProblem> {
+    if !super::safe_stop::gate().view().safe {
+        return Err(RepairProblem::Busy);
+    }
+    let me = with_kept(|k| {
+        let k = k.as_ref().ok_or(RepairProblem::NothingToRepair)?;
+        if k.generation != generation {
+            return Err(RepairProblem::Stale);
+        }
+        if k.last.drift.is_empty() {
+            return Err(RepairProblem::NothingToRepair);
+        }
+        Ok(k.last.me.clone())
+    })?;
+    let installs = crate::fullmove::installs_here();
+    let done = |k: &Kept, fixed: u64, undo_id: Option<String>| {
+        let o = offer(k, installs);
+        RepairDone {
+            generation: o.generation,
+            fixed,
+            lines: o.lines,
+            more: o.more,
+            kept: o.kept,
+            undo_id,
+        }
+    };
+    if !approve {
+        return with_kept(|k| {
+            let k = k.as_mut().ok_or(RepairProblem::Failed)?;
+            decline(k);
+            Ok(done(k, 0, None))
+        });
+    }
+    let installed_now = crate::fullmove::installed_here(&me);
+    let (part, files, wanted) = with_kept(|k| {
+        let k = k.as_mut().ok_or(RepairProblem::Failed)?;
+        let release = approve_now(k, &installed_now);
+        let titles: Vec<Title> = release
+            .iter()
+            .filter_map(|at| k.last.plan.apps.get(*at as usize))
+            .map(|e| Title::Name(name(&e.app.name)))
+            .collect();
+        let picked: Vec<&crate::fullmove::RebuiltLine> = k
+            .last
+            .lines
+            .iter()
+            .filter(|l| l.kind == Kind::App && titles.contains(&l.title))
+            .collect();
+        let wanted: Vec<(Kind, Title)> = picked.iter().map(|l| (l.kind, l.title.clone())).collect();
+        Ok::<_, RepairProblem>((
+            super::repair::part_plan(&k.last.plan, &picked),
+            k.last.files.clone(),
+            wanted,
+        ))
+    })?;
+    if wanted.is_empty() {
+        return with_kept(|k| Ok(done(k.as_ref().ok_or(RepairProblem::Failed)?, 0, None)));
+    }
+    let (new, undo_id) = run_part(app, &part, &me, files)?;
+    with_kept(|k| {
+        let k = k.as_mut().ok_or(RepairProblem::Failed)?;
+        let fixed = merge(&mut k.last.lines, &new, &wanted);
+        k.generation = k.generation.wrapping_add(1);
+        Ok(done(k, fixed, undo_id))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deliver::repair::Last;
+    use crate::fullmove::RebuiltLine;
+    use pctwin_record::{AppList, AppMaker, AppSystem, FoundApp, FoundWhere, Owner, RegistryView};
+    use pctwin_types::ItemStatus;
+    use pctwin_types::Reason;
+
+    fn line(n: &str, status: ItemStatus) -> RebuiltLine {
+        RebuiltLine {
+            title: Title::Name(n.into()),
+            kind: Kind::App,
+            count: 0,
+            status,
+            reason: Some(Reason::FinishByHand),
+            notes: vec![],
+        }
+    }
+
+    fn kept() -> Kept {
+        let mut plan = crate::deliver::repair::tests::plan_with(&[
+            ("Writer", true),
+            ("Notes", true),
+            ("Paint", true),
+        ]);
+        plan.held = vec![0, 1];
+        Kept {
+            generation: 5,
+            last: Last {
+                plan,
+                me: "1001".into(),
+                files: vec![],
+                lines: vec![
+                    line("Writer", ItemStatus::NeedsAction),
+                    line("Notes", ItemStatus::NeedsAction),
+                    line("Paint", ItemStatus::Reinstalled),
+                ],
+                drift: vec![
+                    Drift {
+                        name: "Writer".into(),
+                        why: Why::AppUpdated,
+                        steps: vec![Step::Install],
+                        app: Some(0),
+                    },
+                    Drift {
+                        name: "Notes".into(),
+                        why: Why::AppRemoved,
+                        steps: vec![Step::Install],
+                        app: Some(1),
+                    },
+                    Drift {
+                        name: "Pictures".into(),
+                        why: Why::DestinationChanged,
+                        steps: vec![Step::Files, Step::AppData],
+                        app: None,
+                    },
+                ],
+            },
+        }
+    }
+
+    #[test]
+    fn what_changed_after_approval_is_shown_with_its_held_steps() {
+        let v = view(&kept()).unwrap();
+        assert_eq!(v.generation, 5);
+        assert_eq!(v.held, 4);
+        let whys: Vec<AfterWhy> = v.lines.iter().map(|l| l.why).collect();
+        assert_eq!(
+            whys,
+            [
+                AfterWhy::AppUpdated,
+                AfterWhy::AppRemoved,
+                AfterWhy::DestinationChanged
+            ]
+        );
+        assert_eq!(v.lines[2].steps, [Recheck::Files, Recheck::AppData]);
+        let mut k = kept();
+        k.last.drift.clear();
+        assert_eq!(view(&k), None, "nothing waits: nothing is shown");
+        assert_eq!(why(Why::ProjectEdited), AfterWhy::ProjectEdited);
+        assert_eq!(step(Step::Settings), Recheck::Settings);
+        assert_eq!(step(Step::Install), Recheck::Install);
+    }
+
+    /// No: the held apps end skipped-by-user; every other line is kept.
+    #[test]
+    fn a_no_skips_only_the_held_apps() {
+        let mut k = kept();
+        decline(&mut k);
+        assert_eq!(k.last.lines[0].status, ItemStatus::SkippedByUser);
+        assert_eq!(k.last.lines[0].reason, None);
+        assert_eq!(k.last.lines[1].status, ItemStatus::SkippedByUser);
+        assert_eq!(k.last.lines[2].status, ItemStatus::Reinstalled);
+        assert!(k.last.drift.is_empty());
+        assert_eq!(k.generation, 6);
+    }
+
+    /// Yes: the plan as it is now. An app here now is the person's and left as it is; one that is
+    /// not here is released to install; nothing else is touched.
+    #[test]
+    fn a_yes_installs_only_what_is_still_missing_now() {
+        let mut k = kept();
+        let writer_here = AppList {
+            found: vec![FoundApp {
+                name: "Writer".into(),
+                version: None,
+                publisher: None,
+                owner: Owner::Shared,
+                system: AppSystem::Windows,
+                found: FoundWhere::WindowsEntry {
+                    view: RegistryView::Machine,
+                    key: "Writer".into(),
+                    product_code: Some("{Writer}".into()),
+                },
+                arch: pctwin_record::AppArch::UNKNOWN,
+                maker: AppMaker::Unsigned,
+                web: None,
+                update_feed: None,
+                installers: vec![],
+                notes: vec![],
+            }],
+            not_read: vec![],
+        };
+        let release = approve_now(&mut k, &writer_here);
+        assert_eq!(release, [1]);
+        let names: Vec<&Title> = k.last.lines.iter().map(|l| &l.title).collect();
+        assert_eq!(
+            names,
+            [&Title::Name("Notes".into()), &Title::Name("Paint".into())]
+        );
+        assert_eq!(k.last.plan.held, [0]);
+        assert!(k.last.drift.is_empty());
+        assert_eq!(k.generation, 6);
+    }
 }

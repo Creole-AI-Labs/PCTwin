@@ -594,6 +594,61 @@ fn settings_at_landed(
     (now, gone)
 }
 
+/// Each app's line: its name and result.
+pub type AppLines = Vec<(String, AppResult)>;
+/// Each app already here: its name, and the version here when it is older.
+pub type HereLines = Vec<(String, Option<String>)>;
+
+/// One line per app of `plan`: the installer's results for `to_install` (in order), the
+/// person's step for each app PCTwin cannot install, a held app needs-action (Task List 2.9), and
+/// the apps already here, said apart.
+pub fn app_lines(
+    plan: &FullPlan,
+    to_install: &[&AppEntry],
+    installed: Vec<AppResult>,
+) -> (AppLines, HereLines) {
+    let mut by_name: Vec<(&str, AppResult)> = to_install
+        .iter()
+        .map(|e| e.app.name.as_str())
+        .zip(installed)
+        .collect();
+    let mut apps = Vec::new();
+    let mut here = Vec::new();
+    for (at, e) in plan.apps.iter().enumerate() {
+        if plan.held.contains(&(at as u32)) {
+            // Changed here after approval: held until the person approves it again, never
+            // installed over what is there now nor said to be here (Task List 2.9).
+            apps.push((e.app.name.clone(), AppResult::because(Reason::FinishByHand)));
+        } else if let Some(reason) = needs_of(&e.plan) {
+            // The person installs it; what the catalogue and the old laptop's list know about
+            // after (a sign-in, a licence key, its registration) goes with it.
+            let card = &e.plan.card;
+            let mut r = AppResult::because(reason);
+            r.todo = pctwin_apps::after::checklist(
+                &e.app,
+                card.sign_in,
+                card.licence_key,
+                pctwin_apps::after::Installed::Failed,
+                &[],
+            );
+            apps.push((e.app.name.clone(), r));
+        } else if let Some(at) = by_name.iter().position(|(n, _)| *n == e.app.name) {
+            let (_, r) = by_name.remove(at);
+            apps.push((e.app.name.clone(), r));
+        } else if e.plan.disposition == pctwin_apps::routes::Disposition::AlreadyHere {
+            // Already here: left as it is, and said (with the older version here, if it is).
+            here.push((e.app.name.clone(), crate::plan::older_here(&e.plan)));
+        }
+    }
+    // An install the installer gave no answer for is never counted as done.
+    for e in to_install {
+        if !apps.iter().any(|(n, _)| *n == e.app.name) {
+            apps.push((e.app.name.clone(), AppResult::because(Reason::NotVerified)));
+        }
+    }
+    (apps, here)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn rebuild(
     plan: &FullPlan,
@@ -634,41 +689,7 @@ pub fn rebuild(
     } else {
         Some(installer.restore_point())
     };
-    let mut by_name: Vec<(&str, AppResult)> = to_install
-        .iter()
-        .map(|e| e.app.name.as_str())
-        .zip(installed)
-        .collect();
-    let mut apps = Vec::new();
-    let mut here = Vec::new();
-    for e in &plan.apps {
-        if let Some(reason) = needs_of(&e.plan) {
-            // The person installs it; what the catalogue and the old laptop's list know about
-            // after (a sign-in, a licence key, its registration) goes with it.
-            let card = &e.plan.card;
-            let mut r = AppResult::because(reason);
-            r.todo = pctwin_apps::after::checklist(
-                &e.app,
-                card.sign_in,
-                card.licence_key,
-                pctwin_apps::after::Installed::Failed,
-                &[],
-            );
-            apps.push((e.app.name.clone(), r));
-        } else if let Some(at) = by_name.iter().position(|(n, _)| *n == e.app.name) {
-            let (_, r) = by_name.remove(at);
-            apps.push((e.app.name.clone(), r));
-        } else if e.plan.disposition == pctwin_apps::routes::Disposition::AlreadyHere {
-            // Already here: left as it is, and said (with the older version here, if it is).
-            here.push((e.app.name.clone(), crate::plan::older_here(&e.plan)));
-        }
-    }
-    // An install the installer gave no answer for is never counted as done.
-    for e in &to_install {
-        if !apps.iter().any(|(n, _)| *n == e.app.name) {
-            apps.push((e.app.name.clone(), AppResult::because(Reason::NotVerified)));
-        }
-    }
+    let (apps, here) = app_lines(plan, &to_install, installed);
     // Settings.
     let total = plan.settings.moves.len() as u64;
     let mut done = 0u64;
