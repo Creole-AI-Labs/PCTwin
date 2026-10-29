@@ -1,0 +1,233 @@
+[
+  {
+    "clear": false,
+    "exceptions": [
+      {
+        "canAccept": true,
+        "canMarkDone": false,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "items": [
+          {
+            "id": "0101010101010101010101010101010101010101010101010101010101010101",
+            "kind": "file",
+            "label": "Letters/ada.txt"
+          }
+        ],
+        "key": "only-on-old-laptop",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "kind": "open"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000abc"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": false,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "items": [],
+        "key": "key-not-checked",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "person-did-it"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000abd"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "items": [],
+        "key": "tied-to-old-laptop",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "accepted-loss"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000abe"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000004",
+        "items": [],
+        "key": "do-first-on-old-laptop",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "kind": "open"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000abf"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": false,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000005",
+        "items": [],
+        "key": "steps-not-finished",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "person-did-it"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac0"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": false,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000006",
+        "items": [],
+        "key": "not-searched",
+        "more": 0,
+        "names": [],
+        "places": [
+          "E:\\"
+        ],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "accepted-loss"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac1"
+      },
+      {
+        "canAccept": false,
+        "canMarkDone": false,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000007",
+        "items": [],
+        "key": "old-laptop-not-reachable",
+        "more": 0,
+        "names": [],
+        "places": [],
+        "resolution": {
+          "kind": "open"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac2"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000008",
+        "items": [],
+        "key": "special-sign-in",
+        "more": 0,
+        "names": [
+          "Mail"
+        ],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "person-did-it"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac3"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "0000000000000000000000000000000000000000000000000000000000000009",
+        "items": [],
+        "key": "special-relink",
+        "more": 0,
+        "names": [
+          "Mail"
+        ],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "accepted-loss"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac4"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "000000000000000000000000000000000000000000000000000000000000000a",
+        "items": [],
+        "key": "special-export-first",
+        "more": 0,
+        "names": [
+          "Mail"
+        ],
+        "places": [],
+        "resolution": {
+          "kind": "open"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac5"
+      },
+      {
+        "canAccept": true,
+        "canMarkDone": true,
+        "count": 1,
+        "id": "000000000000000000000000000000000000000000000000000000000000000b",
+        "items": [],
+        "key": "special-look-at-it",
+        "more": 0,
+        "names": [
+          "Mail"
+        ],
+        "places": [],
+        "resolution": {
+          "at": 1792627300,
+          "kind": "person-did-it"
+        },
+        "shown": "0000000000000000000000000000000000000000000000000000000000000ac6"
+      }
+    ],
+    "id": "1792627200000-0",
+    "keepUntil": 1796000000,
+    "madeAt": 1792627200,
+    "oldLaptop": {
+      "at": 1792627200,
+      "kind": "checked"
+    },
+    "saved": true,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "suggestedKeepUntil": 1795219200,
+    "undoOpen": true
+  },
+  {
+    "clear": false,
+    "exceptions": [],
+    "id": "1792627200000-0",
+    "keepUntil": null,
+    "madeAt": 1792627200,
+    "oldLaptop": {
+      "kind": "not-checked"
+    },
+    "saved": false,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [],
+      "searched": []
+    },
+    "suggestedKeepUntil": 1795219200,
+    "undoOpen": false
+  }
+]

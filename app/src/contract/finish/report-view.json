@@ -1,0 +1,44 @@
+[
+  {
+    "accountId": null,
+    "digest": "000000000000000000000000000000000000000000000000000000000000000d",
+    "goodbye": [
+      5,
+      1
+    ],
+    "headline": "finished-with-tasks",
+    "id": "1792627200000-0",
+    "lines": [
+      {
+        "isApp": false,
+        "name": null,
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "isApp": true,
+        "name": "Mail",
+        "reason": "sign-in",
+        "standing": "needs-action"
+      }
+    ],
+    "othersNotFinished": 2,
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    },
+    "withheld": {
+      "accountIds": 1,
+      "names": 1,
+      "secrets": 0
+    }
+  }
+]

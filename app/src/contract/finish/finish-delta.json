@@ -1,0 +1,92 @@
+[
+  {
+    "digest": "0000000000000000000000000000000000000000000000000000000000000007",
+    "id": "1792627200000-0",
+    "lines": [
+      {
+        "change": "new",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "updated",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "both-changed",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      },
+      {
+        "change": "gone-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      },
+      {
+        "change": "gone-on-old-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "cannot-tell",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      }
+    ],
+    "more": 0,
+    "others": 3,
+    "purpose": "check"
+  },
+  {
+    "digest": "0000000000000000000000000000000000000000000000000000000000000007",
+    "id": "1792627200000-0",
+    "lines": [
+      {
+        "change": "new",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "updated",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "both-changed",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      },
+      {
+        "change": "gone-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      },
+      {
+        "change": "gone-on-old-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": false
+      },
+      {
+        "change": "cannot-tell",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "label": "Letters/ada.txt",
+        "needsChoice": true
+      }
+    ],
+    "more": 0,
+    "others": 3,
+    "purpose": "catch-up"
+  }
+]

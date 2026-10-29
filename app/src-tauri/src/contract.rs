@@ -1388,3 +1388,496 @@ fn every_label_word_is_a_key_the_screens_accept() {
         }
     }
 }
+
+/* ---------- Finishing a move (Task List 2.7) ---------- */
+
+/// The finishing screens' examples, written to app/src/contract/finish/ (a folder of their own,
+/// so the move's screens and the finishing screens are tested apart).
+mod finish_examples {
+    use super::{Value, json};
+    use crate::finish::*;
+    use pctwin_record::ItemKind;
+    use pctwin_types::Reason;
+
+    const ID: &str = "1792627200000-0";
+    const ITEM: &str = "0101010101010101010101010101010101010101010101010101010101010101";
+
+    fn tally() -> TallyView {
+        TallyView {
+            selected: 1_250,
+            done: 1_240,
+            needs_action: 6,
+            failed: 2,
+            waiting: 1,
+            not_reachable: 1,
+            no_result_yet: 0,
+            skipped: 40,
+            left_out: 12,
+            accepted_loss: 1,
+        }
+    }
+
+    fn search() -> SearchView {
+        SearchView {
+            searched: vec!["Documents".into(), "Pictures".into()],
+            not_searched: vec!["E:\\".into()],
+            found_everything: false,
+        }
+    }
+
+    fn overview() -> Vec<FinishView> {
+        Headline::ALL
+            .iter()
+            .map(|h| FinishView {
+                id: ID.into(),
+                headline: *h,
+                tally: tally(),
+                others: 120,
+                after_move: AfterKind::ALL
+                    .iter()
+                    .map(|g| AfterGroup {
+                        group: *g,
+                        at_scan: 12,
+                        on_new_laptop: 10,
+                    })
+                    .collect(),
+                notes: FinishNote::ALL.to_vec(),
+                not_finished: StandingKey::ALL
+                    .iter()
+                    .zip(AccessKey::ALL.iter().cycle())
+                    .map(|(s, a)| ItemView {
+                        id: ITEM.into(),
+                        label: "Letters/ada.txt".into(),
+                        kind: ItemKind::File,
+                        standing: *s,
+                        reason: Some(Reason::PartsMissing),
+                        access: *a,
+                    })
+                    .collect(),
+                more: 9,
+                search: search(),
+                old_laptop_checked_at: Some(1_792_627_200),
+            })
+            .collect()
+    }
+
+    fn exceptions() -> Vec<ExceptionView> {
+        ExceptionKey::ALL
+            .iter()
+            .enumerate()
+            .map(|(n, key)| ExceptionView {
+                id: format!("{:064x}", n + 1),
+                key: *key,
+                count: 1,
+                items: if *key == ExceptionKey::OnlyOnOldLaptop {
+                    vec![NamedItem {
+                        id: ITEM.into(),
+                        label: "Letters/ada.txt".into(),
+                        kind: ItemKind::File,
+                    }]
+                } else {
+                    vec![]
+                },
+                more: 0,
+                places: if *key == ExceptionKey::NotSearched {
+                    vec!["E:\\".into()]
+                } else {
+                    vec![]
+                },
+                names: if key.special() {
+                    vec!["Mail".into()]
+                } else {
+                    vec![]
+                },
+                resolution: match n % 3 {
+                    0 => ResolutionView::Open,
+                    1 => ResolutionView::PersonDidIt { at: 1_792_627_300 },
+                    _ => ResolutionView::AcceptedLoss { at: 1_792_627_300 },
+                },
+                can_accept: *key != ExceptionKey::OldLaptopNotReachable,
+                can_mark_done: key.person_can_do(),
+                shown: format!("{:064x}", 0xabc + n),
+            })
+            .collect()
+    }
+
+    fn goodbye() -> Vec<GoodbyeView> {
+        vec![
+            GoodbyeView {
+                id: ID.into(),
+                made_at: 1_792_627_200,
+                suggested_keep_until: 1_795_219_200,
+                keep_until: Some(1_796_000_000),
+                undo_open: true,
+                old_laptop: OldLaptopView::Checked { at: 1_792_627_200 },
+                clear: false,
+                search: search(),
+                exceptions: exceptions(),
+                saved: true,
+            },
+            GoodbyeView {
+                id: ID.into(),
+                made_at: 1_792_627_200,
+                suggested_keep_until: 1_795_219_200,
+                keep_until: None,
+                undo_open: false,
+                old_laptop: OldLaptopView::NotChecked,
+                clear: false,
+                search: SearchView::default(),
+                exceptions: vec![],
+                saved: false,
+            },
+        ]
+    }
+
+    fn delta() -> Vec<DeltaView> {
+        CatchupPurpose::ALL
+            .iter()
+            .map(|p| DeltaView {
+                id: ID.into(),
+                purpose: *p,
+                digest: format!("{:064x}", 7),
+                lines: ChangeKey::ALL
+                    .iter()
+                    .map(|c| DeltaLineView {
+                        id: ITEM.into(),
+                        label: "Letters/ada.txt".into(),
+                        change: *c,
+                        needs_choice: c.needs_choice(),
+                    })
+                    .collect(),
+                more: 0,
+                others: 3,
+            })
+            .collect()
+    }
+
+    fn route() -> RouteView {
+        RouteView {
+            system: SystemKey::Windows,
+            route: "windows-reset-clean-drive".into(),
+            steps: vec![
+                "windows-open-recovery".into(),
+                "windows-reset-this-pc".into(),
+                "windows-remove-everything".into(),
+                "windows-clean-drive".into(),
+            ],
+            can_open: true,
+        }
+    }
+
+    fn handover() -> Vec<HandoverView> {
+        let mut v = vec![HandoverView::Ready {
+            action: HandoverAction::EraseOldLaptop,
+            digest: format!("{:064x}", 9),
+            removes: vec!["Samsung SSD 980".into()],
+            keeps: vec![],
+            notes: HandoverNote::ALL.to_vec(),
+            route: route(),
+        }];
+        v.extend(RefusalKey::ALL.iter().map(|why| HandoverView::Refused {
+            action: HandoverAction::RemoveMyAccount,
+            why: *why,
+            open: u64::from(*why == RefusalKey::ListNotClear) * 2,
+        }));
+        v
+    }
+
+    fn started() -> Vec<HandoverStarted> {
+        SystemKey::ALL
+            .iter()
+            .map(|s| HandoverStarted {
+                action: HandoverAction::EraseOldLaptop,
+                undo_closed: true,
+                opened: *s != SystemKey::Linux,
+                route: RouteView {
+                    system: *s,
+                    ..route()
+                },
+            })
+            .collect()
+    }
+
+    fn recorded() -> Vec<HandoverRecorded> {
+        OutcomeKey::ALL
+            .iter()
+            .map(|o| HandoverRecorded {
+                action: HandoverAction::RemoveMyAccount,
+                outcome: *o,
+                at: 1_792_627_400,
+            })
+            .collect()
+    }
+
+    fn doctor() -> Vec<DoctorView> {
+        vec![
+            DoctorView {
+                findings: vec![
+                    FindingView {
+                        cause: "doctor-windows-public-network".into(),
+                        fix: "doctor-windows-public-network-fix".into(),
+                        sure: false,
+                        names: vec!["Wi-Fi".into()],
+                    },
+                    FindingView {
+                        cause: "doctor-guest-network".into(),
+                        fix: "doctor-guest-network-fix".into(),
+                        sure: false,
+                        names: vec![],
+                    },
+                ],
+                hotspot: HotspotView { suggested: true },
+                not_checked: vec!["doctor-probe-hears-itself".into()],
+            },
+            DoctorView {
+                findings: vec![FindingView {
+                    cause: "doctor-not-connected".into(),
+                    fix: "doctor-not-connected-fix".into(),
+                    sure: true,
+                    names: vec![],
+                }],
+                hotspot: HotspotView { suggested: false },
+                not_checked: vec![],
+            },
+        ]
+    }
+
+    fn setup() -> Vec<SetupView> {
+        vec![SetupView {
+            id: ID.into(),
+            tasks: SetupWhat::ALL
+                .iter()
+                .enumerate()
+                .map(|(n, w)| SetupTask {
+                    id: format!("{:064x}", n + 1),
+                    what: *w,
+                    name: "Mail".into(),
+                    mark: SetupMark::ALL[n % SetupMark::ALL.len()],
+                })
+                .collect(),
+            saved: vec![SavedSetupView {
+                history_id: "1792627300000-1".into(),
+                when: "2026-10-22T00:01:40Z".into(),
+            }],
+        }]
+    }
+
+    fn undo() -> Vec<UndoPreviewView> {
+        vec![UndoPreviewView {
+            id: ID.into(),
+            undo_id: Some("01010101010101010101010101010101".into()),
+            apps_removed: vec!["7-Zip".into()],
+            apps_yours: vec!["Chromey".into()],
+            settings: 40,
+            app_data: vec!["Mail".into()],
+            files: 1_240,
+            open: true,
+        }]
+    }
+
+    fn cleanup() -> Vec<CleanupView> {
+        CleanupWhat::ALL
+            .iter()
+            .map(|w| CleanupView {
+                what: *w,
+                digest: format!("{:064x}", 11),
+                removes: vec![CleanupEntry {
+                    name: "pctwin-installs-0011223344556677".into(),
+                    bytes: 120_000_000,
+                }],
+                keeps: vec![CleanupEntry {
+                    name: "pctwin-notes".into(),
+                    bytes: 4_000,
+                }],
+            })
+            .collect()
+    }
+
+    fn report() -> Vec<ReportView> {
+        vec![ReportView {
+            id: ID.into(),
+            headline: Headline::FinishedWithTasks,
+            tally: tally(),
+            account_id: None,
+            lines: vec![
+                ReportLineView {
+                    name: None,
+                    is_app: false,
+                    standing: StandingKey::Failed,
+                    reason: Some(Reason::PartsMissing),
+                },
+                ReportLineView {
+                    name: Some("Mail".into()),
+                    is_app: true,
+                    standing: StandingKey::NeedsAction,
+                    reason: Some(Reason::SignIn),
+                },
+            ],
+            others_not_finished: 2,
+            goodbye: Some((5, 1)),
+            withheld: WithheldView {
+                names: 1,
+                secrets: 0,
+                account_ids: 1,
+            },
+            digest: format!("{:064x}", 13),
+        }]
+    }
+
+    pub fn problems() -> Vec<FinishProblem> {
+        vec![
+            FinishProblem::NoMove,
+            FinishProblem::Changed,
+            FinishProblem::NotAllowed,
+            FinishProblem::Busy,
+            FinishProblem::Failed,
+        ]
+    }
+
+    pub fn families() -> Vec<(&'static str, Value)> {
+        vec![
+            ("finish-problem", json(problems())),
+            ("finish-view", json(overview())),
+            ("goodbye-view", json(goodbye())),
+            ("finish-delta", json(delta())),
+            ("handover-view", json(handover())),
+            ("handover-started", json(started())),
+            ("handover-recorded", json(recorded())),
+            ("doctor-view", json(doctor())),
+            ("setup-view", json(setup())),
+            (
+                "saved-setup",
+                json([SavedSetup {
+                    history_id: "1792627300000-1".into(),
+                    apps: 12,
+                    settings: 40,
+                }]),
+            ),
+            ("undo-preview", json(undo())),
+            ("cleanup-view", json(cleanup())),
+            (
+                "cleanup-done",
+                json([CleanupDone {
+                    what: CleanupWhat::ModelAndCache,
+                    removed: 3,
+                    kept: 1,
+                    failed: 0,
+                }]),
+            ),
+            ("report-view", json(report())),
+        ]
+    }
+
+    /// What the screens send with each finishing command, and the finishing event.
+    pub fn calls() -> Value {
+        serde_json::json!({
+            "commands": [
+                { "name": "finish_overview", "args": [["id", ID]] },
+                { "name": "goodbye_list", "args": [["id", ID]] },
+                { "name": "goodbye_answer", "args": [["id", ID], ["exception", format!("{:064x}", 1)], ["shown", format!("{:064x}", 2)], ["answer", "accept-loss"]] },
+                { "name": "goodbye_keep_until", "args": [["id", ID], ["at", 1_796_000_000_u64]] },
+                { "name": "catchup_arm", "args": [["id", ID], ["purpose", "check"]] },
+                { "name": "catchup_approve", "args": [["id", ID], ["digest", format!("{:064x}", 7)], ["choices", [{ "id": ITEM, "choice": "keep-both" }]]] },
+                { "name": "handover_preview", "args": [["id", ID], ["action", "remove-my-account"]] },
+                { "name": "handover_confirm", "args": [["id", ID], ["action", "erase-old-laptop"], ["digest", format!("{:064x}", 9)]] },
+                { "name": "handover_result", "args": [["id", ID], ["action", "erase-old-laptop"], ["says", "cannot-tell"]] },
+                { "name": "doctor_run", "args": [["role", "new"]] },
+                { "name": "setup_checklist", "args": [["id", ID]] },
+                { "name": "setup_mark", "args": [["id", ID], ["task", format!("{:064x}", 1)], ["done", true]] },
+                { "name": "setup_save", "args": [["id", ID]] },
+                { "name": "undo_preview", "args": [["id", ID]] },
+                { "name": "cleanup_preview", "args": [["what", "temporary-files"]] },
+                { "name": "cleanup_confirm", "args": [["what", "model-and-cache"], ["digest", format!("{:064x}", 11)]] },
+                { "name": "report_preview", "args": [["id", ID], ["disclosure", { "fileNames": false, "appNames": true, "accountId": false }]] },
+                { "name": "report_save", "args": [["id", ID], ["disclosure", { "fileNames": false, "appNames": true, "accountId": false }], ["digest", format!("{:064x}", 13)], ["text", "PCTwin move report"]] },
+            ],
+            "events": { "finishDelta": DELTA_EVENT },
+        })
+    }
+}
+
+fn finish_dir() -> PathBuf {
+    dir().join("finish")
+}
+
+#[test]
+fn the_finishing_example_files_match_the_engine() {
+    let write = std::env::var_os("PCTWIN_WRITE_CONTRACT").is_some_and(|v| v == "1");
+    let dir = finish_dir();
+    if write {
+        std::fs::create_dir_all(&dir).unwrap();
+    }
+    let families = finish_examples::families();
+    let names: Vec<String> = families.iter().map(|(n, _)| format!("{n}.json")).collect();
+    let mut stale = Vec::new();
+    for (name, value) in &families {
+        let path = dir.join(format!("{name}.json"));
+        let want = text(value);
+        if write {
+            std::fs::write(&path, &want).unwrap();
+            continue;
+        }
+        let have = std::fs::read_to_string(&path).map(|s| s.replace("\r\n", "\n"));
+        if have.ok().as_deref() != Some(want.as_str()) {
+            stale.push(format!("{name}.json"));
+        }
+    }
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if file.ends_with(".json") && !names.contains(&file) {
+            if write {
+                std::fs::remove_file(dir.join(&file)).unwrap();
+            } else {
+                stale.push(format!("{file} (no longer made)"));
+            }
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "app/src/contract/finish differs from what the engine sends: {stale:?}. Run with \
+         PCTWIN_WRITE_CONTRACT=1 to update them."
+    );
+}
+
+#[test]
+fn the_finishing_calls_file_matches_the_engine() {
+    let path = dir().join("shell").join("finish-calls.json");
+    let want = text(&finish_examples::calls());
+    if std::env::var_os("PCTWIN_WRITE_CONTRACT").is_some_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+        return;
+    }
+    let have = std::fs::read_to_string(&path).map(|s| s.replace("\r\n", "\n"));
+    assert_eq!(
+        have.ok().as_deref(),
+        Some(want.as_str()),
+        "app/src/contract/shell/finish-calls.json differs from the engine's finishing commands"
+    );
+}
+
+/// Every finishing problem is in the examples with its own tag, and every refusal key once.
+#[test]
+fn every_finishing_variant_is_in_the_examples() {
+    use crate::finish::{FinishProblem, RefusalKey};
+    let problems: BTreeSet<&str> = finish_examples::problems()
+        .iter()
+        .map(FinishProblem::variant)
+        .collect();
+    assert_eq!(problems.len(), FinishProblem::VARIANTS.len());
+    assert_eq!(
+        tags(json(finish_examples::problems())).len(),
+        FinishProblem::VARIANTS.len()
+    );
+    let handover = finish_examples::families()
+        .into_iter()
+        .find(|(n, _)| *n == "handover-view")
+        .unwrap()
+        .1;
+    let refused: BTreeSet<String> = handover
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v["why"].as_str().map(String::from))
+        .collect();
+    assert_eq!(refused.len(), RefusalKey::ALL.len());
+}

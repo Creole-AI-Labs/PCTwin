@@ -1,0 +1,123 @@
+[
+  {
+    "action": "erase-old-laptop",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000009",
+    "keeps": [],
+    "kind": "ready",
+    "notes": [
+      "ssd-not-secure-wipe",
+      "does-not-cancel-subscriptions",
+      "others-stay",
+      "cannot-be-undone",
+      "closes-undo",
+      "sign-in-as-another-administrator",
+      "family-group-first",
+      "not-a-certificate",
+      "encrypt-first-helps"
+    ],
+    "removes": [
+      "Samsung SSD 980"
+    ],
+    "route": {
+      "canOpen": true,
+      "route": "windows-reset-clean-drive",
+      "steps": [
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-drive"
+      ],
+      "system": "windows"
+    }
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "wrong-device"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "undo-not-closed"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "old-laptop-not-checked"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "list-out-of-date"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 2,
+    "why": "list-not-clear"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "no-write-exclusion"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "no-such-account"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "other-people-use-it"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "not-qualified"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "no-fresh-confirmation"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "wrong-confirmation"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "changed-since-confirmed"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "expired"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "already-used"
+  },
+  {
+    "action": "remove-my-account",
+    "kind": "refused",
+    "open": 0,
+    "why": "nothing-to-remove"
+  }
+]
