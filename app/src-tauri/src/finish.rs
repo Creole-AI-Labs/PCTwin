@@ -1798,13 +1798,17 @@ fn share<R: Runtime>(
 
 /* ---------- Commands ---------- */
 
-/// The mover's items that still need them: never what is done, nor what they chose to leave
-/// behind (two-copy run, 29 October 2026: files left out by the person's own choice were listed
-/// as not finished).
+/// The mover's items that still need them: never what is done, what they chose to leave behind,
+/// or the system's own files the system makes again (two-copy run, 29 October 2026: files left
+/// out by the person's choice, and each folder's `desktop.ini`, were listed as not finished).
 fn open_items(l: &Ledger) -> Vec<ItemView> {
     l.lines()
         .filter(|(id, line)| {
             line.mine
+                && line.selection
+                    != (pctwin_readiness::ledger::Selection::Excluded {
+                        why: pctwin_record::LeftOutReason::System,
+                    })
                 && !matches!(
                     l.standing(**id),
                     Some(Standing::Done(_) | Standing::SkippedByUser)
@@ -2658,8 +2662,15 @@ mod tests {
                 reason: LeftOutReason::ChosenByUser,
             },
         );
+        let system = item(
+            "desktop.ini",
+            Inclusion::LeftOut {
+                reason: LeftOutReason::System,
+            },
+        );
         k.record.items.push(folder.clone());
         k.record.items.push(skipped.clone());
+        k.record.items.push(system.clone());
         let (l, _) = ledger_with(&k, &JournalProbe::default());
         assert!(l.line(folder.id).is_none());
         let t = l.tally();
@@ -2670,6 +2681,12 @@ mod tests {
             open.iter()
                 .all(|v| v.standing != StandingKey::SkippedByUser)
         );
+        assert!(
+            open.iter().all(|v| v.id != system.id.to_hex()),
+            "the system's own file"
+        );
+        // Left out for a reason that needs the person (tied to the old laptop): still listed.
+        assert!(open.iter().any(|v| v.label == "passkey"));
     }
 
     /// T27-001: with no journal to show it, a copy the move called "copied" is not done: the
