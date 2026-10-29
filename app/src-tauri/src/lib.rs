@@ -12,6 +12,8 @@
 
 #[cfg(test)]
 mod contract;
+// The Phase 2 deliverables made explicit (Task List 2.9) that need their own commands.
+mod deliver;
 // The engine's 2.2, 2.3 and 2.6 runners publish into the guard and take its intents as they are
 // wired in (Task List 2.8 follow-up); until then the conversions and the publishing side are
 // exercised by their tests only.
@@ -285,6 +287,17 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         fullmove::fullmove_undo,
         fullmove::move_appdata_answer,
         moving::move_choose_what,
+        deliver::work::work_checks,
+        deliver::work::work_check_add,
+        deliver::work::work_check_run,
+        deliver::work::work_check_answer,
+        deliver::work::work_check_remove,
+        deliver::repair::repair_offer,
+        deliver::repair::repair_run,
+        deliver::changes::move_changes,
+        deliver::changes::move_reapprove,
+        deliver::safe_stop::safe_stop,
+        deliver::kit::recovery_kit_save,
     ]
 }
 

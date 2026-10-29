@@ -61,6 +61,17 @@ const COMMANDS: &[&str] = &[
     "fullmove_undo",
     "move_appdata_answer",
     "move_choose_what",
+    "work_checks",
+    "work_check_add",
+    "work_check_run",
+    "work_check_answer",
+    "work_check_remove",
+    "repair_offer",
+    "repair_run",
+    "move_changes",
+    "move_reapprove",
+    "safe_stop",
+    "recovery_kit_save",
 ];
 
 fn main() {

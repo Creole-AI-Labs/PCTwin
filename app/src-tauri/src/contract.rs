@@ -177,13 +177,61 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         update: None,
         source: None,
         note: None,
+        undo_if_updated: None,
+        tested: None,
+    };
+    use pctwin_apps::compat::{
+        Aspect, AspectLine, AspectResult, GuidedStep, Outcome, Tested, TestedHow,
+    };
+    let line = |aspect, result| AspectLine { aspect, result };
+    let writer_tested = Tested {
+        outcome: Outcome::WorksWithSteps,
+        aspects: vec![
+            line(Aspect::Install, AspectResult::Works),
+            line(Aspect::DataImport, AspectResult::NotApplicable),
+            line(Aspect::Settings, AspectResult::Works),
+            line(Aspect::Launch, AspectResult::Guided),
+            line(Aspect::Undo, AspectResult::NotTested),
+        ],
+        steps: vec![GuidedStep::SignIn],
+        checked_on: Some("2026-10-29".into()),
+        how: Some(TestedHow::Lab),
+        version: Some("3.1".into()),
     };
     crate::fullmove::RebuildPlanView {
         changes: vec![
             ChangeView {
                 source: Some("Example.Writer".into()),
+                tested: Some(writer_tested),
                 ..change(
                     Title::Name("Writer".into()),
+                    Kind::App,
+                    ChangeAction::Install,
+                    UndoPromise::RemovesIfPackage,
+                    0,
+                    None,
+                    None,
+                    0,
+                )
+            },
+            ChangeView {
+                tested: Some(pctwin_apps::compat::Tested::not_tested()),
+                ..change(
+                    Title::Name("Sketch Tool".into()),
+                    Kind::App,
+                    ChangeAction::LeaveAlone,
+                    UndoPromise::MustKeep,
+                    0,
+                    Some(Reason::ManualInstall),
+                    None,
+                    0,
+                )
+            },
+            ChangeView {
+                source: Some("Example.Viewer".into()),
+                tested: Some(pctwin_apps::compat::Tested::not_tested()),
+                ..change(
+                    Title::Name("Viewer".into()),
                     Kind::App,
                     ChangeAction::Install,
                     UndoPromise::RemoveYourself,
@@ -193,16 +241,6 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     0,
                 )
             },
-            change(
-                Title::Name("Sketch Tool".into()),
-                Kind::App,
-                ChangeAction::LeaveAlone,
-                UndoPromise::MustKeep,
-                0,
-                Some(Reason::ManualInstall),
-                None,
-                0,
-            ),
             change(
                 Title::Name("Writer settings".into()),
                 Kind::Settings,
@@ -217,6 +255,8 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                 note: Some(pctwin_fullmove::plan::ChangeNote::OlderHere {
                     version: "2.0".into(),
                 }),
+                update: Some(3),
+                undo_if_updated: Some(UndoPromise::KeepsNewer),
                 ..change(
                     Title::Name("Notes".into()),
                     Kind::App,
@@ -234,7 +274,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     Title::Name("Browser".into()),
                     Kind::Special,
                     ChangeAction::LeaveAlone,
-                    UndoPromise::MustKeep,
+                    UndoPromise::NeedsYouMaker,
                     0,
                     Some(Reason::SignIn),
                     Some(SpecialStep::Relink),
@@ -245,7 +285,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                 Title::Name("Mail".into()),
                 Kind::Special,
                 ChangeAction::LeaveAlone,
-                UndoPromise::MustKeep,
+                UndoPromise::NeedsYouMaker,
                 0,
                 Some(Reason::SignIn),
                 Some(SpecialStep::SignIn),
@@ -300,6 +340,14 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         links: 4,
         prompt: false,
         restore_point: false,
+        internet: pctwin_fullmove::plan::Internet {
+            downloads: 2,
+            sign_ins: 2,
+        },
+        room: crate::fullmove::RoomView {
+            installs: 2_097_152_000,
+            app_data: 58_720_256,
+        },
     }
 }
 
@@ -1070,6 +1118,23 @@ fn families() -> Vec<(&'static str, Value)> {
             "interrupted",
             json([crate::recovery::Interrupted { unfinished: 3 }]),
         ),
+        ("work-checks", json(crate::deliver::examples::work_checks())),
+        (
+            "work-problem",
+            json(crate::deliver::examples::work_problems()),
+        ),
+        (
+            "repair-offer",
+            json(crate::deliver::examples::repair_offers()),
+        ),
+        ("repair-done", json(crate::deliver::examples::repair_done())),
+        (
+            "repair-problem",
+            json(crate::deliver::examples::repair_problems()),
+        ),
+        ("move-changed", json(crate::deliver::examples::changes())),
+        ("safe-stop", json(crate::deliver::examples::safe_stops())),
+        ("kit-saved", json(crate::deliver::examples::kits())),
         (
             "tidied",
             json([crate::recovery::Tidied {
@@ -1209,6 +1274,77 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
         EndedEarly::VARIANTS,
     );
 
+    {
+        use crate::deliver::{changes, examples as x, kit, repair, safe_stop, work};
+        fn words<T: serde::Serialize>(
+            family: &str,
+            have: &[T],
+            variant: fn(&T) -> &'static str,
+            all: &[&str],
+        ) {
+            let got: BTreeSet<&str> = have.iter().map(variant).collect();
+            let want: BTreeSet<&str> = all.iter().copied().collect();
+            assert_eq!(got, want, "{family}: an example of every word");
+            let wire: BTreeSet<String> = have.iter().map(|v| json(v).to_string()).collect();
+            assert_eq!(wire.len(), all.len(), "{family}: two words look alike");
+        }
+        let checks = x::work_checks();
+        let all = |f: fn(&work::WorkCheck) -> &'static str| -> Vec<&'static str> {
+            checks.iter().flat_map(|c| c.checks.iter().map(f)).collect()
+        };
+        let have: BTreeSet<_> = all(|c| c.what.variant()).into_iter().collect();
+        assert_eq!(have.len(), work::WorkWhat::VARIANTS.len());
+        let have: BTreeSet<_> = all(|c| c.label.variant()).into_iter().collect();
+        assert_eq!(have.len(), work::WorkLabel::VARIANTS.len());
+        let have: BTreeSet<_> = all(|c| c.state.variant()).into_iter().collect();
+        assert_eq!(have.len(), work::WorkState::VARIANTS.len());
+        words(
+            "work-problem",
+            &x::work_problems(),
+            work::WorkProblem::variant,
+            work::WorkProblem::VARIANTS,
+        );
+        words(
+            "repair-problem",
+            &x::repair_problems(),
+            repair::RepairProblem::variant,
+            repair::RepairProblem::VARIANTS,
+        );
+        let waits: BTreeSet<&str> = x::repair_offers()
+            .iter()
+            .flat_map(|o| {
+                o.lines
+                    .iter()
+                    .flat_map(|l| l.waits_for.iter().map(|w| w.variant()))
+            })
+            .collect();
+        assert_eq!(waits.len(), repair::Prerequisite::VARIANTS.len());
+        let why: BTreeSet<&str> = x::changes()
+            .iter()
+            .flat_map(|c| c.lines.iter().map(|l| l.why.variant()))
+            .collect();
+        assert_eq!(why.len(), changes::AfterWhy::VARIANTS.len());
+        let steps: BTreeSet<&str> = x::changes()
+            .iter()
+            .flat_map(|c| {
+                c.lines
+                    .iter()
+                    .flat_map(|l| l.steps.iter().map(|s| s.variant()))
+            })
+            .collect();
+        assert_eq!(steps.len(), changes::Recheck::VARIANTS.len());
+        let busy: BTreeSet<&str> = x::safe_stops()
+            .iter()
+            .flat_map(|v| v.busy.iter().map(|b| b.variant()))
+            .collect();
+        assert_eq!(busy.len(), safe_stop::BusyWith::VARIANTS.len());
+        let parts: BTreeSet<&str> = x::kits()
+            .iter()
+            .flat_map(|k| k.holds.iter().chain(&k.lacks).map(|p| p.variant()))
+            .collect();
+        assert_eq!(parts.len(), kit::KitPart::VARIANTS.len());
+    }
+
     // Problems: one example per problem, each with its own key.
     let keys: BTreeSet<&str> = problems().iter().map(|p| p.key).collect();
     assert_eq!(problems().len(), Problem::VARIANTS.len());
@@ -1307,6 +1443,17 @@ fn calls() -> Value {
             { "name": "fullmove_undo", "args": [["id", "01010101010101010101010101010101"]] },
             { "name": "move_appdata_answer", "args": [["retry", true]] },
             { "name": "move_choose_what", "args": [["choice", { "folders": [{ "role": "documents", "parts": ["Work"] }], "apps": true }]] },
+            { "name": "work_checks", "args": [] },
+            { "name": "work_check_add", "args": [["pick", { "kind": "font", "family": "Inter" }]] },
+            { "name": "work_check_run", "args": [] },
+            { "name": "work_check_answer", "args": [["index", 0], ["generation", 1], ["worked", true]] },
+            { "name": "work_check_remove", "args": [["index", 0], ["generation", 1]] },
+            { "name": "repair_offer", "args": [] },
+            { "name": "repair_run", "args": [["generation", 1], ["lines", [0, 2]]] },
+            { "name": "move_changes", "args": [] },
+            { "name": "move_reapprove", "args": [["generation", 1], ["approve", true]] },
+            { "name": "safe_stop", "args": [] },
+            { "name": "recovery_kit_save", "args": [["id", "1792627200000-0"]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -1333,6 +1480,8 @@ fn calls() -> Value {
             "qsPicked": crate::quicksend::PICKED_EVENT,
             "qsDragging": crate::quicksend::DRAGGING_EVENT,
             "guard": crate::guard::EVENT,
+            "moveChanged": crate::deliver::changes::EVENT,
+            "safeStop": crate::deliver::safe_stop::EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

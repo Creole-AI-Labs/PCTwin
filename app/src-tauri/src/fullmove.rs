@@ -166,6 +166,20 @@ pub struct ChangeView {
     pub source: Option<String>,
     /// What else the person should know (an older version here, saved sign-ins to websites).
     pub note: Option<ChangeNote>,
+    /// What undo can do if the person ticks "Update it" (only with `update`).
+    pub undo_if_updated: Option<UndoPromise>,
+    /// What tests of this app between these two systems showed (apps only).
+    pub tested: Option<pctwin_apps::compat::Tested>,
+}
+
+/// About how much room the move takes on this laptop beyond the files, at its busiest (installer
+/// downloads and the apps installed; the app data, staged and placed). Margins, said with
+/// "about".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomView {
+    pub installs: u64,
+    pub app_data: u64,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -182,6 +196,10 @@ pub struct RebuildPlanView {
     pub prompt: bool,
     /// A Windows restore point is asked for before the first change.
     pub restore_point: bool,
+    /// What the move needs from the internet.
+    pub internet: pctwin_fullmove::plan::Internet,
+    /// The room it takes beyond the files.
+    pub room: RoomView,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -198,6 +216,9 @@ fn promise_of(p: Promise) -> UndoPromise {
         Promise::CanReverse => UndoPromise::CanReverse,
         Promise::MustKeep => UndoPromise::MustKeep,
         Promise::RemoveYourself => UndoPromise::RemoveYourself,
+        Promise::RemovesIfPackage => UndoPromise::RemovesIfPackage,
+        Promise::KeepsNewer => UndoPromise::KeepsNewer,
+        Promise::NeedsYouMaker => UndoPromise::NeedsYouMaker,
     }
 }
 
@@ -352,6 +373,11 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
                 },
                 n => n,
             }),
+            undo_if_updated: c.undo_if_updated.map(promise_of),
+            tested: c.tested.map(|mut t| {
+                t.version = t.version.map(|v| name(&v));
+                t
+            }),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -372,6 +398,14 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         links: plan.links,
         prompt: asks,
         restore_point: asks && cfg!(windows),
+        internet: plan.internet(),
+        room: {
+            let r = plan.room_needed();
+            RoomView {
+                installs: r.installs,
+                app_data: r.app_data,
+            }
+        },
     }
 }
 

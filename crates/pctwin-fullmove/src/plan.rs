@@ -43,9 +43,19 @@ pub enum Promise {
     CanReverse,
     /// PCTwin leaves it: it was here before, or it was not changed.
     MustKeep,
-    /// PCTwin does not remove apps yet: the person removes it in the system's settings if they
+    /// PCTwin does not remove this app: the person removes it in the system's settings if they
     /// do not want it.
     RemoveYourself,
+    /// An app PCTwin installs on Windows: undo removes it if Windows installed it from a Windows
+    /// Installer package and it is still the version PCTwin installed; otherwise the person
+    /// removes it in the system's settings (which of the two is known only once it is installed).
+    RemovesIfPackage,
+    /// An older version here that PCTwin updates if ticked: undo cannot bring the older version
+    /// back, so the newer one stays.
+    KeepsNewer,
+    /// A sign-in, licence or relinking the person does: the app's maker governs it, and undo
+    /// cannot take it back.
+    NeedsYouMaker,
 }
 
 /// What a change is about.
@@ -103,6 +113,11 @@ pub struct Change {
     pub source: Option<String>,
     /// What else the person should know about it, in a word the screens translate.
     pub note: Option<ChangeNote>,
+    /// What undo can do if the person ticks "Update it" (only with `update`).
+    pub undo_if_updated: Option<Promise>,
+    /// What tests of this app between these two systems showed (apps only; `None` for other
+    /// changes).
+    pub tested: Option<pctwin_apps::compat::Tested>,
 }
 
 /// What else the person should know about a change, beside what it does.
@@ -133,6 +148,38 @@ pub fn special_reason(step: SpecialStep) -> Option<Reason> {
         SpecialStep::ExportFirst | SpecialStep::NotYet | SpecialStep::LookAtIt => {
             Some(Reason::FinishByHand)
         }
+    }
+}
+
+/// What undo can do for an app PCTwin installs by `plan`'s first route PCTwin installs from:
+/// on Windows (winget) undo removes a Windows Installer package it installed, still that version;
+/// a Linux package tool's install, and anything else, the person removes (undo lists it).
+pub fn install_promise(plan: &AppPlan) -> Promise {
+    let first = plan.routes.iter().find(|r| {
+        matches!(
+            r,
+            Route::Winget { .. }
+                | Route::Apt { .. }
+                | Route::Dnf { .. }
+                | Route::Flatpak { .. }
+                | Route::Snap { .. }
+        )
+    });
+    match first {
+        Some(Route::Winget { .. }) => Promise::RemovesIfPackage,
+        _ => Promise::RemoveYourself,
+    }
+}
+
+/// What undo can do for a special category's step.
+pub fn special_promise(step: SpecialStep) -> Promise {
+    match step {
+        // App data PCTwin places: removed again, each file only while it is what PCTwin wrote.
+        SpecialStep::Copy => Promise::CanReverse,
+        // The person signs in or relinks: the maker governs it.
+        SpecialStep::SignIn | SpecialStep::Relink => Promise::NeedsYouMaker,
+        // Nothing PCTwin changes: left as it is.
+        SpecialStep::ExportFirst | SpecialStep::NotYet | SpecialStep::LookAtIt => Promise::MustKeep,
     }
 }
 
@@ -227,6 +274,19 @@ pub struct FullPlan {
     /// file was there, so a setting that points at one is pointed at where it really landed
     /// ([`crate::run::DataDone::files`]).
     pub old_folders: Vec<(FolderRole, String)>,
+    /// This laptop's kind of system, for the compatibility record (`None`: not known).
+    pub to: Option<pctwin_record::AppSystem>,
+}
+
+/// What the move needs from the internet (the 2.9 preview).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Internet {
+    /// Apps PCTwin downloads and installs (each from its maker's or its store's site; the sizes
+    /// are known only once downloaded).
+    pub downloads: u64,
+    /// Apps and app data the person signs in to again, online.
+    pub sign_ins: u64,
 }
 
 /// Whether `app` belongs in the mover's plan: theirs, or everyone's.
@@ -363,6 +423,7 @@ impl FullPlan {
         let Some((x, digest)) = extras else {
             return Self {
                 apps,
+                to: Some(here.target.system),
                 ..Self::default()
             };
         };
@@ -391,6 +452,7 @@ impl FullPlan {
                 from: Some(x.system),
                 extras_digest: Some(digest),
                 links: x.links,
+                to: Some(here.target.system),
                 ..Self::default()
             };
         };
@@ -454,6 +516,7 @@ impl FullPlan {
             left_out_by_person: x.left_out_by_person,
             links: x.links,
             old_folders: x.folders.iter().map(|f| (f.role, f.path.clone())).collect(),
+            to: Some(here.target.system),
         }
     }
 
@@ -467,7 +530,7 @@ impl FullPlan {
                 }
                 _ => match needs_of(&e.plan) {
                     Some(r) => (Action::LeaveAlone, Promise::MustKeep, Some(r)),
-                    None => (Action::Install, Promise::RemoveYourself, None),
+                    None => (Action::Install, install_promise(&e.plan), None),
                 },
             };
             out.push(Change {
@@ -484,6 +547,9 @@ impl FullPlan {
                     .then(|| e.winget().map(str::to_string))
                     .flatten(),
                 note: older_here(&e.plan).map(|version| ChangeNote::OlderHere { version }),
+                undo_if_updated: (older_here(&e.plan).is_some() && e.winget().is_some())
+                    .then_some(Promise::KeepsNewer),
+                tested: Some(self.tested(&e.app)),
                 update: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(at as u32),
             });
@@ -502,6 +568,8 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: None,
+                undo_if_updated: None,
+                tested: None,
             });
         }
         for (at, s) in self.special.iter().enumerate() {
@@ -514,11 +582,7 @@ impl FullPlan {
                 } else {
                     Action::Merge
                 },
-                undo: if needs.is_some() {
-                    Promise::MustKeep
-                } else {
-                    Promise::CanReverse
-                },
+                undo: special_promise(s.step),
                 count: 0,
                 needs,
                 special: Some(s.step),
@@ -527,6 +591,8 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: s.sites.then_some(ChangeNote::Sites),
+                undo_if_updated: None,
+                tested: None,
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -545,6 +611,8 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: None,
+                undo_if_updated: None,
+                tested: None,
             });
         }
         if self.special_not_checked > 0 {
@@ -561,6 +629,8 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: None,
+                undo_if_updated: None,
+                tested: None,
             });
         }
         if self.left_out_by_person {
@@ -577,6 +647,8 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: None,
+                undo_if_updated: None,
+                tested: None,
             });
         } else if self.from.is_some() && !self.special_searched {
             out.push(Change {
@@ -592,9 +664,32 @@ impl FullPlan {
                 update: None,
                 source: None,
                 note: None,
+                undo_if_updated: None,
+                tested: None,
             });
         }
         out
+    }
+
+    /// What tests of `app` between the old laptop's system and this one showed.
+    pub fn tested(&self, app: &FoundApp) -> pctwin_apps::compat::Tested {
+        match self.to {
+            Some(to) => pctwin_apps::compat::tested(pctwin_apps::compat::shipped(), app, to),
+            None => pctwin_apps::compat::Tested::not_tested(),
+        }
+    }
+
+    /// What the move needs from the internet: a download for each app PCTwin installs, and a
+    /// sign-in for each special category the person signs in to again.
+    pub fn internet(&self) -> Internet {
+        Internet {
+            downloads: self.to_install().len() as u64,
+            sign_ins: self
+                .special
+                .iter()
+                .filter(|s| matches!(s.step, SpecialStep::SignIn | SpecialStep::Relink))
+                .count() as u64,
+        }
     }
 
     /// The apps PCTwin itself installs, in plan order.
@@ -788,7 +883,8 @@ mod tests {
         assert_eq!(names, ["Writer", "Unsigned Tool", "Already"]);
         let changes = plan.changes();
         assert_eq!(changes[0].action, Action::Install);
-        assert_eq!(changes[0].undo, Promise::RemoveYourself);
+        // A winget install: undo removes it if Windows installed a Windows Installer package.
+        assert_eq!(changes[0].undo, Promise::RemovesIfPackage);
         assert_eq!(changes[1].needs, Some(Reason::ManualInstall));
         assert_eq!(changes[2].action, Action::LeaveAlone);
         assert_eq!(changes[2].needs, None);
