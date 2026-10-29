@@ -62,6 +62,7 @@ fn a_package_crosses_the_channel_whole_and_is_installed_from_the_helpers_copy() 
     let digest: [u8; 32] = sha2::Sha256::digest(&package).into();
     let install = Action::InstallVerifiedPackage(InstallVerifiedPackage {
         product_code: None,
+        for_move: None,
         artifact: 1,
         sha256: Hex32(digest),
         kind: PackageKind::Msi,

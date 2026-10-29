@@ -22,15 +22,15 @@ use serde::Serialize;
 use pctwin_apps::found::windows::{RawEntry, RegValue};
 use pctwin_helper::Acted;
 use pctwin_helper::broker::actions::{
-    Action, ApprovedPlan, Hex16, Id, InstalledProduct, PlannedOperation, ProductVersion,
-    UninstallWindowsInstallerProduct,
+    Action, ApprovedPlan, Hex16, Id, InstallDate, InstalledProduct, PlannedOperation,
+    ProductVersion, UninstallWindowsInstallerProduct,
 };
 use pctwin_helper::broker::receipt::Outcome;
 use pctwin_helper::broker::uninstall::UninstallResult;
 use pctwin_helper::broker::{BrokerRequest, PROTOCOL};
 
 use crate::install::{Helper, Machine};
-use crate::run::{RemovableApp, UndoBook};
+use crate::run::{RemovableApp, Settled, UndoBook};
 
 /// What undo will do with one group, looked at now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -141,7 +141,10 @@ pub fn preview(
     }
     out.extend(book.removable.iter().map(|a| PlanLine {
         name: a.name.clone(),
-        plan: apps.plan(a),
+        plan: match a.settled {
+            None => apps.plan(a),
+            Some(settled) => settled_plan(settled),
+        },
     }));
     out.extend(book.apps.iter().map(|a| PlanLine {
         name: a.clone(),
@@ -152,10 +155,11 @@ pub fn preview(
 
 /// Undoes the move's settings through the executor (compare-and-write: a setting the person
 /// changed since is kept), group by group, with `rebuild` (the journal's recorders) and
-/// `adapter` (which must know `book`'s places).
+/// `adapter` (which must know `book`'s places). Each app whose removal ended is marked settled in
+/// `book`, which the caller keeps: a later undo never asks for it again.
 pub fn undo(
     rebuild: &Rebuild<'_>,
-    book: &UndoBook,
+    book: &mut UndoBook,
     adapter: &mut dyn Adapter,
     data: Option<(&pctwin_grant::CaptureKey, &pctwin_gate::Destination)>,
     apps: &mut dyn AppUndo,
@@ -219,16 +223,58 @@ pub fn undo(
     }
     // Apps PCTwin installed from a Windows Installer package: removed through the helper, each
     // checked gone afterwards.
-    let removed = apps.remove(&book.removable);
-    out.extend(book.removable.iter().zip(removed).map(|(a, result)| Line {
-        name: a.name.clone(),
-        result,
-    }));
+    let pending: Vec<RemovableApp> = book
+        .removable
+        .iter()
+        .filter(|a| a.settled.is_none())
+        .cloned()
+        .collect();
+    let mut removed = apps.remove(book.scope, &pending).into_iter();
+    for a in &mut book.removable {
+        let result = match a.settled {
+            Some(settled) => settled_result(settled),
+            None => {
+                let result = removed.next().unwrap_or(Result::NotRemoved);
+                a.settled = settled_by(&result);
+                result
+            }
+        };
+        out.push(Line {
+            name: a.name.clone(),
+            result,
+        });
+    }
     out.extend(book.apps.iter().map(|a| Line {
         name: a.clone(),
         result: Result::RemoveYourself,
     }));
     Ok(out)
+}
+
+/// What a later preview says of an app an earlier undo settled: never asked for again.
+fn settled_plan(settled: Settled) -> UndoPlan {
+    match settled {
+        Settled::Removed | Settled::AlreadyGone => UndoPlan::AlreadyGone,
+        Settled::KeptOtherVersion => UndoPlan::KeepOtherVersion,
+    }
+}
+
+/// What a later undo says of an app an earlier undo settled: never asked for again.
+fn settled_result(settled: Settled) -> Result {
+    match settled {
+        Settled::Removed | Settled::AlreadyGone => Result::AsBefore,
+        Settled::KeptOtherVersion => Result::KeptOtherVersion,
+    }
+}
+
+/// Whether `result` ends undo for an app (so it is never asked for again), and how.
+fn settled_by(result: &Result) -> Option<Settled> {
+    match result {
+        Result::Removed { .. } => Some(Settled::Removed),
+        Result::AsBefore => Some(Settled::AlreadyGone),
+        Result::KeptOtherVersion => Some(Settled::KeptOtherVersion),
+        _ => None,
+    }
 }
 
 /* ---------- Apps PCTwin installed (decided 28 October 2026) ---------- */
@@ -237,8 +283,8 @@ pub fn undo(
 pub trait AppUndo {
     /// What undo would do with `app`, looked at now. Nothing changes and nobody is asked.
     fn plan(&mut self, app: &RemovableApp) -> UndoPlan;
-    /// Removes `apps`, one result each, in order.
-    fn remove(&mut self, apps: &[RemovableApp]) -> Vec<Result>;
+    /// Removes `apps` of the move `for_move` (its scope), one result each, in order.
+    fn remove(&mut self, for_move: [u8; 16], apps: &[RemovableApp]) -> Vec<Result>;
 }
 
 /// Where PCTwin has no administrator helper to remove apps with: each is listed for the person
@@ -249,7 +295,7 @@ impl AppUndo for ListOnly {
     fn plan(&mut self, _: &RemovableApp) -> UndoPlan {
         UndoPlan::RemoveYourself
     }
-    fn remove(&mut self, apps: &[RemovableApp]) -> Vec<Result> {
+    fn remove(&mut self, _: [u8; 16], apps: &[RemovableApp]) -> Vec<Result> {
         apps.iter().map(|_| Result::RemoveYourself).collect()
     }
 }
@@ -287,11 +333,15 @@ fn look(entries: &[RawEntry], product: &InstalledProduct) -> Look {
     else {
         return Look::Gone;
     };
-    let version = match e.values.get("displayversion") {
-        Some(RegValue::Text(v)) => ProductVersion::parse(v),
+    let text = |name: &str| match e.values.get(name) {
+        Some(RegValue::Text(v)) => Some(v.as_str()),
         _ => None,
     };
-    if version.as_ref() == Some(&product.version) {
+    // The version installed, written into the list on the same day: one installed again since is
+    // the person's (review finding F1).
+    let version = text("displayversion").and_then(ProductVersion::parse);
+    let day = text("installdate").and_then(InstallDate::parse);
+    if version.as_ref() == Some(&product.version) && day.as_ref() == Some(&product.installed_on) {
         Look::Same
     } else {
         Look::Other
@@ -308,6 +358,10 @@ impl HelperUndo<'_> {
                     Result::Removed { restart_needed }
                 }
                 Outcome::Uninstall(UninstallResult::AlreadyGone) if gone => Result::AsBefore,
+                // An earlier attempt the helper found finished after a crash (review finding F2).
+                Outcome::AlreadyInPlace if gone => Result::Removed {
+                    restart_needed: false,
+                },
                 Outcome::Uninstall(UninstallResult::KeptOtherVersion) => Result::KeptOtherVersion,
                 _ => Result::NotRemoved,
             },
@@ -325,7 +379,7 @@ impl AppUndo for HelperUndo<'_> {
         }
     }
 
-    fn remove(&mut self, apps: &[RemovableApp]) -> Vec<Result> {
+    fn remove(&mut self, for_move: [u8; 16], apps: &[RemovableApp]) -> Vec<Result> {
         let entries = self.machine.entries();
         let mut out: Vec<Option<Result>> = Vec::with_capacity(apps.len());
         let mut wanted = Vec::new();
@@ -340,7 +394,7 @@ impl AppUndo for HelperUndo<'_> {
             });
         }
         if !wanted.is_empty() {
-            self.remove_through_helper(apps, &wanted, &mut out);
+            self.remove_through_helper(for_move, apps, &wanted, &mut out);
         }
         out.into_iter()
             .map(|r| r.unwrap_or(Result::NotRemoved))
@@ -353,6 +407,7 @@ impl HelperUndo<'_> {
     /// judged into `out`.
     fn remove_through_helper(
         &mut self,
+        for_move: [u8; 16],
         apps: &[RemovableApp],
         wanted: &[usize],
         out: &mut [Option<Result>],
@@ -377,6 +432,7 @@ impl HelperUndo<'_> {
                         UninstallWindowsInstallerProduct {
                             product_code: r.product.code,
                             installed_by: r.installed_by,
+                            for_move: Hex16(for_move),
                         },
                     ),
                 },
@@ -407,5 +463,48 @@ impl HelperUndo<'_> {
             out[*at] = Some(self.judged(answer, &apps[*at].removable.product));
         }
         self.helper.bye();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review finding F1: only a removal that ended settles an app (removed, already gone, kept
+    /// because it changed); one not removed, or left for the person, is asked for again.
+    #[test]
+    fn only_an_ended_removal_settles_an_app() {
+        assert_eq!(
+            settled_by(&Result::Removed {
+                restart_needed: true
+            }),
+            Some(Settled::Removed)
+        );
+        assert_eq!(settled_by(&Result::AsBefore), Some(Settled::AlreadyGone));
+        assert_eq!(
+            settled_by(&Result::KeptOtherVersion),
+            Some(Settled::KeptOtherVersion)
+        );
+        // A settled app is said as it was left, and never asked for again.
+        assert_eq!(settled_plan(Settled::Removed), UndoPlan::AlreadyGone);
+        assert_eq!(settled_plan(Settled::AlreadyGone), UndoPlan::AlreadyGone);
+        assert_eq!(
+            settled_plan(Settled::KeptOtherVersion),
+            UndoPlan::KeepOtherVersion
+        );
+        assert_eq!(settled_result(Settled::Removed), Result::AsBefore);
+        assert_eq!(settled_result(Settled::AlreadyGone), Result::AsBefore);
+        assert_eq!(
+            settled_result(Settled::KeptOtherVersion),
+            Result::KeptOtherVersion
+        );
+        for open in [
+            Result::NotRemoved,
+            Result::RemoveYourself,
+            Result::NotDoneYet { left: 1 },
+            Result::Restored,
+        ] {
+            assert_eq!(settled_by(&open), None, "{open:?}");
+        }
     }
 }

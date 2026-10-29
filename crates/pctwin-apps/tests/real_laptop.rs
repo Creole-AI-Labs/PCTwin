@@ -149,6 +149,7 @@ fn a_winget_download_passes_the_helpers_own_maker_check_and_a_wrong_maker_fails(
     let held = staging.open_verified(handle, sha).unwrap();
     let action = |maker: pctwin_maker::WindowsSigner| InstallVerifiedPackage {
         product_code: None,
+        for_move: None,
         artifact: handle,
         sha256: Hex32(sha),
         kind: pctwin_helper::broker::actions::PackageKind::Msi,

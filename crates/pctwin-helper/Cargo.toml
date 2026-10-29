@@ -40,6 +40,9 @@ base64 = "0.22.1"
 blake3 = "1.8"
 sha2 = "0.11.0"
 thiserror = "2.0.21"
+# Reads the product code from the Property table of the helper's own held, hash-pinned MSI
+# (uninstall on undo, review finding F4): pure safe Rust over the compound-file format.
+msi = "0.10.0"
 zeroize = "1.9.0"
 
 [target.'cfg(windows)'.dependencies]

@@ -209,6 +209,7 @@ fn an_elevated_install_stopped_before_its_outcome_is_never_done_twice() {
                 action_id: Id::parse("install.test").unwrap(),
                 action: Action::InstallVerifiedPackage(InstallVerifiedPackage {
                     product_code: None,
+                    for_move: None,
                     artifact: handle,
                     sha256: Hex32(sha),
                     kind: PackageKind::Msi,

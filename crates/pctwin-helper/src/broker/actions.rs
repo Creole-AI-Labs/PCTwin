@@ -161,6 +161,27 @@ impl ProductCode {
         // Only ASCII is ever stored (checked in `parse`).
         std::str::from_utf8(&self.0).unwrap_or("")
     }
+
+    /// Windows Installer's packed form of the code, as its own registry keys name a product
+    /// (`Installer\Products\<packed>`): the first three groups reversed, then each pair of the
+    /// last sixteen digits swapped.
+    pub fn packed(&self) -> String {
+        let hex: Vec<u8> = self
+            .0
+            .iter()
+            .copied()
+            .filter(u8::is_ascii_hexdigit)
+            .collect();
+        let mut out = Vec::with_capacity(32);
+        out.extend(hex[0..8].iter().rev());
+        out.extend(hex[8..12].iter().rev());
+        out.extend(hex[12..16].iter().rev());
+        for pair in hex[16..32].chunks(2) {
+            out.push(pair[1]);
+            out.push(pair[0]);
+        }
+        String::from_utf8(out).unwrap_or_default()
+    }
 }
 
 impl std::fmt::Display for ProductCode {
@@ -219,13 +240,37 @@ impl<'de> Deserialize<'de> for ProductVersion {
     }
 }
 
+/// The day Windows Installer wrote a product into the system's list (`InstallDate`, written
+/// `YYYYMMDD`): exactly eight digits.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+pub struct InstallDate(String);
+
+impl InstallDate {
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        (s.len() == 8 && s.bytes().all(|b| b.is_ascii_digit())).then(|| Self(s.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for InstallDate {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::custom("not an install date"))
+    }
+}
+
 /// A Windows Installer product the helper saw its own install add: not in the system's list
-/// before, there after, at this version.
+/// before, there after, at this version, written into the list on this day.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct InstalledProduct {
     pub code: ProductCode,
     pub version: ProductVersion,
+    pub installed_on: InstallDate,
 }
 
 /// One of the fixed actions.
@@ -250,6 +295,8 @@ pub enum Action {
 pub struct UninstallWindowsInstallerProduct {
     pub product_code: ProductCode,
     pub installed_by: Hex32,
+    /// The move whose install recorded it: the helper's record must name the same move.
+    pub for_move: Hex16,
 }
 
 /// Install one exact package already staged in the helper's own administrators-only folder: by
@@ -270,6 +317,10 @@ pub struct InstallVerifiedPackage {
     /// present after, nothing else gone); only then can undo remove it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub product_code: Option<ProductCode>,
+    /// The move this install belongs to (its scope): kept with the recorded product, so only an
+    /// undo of this same move can name it. With none, no product is recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_move: Option<Hex16>,
 }
 
 /// The kinds of package the compiled adapters know. Each adapter builds its own fixed arguments;
@@ -485,6 +536,7 @@ mod tests {
     fn install(scope: InstallScope) -> Action {
         Action::InstallVerifiedPackage(InstallVerifiedPackage {
             product_code: None,
+            for_move: None,
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,
@@ -595,6 +647,41 @@ mod tests {
         assert_eq!(serde_json::from_str::<ProductCode>(&json).unwrap(), good);
     }
 
+    /// Windows Installer's own documented example of a packed product code.
+    #[test]
+    fn a_product_code_packs_as_windows_installer_does() {
+        let code = ProductCode::parse("{12345678-abcd-ef01-2345-6789abcdef01}").unwrap();
+        assert_eq!(code.packed(), "87654321DCBA10FE32547698BADCFE10");
+        assert_eq!(
+            ProductCode::parse(CODE).unwrap().packed(),
+            "4D3C2B1A6F5E9874A9CBED0F21436587"
+        );
+    }
+
+    #[test]
+    fn an_install_date_is_eight_digits() {
+        assert_eq!(InstallDate::parse("20261029").unwrap().as_str(), "20261029");
+        assert_eq!(
+            InstallDate::parse(" 20261029 ").unwrap().as_str(),
+            "20261029"
+        );
+        for bad in [
+            "",
+            "2026102",
+            "202610290",
+            "2026-10-2",
+            "2026102x",
+            "20261029;",
+        ] {
+            assert!(InstallDate::parse(bad).is_none(), "{bad:?}");
+            let json = serde_json::to_string(bad).unwrap();
+            assert!(
+                serde_json::from_str::<InstallDate>(&json).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_version_is_short_and_plain() {
         for good in [
@@ -631,8 +718,9 @@ mod tests {
     #[test]
     fn the_uninstall_action_takes_only_a_code_and_its_install() {
         let key = "cd".repeat(32);
+        let mv = "ef".repeat(16);
         let good = format!(
-            r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}"}}}}"#
+            r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","for-move":"{mv}"}}}}"#
         );
         let a: Action = serde_json::from_str(&good).unwrap();
         assert_eq!(
@@ -640,23 +728,28 @@ mod tests {
             Action::UninstallWindowsInstallerProduct(UninstallWindowsInstallerProduct {
                 product_code: ProductCode::parse(CODE).unwrap(),
                 installed_by: Hex32([0xcd; 32]),
+                for_move: Hex16([0xef; 16]),
             })
         );
         assert_eq!(a.audience(), Audience::Install);
         assert!(a.needs_admin());
         for bad in [
             format!(
-                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","args":"/i x"}}}}"#
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","for-move":"{mv}","args":"/i x"}}}}"#
             ),
             format!(
-                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","path":"C:/x.msi"}}}}"#
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","for-move":"{mv}","path":"C:/x.msi"}}}}"#
             ),
             format!(r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}"}}}}"#),
+            // No move named.
             format!(
-                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE} /i x","installed-by":"{key}"}}}}"#
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}"}}}}"#
             ),
             format!(
-                r#"{{"uninstall-windows-installer-product":{{"product-code":"C:/x.msi","installed-by":"{key}"}}}}"#
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE} /i x","installed-by":"{key}","for-move":"{mv}"}}}}"#
+            ),
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"C:/x.msi","installed-by":"{key}","for-move":"{mv}"}}}}"#
             ),
             format!(
                 r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"zz"}}}}"#
@@ -798,6 +891,7 @@ mod tests {
         assert_ne!(a.identity(), install(InstallScope::User).identity());
         let mut other = InstallVerifiedPackage {
             product_code: None,
+            for_move: None,
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,

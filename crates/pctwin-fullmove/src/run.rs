@@ -60,6 +60,20 @@ pub struct Removable {
 pub struct RemovableApp {
     pub name: String,
     pub removable: Removable,
+    /// How an earlier undo of this move left it, once that undo ended for it (removed, found
+    /// already gone, or kept because it changed): a later undo never asks for it again (review
+    /// finding F1). `None` while it is still to be removed.
+    #[serde(default)]
+    pub settled: Option<Settled>,
+}
+
+/// How an undo ended for an app it may remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Settled {
+    Removed,
+    AlreadyGone,
+    KeptOtherVersion,
 }
 
 impl AppResult {
@@ -179,6 +193,15 @@ pub struct UndoBook {
 }
 
 impl UndoBook {
+    /// Whether undo has anything to do for this move: settings, apps to remove or list, or app
+    /// data that landed.
+    pub fn has_anything(&self) -> bool {
+        !self.recipes.is_empty()
+            || !self.apps.is_empty()
+            || !self.removable.is_empty()
+            || !self.landed.is_empty()
+    }
+
     /// The book's ID: its move's scope, as hex (one book per move).
     pub fn id(&self) -> String {
         self.scope.iter().map(|b| format!("{b:02x}")).collect()
@@ -196,6 +219,7 @@ pub fn installed_apps(apps: &[(String, AppResult)]) -> (Vec<String>, Vec<Removab
             Some(r) => removable.push(RemovableApp {
                 name: name.clone(),
                 removable: r.clone(),
+                settled: None,
             }),
             None if a.installed || a.result.status() == ItemStatus::Reinstalled => {
                 listed.push(name.clone());
@@ -790,13 +814,16 @@ pub fn rebuild(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pctwin_helper::broker::actions::{Hex32, InstalledProduct, ProductCode, ProductVersion};
+    use pctwin_helper::broker::actions::{
+        Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
+    };
 
     fn removable() -> Box<Removable> {
         Box::new(Removable {
             product: InstalledProduct {
                 code: ProductCode::parse("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}").unwrap(),
                 version: ProductVersion::parse("2.1.0").unwrap(),
+                installed_on: InstallDate::parse("20261028").unwrap(),
             },
             installed_by: Hex32([1; 32]),
         })
@@ -830,6 +857,25 @@ mod tests {
         )
         .unwrap();
         assert!(old.removable.is_empty());
+        assert!(old.has_anything());
+        let mut empty = old.clone();
+        empty.apps.clear();
+        assert!(!empty.has_anything());
+        // A move whose only change was an app undo removes still has an undo.
+        let mut only_removable = empty.clone();
+        only_removable.removable = kept.clone();
+        assert!(only_removable.has_anything());
+        let mut only_landed = empty.clone();
+        only_landed.landed = vec![("Mail".into(), 1)];
+        assert!(only_landed.has_anything());
+        let mut only_settings = empty.clone();
+        only_settings.recipes = vec![
+            serde_json::from_str(
+                r#"{"format":1,"id":"org.example.app","version":1,"platforms":[],"steps":[]}"#,
+            )
+            .unwrap(),
+        ];
+        assert!(only_settings.has_anything());
         let mut book = old.clone();
         book.removable = kept;
         let json = serde_json::to_string(&book).unwrap();

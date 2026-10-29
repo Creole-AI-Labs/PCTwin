@@ -586,7 +586,8 @@ pctwin_types::listed_enum! {
     pub enum UndoPlan {
         /// Put back as it was.
         PutBack,
-        /// The app is removed; the person's own data is kept.
+        /// PCTwin removes the app (through Windows Installer); it does not touch files the person
+        /// made, and promises nothing about what the app's own uninstaller does.
         RemoveApp,
         /// Kept: it changed since the move.
         KeepChanged,

@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::actions::{Hex32, Id, InstalledProduct};
+use super::actions::{Hex16, Hex32, Id, InstalledProduct};
 use super::restore::RestorePointResult;
 use super::uninstall::UninstallResult;
 
@@ -26,6 +26,8 @@ pub enum Outcome {
     Installed {
         restart_needed: bool,
         product: InstalledProduct,
+        /// The move the install was for: only an undo of that move may remove it.
+        for_move: Hex16,
     },
     /// How removing an app PCTwin installed ended, when it did not fail.
     Uninstall(UninstallResult),

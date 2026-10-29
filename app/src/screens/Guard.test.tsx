@@ -360,6 +360,14 @@ describe("what is shown (T28-005, T28-010 to T28-012, T28-014, T28-022)", () => 
     for (const id of ["guard-undo-plan-remove-app", "guard-undo-plan-keep-other-version", "guard-undo-plan-already-gone", "guard-undo-plan-remove-yourself"]) {
       expect(screen.getByText(text(id))).toBeTruthy();
     }
+    // Removing an app needs an administrator's approval, and the preview says so beforehand.
+    expect(screen.getByText(text("guard-undo-preview-admin"))).toBeTruthy();
+    cleanup();
+    const nothingToRemove = { ...preview, screen: { ...preview.screen, lines: [{ name: "Tool", plan: "remove-yourself" }] } } as Projection;
+    const quiet = fakeEngine(ready(nothingToRemove));
+    render(wrap(<GuardHost bridge={quiet.bridge} />));
+    await screen.findByRole("heading", { name: text("guard-undo-preview-title") });
+    expect(screen.queryByText(text("guard-undo-preview-admin"))).toBeNull();
     cleanup();
     const done = {
       ...g.undoDone,

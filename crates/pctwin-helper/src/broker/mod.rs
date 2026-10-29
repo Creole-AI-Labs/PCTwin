@@ -23,7 +23,9 @@
 //! 7. the exact object (a package is opened and hashed again);
 //! 8. the system's own approval ([`NativeAuthority`]): not approved, or no answer, is no;
 //! 9. everything again after the approval, since the person may have taken a while: revocation,
-//!    the lease, the package, opened and hashed once more and then held unchanged; and, for a
+//!    the lease, the package, opened and hashed once more and then held unchanged; for a removal,
+//!    the helper's own record of the install it undoes (as at 6b: recorded for this product and move,
+//!    never used before); and, for a
 //!    package, the helper's own maker check of that held copy ([`maker`]): the app's answer is
 //!    never used for an install with an administrator's rights;
 //! 10. the intent written durably to the journal: if it cannot be, nothing changes;
@@ -161,6 +163,8 @@ pub enum Denial {
     NotAvailable,
     #[error("PCTwin's own record does not show it installed that app, so it does not remove it")]
     NotInstalledByPctwin,
+    #[error("PCTwin already undid that app's install once, so it does not remove it again")]
+    AlreadyUndone,
 }
 
 /// The system's own approval for one action.
@@ -269,6 +273,7 @@ pub enum Effect {
     Installed {
         restart_needed: bool,
         product: actions::InstalledProduct,
+        for_move: Hex16,
     },
     Uninstall(uninstall::UninstallResult),
     RestorePoint(RestorePointResult),
@@ -290,9 +295,11 @@ impl Effect {
             Effect::Installed {
                 restart_needed,
                 product,
+                for_move,
             } => Outcome::Installed {
                 restart_needed,
                 product,
+                for_move,
             },
             Effect::Uninstall(u) => Outcome::Uninstall(u),
             Effect::RestorePoint(r) => Outcome::RestorePoint(r),
@@ -396,13 +403,21 @@ impl Adapters for BuiltInAdapters {
         action: &InstallVerifiedPackage,
         _: &Revoker,
     ) -> Effect {
-        let before = installs::watches_product(action)
-            .then(uninstall::installed_products)
+        let watched = installs::watches_product(action);
+        // The package's own product code, read from the helper's held, hash-pinned copy.
+        let package_code = watched
+            .then(|| {
+                std::fs::File::open(package.path())
+                    .ok()
+                    .and_then(|f| uninstall::product_code_of(std::io::BufReader::new(f)))
+            })
             .flatten();
+        let before = watched.then(uninstall::installed_products).flatten();
         let effect = installs::install(package, action);
         installs::with_product(
             effect,
             action,
+            package_code,
             before.as_ref(),
             &mut uninstall::installed_products,
         )
@@ -479,9 +494,9 @@ impl Adapters for BuiltInAdapters {
             Action::InstallVerifiedPackage(_) => Observed::Unknown,
             #[cfg(windows)]
             Action::UninstallWindowsInstallerProduct(u) => uninstall::observed(
-                &u.product_code,
-                installs::running_command_lines(),
-                uninstall::installed_products().as_ref(),
+                uninstall::installer_among(installs::running_command_lines()),
+                uninstall::installed_products().map(|p| p.contains_key(&u.product_code)),
+                uninstall::registered(&u.product_code),
             ),
             #[cfg(not(windows))]
             Action::UninstallWindowsInstallerProduct(_) => Observed::Unknown,
@@ -722,18 +737,50 @@ impl<'a> Broker<'a> {
         let Action::UninstallWindowsInstallerProduct(u) = action else {
             return Ok(None);
         };
-        match self
+        let product = match self
             .journal
             .lookup(&u.installed_by)
             .map_err(|_| Denial::JournalUnavailable)?
         {
-            Recorded::Finished(_, Outcome::Installed { product, .. })
-                if product.code == u.product_code =>
-            {
-                Ok(Some(product))
-            }
-            _ => Err(Denial::NotInstalledByPctwin),
+            Recorded::Finished(
+                _,
+                Outcome::Installed {
+                    product, for_move, ..
+                },
+            ) if product.code == u.product_code && for_move == u.for_move => product,
+            _ => return Err(Denial::NotInstalledByPctwin),
+        };
+        match self
+            .journal
+            .lookup(&uninstall::consumed_key(&u.installed_by))
+            .map_err(|_| Denial::JournalUnavailable)?
+        {
+            Recorded::Nothing => Ok(Some(product)),
+            _ => Err(Denial::AlreadyUndone),
         }
+    }
+
+    /// After a removal of `request` that ended (removed, already gone, kept because it changed,
+    /// or found in place after a crash), marks the install it used as used, durably, so it is
+    /// never removed again (review finding F1). Whether the mark was written.
+    fn mark_used(&mut self, request: &BrokerRequest, outcome: &Outcome) -> bool {
+        let Action::UninstallWindowsInstallerProduct(u) = &request.action else {
+            return true;
+        };
+        if !matches!(outcome, Outcome::Uninstall(_) | Outcome::AlreadyInPlace) {
+            return true;
+        }
+        let intent = Intent {
+            idempotency: uninstall::consumed_key(&u.installed_by),
+            plan_generation: request.plan_generation,
+            plan_digest: request.plan_digest,
+            action_id: request.action_id.clone(),
+            action: request.action.clone(),
+        };
+        self.journal
+            .record_intent(&intent)
+            .and_then(|at| self.journal.record_outcome(at, outcome))
+            .is_ok()
     }
 
     /// Checks `request` and, if everything holds, makes the change.
@@ -774,8 +821,6 @@ impl<'a> Broker<'a> {
         if !request.action.needs_admin() {
             return Err(Denial::NotNeeded);
         }
-        // 5b. Removing an app: only one this helper's own journal recorded installing.
-        self.recorded_install(&request.action)?;
         // 6.
         let idempotency = self.idempotency(request);
         let earlier = match self
@@ -789,7 +834,8 @@ impl<'a> Broker<'a> {
             Recorded::Unfinished(at) => match self.adapters.observe(&request.action) {
                 Observed::Present => {
                     let outcome = Outcome::AlreadyInPlace;
-                    let recorded = self.journal.record_outcome(at, &outcome).is_ok();
+                    let used = self.mark_used(request, &outcome);
+                    let recorded = self.journal.record_outcome(at, &outcome).is_ok() && used;
                     return Ok(self.receipt(request, idempotency, outcome, at, recorded, true));
                 }
                 Observed::Absent => Some(at),
@@ -797,6 +843,10 @@ impl<'a> Broker<'a> {
             },
             Recorded::Nothing => None,
         };
+        // 6b. Removing an app: only one this helper's own journal recorded installing for this
+        // move, never used by a removal before (a finished request asked again was answered
+        // above, from the journal).
+        self.recorded_install(&request.action)?;
         // 7.
         drop(self.verify_object(&request.action)?);
         // 8.
@@ -848,9 +898,10 @@ impl<'a> Broker<'a> {
             (Action::InstallVerifiedPackage(_), None) => return Err(Denial::Unsafe),
         };
         drop(package);
-        // 12.
+        // 12. A removal that ended marks its install used first, then its own outcome.
         let outcome = effect.outcome();
-        let recorded = self.journal.record_outcome(at, &outcome).is_ok();
+        let used = self.mark_used(request, &outcome);
+        let recorded = self.journal.record_outcome(at, &outcome).is_ok() && used;
         if self.revoker.is_revoked() {
             // Stopped during the action: this result is reported, nothing new starts.
             self.close();

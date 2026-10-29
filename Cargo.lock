@@ -3082,6 +3082,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "msi"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0325f8473ef1f5c38ee42345e2cd1678299cbbfa169d1776654a2a682867420"
+dependencies = [
+ "byteorder",
+ "cfb 0.14.0",
+ "encoding_rs",
+ "uuid",
+]
+
+[[package]]
 name = "muda"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3853,6 +3865,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "getrandom 0.4.3",
+ "msi",
  "pctwin-catalogue",
  "pctwin-gate",
  "pctwin-grant",

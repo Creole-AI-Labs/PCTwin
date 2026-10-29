@@ -228,6 +228,9 @@ pub struct WingetInstaller<'a> {
     point: Option<RestorePoint>,
     down: Option<HelperDown>,
     plan: Option<ApprovedPlan>,
+    /// The move these installs belong to (its scope): with none, the helper records no product,
+    /// and undo lists every app for the person.
+    for_move: Option<[u8; 16]>,
 }
 
 const RESTORE_ID: &str = "restore-point";
@@ -253,7 +256,15 @@ impl<'a> WingetInstaller<'a> {
             point: None,
             down: None,
             plan: None,
+            for_move: None,
         }
+    }
+
+    /// The installs are for move `scope`: a Windows Installer app the helper records can then
+    /// be removed by an undo of this move, and only of this move.
+    pub fn for_move(mut self, scope: [u8; 16]) -> Self {
+        self.for_move = Some(scope);
+        self
     }
 
     /// Downloads and checks `app`'s package (`at`: its place in the list).
@@ -292,6 +303,7 @@ impl<'a> WingetInstaller<'a> {
             kind,
             &e.app,
             m.product_code_of_installer(),
+            self.for_move,
         )
         .map_err(|_| manual())?;
         Ok(Prepared { at, op, file, size })
@@ -392,11 +404,14 @@ impl<'a> WingetInstaller<'a> {
                 Outcome::Installed {
                     restart_needed,
                     product,
+                    for_move,
                 } => {
-                    recorded = Some(Box::new(Removable {
-                        product,
-                        installed_by: r.idempotency,
-                    }));
+                    if Some(for_move.0) == self.for_move {
+                        recorded = Some(Box::new(Removable {
+                            product,
+                            installed_by: r.idempotency,
+                        }));
+                    }
                     Installed::Done { restart_needed }
                 }
                 Outcome::AlreadyInPlace => Installed::AlreadyInPlace,

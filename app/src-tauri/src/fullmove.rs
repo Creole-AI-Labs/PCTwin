@@ -686,6 +686,8 @@ pub fn rebuild_here<R: Runtime>(
             &machine,
             &mut nonce,
         )
+        // The move these installs belong to: only its own undo can remove what it installs.
+        .for_move(scope.0)
     });
     #[cfg(windows)]
     let installer: &mut dyn Installer = match chain.as_mut() {
@@ -804,8 +806,7 @@ pub fn rebuild_here<R: Runtime>(
         Some(RestorePoint::NotMade { .. }) if !installs_here() => RestoreWord::NotAsked,
         Some(RestorePoint::NotMade { .. }) => RestoreWord::NotMade,
     };
-    let can_undo =
-        !done.undo.recipes.is_empty() || !done.undo.apps.is_empty() || !done.undo.landed.is_empty();
+    let can_undo = done.undo.has_anything();
     // One book per move, never over another move's: kept here and beside the journal, so Undo
     // still works after PCTwin restarts, for this move and every earlier one.
     let undo_id = can_undo.then(|| done.undo.id());
@@ -1176,12 +1177,13 @@ pub fn fullmove_undo<R: Runtime>(
     let app2 = app.clone();
     std::thread::Builder::new()
         .name("pctwin-undo".into())
-        .spawn(move || run_undo(&app2, epoch, &book))
+        .spawn(move || run_undo(&app2, epoch, book))
         .map(|_| ())
         .map_err(|_| crate::moving::MoveProblem::Failed)
 }
 
-fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
+fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
+    let book = &mut book;
     let guard = app.state::<AppGuard>();
     let state = app.state::<AppFullMove>();
     let close = || {
@@ -1309,6 +1311,12 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
                             ),
                             Err(_) => (Vec::new(), DisplayState::Failed),
                         };
+                    // Apps whose removal ended are settled in the book, kept here and beside
+                    // the journal: a later undo never asks for them again.
+                    lock(&state.books).insert(book.id(), book.clone());
+                    if let Some(folder) = books_folder(app) {
+                        let _ = crate::undo_books::save(&folder, book);
+                    }
                     let (lines, more) = bounded(lines);
                     publish(
                         app,

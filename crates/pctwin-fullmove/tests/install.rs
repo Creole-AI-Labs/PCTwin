@@ -21,7 +21,7 @@ use pctwin_fullmove::plan::AppEntry;
 use pctwin_fullmove::run::Installer;
 use pctwin_helper::Acted;
 use pctwin_helper::broker::actions::{
-    Action, ApprovedPlan, Hex32, InstalledProduct, ProductCode, ProductVersion,
+    Action, ApprovedPlan, Hex16, Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
 };
 use pctwin_helper::broker::receipt::{Outcome, Receipt};
 use pctwin_helper::broker::restore::RestorePointResult;
@@ -36,6 +36,7 @@ use sha2::Digest;
 
 const CODE: &str = "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}";
 const INSTALLER: &[u8] = b"an msi's bytes, as winget downloaded them";
+const MOVE: [u8; 16] = [0x4d; 16];
 
 fn manifest(code: &str, sha: Option<[u8; 32]>) -> String {
     let sha = sha
@@ -292,7 +293,8 @@ fn run_entry(winget: FakeWinget, mut helper: FakeHelper, e: AppEntry) -> Run {
             &mut helper,
             &machine,
             &mut nonce,
-        );
+        )
+        .for_move(MOVE);
         let results = chain.install(&refs, &mut || {});
         let point = chain.asked();
         (results, point)
@@ -485,12 +487,18 @@ fn winget_is_searched_by_the_product_code_for_the_plan() {
 }
 
 fn installed(code: &str, version: &str) -> Outcome {
+    installed_for(code, version, MOVE)
+}
+
+fn installed_for(code: &str, version: &str, for_move: [u8; 16]) -> Outcome {
     Outcome::Installed {
         restart_needed: false,
         product: InstalledProduct {
             code: ProductCode::parse(code).unwrap(),
             version: ProductVersion::parse(version).unwrap(),
+            installed_on: InstallDate::parse("20261028").unwrap(),
         },
+        for_move: Hex16(for_move),
     }
 }
 
@@ -519,6 +527,8 @@ fn an_msi_install_the_helper_saw_appear_is_kept_for_undo() {
         panic!()
     };
     assert_eq!(p.product_code, ProductCode::parse(CODE));
+    // The install names its move (review finding F3).
+    assert_eq!(p.for_move, Some(Hex16(MOVE)));
     let done = &r.results[0];
     assert_eq!(done.result.status(), ItemStatus::Reinstalled);
     let kept = done.removable.as_deref().expect("kept for undo");
@@ -543,6 +553,16 @@ fn nothing_is_kept_for_undo_unless_the_helper_and_the_list_agree() {
             ..FakeHelper::default()
         },
     );
+    assert_eq!(r.results[0].removable, None);
+    // The helper recorded it for another move (review finding F3).
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed_for(CODE, "2.1.0", [0x99; 16])),
+            ..FakeHelper::default()
+        },
+    );
+    assert!(r.results[0].installed);
     assert_eq!(r.results[0].removable, None);
     // The list showed the product before the install.
     let helper = FakeHelper {

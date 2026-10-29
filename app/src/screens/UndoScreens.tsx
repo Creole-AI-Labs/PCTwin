@@ -2,8 +2,10 @@
  * Undo (Task List 2.3 and 2.7; blueprint R05 and R06).
  *
  * R05, the preview: what undo would do with each change, looked at now: put back, the app removed
- * (the person's own data kept), kept because it changed after the move, only its service or maker can
- * undo it, or left alone because it was there before. Nothing happens until the person chooses Undo.
+ * (PCTwin does not touch files the person made; it cannot promise what the app's own uninstaller
+ * does), kept because it changed after the move, only its service or maker can undo it, or left
+ * alone because it was there before. When an app is to be removed, it says the laptop will ask an
+ * administrator to approve. Nothing happens until the person chooses Undo.
  *
  * R06, the result: Restored, Removed, As before, Kept because you changed it, Kept (and why under
  * More details), Kept under another name, Done elsewhere, or Not done yet (undo tries again). Never
@@ -56,6 +58,11 @@ export function UndoPreview({ screen }: { screen: Extract<ScreenView, { kind: "u
           <p className="subhead" />
         </Localized>
       )}
+      {screen.lines.some((l) => l.plan === "remove-app") ? (
+        <Localized id="guard-undo-preview-admin">
+          <p className="subhead" />
+        </Localized>
+      ) : null}
       <StateLine />
       <RefusalLine />
       <UndoLegend />

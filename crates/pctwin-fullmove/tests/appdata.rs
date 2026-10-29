@@ -491,7 +491,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         },
     };
     let rebuild_rec = Rebuild::new(&journal, &keys().install, &keys().setting);
-    let rebuilt = rebuild(
+    let mut rebuilt = rebuild(
         &plan,
         &done,
         &mut NoApps,
@@ -614,7 +614,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     let mut adapter = settings;
     let lines = pctwin_fullmove::undo::undo(
         &rebuild_rec,
-        &rebuilt.undo,
+        &mut rebuilt.undo,
         &mut adapter,
         Some((&keys().capture, &home)),
         &mut pctwin_fullmove::undo::ListOnly,

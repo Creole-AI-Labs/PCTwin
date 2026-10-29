@@ -15,7 +15,7 @@ use pctwin_fullmove::run::{Removable, RemovableApp};
 use pctwin_fullmove::undo::{AppUndo, HelperUndo, ListOnly, Result, UndoPlan};
 use pctwin_helper::Acted;
 use pctwin_helper::broker::actions::{
-    Action, ApprovedPlan, Hex32, InstalledProduct, ProductCode, ProductVersion,
+    Action, ApprovedPlan, Hex16, Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
 };
 use pctwin_helper::broker::receipt::{Outcome, Receipt};
 use pctwin_helper::broker::uninstall::UninstallResult;
@@ -24,9 +24,16 @@ use pctwin_record::RegistryView;
 
 const WRITER: &str = "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}";
 const VIEWER: &str = "{11111111-2222-3333-4444-555555555555}";
+const DAY: &str = "20261028";
+const MOVE: [u8; 16] = [0x4d; 16];
 
 fn entry(code: &str, version: &str) -> RawEntry {
+    entry_on(code, version, DAY)
+}
+
+fn entry_on(code: &str, version: &str, day: &str) -> RawEntry {
     let mut values = BTreeMap::new();
+    values.insert("installdate".into(), RegValue::Text(day.into()));
     values.insert("displayname".into(), RegValue::Text("An app".into()));
     values.insert("displayversion".into(), RegValue::Text(version.into()));
     values.insert("windowsinstaller".into(), RegValue::Number(1));
@@ -44,9 +51,11 @@ fn app(name: &str, code: &str, version: &str, key: u8) -> RemovableApp {
             product: InstalledProduct {
                 code: ProductCode::parse(code).unwrap(),
                 version: ProductVersion::parse(version).unwrap(),
+                installed_on: InstallDate::parse(DAY).unwrap(),
             },
             installed_by: Hex32([key; 32]),
         },
+        settled: None,
     }
 }
 
@@ -201,7 +210,7 @@ impl Bench {
             machine: &machine,
             nonce: &mut nonce,
         };
-        undo.remove(apps)
+        undo.remove(MOVE, apps)
     }
 }
 
@@ -267,6 +276,8 @@ fn the_version_installed_is_removed_through_the_helper_and_checked_gone() {
     };
     assert_eq!(u.product_code, ProductCode::parse(WRITER).unwrap());
     assert_eq!(u.installed_by, Hex32([1; 32]));
+    // The removal names the move the book is for (review finding F3).
+    assert_eq!(u.for_move, Hex16(MOVE));
     assert_eq!(b.helper.asked.len(), 1);
     assert!(b.helper.bye);
     // The other version is still there.
@@ -363,7 +374,7 @@ fn without_the_helper_each_app_is_left_for_the_person() {
     let apps = [app("Writer", WRITER, "2.1.0", 1)];
     let mut list = ListOnly;
     assert_eq!(list.plan(&apps[0]), UndoPlan::RemoveYourself);
-    assert_eq!(list.remove(&apps), [Result::RemoveYourself]);
+    assert_eq!(list.remove(MOVE, &apps), [Result::RemoveYourself]);
 }
 
 /// Each undo attempt is its own set of actions (a failed removal is tried again next time, not
@@ -393,7 +404,7 @@ fn each_attempt_names_its_own_actions() {
         machine: &machine,
         nonce: &mut nonce,
     }
-    .remove(&one);
+    .remove(MOVE, &one);
     let a = &first.helper.started[0];
     let b = &second.helper.started[0];
     assert_ne!(a.operations[0].action_id, b.operations[0].action_id);
@@ -419,4 +430,80 @@ fn an_unreadable_list_is_never_taken_as_gone() {
     assert_eq!(b.plan(&one), [UndoPlan::RemoveApp]);
     assert_eq!(b.remove(&one), [Result::NotRemoved]);
     assert_eq!(b.helper.asked.len(), 1);
+}
+
+/// F1: the same app at the same version, but written into the list on another day, was
+/// installed again since (by the person): kept, and never sent to the helper.
+#[test]
+fn an_app_installed_again_since_is_kept() {
+    let one = [app("Writer", WRITER, "2.1.0", 1)];
+    let mut b = Bench::new(
+        vec![entry_on(WRITER, "2.1.0", "20261105"), entry(VIEWER, "5.1")],
+        Does::Remove {
+            restart_needed: false,
+        },
+    );
+    assert_eq!(b.plan(&one), [UndoPlan::KeepOtherVersion]);
+    assert_eq!(b.remove(&one), [Result::KeptOtherVersion]);
+    assert!(b.helper.started.is_empty());
+}
+
+/// F2: an earlier attempt the helper found finished after a crash is said removed when the
+/// list shows it gone, and not removed when the list still shows it.
+#[test]
+fn a_removal_found_finished_after_a_crash_is_judged_by_the_list() {
+    let one = [app("Writer", WRITER, "2.1.0", 1)];
+    let mut gone = Bench::new(
+        vec![entry(WRITER, "2.1.0"), entry(VIEWER, "5.1")],
+        Does::Answers(Outcome::AlreadyInPlace),
+    );
+    // The fake answers without touching the list, so take it out as the earlier attempt did.
+    gone.helper.does = Does::Answers(Outcome::AlreadyInPlace);
+    let list = Rc::clone(&gone.list);
+    let machine = FakeMachine(Rc::clone(&list));
+    let mut n = 0u8;
+    let mut nonce = || {
+        n += 1;
+        Some([n; 16])
+    };
+    struct Removing<'a>(&'a mut FakeHelper, List);
+    impl Helper for Removing<'_> {
+        fn start(&mut self, p: &ApprovedPlan) -> std::result::Result<(), HelperDown> {
+            self.0.start(p)
+        }
+        fn stage(
+            &mut self,
+            a: u64,
+            h: Hex32,
+            s: u64,
+            r: &mut dyn std::io::Read,
+        ) -> std::result::Result<(), String> {
+            self.0.stage(a, h, s, r)
+        }
+        fn act(&mut self, r: &BrokerRequest) -> std::result::Result<Acted, String> {
+            self.1.borrow_mut().retain(|e| e.key != WRITER);
+            self.0.act(r)
+        }
+        fn bye(&mut self) {
+            self.0.bye();
+        }
+    }
+    let mut removing = Removing(&mut gone.helper, Rc::clone(&list));
+    let got = HelperUndo {
+        helper: &mut removing,
+        machine: &machine,
+        nonce: &mut nonce,
+    }
+    .remove(MOVE, &one);
+    assert_eq!(
+        got,
+        [Result::Removed {
+            restart_needed: false
+        }]
+    );
+    let mut still = Bench::new(
+        vec![entry(WRITER, "2.1.0"), entry(VIEWER, "5.1")],
+        Does::Answers(Outcome::AlreadyInPlace),
+    );
+    assert_eq!(still.remove(&one), [Result::NotRemoved]);
 }

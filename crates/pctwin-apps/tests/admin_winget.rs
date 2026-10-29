@@ -81,6 +81,7 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
     let handle = staging.admit(&mut bytes.as_slice(), sha).unwrap();
     let action = InstallVerifiedPackage {
         product_code: None,
+        for_move: None,
         artifact: handle,
         sha256: Hex32(sha),
         kind: PackageKind::Msi,
