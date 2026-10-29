@@ -247,7 +247,7 @@ describe("receiving", () => {
       expect(called("quicksend_receive")).toBe(true);
     });
     // What is coming is announced; nothing is saved until the person says where (29 October 2026).
-    send("quicksend-incoming", { files: offeredExamples });
+    send("quicksend-incoming", { files: offeredExamples, prompt: 1 });
     expect(heading()).toBe(text("qs-where-title"));
     expect(called("quicksend_save_here")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: text("qs-where-save") }));
@@ -279,7 +279,7 @@ describe("receiving", () => {
     await waitFor(() => {
       expect(called("quicksend_receive")).toBe(true);
     });
-    send("quicksend-incoming", { files: offeredExamples });
+    send("quicksend-incoming", { files: offeredExamples, prompt: 1 });
     const total = offeredExamples.reduce((n, f) => n + f.size, 0);
     expect(page()).toContain(plain(text("qs-where-body", { count: offeredExamples.length, size: formatBytes(total, "en") })));
     expect(page()).toContain(plain(text("qs-where-folder", { folder: "Downloads" })));

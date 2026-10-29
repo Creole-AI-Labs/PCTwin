@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use pctwin_quicksend::session::{Turn, Want, next_turn};
+use pctwin_quicksend::session::{Pace, Turn, Want, next_turn};
 use pctwin_quicksend::{Arrival, Offer, Outcome, receive, send_live};
 use pctwin_transfer::{Channel, ChannelError};
 use tokio::sync::mpsc;
@@ -28,7 +28,11 @@ fn pair() -> (Mem, Mem) {
     (Mem { tx: a_tx, rx: a_rx }, Mem { tx: b_tx, rx: b_rx })
 }
 
-const EVERY: Duration = Duration::from_millis(5);
+const EVERY: Pace = Pace {
+    every: Duration::from_millis(5),
+    min: Duration::from_millis(1),
+    step: Duration::from_secs(5),
+};
 
 fn file(dir: &Path, name: &str, body: &[u8]) -> Vec<PathBuf> {
     let p = dir.join(name);
@@ -162,4 +166,53 @@ async fn nothing_arrives_once_the_session_ended() {
 
 fn dirs() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
+}
+
+/// A laptop that goes silent in the middle of turn-taking ends the session after a while, on
+/// either side: nothing holds a session open forever.
+#[tokio::test(start_paused = true)]
+async fn a_silent_laptop_ends_the_session() {
+    let pace = Pace {
+        every: Duration::from_millis(500),
+        min: Duration::from_millis(250),
+        step: Duration::from_secs(30),
+    };
+    // The follower hears nothing from the leader.
+    let (_a, mut b) = pair();
+    let start = tokio::time::Instant::now();
+    let t = next_turn(&mut b, false, &mut || Want::default(), pace).await;
+    assert_eq!(t, Turn::Ended);
+    assert!(start.elapsed() >= Duration::from_secs(30));
+    // The leader gets no answer.
+    let (mut a, _b) = pair();
+    let t = next_turn(&mut a, true, &mut || Want::default(), pace).await;
+    assert_eq!(t, Turn::Ended);
+}
+
+/// A leader that asks as fast as it can is answered no faster than the follower's floor.
+#[tokio::test(start_paused = true)]
+async fn the_follower_answers_no_faster_than_its_floor() {
+    let (mut a, mut b) = pair();
+    let min = Duration::from_millis(250);
+    let fast = Pace {
+        every: Duration::ZERO,
+        min,
+        step: Duration::from_secs(30),
+    };
+    let mut answers = 0;
+    let mut quiet = || {
+        answers += 1;
+        Want {
+            offer: false,
+            end: answers > 8,
+        }
+    };
+    let start = tokio::time::Instant::now();
+    let mut nothing = Want::default;
+    let (ta, tb) = tokio::join!(
+        next_turn(&mut a, true, &mut nothing, fast),
+        next_turn(&mut b, false, &mut quiet, fast)
+    );
+    assert_eq!((ta, tb), (Turn::Ended, Turn::Ended));
+    assert!(start.elapsed() >= min * 8, "{:?}", start.elapsed());
 }

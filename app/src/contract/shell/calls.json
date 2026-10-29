@@ -373,8 +373,22 @@
       "name": "quicksend_choose_folder"
     },
     {
-      "args": [],
+      "args": [
+        [
+          "prompt",
+          1
+        ]
+      ],
       "name": "quicksend_save_here"
+    },
+    {
+      "args": [
+        [
+          "prompt",
+          1
+        ]
+      ],
+      "name": "quicksend_decline_here"
     },
     {
       "args": [],

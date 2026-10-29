@@ -206,7 +206,7 @@ describe("Remember this connection", () => {
     await waitFor(() => {
       expect(called("quicksend_receive")).toBe(true);
     });
-    send("quicksend-incoming", { files: [] });
+    send("quicksend-incoming", { files: [], prompt: 1 });
     fireEvent.click(button(text("qs-where-save")));
     send("quicksend-receipt", receipts[0]);
     send("quicksend-remember", { fallbackStore: false, connections: [{ id: ADA.id, label: ADA.label, lastUsed: ADA.lastUsed }, { id: KITCHEN.id, label: KITCHEN.label, lastUsed: KITCHEN.lastUsed }] });

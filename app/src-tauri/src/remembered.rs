@@ -757,15 +757,21 @@ async fn known_turn<R: Runtime>(
     label: &str,
     link: &mut Link,
     live: &Live,
-) -> Option<Option<crate::quicksend::ReceiptView>> {
-    let got = receive_or_stop(link, live).await?;
+) -> Option<crate::sessions::Received> {
+    // The offer the other laptop took the turn for must come soon.
+    let got = tokio::time::timeout(crate::sessions::OFFER_WAIT, receive_or_stop(link, live))
+        .await
+        .ok()??;
     if !st.remembered(app, id) || live.control.stopped() {
         return None;
     }
     match got.ok()? {
         pctwin_quicksend::Arrival::Files(incoming) => {
             match receive_files(app, st, qs, id, label, incoming, link, live).await {
-                Ok(()) => Some(None),
+                Ok(()) => Some(crate::sessions::Received {
+                    receipt: None,
+                    declined: false,
+                }),
                 Err(e) => {
                     let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
                     None

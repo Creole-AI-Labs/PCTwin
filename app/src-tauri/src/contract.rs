@@ -1411,6 +1411,7 @@ fn families() -> Vec<(&'static str, Value)> {
             "qs-incoming",
             json([crate::quicksend::IncomingView {
                 files: qs_offered(),
+                prompt: 1,
             }]),
         ),
         ("qs-receipt", json(qs_receipts())),
@@ -1908,7 +1909,8 @@ fn calls() -> Value {
             { "name": "quicksend_receive", "args": [] },
             { "name": "quicksend_folder", "args": [] },
             { "name": "quicksend_choose_folder", "args": [] },
-            { "name": "quicksend_save_here", "args": [] },
+            { "name": "quicksend_save_here", "args": [["prompt", 1]] },
+            { "name": "quicksend_decline_here", "args": [["prompt", 1]] },
             { "name": "quicksend_open_folder", "args": [] },
             { "name": "quicksend_keep_original_dates", "args": [] },
             { "name": "quicksend_pause", "args": [] },

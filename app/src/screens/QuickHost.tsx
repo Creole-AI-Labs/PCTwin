@@ -115,6 +115,8 @@ export default function QuickHost({
   // For the engine's events (the listener is set once): which side this is, and whether Save here was pressed.
   const senderRef = useRef(sender);
   const savedRef = useRef(false);
+  // The question the Save on the "where" page answers (a late click never answers the next).
+  const promptRef = useRef(0);
   const [view, setView] = useState<View>({ kind: mode === "note" ? "compose" : sender ? "pick" : "folder" });
   // The note being typed, and why the last try was refused.
   const [noteText, setNoteText] = useState("");
@@ -175,6 +177,7 @@ export default function QuickHost({
       // What is being received: kept for the sizes on the Done page, never a page of its own.
       if (event.kind === "incoming") {
         setOffered(event.files);
+        promptRef.current = event.prompt;
         // The receiver: what is coming is announced, then PCTwin waits for where it goes.
         if (!senderRef.current) setView((v) => (v.kind === "progress" && !savedRef.current ? { kind: "where" } : v));
         return;
@@ -568,7 +571,7 @@ export default function QuickHost({
               onClick={() => {
                 savedRef.current = true;
                 setView({ kind: "progress", progress: STARTING });
-                qsSaveHere().catch(fail);
+                qsSaveHere(promptRef.current).catch(fail);
               }}
             >
               {l10n.getString("qs-where-save")}
