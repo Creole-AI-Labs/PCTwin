@@ -2824,3 +2824,25 @@ qs-sends-paused = 已暂停
 qs-send-pause = 暂停
 qs-send-resume = 继续
 qs-send-cancel = 取消
+
+# Open sends: Add files, Send to, several laptops at once, questions that wait, a live file being copied
+qs-session-ended-name = { $name }：这次发送已结束，不会再收到任何内容。
+qs-sends-action-name = { $what }：{ $name }
+qs-sends-title = 你的发送
+qs-sends-intro = PCTwin 最多同时向三台电脑发送；发给同一台电脑时一次发一份。其他的排队等候。
+qs-sends-empty = 现在没有正在发送的内容。
+qs-sends-ended-title = 已结束的发送
+qs-sends-stopped = 它在完成前被停止了。
+qs-sends-result-whole = 已复制并检查
+qs-sends-result-partial = 有些未复制
+qs-sends-not-sent = 未发送给 { $name }。
+qs-sends-failed = PCTwin 无法更改这次发送。请再试一次。
+qs-session-offer-waiting = { $name } 正在给你发送更多文件。
+qs-session-offer-show = 选择保存位置
+qs-to-now-several-hint = 每台电脑都必须开着并在附近。PCTwin 最多同时向三台发送，其他的排队等候。
+qs-asking-files = { $label } 想给你发送文件。
+qs-asking-note = { $label } 给你发了一张便条。
+qs-asking-later = 你离开此页面时，PCTwin 会问你。
+qs-asking-show = 选择保存位置
+qs-asking-show-note = 显示便条
+progress-current-open-in = PCTwin 复制 { $name } 期间，{ $app } 无法保存对它的更改。如果 { $app } 提示文件正在使用，请等复制完成。

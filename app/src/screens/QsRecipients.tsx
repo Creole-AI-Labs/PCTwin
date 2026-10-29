@@ -13,9 +13,9 @@ export type When = "now" | "later";
 
 /**
  * Q04 and Q17 together: who gets the files chosen on the pick page. Remembered laptops are ticked
- * (several in one approval), or "Use a code instead" pairs a laptop with the code as before. With
- * one laptop ticked, Now sends while it is nearby; When it is nearby (always, for several) makes a
- * waiting send: "Approve this delivery" covers these files as they are now, these laptops and how
+ * (several in one approval), or "Use a code instead" pairs a laptop with the code as before. Now
+ * sends while the laptops are nearby: up to three at the same time, the others waiting their turn
+ * (29 October 2026). When it is nearby makes a waiting send: "Approve this delivery" covers these files as they are now, these laptops and how
  * long it waits, and PCTwin keeps a copy to send. Each laptop is still asked where to save, unless
  * it allowed sends into a folder.
  * Events: onToggle(id, on), onWhen, onDays, onCode, onSendNow, onApprove, onBack.
@@ -52,7 +52,7 @@ export default function QsRecipients({
 }) {
   const { l10n } = useLocalization();
   const one = chosen.length === 1;
-  const now = one && when === "now";
+  const now = when === "now";
   return (
     <>
       <QsStrip onBack={onBack} />
@@ -83,22 +83,16 @@ export default function QsRecipients({
 
       {chosen.length > 0 && (
         <section className="qs-card" aria-label={l10n.getString("qs-to-when")}>
-          {one ? (
-            <Segmented
-              label={l10n.getString("qs-to-when")}
-              hint={l10n.getString(when === "now" ? "qs-to-now-hint" : "qs-waiting-on")}
-              value={when}
-              options={[
-                { value: "now", label: l10n.getString("qs-to-now") },
-                { value: "later", label: l10n.getString("qs-to-later") },
-              ]}
-              onChange={onWhen}
-            />
-          ) : (
-            <p className="qs-small">
-              {l10n.getString("qs-to-several")} {l10n.getString("qs-waiting-on")}
-            </p>
-          )}
+          <Segmented
+            label={l10n.getString("qs-to-when")}
+            hint={now ? l10n.getString(one ? "qs-to-now-hint" : "qs-to-now-several-hint") : one ? l10n.getString("qs-waiting-on") : `${l10n.getString("qs-to-several")} ${l10n.getString("qs-waiting-on")}`}
+            value={when}
+            options={[
+              { value: "now", label: l10n.getString(one ? "qs-to-now" : "qs-to-now-several") },
+              { value: "later", label: l10n.getString("qs-to-later") },
+            ]}
+            onChange={onWhen}
+          />
           {!now && (
             <Select
               label={l10n.getString("qs-to-days")}
@@ -115,7 +109,7 @@ export default function QsRecipients({
 
       <FrameFooter note="send">
         {now ? (
-          <Button variant="primary" disabled={busy} onClick={onSendNow}>
+          <Button variant="primary" disabled={busy || chosen.length === 0} onClick={onSendNow}>
             {l10n.getString("qs-to-send-now")}
           </Button>
         ) : (

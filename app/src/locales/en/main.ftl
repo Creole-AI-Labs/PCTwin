@@ -2977,3 +2977,25 @@ qs-sends-paused = Paused
 qs-send-pause = Pause
 qs-send-resume = Resume
 qs-send-cancel = Cancel
+
+# Open sends: Add files, Send to, several laptops at once, questions that wait, a live file being copied
+qs-session-ended-name = { $name }: this send is over. Nothing more arrives.
+qs-sends-action-name = { $what }: { $name }
+qs-sends-title = Your sends
+qs-sends-intro = PCTwin sends to up to three laptops at the same time, and one send after another to the same laptop. The others wait their turn.
+qs-sends-empty = Nothing is being sent now.
+qs-sends-ended-title = Finished sends
+qs-sends-stopped = It was stopped before the end.
+qs-sends-result-whole = Copied and checked
+qs-sends-result-partial = Some did not copy
+qs-sends-not-sent = Not sent to { $name }.
+qs-sends-failed = PCTwin could not change that send. Try again.
+qs-session-offer-waiting = { $name } is sending you more files.
+qs-session-offer-show = Choose where to save
+qs-to-now-several-hint = Each laptop must be on and nearby. PCTwin sends to up to three at the same time; the others wait their turn.
+qs-asking-files = { $label } wants to send you files.
+qs-asking-note = { $label } sent you a note.
+qs-asking-later = PCTwin asks you about it when you leave this page.
+qs-asking-show = Choose where to save
+qs-asking-show-note = Show the note
+progress-current-open-in = While PCTwin copies { $name }, { $app } cannot save changes to it. If { $app } says the file is in use, wait for the copy to finish.

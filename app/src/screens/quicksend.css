@@ -685,3 +685,23 @@
 .qs-card > .qs-small:first-child {
   margin-top: 0;
 }
+
+/* An open send's own buttons (Add files, Send to <name>, End), one line per laptop when several. */
+.qs-open-send {
+  margin-top: var(--space-4);
+}
+
+.qs-open-send-name {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+/* The other laptop offers more while files are being chosen: said here, answered when the person chooses. */
+.qs-offer-waiting {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  justify-items: start;
+}

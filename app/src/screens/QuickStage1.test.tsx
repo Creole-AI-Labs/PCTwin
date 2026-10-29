@@ -7,6 +7,9 @@ import incomingExamples from "../contract/known-incoming.json";
 import noteExamples from "../contract/qs-note.json";
 import receipts from "../contract/qs-receipt.json";
 import waitingExamples from "../contract/waiting-send.json";
+import sessionExamples from "../contract/qs-session.json";
+import sendExamples from "../contract/qs-send.json";
+import sessionReceiptExamples from "../contract/qs-session-receipt.json";
 import { violations } from "../testing/a11y";
 import { localization } from "../i18n";
 import App from "../App";
@@ -401,7 +404,7 @@ describe("choosing who gets the files", () => {
     return onWaiting;
   }
 
-  it("one remembered laptop, now: sent over its own connection, then the progress page", async () => {
+  it("one remembered laptop, now: sent over its own connection, then the list of sends", async () => {
     await atRecipients();
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes("Ada's laptop") }));
@@ -410,9 +413,32 @@ describe("choosing who gets the files", () => {
       expect(tauri.invoke).toHaveBeenCalledWith("known_send", { id: ADA.id });
     });
     await waitFor(() => {
-      expect(heading()).toBe(text("qs-sending-title"));
+      expect(heading()).toBe(text("qs-sends-title"));
     });
     expect(called("pairing_old_start")).toBe(false);
+  });
+
+  it("several laptops now: the same files offered again for each, each sent over its own connection", async () => {
+    replies.known_send = (args) => {
+      if ((args as { id: string }).id === DESKTOP.id) refuse("not-nearby")();
+      return null;
+    };
+    await atRecipients();
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes("Ada's laptop") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes("Old desktop") }));
+    expect(page()).toContain(text("qs-to-now-several-hint"));
+    fireEvent.click(button(text("qs-to-send-now")));
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-sends-title"));
+    });
+    const sends = tauri.invoke.mock.calls.filter((c: unknown[]) => c[0] === "known_send").map((c: unknown[]) => c[1]);
+    expect(sends).toEqual([{ id: ADA.id }, { id: DESKTOP.id }]);
+    // Offered once on the pick page, and again before the second laptop.
+    expect(tauri.invoke.mock.calls.filter((c: unknown[]) => c[0] === "quicksend_offer").length).toBe(2);
+    // The laptop that could not be reached is said by name, with why.
+    expect(page()).toContain(plain(text("qs-sends-not-sent", { name: DESKTOP.label })));
+    expect(page()).toContain(text("qs-refusal-not-nearby"));
+    expect(await violations()).toEqual([]);
   });
 
   it("not nearby: said on the same page, nothing else happens", async () => {
@@ -431,7 +457,8 @@ describe("choosing who gets the files", () => {
     const onWaiting = await atRecipients();
     fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes("Ada's laptop") }));
     fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes("Old desktop") }));
-    // With several, there is no Now.
+    // Several can go now too; When it is nearby makes one approval for all of them.
+    fireEvent.click(screen.getByRole("radio", { name: text("qs-to-later") }));
     expect(screen.queryByRole("button", { name: text("qs-to-send-now") })).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: text("qs-to-days") }), { target: { value: "14" } });
     fireEvent.click(button(text("qs-to-approve")));
@@ -503,17 +530,165 @@ describe("waiting sends", () => {
 });
 
 describe("the open send's own buttons", () => {
-  it("have their place but show nothing until the engine part is wired", () => {
-    const { container } = inApp(<OpenSendActions peer="Ada's laptop" />);
+  const [OPEN, ENDING] = sessionExamples;
+  it("show nothing without an open send; Add files on the sender, Send to <name> on the receiver, and End", () => {
+    const { container } = inApp(<OpenSendActions sessions={[]} peer="Receiving laptop" side="send" onAdd={vi.fn()} onEnd={vi.fn()} />);
     expect(container.querySelector("[data-slot=open-send]")).toBeNull();
     cleanup();
-    const onAddFiles = vi.fn();
-    const onSendTo = vi.fn();
-    inApp(<OpenSendActions peer="Ada's laptop" onAddFiles={onAddFiles} onSendTo={onSendTo} />);
-    fireEvent.click(button(text("qs-add-files")));
-    fireEvent.click(button(text("qs-send-to", { name: "Ada's laptop" })));
-    expect(onAddFiles).toHaveBeenCalled();
-    expect(onSendTo).toHaveBeenCalled();
+    const onAdd = vi.fn();
+    const onEnd = vi.fn();
+    inApp(<OpenSendActions sessions={[{ ...OPEN, name: null }]} peer="Receiving laptop" side="send" onAdd={onAdd} onEnd={onEnd} />);
+    fireEvent.click(button(text("qs-session-add-files")));
+    expect(onAdd).toHaveBeenCalledWith({ ...OPEN, name: null });
+    // The six-digit send has no name from the engine: the page's own name for the other laptop.
+    fireEvent.click(screen.getByRole("button", { name: (n) => plain(n) === plain(text("qs-sends-action-name", { what: text("qs-session-end"), name: "Receiving laptop" })) }));
+    expect(onEnd).toHaveBeenCalled();
+    cleanup();
+    inApp(<OpenSendActions sessions={[OPEN]} peer="Sending laptop" side="receive" onAdd={onAdd} onEnd={onEnd} />);
+    expect(button(text("qs-session-send-to", { name: "Ada's laptop" }))).toBeTruthy();
+  });
+
+  it("an ending send says so and offers nothing", () => {
+    inApp(<OpenSendActions sessions={[ENDING]} peer="Receiving laptop" side="send" onAdd={vi.fn()} onEnd={vi.fn()} />);
+    expect(page()).toContain(text("qs-session-ended"));
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+const PICKED = { id: "p1", name: "letter.txt", kind: "file", included: true, bytes: 1200, files: 1 };
+
+describe("an open send, after the first files", () => {
+  const SESSION = sessionExamples[0].id;
+  async function sentWithTheCode() {
+    replies.quicksend_offer = () => [{ id: "f1", path: "letter.txt", size: 1200 }];
+    replies.quicksend_pick = () => [PICKED];
+    inApp(<QuickHost mode="send" onHome={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-add-files")) }));
+    await waitFor(() => {
+      expect(screen.getByText("letter.txt")).toBeTruthy();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: (n) => plain(n) === plain(text("qs-choose-continue")) }));
+    await waitFor(() => {
+      expect(called("pairing_old_start")).toBe(true);
+    });
+    send("pairing-old", { kind: "paired" });
+    await waitFor(() => {
+      expect(called("quicksend_send")).toBe(true);
+    });
+    send("quicksend-receipt", receipts[0]);
+    // The engine opens the send for more, with no name: the code's pairing.
+    send("quicksend-sessions", [{ id: SESSION, name: null, ending: false }]);
+  }
+
+  it("the sender's Add files: a fresh pick page, the offer queued in that send, then the list with Pause and Cancel", async () => {
+    await sentWithTheCode();
+    replies.quicksend_session_add = () => [{ ...sendExamples[0], session: SESSION, name: null, state: "waiting" }];
+    fireEvent.click(await screen.findByRole("button", { name: text("qs-session-add-files") }));
+    await waitFor(() => {
+      expect(called("quicksend_clear")).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-add-files")) }));
+    fireEvent.click(await screen.findByRole("button", { name: (n) => plain(n) === plain(text("qs-choose-continue")) }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_session_add", { session: SESSION });
+    });
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-sends-title"));
+    });
+    // Named as the page names the other laptop; no second pairing.
+    expect(page()).toContain(text("qs-label-receiving"));
+    expect(page()).toContain(text("qs-sends-waiting"));
+    expect(tauri.invoke.mock.calls.filter((c: unknown[]) => c[0] === "pairing_old_start").length).toBe(1);
+    replies.quicksend_send_pause = () => [{ ...sendExamples[0], session: SESSION, name: null, state: "waiting", paused: true }];
+    fireEvent.click(screen.getByRole("button", { name: (n) => plain(n) === plain(text("qs-sends-action-name", { what: text("qs-send-pause"), name: text("qs-label-receiving") })) }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_send_pause", { id: 1 });
+    });
+    await waitFor(() => {
+      expect(page()).toContain(text("qs-sends-paused"));
+    });
+    replies.quicksend_send_cancel = () => [];
+    fireEvent.click(screen.getByRole("button", { name: (n) => plain(n) === plain(text("qs-sends-action-name", { what: text("qs-send-cancel"), name: text("qs-label-receiving") })) }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_send_cancel", { id: 1 });
+    });
+    // Its result comes by the receiving laptop's own count, never before.
+    send("quicksend-sends", [{ ...sendExamples[0], session: SESSION, name: null }]);
+    send("quicksend-session-receipt", { ...sessionReceiptExamples[0], session: SESSION, send: 1 });
+    send("quicksend-sends", []);
+    await waitFor(() => {
+      expect(page()).toContain(text("qs-sends-ended-title"));
+    });
+    expect(page()).toContain(plain(text("qs-known-delivered-counts", { arrived: 2, total: 5 })));
+    expect(await violations()).toEqual([]);
+  });
+
+  it("the other laptop's Send to: asked where to save like the first, then received, then its Done page", async () => {
+    await sentWithTheCode();
+    replies.quicksend_folder = () => DOWNLOADS;
+    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }] });
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-where-title"));
+    });
+    await waitFor(() => {
+      expect(page()).toContain(plain(text("qs-where-folder", { folder: "Downloads" })));
+    });
+    fireEvent.click(button(text("qs-where-save")));
+    await waitFor(() => {
+      expect(called("quicksend_save_here")).toBe(true);
+    });
+    send("quicksend-session-receipt", { session: SESSION, send: null, receipt: receipts.find((r) => r.side === "receiver") ?? receipts[0] });
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1 }).textContent).not.toBe(text("qs-where-title"));
+    });
+    expect(screen.queryByRole("button", { name: text("qs-where-save") })).toBeNull();
+  });
+
+  it("declining more files keeps the send open and goes back", async () => {
+    await sentWithTheCode();
+    replies.quicksend_folder = () => DOWNLOADS;
+    send("quicksend-incoming", { files: [{ id: "00112233445566778899aabbccddeef9", path: "back.pdf", size: 20 }] });
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-where-title"));
+    });
+    fireEvent.click(button(text("qs-where-stop")));
+    await waitFor(() => {
+      expect(called("quicksend_stop")).toBe(true);
+    });
+    expect(called("quicksend_session_end")).toBe(false);
+    expect(button(text("qs-session-add-files"))).toBeTruthy();
+  });
+
+  it("End closes the send", async () => {
+    await sentWithTheCode();
+    fireEvent.click(await screen.findByRole("button", { name: (n) => plain(n) === plain(text("qs-sends-action-name", { what: text("qs-session-end"), name: text("qs-label-receiving") })) }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_session_end", { session: SESSION });
+    });
+  });
+});
+
+describe("a remembered laptop asking while the person is busy", () => {
+  it("is said at the top, never dropped, and asked as soon as the busy page is left", async () => {
+    replies.quicksend_folder = () => DOWNLOADS;
+    render(<App initialLanguage="en" />);
+    await act(async () => {});
+    // PCTwin was handed files to send: the send's pick page opens.
+    send("quicksend-launch", [PICKED]);
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-choose-title"));
+    });
+    send("known-incoming", INCOMING);
+    // The send page stays; the question waits, said in words.
+    expect(heading()).toBe(text("qs-choose-title"));
+    expect(page()).toContain(plain(text("qs-asking-files", { label: INCOMING.label })));
+    expect(page()).toContain(text("qs-asking-later"));
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "PCTwin home" }));
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-where-title"));
+    });
+    expect(page()).not.toContain(plain(text("qs-asking-later")));
   });
 });
 

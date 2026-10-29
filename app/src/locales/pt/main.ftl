@@ -3203,3 +3203,25 @@ qs-sends-paused = Pausado
 qs-send-pause = Pausar
 qs-send-resume = Continuar
 qs-send-cancel = Cancelar
+
+# Open sends: Add files, Send to, several laptops at once, questions that wait, a live file being copied
+qs-session-ended-name = { $name }: este envio terminou. Nada mais chega.
+qs-sends-action-name = { $what }: { $name }
+qs-sends-title = Seus envios
+qs-sends-intro = O PCTwin envia para até três notebooks ao mesmo tempo, e um envio depois do outro para o mesmo notebook. Os outros esperam a vez.
+qs-sends-empty = Nada está sendo enviado agora.
+qs-sends-ended-title = Envios terminados
+qs-sends-stopped = Ele foi parado antes do fim.
+qs-sends-result-whole = Copiados e verificados
+qs-sends-result-partial = Alguns não foram copiados
+qs-sends-not-sent = Não enviado para { $name }.
+qs-sends-failed = O PCTwin não conseguiu mudar esse envio. Tente de novo.
+qs-session-offer-waiting = { $name } está enviando mais arquivos para você.
+qs-session-offer-show = Escolher onde salvar
+qs-to-now-several-hint = Cada notebook precisa estar ligado e por perto. O PCTwin envia para até três ao mesmo tempo; os outros esperam a vez.
+qs-asking-files = { $label } quer enviar arquivos para você.
+qs-asking-note = { $label } enviou uma nota para você.
+qs-asking-later = O PCTwin pergunta sobre isso quando você sair desta página.
+qs-asking-show = Escolher onde salvar
+qs-asking-show-note = Mostrar a nota
+progress-current-open-in = Enquanto o PCTwin copia { $name }, { $app } não consegue salvar alterações nele. Se { $app } disser que o arquivo está em uso, espere a cópia terminar.

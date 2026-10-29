@@ -30,7 +30,14 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  qsSendCancel,
+  qsSendPause,
+  qsSendResume,
+  qsSessionAdd,
+  qsSessionEnd,
   toMoveProblem,
+  type QsSend,
+  type QsSession,
   type QsFolder,
   type QsProblem,
   type QsReceipt,
@@ -50,6 +57,8 @@ import QuickStop from "./QuickStop";
 import { Folder, Tile } from "./QsParts";
 import { NoteCompose, NoteInHost, NoteSent, noteProblem } from "./QsNote";
 import OpenSendActions from "./QsOpenSend";
+import QsSends, { type NotSent } from "./QsSends";
+import { clearResults, showSends, useOpenSends } from "../openSends";
 import QsRecipients, { type WaitDays, type When } from "./QsRecipients";
 import { RememberOffer } from "./QsRemember";
 import "./progress.css";
@@ -73,7 +82,10 @@ type View =
   /** The receiver, once paired and told what is coming: where should these go? Nothing is saved before Save here (29 October 2026). */
   | { kind: "where" }
   | { kind: "progress"; progress: SendProgress }
-  | { kind: "done"; receipt: QsReceipt }
+  /** `listed`: a result opened from the list of sends, where Done returns. */
+  | { kind: "done"; receipt: QsReceipt; listed?: boolean }
+  /** Your sends: every send going on now, each with Pause, Resume and Cancel, and the results. */
+  | { kind: "sends" }
   | { kind: "problem"; problem: QsProblem };
 
 /** "Remember this connection", offered after an exchange over the code; `remembered`: the name it took. */
@@ -97,25 +109,54 @@ function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
  */
 export default function QuickHost({
   mode,
+  session,
   onHome,
   onWaiting,
   onWindow,
+  onIdle,
 }: {
-  /** `note`: send a note or link (Q24) over the code. */
-  mode: "send" | "receive" | "note";
+  /** `note`: send a note or link (Q24) over the code; `sends`: the list of sends going on now. */
+  mode: "send" | "receive" | "note" | "sends";
+  /** Add files to this open send (Send to <name> from a remembered laptop's page): the pick page first, then the list of sends. */
+  session?: string;
   onHome: () => void;
   /** A waiting send was approved: show the waiting sends. */
   onWaiting?: () => void;
   /** The window size the page asks for, so the frame can fit it (the mini box has no header). */
   onWindow?: (mode: WindowMode) => void;
+  /** Whether leaving now loses nothing (the Done page, the list of sends): another question may then be shown. */
+  onIdle?: (idle: boolean) => void;
 }) {
   const { l10n } = useLocalization();
   const bytes = useBytes();
   const sender = mode !== "receive";
+  // Open sends (Add files, Send to <name>, several laptops at once), from the engine's list.
+  const open = useOpenSends();
+  // The open sends that were there before this page: not this page's (unless it opened on the list).
+  const [before] = useState(() => (mode === "sends" || session ? new Set<string>() : new Set(open.sessions.map((s) => s.id))));
+  const mine = open.sessions.filter((s) => !before.has(s.id));
+  const mineRef = useRef<QsSession[]>(mine);
+  useEffect(() => {
+    mineRef.current = mine;
+  });
+  // Add files to an open send: which one, and the page to go back to.
+  const [addTo, setAddTo] = useState<{ session: string; back: View } | null>(session ? { session, back: { kind: "sends" } } : null);
+  // Laptops a send now could not reach (several at once), and a Pause, Resume or Cancel not taken.
+  const [notSent, setNotSent] = useState<NotSent[]>([]);
+  const [sendsFailed, setSendsFailed] = useState(false);
+  // The other laptop offered more in an open send: the page asks where they go, then receives them.
+  const sessionReceive = useRef<{ back: View } | null>(null);
+  // ... and it came while the person was choosing files: said on that page, never taking them off it.
+  const [offerWaiting, setOfferWaiting] = useState(false);
   // For the engine's events (the listener is set once): which side this is, and whether Save here was pressed.
   const senderRef = useRef(sender);
   const savedRef = useRef(false);
-  const [view, setView] = useState<View>({ kind: mode === "note" ? "compose" : sender ? "pick" : "folder" });
+  const [view, setView] = useState<View>({ kind: mode === "sends" ? "sends" : mode === "note" ? "compose" : sender ? "pick" : "folder" });
+  const viewRef = useRef<View>(view);
+  useEffect(() => {
+    viewRef.current = view;
+    onIdle?.(view.kind === "done" || view.kind === "sends");
+  }, [view, onIdle]);
   // The note being typed, and why the last try was refused.
   const [noteText, setNoteText] = useState("");
   const [noteRefused, setNoteRefused] = useState<QsRefusal | null>(null);
@@ -175,6 +216,16 @@ export default function QuickHost({
       // What is being received: kept for the sizes on the Done page, never a page of its own.
       if (event.kind === "incoming") {
         setOffered(event.files);
+        // More from the other laptop in an open send: asked where they go, exactly as the first.
+        const v = viewRef.current;
+        if (mineRef.current.some((s) => !s.ending) && v.kind !== "where" && !(v.kind === "progress" && !savedRef.current && !senderRef.current)) {
+          savedRef.current = false;
+          sessionReceive.current = { back: v.kind === "done" || v.kind === "sends" ? v : { kind: "sends" } };
+          setDatesKept(null);
+          if (v.kind === "pick" || v.kind === "to") setOfferWaiting(true);
+          else setView({ kind: "where" });
+          return;
+        }
         // The receiver: what is coming is announced, then PCTwin waits for where it goes.
         if (!senderRef.current) setView((v) => (v.kind === "progress" && !savedRef.current ? { kind: "where" } : v));
         return;
@@ -223,6 +274,12 @@ export default function QuickHost({
         if (note.from === null) setView((v) => (v.kind === "progress" || v.kind === "note" ? { kind: "note", note } : v));
       } else if (event.kind === "launch") {
         setItems((old) => merged(old, event.items));
+      } else if (event.kind === "session-receipt" && event.result.send === null && sessionReceive.current) {
+        // What the other laptop offered in the open send, received here: its Done page.
+        sessionReceive.current = null;
+        setOfferWaiting(false);
+        const receipt = event.result.receipt;
+        setView({ kind: "done", receipt });
       }
     }).then((stop) => {
       if (on) unlisten = stop;
@@ -300,6 +357,76 @@ export default function QuickHost({
     setView({ kind: "problem", problem: { kind: "failed", detail: "" } });
   };
 
+  // The sender, on the other laptop's way back in an open send: where those files go is asked
+  // here too, so the folder is found when it is first needed.
+  useEffect(() => {
+    if (view.kind !== "where" || folder !== null) return;
+    let on = true;
+    qsFolder().then(
+      (f) => {
+        if (on) setFolder(f);
+      },
+      () => {
+        if (on) setFolderFailed(true);
+      },
+    );
+    return () => {
+      on = false;
+    };
+  }, [view.kind, folder]);
+
+  // Add files (or Send to <name>) in an open send: a fresh pick page, then the list of sends.
+  const addFiles = (s: QsSession) => {
+    setNotSent([]);
+    setToRefused(null);
+    setTooMany(false);
+    void qsClear().catch(() => undefined);
+    setItems([]);
+    setAddTo({ session: s.id, back: view });
+    setView({ kind: "pick" });
+  };
+  const endSession = (s: QsSession) => {
+    setSendsFailed(false);
+    qsSessionEnd(s.id).catch(() => {
+      setSendsFailed(true);
+    });
+  };
+  const onList = (command: (id: number) => Promise<QsSend[]>) => (id: number) => {
+    setSendsFailed(false);
+    command(id).then(showSends, () => {
+      setSendsFailed(true);
+    });
+  };
+
+  // Send now to the remembered laptops ticked: each gets the same files, up to three at the same
+  // time (the engine queues the rest). The pick page's offer goes with the first; each further
+  // laptop gets the same choice offered again. A laptop that could not be reached is said, by name.
+  const sendNow = async () => {
+    const ids = items.filter((i) => i.included && !i.problem).map((i) => i.id);
+    const failedTo: NotSent[] = [];
+    let first: QsRefusal | null = null;
+    let sent = 0;
+    for (const [i, id] of chosenTo.entries()) {
+      const to = known.find((c) => c.id === id);
+      try {
+        if (i > 0) await qsOffer(ids);
+        await knownSend(id);
+        sent++;
+      } catch (error: unknown) {
+        const refusal = toQsRefusal(error);
+        first ??= refusal;
+        failedTo.push({ name: to?.label ?? "", refusal });
+      }
+    }
+    setBusy(false);
+    if (sent === 0) {
+      setToRefused(first);
+      return;
+    }
+    setNotSent(failedTo);
+    setView({ kind: "sends" });
+  };
+
   const chooseFolder = () => {
     setFolderFailed(false);
     qsChooseFolder().then(
@@ -346,6 +473,7 @@ export default function QuickHost({
   );
 
   const peerName = peer ? labelShownSafely(l10n, peer) : l10n.getString(sender ? "qs-label-receiving" : "qs-label-sending");
+  const openSend = <OpenSendActions sessions={mine} peer={peerName} side={sender ? "send" : "receive"} onAdd={addFiles} onEnd={endSession} />;
 
   switch (view.kind) {
     case "compose":
@@ -399,21 +527,9 @@ export default function QuickHost({
             setView({ kind: "pair" });
           }}
           onSendNow={() => {
-            const id = chosenTo[0];
-            const to = known.find((c) => c.id === id);
             setToRefused(null);
             setBusy(true);
-            knownSend(id).then(
-              () => {
-                setBusy(false);
-                if (to) setPeer({ kind: "named", name: to.label });
-                setView({ kind: "progress", progress: STARTING });
-              },
-              (error: unknown) => {
-                setBusy(false);
-                setToRefused(toQsRefusal(error));
-              },
-            );
+            void sendNow();
           }}
           onApprove={() => {
             setToRefused(null);
@@ -453,9 +569,24 @@ export default function QuickHost({
             onContinue={() => {
               const ids = items.filter((i) => i.included && !i.problem).map((i) => i.id);
               setTooMany(false);
+              setToRefused(null);
               qsOffer(ids).then(
                 (files) => {
                   setOffered(files);
+                  // Add files in an open send: it waits its turn there, shown in the list of sends.
+                  if (addTo) {
+                    qsSessionAdd(addTo.session).then(
+                      (list) => {
+                        showSends(list);
+                        setAddTo(null);
+                        setView({ kind: "sends" });
+                      },
+                      (error: unknown) => {
+                        setToRefused(toQsRefusal(error));
+                      },
+                    );
+                    return;
+                  }
                   // Remembered laptops: choose who gets it; otherwise pair with the code.
                   setView({ kind: known.length > 0 ? "to" : "pair" });
                 },
@@ -466,9 +597,32 @@ export default function QuickHost({
                 },
               );
             }}
-            onBack={onHome}
+            onBack={
+              addTo
+                ? () => {
+                    const back = addTo.back;
+                    setAddTo(null);
+                    if (session && back.kind === "sends") onHome();
+                    else setView(back);
+                  }
+                : onHome
+            }
           />
           {failed && <Banner tone="attention">{l10n.getString("qs-pick-failed")}</Banner>}
+          {addTo && toRefused && <Banner tone="attention">{l10n.getString(`qs-refusal-${toRefused.kind}`)}</Banner>}
+          {offerWaiting && (
+            <div role="status" className="qs-offer-waiting">
+              <Banner tone="info">{l10n.getString("qs-session-offer-waiting", { name: peerName })}</Banner>
+              <Button
+                onClick={() => {
+                  setOfferWaiting(false);
+                  setView({ kind: "where" });
+                }}
+              >
+                {l10n.getString("qs-session-offer-show")}
+              </Button>
+            </div>
+          )}
           {tooMany && (
             <div role="alert">
               <Banner tone="attention">{l10n.getString("qs-pick-too-many")}</Banner>
@@ -557,7 +711,11 @@ export default function QuickHost({
               onClick={() => {
                 // Nothing is saved yet, so stopping loses nothing.
                 void qsStop().catch(() => undefined);
-                onHome();
+                // In an open send this declines only these files; the send stays open.
+                const inSession = sessionReceive.current;
+                sessionReceive.current = null;
+                if (inSession) setView(inSession.back);
+                else onHome();
               }}
             >
               {l10n.getString("qs-where-stop")}
@@ -605,8 +763,8 @@ export default function QuickHost({
             to={to}
             progress={view.progress}
             side={sender ? "send" : "receive"}
-            // Add files (sender) and Send to <name> (receiver) go here once the engine has them.
-            openSend={<OpenSendActions peer={peerName} />}
+            // Add files (sender) and Send to <name> (receiver), while the send is open.
+            openSend={openSend}
             onPause={() => void qsPause().catch(() => undefined)}
             onResume={() => void qsResume().catch(() => undefined)}
             onCompact={() => {
@@ -628,7 +786,43 @@ export default function QuickHost({
           />
         </>
       );
+    case "sends":
+      return (
+        <QsSends
+          open={open}
+          peer={peerName}
+          notSent={notSent}
+          failed={sendsFailed}
+          openSend={openSend}
+          onPause={onList(qsSendPause)}
+          onResume={onList(qsSendResume)}
+          onCancel={onList(qsSendCancel)}
+          onOpen={(send) => {
+            const r = open.results.find((x) => x.send === send);
+            if (r) setView({ kind: "done", receipt: r.receipt, listed: true });
+          }}
+          onDone={() => {
+            clearResults();
+            onHome();
+          }}
+        />
+      );
     case "done":
+      if (view.listed)
+        return (
+          <QuickDone
+            side="send"
+            receipt={{ lines: view.receipt.lines }}
+            stopped={view.receipt.stopped}
+            folder={null}
+            onDone={() => {
+              setView({ kind: "sends" });
+            }}
+            onBack={() => {
+              setView({ kind: "sends" });
+            }}
+          />
+        );
       return (
         <>
           <QuickDone
@@ -666,6 +860,7 @@ export default function QuickHost({
           }}
           onDone={onHome}
           />
+          {openSend}
           {rememberOffer}
         </>
       );

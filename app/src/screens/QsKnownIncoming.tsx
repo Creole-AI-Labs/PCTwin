@@ -10,6 +10,7 @@ import {
   qsOpenFolder,
   qsPause,
   qsResume,
+  qsSessionEnd,
   qsStop,
   toQsRefusal,
   type KnownIncoming,
@@ -23,6 +24,8 @@ import { fileName, useBytes, type SendProgress } from "../quicksend";
 import FrameFooter from "./FrameFooter";
 import { Folder, Heading, Name, QsStrip, Tile } from "./QsParts";
 import QuickDone from "./QuickDone";
+import OpenSendActions from "./QsOpenSend";
+import { useOpenSends } from "../openSends";
 import QuickProgress from "./QuickProgress";
 import QuickStop from "./QuickStop";
 
@@ -121,8 +124,21 @@ type View =
  * holds: the connection's folder for next time, else the one `quicksend_folder` holds (Downloads,
  * or the one chosen this session).
  */
-export default function KnownReceiveHost({ incoming, onHome }: { incoming: KnownIncoming; onHome: () => void }) {
+export default function KnownReceiveHost({
+  incoming,
+  onHome,
+  onSendTo,
+}: {
+  incoming: KnownIncoming;
+  onHome: () => void;
+  /** Send to <name>: files back to that laptop in the send it left open (the pick page, then the list of sends). */
+  onSendTo?: (session: string) => void;
+}) {
   const { l10n } = useLocalization();
+  // The send with that laptop stays open after these files: the one that opened since this page did.
+  const open = useOpenSends();
+  const [before] = useState(() => new Set(open.sessions.map((s) => s.id)));
+  const opened = open.sessions.filter((s) => !before.has(s.id) && s.name !== null);
   const [view, setView] = useState<View>({ kind: "ask" });
   const [folder, setFolder] = useState<QsFolder | null>(incoming.folder);
   const [nextTime, setNextTime] = useState(false);
@@ -234,8 +250,8 @@ export default function KnownReceiveHost({ incoming, onHome }: { incoming: Known
           />
         </>
       );
-    case "done":
-      return (
+    case "done": {
+      const done = (
         <QuickDone
           side="receive"
           receipt={{ lines: view.receipt.lines }}
@@ -263,6 +279,25 @@ export default function KnownReceiveHost({ incoming, onHome }: { incoming: Known
           onDone={onHome}
         />
       );
+      return (
+        <>
+          {done}
+          {onSendTo && (
+            <OpenSendActions
+              sessions={opened}
+              peer={incoming.label}
+              side="receive"
+              onAdd={(s) => {
+                onSendTo(s.id);
+              }}
+              onEnd={(s) => {
+                void qsSessionEnd(s.id).catch(() => undefined);
+              }}
+            />
+          )}
+        </>
+      );
+    }
     case "problem":
       return (
         <>

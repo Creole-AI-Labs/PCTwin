@@ -232,6 +232,22 @@ ul.header-settings-panel {
   font-size: var(--type-supporting);
 }
 
+/* A remembered laptop's question that waits while a move, a pairing or a send is on screen. */
+.app-asking {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--colour-line-quiet);
+  background: var(--colour-paper);
+}
+
+.app-asking > .kit-banner {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
 .app-main {
   flex: 1;
   min-height: 0;

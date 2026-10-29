@@ -3542,3 +3542,25 @@ qs-sends-paused = متوقف مؤقتًا
 qs-send-pause = إيقاف مؤقت
 qs-send-resume = متابعة
 qs-send-cancel = إلغاء
+
+# Open sends: Add files, Send to, several laptops at once, questions that wait, a live file being copied
+qs-session-ended-name = { $name }: انتهى هذا الإرسال. لن يصل شيء آخر.
+qs-sends-action-name = { $what }: { $name }
+qs-sends-title = عمليات الإرسال
+qs-sends-intro = يرسل PCTwin إلى ثلاثة حواسيب على الأكثر في الوقت نفسه، وإرسالًا بعد آخر إلى الحاسوب نفسه. ينتظر الباقي دوره.
+qs-sends-empty = لا يُرسل شيء الآن.
+qs-sends-ended-title = عمليات إرسال انتهت
+qs-sends-stopped = أُوقف قبل النهاية.
+qs-sends-result-whole = نُسخت وتم التحقق منها
+qs-sends-result-partial = لم يُنسخ بعضها
+qs-sends-not-sent = لم يُرسل إلى { $name }.
+qs-sends-failed = لم يستطع PCTwin تغيير هذا الإرسال. حاول مرة أخرى.
+qs-session-offer-waiting = يرسل { $name } إليك ملفات أخرى.
+qs-session-offer-show = اختر مكان الحفظ
+qs-to-now-several-hint = يجب أن يكون كل حاسوب مشغّلًا وقريبًا. يرسل PCTwin إلى ثلاثة على الأكثر في الوقت نفسه، وينتظر الباقي دوره.
+qs-asking-files = يريد { $label } أن يرسل إليك ملفات.
+qs-asking-note = أرسل إليك { $label } ملاحظة.
+qs-asking-later = يسألك PCTwin عن ذلك عندما تغادر هذه الصفحة.
+qs-asking-show = اختر مكان الحفظ
+qs-asking-show-note = اعرض الملاحظة
+progress-current-open-in = أثناء نسخ PCTwin للملف { $name }، لا يستطيع { $app } حفظ تغييرات فيه. إذا قال { $app } إن الملف قيد الاستخدام، فانتظر حتى ينتهي النسخ.

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import lockup from "./assets/pctwin-lockup.png";
 import { directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, listenKnown, qsLaunchFiles, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type KnownDelivered, type KnownIncoming, type Label, type Problem, type QsNote, type ReadyNote, type RescueDrive } from "./bridge";
-import { Toast } from "./components/kit";
+import { Banner, Button, Toast } from "./components/kit";
 import KnownHost from "./screens/QsKnownHost";
 import KnownReceiveHost from "./screens/QsKnownIncoming";
 import { NoteInHost } from "./screens/QsNote";
@@ -50,8 +50,9 @@ type Screen =
   | { id: "ready"; note: ReadyNote }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
   | { id: "pickup"; unfinished: number }
-  // Quick Send, either way, or a note or link, from its home.
-  | { id: "qs"; mode: "send" | "receive" | "note" }
+  // Quick Send, either way, or a note or link, from its home; `sends`: the list of sends going on.
+  // `session`: Add files to this open send (Send to <name>, from a remembered laptop's page).
+  | { id: "qs"; mode: "send" | "receive" | "note" | "sends"; session?: string }
   // Remembered connections and waiting sends (Quick Send stage 1), from Quick Send's home.
   | { id: "known" }
   | { id: "waiting" }
@@ -69,6 +70,12 @@ type Screen =
   // Name this laptop: the first time PCTwin opens, before Home, until a name is chosen.
   | { id: "name"; suggested: Label };
 
+/** A remembered laptop's question that came while the person was busy: its files, or a note. */
+type Asking = { kind: "incoming"; incoming: KnownIncoming } | { kind: "note"; note: QsNote };
+
+/** The page for a question that waited. */
+const askingScreen = (a: Asking): Screen => (a.kind === "incoming" ? { id: "known-in", incoming: a.incoming } : { id: "note-in", note: a.note });
+
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
   const [language, setLanguage] = useState<LanguageCode>(() => initialLanguage ?? savedLanguage() ?? pickLanguage(navigator.languages));
@@ -80,6 +87,14 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   }, [screen]);
   // Files that landed under "allow future sends into this folder", told on the first after a quiet spell.
   const [delivered, setDelivered] = useState<KnownDelivered | null>(null);
+  // A remembered laptop asked to send files (or sent a note) while a move, a pairing or a send was
+  // on screen: said in a line at the top, and asked as soon as that page is left. Never dropped.
+  const [asking, setAsking] = useState<Asking | null>(null);
+  // Quick Send's page can be left without loss (its Done page, the list of sends): the question may be shown now.
+  const [qsIdleShown, setQsIdleShown] = useState(false);
+  const onQsIdle = useCallback((idle: boolean) => {
+    setQsIdleShown(idle);
+  }, []);
   // A move that stopped part way on this laptop: Home shows "Resume your move" until it is tidied up.
   const [unfinished, setUnfinished] = useState(0);
   // What went wrong on the naming page (a name that cannot be used), or null.
@@ -143,9 +158,16 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     const busy = () => ["move", "pair", "qs", "known-in", "name", "pickup"].includes(screenRef.current.id);
     void listenKnown((event) => {
       if (!live) return;
-      if (event.kind === "incoming" && !busy()) setScreen({ id: "known-in", incoming: event.incoming });
-      else if (event.kind === "note" && event.note.from !== null && !busy()) setScreen({ id: "note-in", note: event.note });
-      else if (event.kind === "launch" && !busy()) setScreen({ id: "qs", mode: "send" });
+      // Asked now when the person is free; otherwise kept and said at the top until they are.
+      if (event.kind === "incoming") {
+        const a: Asking = { kind: "incoming", incoming: event.incoming };
+        if (busy()) setAsking(a);
+        else setScreen(askingScreen(a));
+      } else if (event.kind === "note" && event.note.from !== null) {
+        const a: Asking = { kind: "note", note: event.note };
+        if (busy()) setAsking((old) => old ?? a);
+        else setScreen(askingScreen(a));
+      } else if (event.kind === "launch" && !busy()) setScreen({ id: "qs", mode: "send" });
       else if (event.kind === "delivered") {
         const d = event.delivered;
         const whole = d.lines.every((l) => l.outcome.kind === "arrived" || l.outcome.kind === "already-there");
@@ -168,6 +190,16 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
       unlisten?.();
     };
   }, []);
+
+  // A question that waited is asked as soon as the person leaves the busy page.
+  useEffect(() => {
+    if (!asking) return;
+    if (["move", "pair", "qs", "known-in", "name", "pickup"].includes(screen.id)) return;
+    // The question is the engine's, waiting outside React: shown the moment the busy page is left.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setScreen(askingScreen(asking));
+    setAsking(null);
+  }, [asking, screen.id]);
 
   // The motion setting and its timings, on the page before anything moves.
   useEffect(() => {
@@ -260,6 +292,27 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               <HeaderMotion />
             </div>
           </header>
+          {asking && (
+            <div className="app-asking" role="status">
+              <Banner tone="info">
+                {asking.kind === "incoming"
+                  ? l10n.getString("qs-asking-files", { label: asking.incoming.label, count: asking.incoming.files.length })
+                  : l10n.getString("qs-asking-note", { label: asking.note.from ?? "" })}{" "}
+                {l10n.getString("qs-asking-later")}
+              </Banner>
+              {/* Quick Send's Done page and list of sends lose nothing when left: the question can be answered now. */}
+              {screen.id === "qs" && qsIdleShown && (
+                <Button
+                  onClick={() => {
+                    setScreen(askingScreen(asking));
+                    setAsking(null);
+                  }}
+                >
+                  {l10n.getString(asking.kind === "incoming" ? "qs-asking-show" : "qs-asking-show-note")}
+                </Button>
+              )}
+            </div>
+          )}
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
             {screen.id === "welcome" && (
               <Welcome
@@ -294,7 +347,13 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             )}
             {screen.id === "known" && <KnownHost onSend={() => { setScreen({ id: "qs", mode: "send" }); }} onBack={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "waiting" && <WaitingHost onSend={() => { setScreen({ id: "qs", mode: "send" }); }} onBack={() => { setScreen({ id: "quick", notice: false }); }} />}
-            {screen.id === "known-in" && <KnownReceiveHost incoming={screen.incoming} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "known-in" && (
+              <KnownReceiveHost
+                incoming={screen.incoming}
+                onHome={() => { setScreen({ id: "quick", notice: false }); }}
+                onSendTo={(session) => { setScreen({ id: "qs", mode: "send", session }); }}
+              />
+            )}
             {screen.id === "note-in" && <NoteInHost note={screen.note} onDone={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "name" && (
               <NameLaptop
@@ -324,7 +383,17 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               />
             )}
             {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
-            {screen.id === "qs" && <QuickHost mode={screen.mode} onWindow={onWindow} onWaiting={() => { setScreen({ id: "waiting" }); }} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "qs" && (
+              <QuickHost
+                key={`${screen.mode}-${screen.session ?? ""}`}
+                mode={screen.mode}
+                session={screen.session}
+                onWindow={onWindow}
+                onIdle={onQsIdle}
+                onWaiting={() => { setScreen({ id: "waiting" }); }}
+                onHome={() => { setScreen({ id: "quick", notice: false }); }}
+              />
+            )}
             {screen.id === "rescue" && <RescuePick onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(drive) => { setScreen({ id: "move", role: "new", rescue: drive }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}

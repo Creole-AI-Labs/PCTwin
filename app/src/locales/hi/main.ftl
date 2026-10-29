@@ -3099,3 +3099,25 @@ qs-sends-paused = रुका हुआ
 qs-send-pause = रोकें
 qs-send-resume = जारी रखें
 qs-send-cancel = रद्द करें
+
+# Open sends: Add files, Send to, several laptops at once, questions that wait, a live file being copied
+qs-session-ended-name = { $name }: यह भेजना खत्म हो गया। अब कुछ और नहीं आएगा।
+qs-sends-action-name = { $what }: { $name }
+qs-sends-title = आपके भेजे जा रहे काम
+qs-sends-intro = PCTwin एक साथ ज़्यादा से ज़्यादा तीन लैपटॉप को भेजता है, और एक ही लैपटॉप को एक के बाद एक। बाकी अपनी बारी का इंतज़ार करते हैं।
+qs-sends-empty = अभी कुछ नहीं भेजा जा रहा है।
+qs-sends-ended-title = पूरे हुए भेजे गए काम
+qs-sends-stopped = इसे अंत से पहले रोक दिया गया।
+qs-sends-result-whole = कॉपी और जाँचे गए
+qs-sends-result-partial = कुछ कॉपी नहीं हुए
+qs-sends-not-sent = { $name } को नहीं भेजा गया।
+qs-sends-failed = PCTwin उस भेजने को बदल नहीं सका। फिर कोशिश करें।
+qs-session-offer-waiting = { $name } आपको और फ़ाइलें भेज रहा है।
+qs-session-offer-show = सेव करने की जगह चुनें
+qs-to-now-several-hint = हर लैपटॉप चालू और पास होना चाहिए। PCTwin एक साथ ज़्यादा से ज़्यादा तीन को भेजता है; बाकी अपनी बारी का इंतज़ार करते हैं।
+qs-asking-files = { $label } आपको फ़ाइलें भेजना चाहता है।
+qs-asking-note = { $label } ने आपको एक नोट भेजा।
+qs-asking-later = जब आप यह पेज छोड़ेंगे, PCTwin आपसे इसके बारे में पूछेगा।
+qs-asking-show = सेव करने की जगह चुनें
+qs-asking-show-note = नोट दिखाएँ
+progress-current-open-in = जब तक PCTwin { $name } कॉपी करता है, { $app } उसमें बदलाव सेव नहीं कर सकता। अगर { $app } कहे कि फ़ाइल इस्तेमाल में है, तो कॉपी पूरी होने का इंतज़ार करें।
