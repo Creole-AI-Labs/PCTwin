@@ -218,7 +218,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       work_check_answer: { generation: 0, checks: [], more: 0 },
       work_check_remove: { generation: 0, checks: [], more: 0 },
       repair_offer: { generation: 0, kept: 0, lines: [], more: 0 },
-      repair_run: { generation: 0, kept: 0, lines: [], more: 0, fixed: 0 },
+      repair_run: { generation: 0, kept: 0, lines: [], more: 0, fixed: 0, undoId: null },
+      move_reapprove: { generation: 0, kept: 0, lines: [], more: 0, fixed: 0, undoId: null },
       safe_stop: { safe: true, busy: [] },
     };
     tauri.invoke.mockImplementation((command: string) =>

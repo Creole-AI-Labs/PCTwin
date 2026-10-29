@@ -1258,7 +1258,8 @@ export const repairRun = (generation: number, lines: number[]) => ask("repair_ru
 /** What changed after approval, or none. */
 export const moveChanges = () => ask("move_changes", (v) => (v === null ? { none: true as const } : parseChangesView(v))).then((r) => ("none" in r ? null : r));
 /** The person's new yes or no for what changed; `generation` goes back as received. */
-export const moveReapprove = (generation: number, approve: boolean) => run("move_reapprove", { generation, approve });
+/** The answer to what changed after approval: what was installed now (a repair result), or a RepairProblem word. */
+export const moveReapprove = (generation: number, approve: boolean) => ask("move_reapprove", parseRepairDone, { generation, approve });
 export const safeStop = () => ask("safe_stop", parseSafeStop);
 /** Saves the recovery kit for one My PCTwin history entry; none when the person picked no folder. */
 export const recoveryKitSave = (id: string) => ask("recovery_kit_save", (v) => (v === null ? { none: true as const } : parseKitSaved(v)), { id }).then((r) => ("none" in r ? null : r));

@@ -6,14 +6,13 @@
  */
 import { useLocalization } from "@fluent/react";
 import { useState } from "react";
-import { moveReapprove, toMoveProblem } from "../bridge";
+import { moveReapprove, toRepairProblem } from "../bridge";
 import { Banner, Button, Row, RowList } from "../components/kit";
 import type { ChangesView } from "../deliver";
 import { listText } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Name, MoreLine } from "./FinishParts";
-import { problemKey } from "./RecoveryKit";
 import { Heading } from "./ProgressParts";
 
 export default function MoveChanged({ changes, onDone }: { changes: ChangesView; onDone: () => void }) {
@@ -29,7 +28,7 @@ export default function MoveChanged({ changes, onDone }: { changes: ChangesView;
       },
       (error: unknown) => {
         setBusy(false);
-        setProblem(problemKey(toMoveProblem(error).kind));
+        setProblem(`repair-problem-${toRepairProblem(error)}`);
       },
     );
   };

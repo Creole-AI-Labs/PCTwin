@@ -106,7 +106,8 @@ export type RepairLine = {
 };
 
 export type RepairOffer = { generation: number; kept: number; lines: RepairLine[]; more: number };
-export type RepairDone = RepairOffer & { fixed: number };
+/** `undoId`: the retry's own undo record (for `fullmoveUndo`), or null when it changed nothing undo could put back. */
+export type RepairDone = RepairOffer & { fixed: number; undoId: string | null };
 
 function parseRepairLine(v: unknown): RepairLine | null {
   const f = exactly(v, ["line", "title", "kind", "status", "reason", "waitsFor"]);
@@ -126,10 +127,12 @@ export function parseRepairOffer(v: unknown): RepairOffer | null {
 }
 
 export function parseRepairDone(v: unknown): RepairDone | null {
-  const f = exactly(v, ["generation", "kept", "lines", "more", "fixed"]);
+  const f = exactly(v, ["generation", "kept", "lines", "more", "fixed", "undoId"]);
   if (!f || !isCount(f.fixed)) return null;
+  const undoId = f.undoId === null ? null : typeof f.undoId === "string" && /^[0-9a-f]{1,64}$/.test(f.undoId) ? f.undoId : undefined;
+  if (undoId === undefined) return null;
   const offer = parseRepairOffer({ generation: f.generation, kept: f.kept, lines: f.lines, more: f.more });
-  return offer ? { ...offer, fixed: f.fixed } : null;
+  return offer ? { ...offer, fixed: f.fixed, undoId } : null;
 }
 
 export const REPAIR_PROBLEMS = ["nothing-to-repair", "stale", "busy", "failed"] as const;

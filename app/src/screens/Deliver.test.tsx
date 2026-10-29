@@ -304,7 +304,8 @@ describe("Changes during the move (item 6)", () => {
   const changes = () => must(parseChangesView(changedJson[0]));
 
   it("shows what changed and which steps it affects, and answers with the generation", async () => {
-    api.moveReapprove.mockResolvedValue(undefined);
+    // The engine answers with what was installed now (a repair result).
+    api.moveReapprove.mockResolvedValue(must(parseRepairDone(doneJson[0])));
     const onDone = vi.fn();
     const user = userEvent.setup();
     inApp(<MoveChanged changes={changes()} onDone={onDone} />);
@@ -319,13 +320,13 @@ describe("Changes during the move (item 6)", () => {
   });
 
   it("can leave them out, and says why when the engine refuses", async () => {
-    api.moveReapprove.mockRejectedValue({ kind: "plan-changed" });
+    api.moveReapprove.mockRejectedValue("stale");
     const onDone = vi.fn();
     const user = userEvent.setup();
     inApp(<MoveChanged changes={changes()} onDone={onDone} />);
     await user.click(screen.getByRole("button", { name: text("changed-leave-out") }));
     expect(api.moveReapprove).toHaveBeenCalledWith(2, false);
-    expect(await screen.findByText(text("finish-problem-changed"))).toBeTruthy();
+    expect(await screen.findByText(text("repair-problem-stale"))).toBeTruthy();
     expect(onDone).not.toHaveBeenCalled();
   });
 
