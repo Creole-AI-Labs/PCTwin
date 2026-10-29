@@ -863,7 +863,7 @@ async fn full_move(kind: Kind) {
             }
         }),
     );
-    let done = rebuild(
+    let mut done = rebuild(
         &plan,
         &pctwin_fullmove::run::DataDone {
             files,
@@ -971,7 +971,15 @@ async fn full_move(kind: Kind) {
             }
         }
     }
-    let lines = undo::undo(&rebuild_rec, &done.undo, &mut adapter, None).unwrap();
+    // Linux and Mac list apps for the person to remove; nothing is removed for them.
+    let lines = undo::undo(
+        &rebuild_rec,
+        &mut done.undo,
+        &mut adapter,
+        None,
+        &mut undo::ListOnly,
+    )
+    .unwrap();
     assert!(
         lines
             .iter()
