@@ -2170,6 +2170,48 @@ mod tests {
         }
     }
 
+    /// Every key the engine sends for the screens to put in words (each route step, each doctor
+    /// finding, fix and probe) has its words in all seven languages.
+    #[test]
+    fn every_engine_word_key_has_words_in_every_language() {
+        let mut keys: BTreeSet<String> = routes()
+            .iter()
+            .flat_map(|r| r.steps.iter().cloned())
+            .collect();
+        for c in [
+            pctwin_doctor::Cause::NotConnected,
+            pctwin_doctor::Cause::MacLocalNetworkDenied,
+            pctwin_doctor::Cause::DiscoveryBlockedOnThisLaptop,
+            pctwin_doctor::Cause::WindowsPublicNetwork(String::new()),
+            pctwin_doctor::Cause::VpnOn(vec![]),
+            pctwin_doctor::Cause::OldLaptopNotPairing,
+            pctwin_doctor::Cause::DifferentNetworks,
+            pctwin_doctor::Cause::GuestNetworkHidesDevices,
+        ] {
+            keys.insert(c.message_key().into());
+            keys.insert(c.fix_key().into());
+        }
+        for k in [
+            "doctor-probe-interfaces",
+            "doctor-probe-hears-itself",
+            "doctor-probe-local-network",
+            "doctor-probe-network-profiles",
+            "doctor-hotspot",
+        ] {
+            keys.insert(k.into());
+        }
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/locales");
+        for lang in ["en", "es", "fr", "pt", "hi", "zh-CN", "ar"] {
+            let text = std::fs::read_to_string(dir.join(lang).join("main.ftl")).unwrap();
+            for k in &keys {
+                assert!(
+                    text.lines().any(|l| l.starts_with(&format!("{k} = "))),
+                    "{lang} has no words for {k}"
+                );
+            }
+        }
+    }
+
     fn is_key(s: &str) -> bool {
         !s.is_empty()
             && s.split('-').all(|p| {
