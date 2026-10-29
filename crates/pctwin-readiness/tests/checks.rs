@@ -263,27 +263,26 @@ fn linked_files_are_looked_up_inside_the_project_only() {
 #[test]
 fn a_link_whose_target_is_gone_is_missing() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "real.txt", b"x");
+    std::fs::create_dir(dir.path().join("real")).unwrap();
+    std::fs::create_dir(dir.path().join("gone")).unwrap();
+    // Windows: junctions, which every account can make (file links need Developer Mode).
     #[cfg(windows)]
-    let made = std::os::windows::fs::symlink_file(
-        dir.path().join("gone.txt"),
-        dir.path().join("dangling.txt"),
-    )
-    .and_then(|()| {
-        std::os::windows::fs::symlink_file(dir.path().join("real.txt"), dir.path().join("good.txt"))
-    });
-    #[cfg(unix)]
-    let made =
-        std::os::unix::fs::symlink(dir.path().join("gone.txt"), dir.path().join("dangling.txt"))
-            .and_then(|()| {
-                std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("good.txt"))
-            });
-    if let Err(e) = made {
-        // Windows without Developer Mode cannot make links: say so, never pass silently.
-        eprintln!("SKIPPED: this account cannot make links here ({e})");
-        assert!(cfg!(windows), "links can always be made on this system");
-        return;
+    for (link, to) in [("good.txt", "real"), ("dangling.txt", "gone")] {
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(dir.path().join(link))
+            .arg(dir.path().join(to))
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
     }
+    #[cfg(unix)]
+    for (link, to) in [("good.txt", "real"), ("dangling.txt", "gone")] {
+        std::os::unix::fs::symlink(dir.path().join(to), dir.path().join(link)).unwrap();
+    }
+    // Its target goes: the link is left pointing at nothing.
+    std::fs::remove_dir(dir.path().join("gone")).unwrap();
+    assert!(std::fs::symlink_metadata(dir.path().join("dangling.txt")).is_ok());
     let links = Goal::LinkedFiles {
         root: dir.path().to_path_buf(),
         links: vec![PathBuf::from("good.txt"), PathBuf::from("dangling.txt")],

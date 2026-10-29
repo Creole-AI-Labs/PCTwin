@@ -1034,10 +1034,15 @@ mod tests {
         assert_eq!(load(&path).entries.len(), 1);
         std::fs::remove_dir(PathBuf::from(&part)).unwrap();
         // Too big: never read whole, an empty list instead.
+        // (A whole list, padded past the bound with spaces JSON allows.)
         let big = t.path().join("big.json");
-        let f = std::fs::File::create(&big).unwrap();
-        f.set_len(MAX_FILE_BYTES + 1).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert_eq!(load(&path).entries.len(), 1);
+        bytes.resize(MAX_FILE_BYTES as usize + 1, b' ');
+        std::fs::write(&big, &bytes).unwrap();
         assert_eq!(load(&big).entries.len(), 0);
+        drop(bytes);
+        std::fs::remove_file(&big).unwrap();
         // While the checks run the list is free; a change meanwhile wins.
         let r = run_in(&state, Some(&path), || {
             with_in(&state, Some(&path), |w| w.add_task("Call").unwrap());
