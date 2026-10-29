@@ -235,15 +235,14 @@ impl OpenSends {
         }
     }
 
-    /// Picks up `session`'s next send for a turn: its Live made now, carrying a Pause already
-    /// given, so a Pause or Cancel from this moment reaches it.
+    /// Picks up `session`'s next send for a turn: its Live made now, so a Pause or Cancel from
+    /// this moment reaches it.
     fn pick_up(&self, session: &str) -> Option<(u64, Offer, Live)> {
         let mut sends = lock(&self.sends);
         let (id, offer) = sends.start(session)?;
+        // A paused send is never picked up, so its Live starts unpaused; a Pause from now on
+        // reaches it through `lives`.
         let live = Live::default();
-        if sends.marks(id).is_some_and(|(paused, _)| paused) {
-            live.control.pause();
-        }
         lock(&self.lives).insert(id, live.clone());
         Some((id, offer, live))
     }
