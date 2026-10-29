@@ -57,6 +57,27 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  qsSendNote,
+  qsOpenLink,
+  qsLaunchFiles,
+  knownConnections,
+  knownRemember,
+  suggestReplacement,
+  knownForget,
+  knownRename,
+  knownAllowFolder,
+  knownRevokeFolder,
+  knownRenewFolder,
+  knownNextFolder,
+  knownClearNextFolder,
+  knownSaveIncoming,
+  knownDeclineIncoming,
+  knownSend,
+  waitingPrepare,
+  waitingSends,
+  waitingRenew,
+  waitingCancel,
+  listenKnown,
   laptopName,
   laptopNameShuffle,
   laptopNameType,
@@ -233,7 +254,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list"
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list" || command === "quicksend_launch_files" || command.startsWith("known_") || command.startsWith("waiting_")
                 ? []
                 : command === "recovery_check"
                 ? { unfinished: 0 }
@@ -279,6 +300,25 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsPause();
       await qsResume();
       await qsStop();
+      await qsSendNote("Wi-Fi: Home");
+      await qsOpenLink("ffeeddccbbaa99887766554433221100");
+      await qsLaunchFiles();
+      await knownConnections();
+      await knownRemember("Ada's laptop", "0011223344556677");
+      await knownForget("0011223344556677");
+      await knownRename("0011223344556677", "Ada (work)");
+      await knownAllowFolder("0011223344556677");
+      await knownRevokeFolder("0011223344556677");
+      await knownRenewFolder("0011223344556677");
+      await knownNextFolder("0011223344556677");
+      await knownClearNextFolder("0011223344556677");
+      await knownSaveIncoming(true);
+      await knownDeclineIncoming();
+      await knownSend("0011223344556677");
+      await waitingPrepare(["0011223344556677"], 7);
+      await waitingSends();
+      await waitingRenew("00112233445566778899aabbccddeeff", 7);
+      await waitingCancel("00112233445566778899aabbccddeeff");
       await updateCheck();
       await updateInstall();
       await laptopName().catch(() => undefined);
@@ -336,6 +376,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenPairingNew(() => undefined);
     await listenMove(() => undefined);
     await listenQuickSend(() => undefined);
+    await listenKnown(() => undefined);
     await listenGuard(() => undefined);
     await listenUndoClosed(() => undefined);
     await listenSafeStop(() => undefined);
@@ -353,5 +394,18 @@ describe("a rescue's drives (2.6)", () => {
     const missing: Record<string, unknown> = { ...good };
     delete missing.looksLikeALaptop;
     expect(parseRescueDrive(missing)).toBeNull();
+  });
+});
+
+describe("remembering a laptop paired again", () => {
+  it("suggests the earlier connection with the name typed, and nothing else", () => {
+    const connections = [
+      { id: "0011223344556677", label: "Ada's laptop", lastUsed: 2 },
+      { id: "8899aabbccddeeff", label: "Kitchen laptop", lastUsed: 1 },
+    ];
+    expect(suggestReplacement(connections, "  ada's LAPTOP ")?.id).toBe("0011223344556677");
+    expect(suggestReplacement(connections, "Ada")).toBeNull();
+    expect(suggestReplacement(connections, "   ")).toBeNull();
+    expect(suggestReplacement([], "Ada's laptop")).toBeNull();
   });
 });

@@ -129,6 +129,9 @@ deny = [
     # replacing anything (renameat2 / renameatx_np) and opening it without following a link
     # (security review finding 2, 26 October 2026).
     "pctwin-executor",
+    # Quick Send's remembered connections: a remembered folder opened again without following a
+    # link (O_NOFOLLOW), and the Linux key folder checked to be the person's own (29 October 2026).
+    "pctwin-known",
     # The app raises its own open-file limit on Mac and Linux (RLIMIT_NOFILE, limits.rs), so a
     # move with many connections never runs out of handles.
     "pctwin-app",

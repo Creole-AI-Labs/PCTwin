@@ -1048,6 +1048,146 @@ fn qs_problems() -> Vec<crate::quicksend::QsProblem> {
     ]
 }
 
+fn qs_refusals() -> Vec<crate::remembered::QsRefusal> {
+    use crate::remembered::QsRefusal as R;
+    vec![
+        R::NotPaired,
+        R::NotWaiting,
+        R::Failed,
+        R::NoteEmpty,
+        R::NoteTooLong,
+        R::NoteTooManyLines,
+        R::NoteHidden,
+        R::NoLink,
+        R::NotFound,
+        R::Restored,
+        R::BadName,
+        R::StoreUnavailable,
+        R::TooManyConnections,
+        R::FolderRunsAtSignIn,
+        R::FolderShellStartUp,
+        R::FolderHoldsKeys,
+        R::FolderSystem,
+        R::FolderNotPlain,
+        R::FolderNotTheSame,
+        R::NotNearby,
+        R::OverCap,
+        R::NoRoom,
+        R::BadDays,
+        R::BadRecipients,
+        R::TooManyFiles,
+        R::ChangedWhileCopying,
+    ]
+}
+
+fn qs_notes() -> Vec<crate::quicksend::NoteView> {
+    use crate::quicksend::NoteView;
+    vec![
+        NoteView {
+            id: "00112233445566778899aabbccddeeff".into(),
+            text: "Wi-Fi: Home\nPassword: blue-river-42".into(),
+            kind: "text",
+            host: None,
+            from: None,
+        },
+        NoteView {
+            id: "ffeeddccbbaa99887766554433221100".into(),
+            text: "https://example.org/menu".into(),
+            kind: "link",
+            host: Some("example.org".into()),
+            from: Some("Ada's laptop".into()),
+        },
+    ]
+}
+
+fn known_connections() -> Vec<crate::remembered::ConnectionView> {
+    use crate::remembered::{ConnectionView, GrantView, NextFolderView};
+    vec![
+        ConnectionView {
+            id: "0011223344556677".into(),
+            label: "Ada's laptop".into(),
+            made_at: 1_790_000_000,
+            last_used: 1_792_000_000,
+            expires_at: 1_799_776_000,
+            device: pctwin_known::Device::Same,
+            folder: Some(GrantView {
+                name: "From Ada".into(),
+                path: r"C:\Users\Bo\Documents\From Ada".into(),
+                ends_at: 1_794_592_000,
+                ended: false,
+            }),
+            next_folder: Some(NextFolderView {
+                name: "Photos".into(),
+                path: r"C:\Users\Bo\Pictures\Photos".into(),
+            }),
+        },
+        ConnectionView {
+            id: "8899aabbccddeeff".into(),
+            label: "Kitchen laptop".into(),
+            made_at: 1_780_000_000,
+            last_used: 1_780_000_000,
+            expires_at: 1_787_776_000,
+            device: pctwin_known::Device::Restored,
+            folder: None,
+            next_folder: None,
+        },
+        ConnectionView {
+            id: "1122334455667788".into(),
+            label: "Old desktop".into(),
+            made_at: 1_785_000_000,
+            last_used: 1_791_000_000,
+            expires_at: 1_798_776_000,
+            device: pctwin_known::Device::CannotTell,
+            folder: None,
+            next_folder: None,
+        },
+    ]
+}
+
+fn waiting_sends() -> Vec<crate::remembered::WaitingView> {
+    use crate::remembered::{RecipientView, WaitingView};
+    use pctwin_quicksend::waiting::Delivery;
+    let r = |c: &str, label: Option<&str>, delivery| RecipientView {
+        connection: c.into(),
+        label: label.map(Into::into),
+        delivery,
+    };
+    vec![WaitingView {
+        id: "00112233445566778899aabbccddeeff".into(),
+        made_at: 1_792_000_000,
+        deadline: 1_792_604_800,
+        files: 3,
+        bytes: 4_200_000,
+        recipients: vec![
+            r("0011223344556677", Some("Ada's laptop"), Delivery::Waiting),
+            r(
+                "8899aabbccddeeff",
+                Some("Kitchen laptop"),
+                Delivery::Delivered {
+                    arrived: 3,
+                    needs_action: 0,
+                    at: 1_792_100_000,
+                },
+            ),
+            r(
+                "1122334455667788",
+                None,
+                Delivery::Declined { at: 1_792_200_000 },
+            ),
+            r(
+                "2233445566778899",
+                Some("Work laptop"),
+                Delivery::Failed {
+                    failed: 1,
+                    why: "it could not be written".into(),
+                    at: 1_792_300_000,
+                },
+            ),
+        ],
+        newer: vec!["menu.txt".into()],
+    }]
+}
+
 fn json(examples: impl serde::Serialize) -> Value {
     serde_json::to_value(examples).expect("examples serialise")
 }
@@ -1218,6 +1358,67 @@ fn families() -> Vec<(&'static str, Value)> {
         ("qs-progress", json(qs_progress())),
         ("qs-folder", json(qs_folders())),
         ("qs-problem", json(qs_problems())),
+        ("qs-refusal", json(qs_refusals())),
+        ("qs-note", json(qs_notes())),
+        (
+            "qs-note-sent",
+            json([crate::quicksend::NoteSentView { taken: true }]),
+        ),
+        (
+            "qs-remember",
+            json([
+                crate::remembered::RememberView {
+                    fallback_store: false,
+                    connections: vec![
+                        crate::remembered::RememberChoice {
+                            id: "0011223344556677".into(),
+                            label: "Ada's laptop".into(),
+                            last_used: 1_792_000_000,
+                        },
+                        crate::remembered::RememberChoice {
+                            id: "8899aabbccddeeff".into(),
+                            label: "Kitchen laptop".into(),
+                            last_used: 1_780_000_000,
+                        },
+                    ],
+                },
+                crate::remembered::RememberView {
+                    fallback_store: true,
+                    connections: Vec::new(),
+                },
+            ]),
+        ),
+        ("known-connection", json(known_connections())),
+        (
+            "known-incoming",
+            json([
+                crate::remembered::KnownIncomingView {
+                    connection: "0011223344556677".into(),
+                    label: "Ada's laptop".into(),
+                    files: qs_offered(),
+                    bytes: 2_400_000,
+                    folder: qs_folders().pop(),
+                },
+                crate::remembered::KnownIncomingView {
+                    connection: "0011223344556677".into(),
+                    label: "Ada's laptop".into(),
+                    files: qs_offered(),
+                    bytes: 2_400_000,
+                    folder: None,
+                },
+            ]),
+        ),
+        (
+            "known-delivered",
+            json([crate::remembered::KnownDeliveredView {
+                connection: "0011223344556677".into(),
+                label: "Ada's laptop".into(),
+                folder: "From Ada".into(),
+                lines: qs_receipts().remove(0).lines,
+                tell: true,
+            }]),
+        ),
+        ("waiting-send", json(waiting_sends())),
         (
             "people-to-place",
             json([crate::moving::PeopleToPlace {
@@ -1422,6 +1623,12 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
     );
     check("move-stage", &stages(), Stage::variant, Stage::VARIANTS);
     check(
+        "qs-refusal",
+        &qs_refusals(),
+        crate::remembered::QsRefusal::variant,
+        crate::remembered::QsRefusal::VARIANTS,
+    );
+    check(
         "move-link",
         &links(),
         crate::moving::ConnectionView::variant,
@@ -1595,6 +1802,25 @@ fn calls() -> Value {
             { "name": "quicksend_pause", "args": [] },
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },
+            { "name": "quicksend_send_note", "args": [["text", "Wi-Fi: Home"]] },
+            { "name": "quicksend_open_link", "args": [["id", "ffeeddccbbaa99887766554433221100"]] },
+            { "name": "quicksend_launch_files", "args": [] },
+            { "name": "known_list", "args": [] },
+            { "name": "known_remember", "args": [["label", "Ada's laptop"], ["replaces", "0011223344556677"]] },
+            { "name": "known_forget", "args": [["id", "0011223344556677"]] },
+            { "name": "known_rename", "args": [["id", "0011223344556677"], ["label", "Ada (work)"]] },
+            { "name": "known_allow_folder", "args": [["id", "0011223344556677"]] },
+            { "name": "known_revoke_folder", "args": [["id", "0011223344556677"]] },
+            { "name": "known_renew_folder", "args": [["id", "0011223344556677"]] },
+            { "name": "known_next_folder", "args": [["id", "0011223344556677"]] },
+            { "name": "known_clear_next_folder", "args": [["id", "0011223344556677"]] },
+            { "name": "known_save_incoming", "args": [["nextTime", true]] },
+            { "name": "known_decline_incoming", "args": [] },
+            { "name": "known_send", "args": [["id", "0011223344556677"]] },
+            { "name": "waiting_prepare", "args": [["ids", ["0011223344556677"]], ["days", 7]] },
+            { "name": "waiting_list", "args": [] },
+            { "name": "waiting_renew", "args": [["id", "00112233445566778899aabbccddeeff"], ["days", 7]] },
+            { "name": "waiting_cancel", "args": [["id", "00112233445566778899aabbccddeeff"]] },
             { "name": "update_check", "args": [] },
             { "name": "update_install", "args": [] },
             { "name": "laptop_name", "args": [] },
@@ -1642,6 +1868,14 @@ fn calls() -> Value {
             "qsProblem": crate::quicksend::PROBLEM_EVENT,
             "qsPicked": crate::quicksend::PICKED_EVENT,
             "qsDragging": crate::quicksend::DRAGGING_EVENT,
+            "qsNote": crate::quicksend::NOTE_EVENT,
+            "qsNoteSent": crate::quicksend::NOTE_SENT_EVENT,
+            "qsRemember": crate::quicksend::REMEMBER_EVENT,
+            "qsLaunch": crate::quicksend::LAUNCH_EVENT,
+            "knownIncoming": crate::remembered::INCOMING_EVENT,
+            "knownDelivered": crate::remembered::DELIVERED_EVENT,
+            "knownChanged": crate::remembered::CHANGED_EVENT,
+            "waitingChanged": crate::remembered::WAITING_EVENT,
             "guard": crate::guard::EVENT,
             "moveChanged": crate::deliver::changes::EVENT,
             "safeStop": crate::deliver::safe_stop::EVENT,

@@ -3692,6 +3692,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-journey",
+ "pctwin-known",
  "pctwin-link",
  "pctwin-maker",
  "pctwin-move",
@@ -3964,6 +3965,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-known"
+version = "0.1.0"
+dependencies = [
+ "apple-native-keyring-store",
+ "dirs-sys",
+ "getrandom 0.4.3",
+ "hkdf 0.13.0",
+ "hmac 0.13.0",
+ "keyring-core",
+ "pctwin-gate",
+ "pctwin-pairing",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-native-keyring-store",
+ "windows-sys 0.61.2",
+ "wmi",
+ "zeroize",
+]
+
+[[package]]
 name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [
@@ -4145,15 +4170,23 @@ dependencies = [
 name = "pctwin-quicksend"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "chacha20poly1305",
+ "getrandom 0.4.3",
  "pctwin-gate",
  "pctwin-journal",
+ "pctwin-known",
  "pctwin-move",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-transfer",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "url",
+ "zeroize",
 ]
 
 [[package]]

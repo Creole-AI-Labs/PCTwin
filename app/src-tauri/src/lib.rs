@@ -31,6 +31,7 @@ mod fullmove;
 mod guard_examples;
 #[allow(dead_code)]
 mod guard_views;
+mod handed;
 mod help;
 mod history;
 #[cfg(test)]
@@ -46,6 +47,7 @@ mod pairing;
 mod quicksend;
 pub mod rebuild;
 mod recovery;
+mod remembered;
 mod restart;
 mod undo_books;
 mod updates;
@@ -322,6 +324,25 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         quicksend::quicksend_pause,
         quicksend::quicksend_resume,
         quicksend::quicksend_stop,
+        quicksend::quicksend_send_note,
+        quicksend::quicksend_open_link,
+        quicksend::quicksend_launch_files,
+        remembered::known_list,
+        remembered::known_remember,
+        remembered::known_forget,
+        remembered::known_rename,
+        remembered::known_allow_folder,
+        remembered::known_revoke_folder,
+        remembered::known_renew_folder,
+        remembered::known_next_folder,
+        remembered::known_clear_next_folder,
+        remembered::known_save_incoming,
+        remembered::known_decline_incoming,
+        remembered::known_send,
+        remembered::waiting_prepare,
+        remembered::waiting_list,
+        remembered::waiting_renew,
+        remembered::waiting_cancel,
         updates::update_check,
         updates::update_install,
         laptop_name::laptop_name,
@@ -395,6 +416,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .manage(pairing::new_state())
         .manage(moving::new_state())
         .manage(quicksend::new_state())
+        .manage(remembered::new_state())
         .manage(laptop_name::new_state())
         .manage(guard::new_state())
         // The Phase 2 role keys, made once as the program starts (pctwin-grant).
@@ -433,6 +455,10 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             fullmove::sweep_staging(app.handle());
             // PCTwin's own update and uninstall wait for its safe stopping points.
             deliver::safe_stop::set_up(app.handle());
+            // Files the system handed PCTwin to send (Send to, a file manager entry), and the
+            // remembered connections' service when something is remembered or waiting.
+            handed::keep_args();
+            remembered::start_if_needed(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

@@ -2980,3 +2980,69 @@ qs-where-stop = Parar
 outcome-landed-moved = Esta pasta foi movida durante a mudança. Seus arquivos estão nela, onde quer que ela esteja agora.
 move-place-changed-title = Uma pasta mudou depois da sua aprovação
 move-place-changed-body = Uma pasta de destino foi movida ou substituída depois de você aprovar a mudança. Nada foi copiado. Verifique a pasta e comece a mudança de novo.
+
+# Quick Send stage 1
+qs-refusal-not-paired = Os notebooks não estão mais conectados. Conecte-os de novo.
+qs-refusal-not-waiting = Não há nada esperando por isso agora.
+qs-refusal-failed = Não funcionou. Tente de novo.
+qs-refusal-note-empty = Escreva algo para enviar primeiro.
+qs-refusal-note-too-long = Esta nota é longa demais. Use menos de 1.000 caracteres.
+qs-refusal-note-too-many-lines = Esta nota tem linhas demais. Use no máximo 20.
+qs-refusal-note-hidden = Esta nota tem um caractere que não pode ser mostrado com segurança. Escreva de novo.
+qs-refusal-no-link = Não há nenhum link para abrir.
+qs-refusal-not-found = Isto não está mais aqui.
+qs-refusal-restored = Este notebook foi restaurado ou copiado. Conecte os dois notebooks de novo com um código.
+qs-refusal-bad-name = Dê um nome de até 40 letras.
+qs-refusal-store-unavailable = O PCTwin não conseguiu acessar o local seguro de chaves deste notebook. Tente de novo depois de entrar.
+qs-refusal-too-many-connections = Você tem conexões salvas demais. Esqueça uma primeiro.
+qs-refusal-folder-runs-at-sign-in = Esta pasta abre programas quando você entra. Escolha outra pasta.
+qs-refusal-folder-shell-start-up = Esta pasta executa coisas quando um terminal abre. Escolha outra pasta.
+qs-refusal-folder-holds-keys = Esta pasta guarda chaves. Escolha outra pasta.
+qs-refusal-folder-system = Esta é uma pasta do próprio sistema. Escolha outra pasta.
+qs-refusal-folder-not-plain = Esta não é uma pasta comum. Escolha outra pasta.
+qs-refusal-folder-not-the-same = Esta não é a pasta escolhida antes. Escolha de novo.
+qs-refusal-not-nearby = O outro notebook não está por perto. Pode estar desligado ou em outra rede.
+qs-refusal-over-cap = Os envios em espera ocupariam espaço demais. Cancele um primeiro.
+qs-refusal-no-room = Não há espaço livre suficiente neste notebook.
+qs-refusal-bad-days = Escolha de 1 a 30 dias.
+qs-refusal-bad-recipients = Escolha cada pessoa uma vez, até 20.
+qs-refusal-too-many-files = Há arquivos demais. Escolha menos.
+qs-refusal-changed-while-copying = Um arquivo mudou enquanto era copiado. Tente de novo.
+qs-note-copy = Copiar
+qs-note-open = Abrir
+qs-note-link-to = Este link vai para { $host }.
+qs-note-sent = A nota chegou.
+qs-remember-ask = Lembrar desta conexão?
+qs-remember-body = Na próxima vez você pode enviar sem código. Isso indica o mesmo notebook de antes, não uma pessoa.
+qs-remember-fallback = Neste notebook a chave fica guardada em um arquivo da sua conta.
+qs-known-same-device = O mesmo dispositivo de antes
+qs-known-restored = Este notebook foi restaurado ou copiado. Conecte de novo.
+qs-known-last-used = Último uso: { $date }
+qs-known-forget = Esquecer
+qs-known-forget-body = A chave e todas as permissões são apagadas. Os arquivos já enviados ficam onde estão.
+qs-known-allow-folder = Permitir envios futuros para uma pasta
+qs-known-allow-body = Os arquivos vão para uma pasta chamada PCTwin Quick Send dentro dela. Isso termina sozinho após 30 dias.
+qs-known-wants-to-send = { $label } quer enviar isto para você.
+qs-known-delivered = Arquivos de { $label } chegaram em { $folder }.
+qs-waiting-days =
+    { $count ->
+        [one] Espera 1 dia
+        [many] Espera { $count } dias
+       *[other] Espera { $count } dias
+    }
+qs-waiting-files =
+    { $count ->
+        [one] 1 arquivo em espera
+        [many] { $count } arquivos em espera
+       *[other] { $count } arquivos em espera
+    }
+qs-waiting-newer = Existe uma versão mais nova. Revise de novo.
+qs-waiting-on = Só envia enquanto este notebook está ligado.
+qs-waiting-cancel = Cancelar e apagar a cópia
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = O PCTwin não consegue saber se é o mesmo notebook.
+qs-remember-replaces = Você já conectou este notebook antes? Escolha-o e a conexão antiga será esquecida.
+qs-remember-replaces-suggested = Pode ser { $label } de novo. Substituir?
+qs-remember-replace = Substituir
+qs-remember-keep-both = Não, manter as duas

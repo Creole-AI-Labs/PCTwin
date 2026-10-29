@@ -1,0 +1,40 @@
+[
+  {
+    "device": "same",
+    "expiresAt": 1799776000,
+    "folder": {
+      "ended": false,
+      "endsAt": 1794592000,
+      "name": "From Ada",
+      "path": "C:\\Users\\Bo\\Documents\\From Ada"
+    },
+    "id": "0011223344556677",
+    "label": "Ada's laptop",
+    "lastUsed": 1792000000,
+    "madeAt": 1790000000,
+    "nextFolder": {
+      "name": "Photos",
+      "path": "C:\\Users\\Bo\\Pictures\\Photos"
+    }
+  },
+  {
+    "device": "restored",
+    "expiresAt": 1787776000,
+    "folder": null,
+    "id": "8899aabbccddeeff",
+    "label": "Kitchen laptop",
+    "lastUsed": 1780000000,
+    "madeAt": 1780000000,
+    "nextFolder": null
+  },
+  {
+    "device": "cannot-tell",
+    "expiresAt": 1798776000,
+    "folder": null,
+    "id": "1122334455667788",
+    "label": "Old desktop",
+    "lastUsed": 1791000000,
+    "madeAt": 1785000000,
+    "nextFolder": null
+  }
+]

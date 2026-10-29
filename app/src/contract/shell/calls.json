@@ -385,6 +385,175 @@
       "name": "quicksend_stop"
     },
     {
+      "args": [
+        [
+          "text",
+          "Wi-Fi: Home"
+        ]
+      ],
+      "name": "quicksend_send_note"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "ffeeddccbbaa99887766554433221100"
+        ]
+      ],
+      "name": "quicksend_open_link"
+    },
+    {
+      "args": [],
+      "name": "quicksend_launch_files"
+    },
+    {
+      "args": [],
+      "name": "known_list"
+    },
+    {
+      "args": [
+        [
+          "label",
+          "Ada's laptop"
+        ],
+        [
+          "replaces",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_remember"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_forget"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ],
+        [
+          "label",
+          "Ada (work)"
+        ]
+      ],
+      "name": "known_rename"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_allow_folder"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_revoke_folder"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_renew_folder"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_next_folder"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_clear_next_folder"
+    },
+    {
+      "args": [
+        [
+          "nextTime",
+          true
+        ]
+      ],
+      "name": "known_save_incoming"
+    },
+    {
+      "args": [],
+      "name": "known_decline_incoming"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "0011223344556677"
+        ]
+      ],
+      "name": "known_send"
+    },
+    {
+      "args": [
+        [
+          "ids",
+          [
+            "0011223344556677"
+          ]
+        ],
+        [
+          "days",
+          7
+        ]
+      ],
+      "name": "waiting_prepare"
+    },
+    {
+      "args": [],
+      "name": "waiting_list"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "00112233445566778899aabbccddeeff"
+        ],
+        [
+          "days",
+          7
+        ]
+      ],
+      "name": "waiting_renew"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "00112233445566778899aabbccddeeff"
+        ]
+      ],
+      "name": "waiting_cancel"
+    },
+    {
       "args": [],
       "name": "update_check"
     },
@@ -575,6 +744,9 @@
   ],
   "events": {
     "guard": "guard-view",
+    "knownChanged": "known-changed",
+    "knownDelivered": "known-delivered",
+    "knownIncoming": "known-incoming",
     "moveAppdata": "move-appdata",
     "moveAppdataOpen": "move-appdata-open",
     "moveChanged": "move-changed",
@@ -595,11 +767,16 @@
     "old": "pairing-old",
     "qsDragging": "quicksend-dragging",
     "qsIncoming": "quicksend-incoming",
+    "qsLaunch": "quicksend-launch",
+    "qsNote": "quicksend-note",
+    "qsNoteSent": "quicksend-note-sent",
     "qsPicked": "quicksend-picked",
     "qsProblem": "quicksend-problem",
     "qsProgress": "quicksend-progress",
     "qsReceipt": "quicksend-receipt",
-    "safeStop": "safe-stop"
+    "qsRemember": "quicksend-remember",
+    "safeStop": "safe-stop",
+    "waitingChanged": "waiting-changed"
   },
   "helpSteps": [
     "pairing",

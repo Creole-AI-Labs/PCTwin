@@ -1,0 +1,45 @@
+[
+  {
+    "connection": "0011223344556677",
+    "folder": "From Ada",
+    "label": "Ada's laptop",
+    "lines": [
+      {
+        "outcome": {
+          "kind": "arrived",
+          "landedAs": "a.jpg"
+        },
+        "path": "a.jpg"
+      },
+      {
+        "outcome": {
+          "kind": "already-there",
+          "landedAs": "b.jpg"
+        },
+        "path": "b.jpg"
+      },
+      {
+        "outcome": {
+          "kind": "declined"
+        },
+        "path": "c.jpg"
+      },
+      {
+        "outcome": {
+          "kind": "needs-action",
+          "landedAs": "d.jpg",
+          "why": "open it once to check it"
+        },
+        "path": "d.jpg"
+      },
+      {
+        "outcome": {
+          "kind": "failed",
+          "why": "it could not be read"
+        },
+        "path": "e.jpg"
+      }
+    ],
+    "tell": true
+  }
+]

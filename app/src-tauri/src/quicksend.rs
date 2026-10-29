@@ -6,6 +6,7 @@
 //! matching the number is the receiver's acceptance (Security Design T): once paired, everything
 //! offered is received into the folder held open since the pairing page showed it.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,6 +20,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use crate::moving::{MoveProblem, journal_path};
 use crate::pairing::AppPairing;
 use pctwin_gate::FileId;
+use pctwin_known::folders::open_plain;
 
 /// A send's or a receive's measured progress.
 pub const PROGRESS_EVENT: &str = "quicksend-progress";
@@ -30,6 +32,15 @@ pub const RECEIPT_EVENT: &str = "quicksend-receipt";
 pub const PROBLEM_EVENT: &str = "quicksend-problem";
 /// Things dropped on the window while the pick page is open: the whole chosen list.
 pub const PICKED_EVENT: &str = "quicksend-picked";
+/// The receiver: a note or link arrived (shown with Copy; a link opens only by the person).
+pub const NOTE_EVENT: &str = "quicksend-note";
+/// The sender: the other laptop took the note (it arrived and passed its checks).
+pub const NOTE_SENT_EVENT: &str = "quicksend-note-sent";
+/// After an exchange over the six-digit pairing: "Remember this connection" may be offered.
+pub const REMEMBER_EVENT: &str = "quicksend-remember";
+/// Files or folders the system handed PCTwin (Send to, a file manager entry, the share action,
+/// a drop on the widget), added to what is chosen: open the pick page.
+pub const LAUNCH_EVENT: &str = "quicksend-launch";
 /// Whether something is being dragged over the window while the pick page is open.
 pub const DRAGGING_EVENT: &str = "quicksend-dragging";
 
@@ -46,18 +57,18 @@ struct Picked {
 
 /// The folder a receive writes into: opened when the pairing page showed it (the very folder
 /// written to, never whatever is at its path later), and the path it was opened at.
-struct Held {
-    path: PathBuf,
-    identity: FileId,
-    dest: pctwin_gate::Destination,
+pub(crate) struct Held {
+    pub(crate) path: PathBuf,
+    pub(crate) identity: FileId,
+    pub(crate) dest: pctwin_gate::Destination,
 }
 
 /// A folder known by its path and by what it is (its identity when it was first held), so that a
 /// folder put at that path later, or a link put there, is never taken for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Known {
-    path: PathBuf,
-    identity: FileId,
+pub(crate) struct Known {
+    pub(crate) path: PathBuf,
+    pub(crate) identity: FileId,
 }
 
 #[derive(Default)]
@@ -66,35 +77,95 @@ pub struct QuickSend {
     accepting: AtomicBool,
     picked: Mutex<Vec<Picked>>,
     next_id: Mutex<u64>,
-    offer: Mutex<Option<Offer>>,
+    pub(crate) offer: Mutex<Option<Offer>>,
     /// The receiver's folder, held open from when the pairing page showed it; taken by the receive
     /// it was shown for, so each receive holds its folder afresh.
-    folder: Mutex<Option<Held>>,
+    pub(crate) folder: Mutex<Option<Held>>,
     /// The folder the person chose this session: the next receive opens it again at its path
     /// rather than trusting an old handle, and only if it is still that folder. Without one,
     /// receives go to the system's Downloads folder.
-    remembered: Mutex<Option<Known>>,
+    pub(crate) remembered: Mutex<Option<Known>>,
     /// What the Downloads folder was when first held this session.
     downloads: Mutex<Option<FileId>>,
     /// Where the last receive saved its files: the only folder Open folder opens.
-    received_into: Mutex<Option<Known>>,
-    live: Mutex<Option<Live>>,
+    pub(crate) received_into: Mutex<Option<Known>>,
+    pub(crate) live: Mutex<Option<Live>>,
     /// What the offer being made was made of (the chosen things), for sending the missing pieces.
-    chosen: Mutex<Vec<PathBuf>>,
+    pub(crate) chosen: Mutex<Vec<PathBuf>>,
     /// The last send from this window: what was chosen, its offer's ID and its receipt (Q19).
     last: Mutex<Option<LastSend>>,
     /// The files the last receive wrote, given the arrival time, with their original dates: what
     /// Keep original dates gives back. Kept in memory for this window only, never on disk.
-    dated: Mutex<Vec<Dated>>,
+    pub(crate) dated: Mutex<Vec<Dated>>,
     /// A receive waiting for the person to say where the files go (decided 29 October 2026: the
     /// receiver is asked when they arrive, not before): [`quicksend_save_here`] answers it.
     save: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// The notes shown now, at most one per laptop it came from: the only web addresses Open
+    /// may open, each by the id of the note shown.
+    pub(crate) notes: Mutex<Notes>,
+}
+
+/// Most notes one laptop may show in each [`NOTE_WINDOW`]; more are dropped unshown.
+pub(crate) const NOTES_PER_WINDOW: usize = 5;
+pub(crate) const NOTE_WINDOW: Duration = Duration::from_secs(60);
+/// The six-digit pairing, as where a note came from (a remembered connection's id otherwise).
+const FROM_PAIRING: &str = "pairing";
+
+/// The notes shown now and when each laptop last sent one.
+#[derive(Default)]
+pub(crate) struct Notes {
+    /// Per laptop (its connection id, or [`FROM_PAIRING`]): the id of the note shown, and it.
+    shown: BTreeMap<String, (String, pctwin_quicksend::Note)>,
+    /// Per laptop: when its recent notes arrived.
+    arrived: BTreeMap<String, Vec<std::time::Instant>>,
+}
+
+impl Notes {
+    /// Keeps `note` from `from` arriving at `at`, replacing the one it showed before: its id, or
+    /// `None` when that laptop sent too many lately (it is dropped, not shown).
+    pub(crate) fn arrive(
+        &mut self,
+        from: &str,
+        note: pctwin_quicksend::Note,
+        at: std::time::Instant,
+    ) -> Option<String> {
+        let recent = self.arrived.entry(from.to_string()).or_default();
+        recent.retain(|t| at.saturating_duration_since(*t) < NOTE_WINDOW);
+        if recent.len() >= NOTES_PER_WINDOW {
+            return None;
+        }
+        recent.push(at);
+        let mut raw = [0u8; 16];
+        getrandom::fill(&mut raw).ok()?;
+        let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        self.shown.insert(from.to_string(), (id.clone(), note));
+        Some(id)
+    }
+
+    /// The web address of the note shown as `id`, taken (Open opens it once); `None` when no
+    /// note shown now has that id (another replaced it) or it is not a link.
+    pub(crate) fn take_link(&mut self, id: &str) -> Option<String> {
+        let from = self
+            .shown
+            .iter()
+            .find(|(_, (shown, _))| shown == id)
+            .map(|(from, _)| from.clone())?;
+        let link = self.shown.get(&from)?.1.link().map(str::to_string)?;
+        self.shown.remove(&from);
+        Some(link)
+    }
+
+    /// Drops the note a laptop no longer remembered showed.
+    pub(crate) fn drop_from(&mut self, from: &str) {
+        self.shown.remove(from);
+        self.arrived.remove(from);
+    }
 }
 
 /// A file a receive wrote and gave the arrival time, as Keep original dates needs it: where it
 /// is in the folder, which file it is, and the date it came with.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Dated {
+pub(crate) struct Dated {
     stored: String,
     identity: FileId,
     original: std::time::SystemTime,
@@ -114,7 +185,7 @@ pub fn new_state() -> AppQuickSend {
     Arc::new(QuickSend::default())
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -163,7 +234,7 @@ pub struct OfferedView {
     pub size: u64,
 }
 
-fn offered(files: Vec<pctwin_quicksend::OfferedFile>) -> Vec<OfferedView> {
+pub(crate) fn offered(files: Vec<pctwin_quicksend::OfferedFile>) -> Vec<OfferedView> {
     files
         .into_iter()
         .map(|f| OfferedView {
@@ -178,7 +249,7 @@ fn offered(files: Vec<pctwin_quicksend::OfferedFile>) -> Vec<OfferedView> {
 /// overrides, isolates and marks) and control characters are shown as their code ("[U+202E]"), so
 /// a name from another laptop can never look like something else ("invoice\u{202E}fdp.exe" would
 /// show as "invoiceexe.pdf"). The file keeps its real name; only what is shown changes.
-fn shown_safely(name: &str) -> String {
+pub(crate) fn shown_safely(name: &str) -> String {
     let hidden = |c: char| {
         c.is_control()
             || matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
@@ -238,7 +309,7 @@ pub struct ReceiptView {
     pub new_dates: u64,
 }
 
-fn receipt_view(side: &'static str, r: &Receipt, stopped: bool) -> ReceiptView {
+pub(crate) fn receipt_view(side: &'static str, r: &Receipt, stopped: bool) -> ReceiptView {
     ReceiptView {
         side,
         stopped,
@@ -338,7 +409,7 @@ pub enum QsProblem {
     },
 }
 
-fn problem_of(e: &pctwin_quicksend::QuickError) -> QsProblem {
+pub(crate) fn problem_of(e: &pctwin_quicksend::QuickError) -> QsProblem {
     if let pctwin_quicksend::QuickError::NoRoom { needed, room } = e {
         return QsProblem::NoRoom {
             needed: *needed,
@@ -357,7 +428,7 @@ fn problem_of(e: &pctwin_quicksend::QuickError) -> QsProblem {
 }
 
 /// Sends the progress until `done`.
-fn tick<R: Runtime>(app: AppHandle<R>, live: Live, done: Arc<AtomicBool>) {
+pub(crate) fn tick<R: Runtime>(app: AppHandle<R>, live: Live, done: Arc<AtomicBool>) {
     tauri::async_runtime::spawn(async move {
         let mut last = None;
         while !done.load(Ordering::Acquire) {
@@ -374,7 +445,7 @@ fn tick<R: Runtime>(app: AppHandle<R>, live: Live, done: Arc<AtomicBool>) {
 /* ---------- Commands ---------- */
 
 /// Adds `paths` to what is chosen (each once, at most [`MAX_PICKED`]), and returns the list.
-fn add(qs: &QuickSend, paths: Vec<PathBuf>) -> Vec<PickedView> {
+pub(crate) fn add(qs: &QuickSend, paths: Vec<PathBuf>) -> Vec<PickedView> {
     let mut picked = lock(&qs.picked);
     let mut next = lock(&qs.next_id);
     for path in paths {
@@ -392,16 +463,21 @@ fn add(qs: &QuickSend, paths: Vec<PathBuf>) -> Vec<PickedView> {
     picked.iter().map(view_of).collect()
 }
 
-/// Things dropped on the window: added only while the pick page is open (so a drop anywhere else
-/// does nothing), and the screens are sent the list (names and sizes, never a path).
+/// Things dropped on the window, or handed over by the system (Send to, a file manager entry,
+/// the share action): added to what is chosen, and the screens are sent the list (names and
+/// sizes, never a path): while the pick page is open as the pick list, otherwise as a launch the
+/// screens may open the pick page for. Nothing is sent before the person chooses Send.
 pub fn dropped<R: Runtime>(app: &AppHandle<R>, paths: Vec<PathBuf>) {
     use tauri::Manager;
     let qs = app.state::<AppQuickSend>();
-    if !qs.accepting.load(Ordering::Acquire) {
-        return;
-    }
     let list = add(&qs, paths);
-    let _ = app.emit(PICKED_EVENT, list);
+    if qs.accepting.load(Ordering::Acquire) {
+        let _ = app.emit(PICKED_EVENT, list);
+    } else {
+        // A drop on the widget, or files the system handed PCTwin: the screens open the pick
+        // page with them, or ignore it (nothing is sent before the person chooses Send).
+        let _ = app.emit(LAUNCH_EVENT, list);
+    }
 }
 
 /// Something is (or no longer is) dragged over the window: told only while the pick page is open.
@@ -522,6 +598,10 @@ pub async fn quicksend_send<R: Runtime>(
     let chosen = lock(&qs.chosen).clone();
     let state = qs.inner().clone();
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
+    let known = app
+        .state::<crate::remembered::AppRemembered>()
+        .inner()
+        .clone();
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
     let done = Arc::new(AtomicBool::new(false));
@@ -530,7 +610,12 @@ pub async fn quicksend_send<R: Runtime>(
     std::thread::Builder::new()
         .name("pctwin-quicksend".into())
         .spawn(move || {
-            let sent = runtime.block_on(pctwin_quicksend::send_live(&mut link, offer, &live));
+            let sent = runtime.block_on(async {
+                let pending = crate::remembered::swap_keys(&mut link).await?;
+                let r = pctwin_quicksend::send_live(&mut link, offer, &live).await?;
+                known.offer_remember(&app, pending);
+                Ok::<_, pctwin_quicksend::QuickError>(r)
+            });
             done.store(true, Ordering::Release);
             match sent {
                 Ok(r) => {
@@ -574,6 +659,10 @@ pub async fn quicksend_receive<R: Runtime>(
         .ok_or(MoveProblem::Failed)?;
     let journal_at = journal_path(&app).ok_or(MoveProblem::Failed)?;
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
+    let known = app
+        .state::<crate::remembered::AppRemembered>()
+        .inner()
+        .clone();
     lock(&qs.dated).clear();
     let (answered, answer) = tokio::sync::oneshot::channel();
     *lock(&qs.save) = Some(answered);
@@ -585,7 +674,16 @@ pub async fn quicksend_receive<R: Runtime>(
         .name("pctwin-quickreceive".into())
         .spawn(move || {
             let ran = runtime.block_on(async {
-                let incoming = pctwin_quicksend::receive_offer(&mut link).await?;
+                let pending = crate::remembered::swap_keys(&mut link).await?;
+                let incoming = match pctwin_quicksend::receive(&mut link).await? {
+                    pctwin_quicksend::Arrival::Files(incoming) => incoming,
+                    pctwin_quicksend::Arrival::Note(note) => {
+                        lock(&state.save).take();
+                        show_note(&app, &state, note, None, FROM_PAIRING);
+                        known.offer_remember(&app, pending);
+                        return Ok(None);
+                    }
+                };
                 let _ = app.emit(
                     INCOMING_EVENT,
                     IncomingView {
@@ -621,10 +719,14 @@ pub async fn quicksend_receive<R: Runtime>(
                     .await;
                 lock(&state.save).take();
                 done.store(true, Ordering::Release);
-                r
+                if r.is_ok() {
+                    known.offer_remember(&app, pending);
+                }
+                r.map(Some)
             });
             match ran {
-                Ok(r) => {
+                Ok(None) => {}
+                Ok(Some(r)) => {
                     let stopped = live.control.stopped();
                     let mut view = receipt_view("receiver", &r, stopped);
                     // Received files show when they arrived, at the top of the folder; the person
@@ -648,8 +750,142 @@ pub async fn quicksend_receive<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
+/// A note or link as the receiving screen shows it: the text exactly as sent (checked to hold
+/// nothing that hides or reorders text), whether it is a link and the site it leads to, and the
+/// remembered connection it came from (`None`: the six-digit pairing).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NoteView {
+    /// What Open names: this note, and no other that came since.
+    pub id: String,
+    pub text: String,
+    pub kind: &'static str,
+    pub host: Option<String>,
+    pub from: Option<String>,
+}
+
+pub(crate) fn note_view(
+    id: String,
+    note: &pctwin_quicksend::Note,
+    from: Option<String>,
+) -> NoteView {
+    let (kind, host) = match note.kind() {
+        pctwin_quicksend::NoteKind::Text => ("text", None),
+        pctwin_quicksend::NoteKind::Link { host } => ("link", Some(host.clone())),
+    };
+    NoteView {
+        id,
+        text: note.text().to_string(),
+        kind,
+        host,
+        from,
+    }
+}
+
+/// Shows a note that arrived from `source` (a connection id, or the six-digit pairing) and keeps
+/// it, so Open can open its link when the person asks: one note per laptop (a new one replaces
+/// it), at most [`NOTES_PER_WINDOW`] per laptop each [`NOTE_WINDOW`] (more are dropped unshown).
+pub(crate) fn show_note<R: Runtime>(
+    app: &AppHandle<R>,
+    qs: &QuickSend,
+    note: pctwin_quicksend::Note,
+    from: Option<String>,
+    source: &str,
+) {
+    let view_of = |id: String| note_view(id, &note, from.clone());
+    let shown = {
+        let mut notes = lock(&qs.notes);
+        // Checked under the notes' lock: a Forget that ran just before drops nothing later, and
+        // one that runs just after drops this note.
+        if source != FROM_PAIRING
+            && !app
+                .state::<crate::remembered::AppRemembered>()
+                .remembered(app, source)
+        {
+            return;
+        }
+        notes.arrive(source, note.clone(), std::time::Instant::now())
+    };
+    if let Some(id) = shown {
+        let _ = app.emit(NOTE_EVENT, view_of(id));
+    }
+}
+
+/// Drops the note connection `id` showed (it is no longer remembered).
+pub(crate) fn drop_notes_from(qs: &QuickSend, id: &str) {
+    lock(&qs.notes).drop_from(id);
+}
+
+/// The other laptop took the note: it arrived and passed its checks (never that it was read).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NoteSentView {
+    pub taken: bool,
+}
+
+/// The sender: sends a note or link over the paired link (typed lines or one web address). The
+/// note is checked before anything is sent; `quicksend-note-sent` says the other laptop took it.
+#[tauri::command]
+pub async fn quicksend_send_note<R: Runtime>(
+    app: AppHandle<R>,
+    pairing: State<'_, AppPairing>,
+    text: String,
+) -> Result<(), crate::remembered::QsRefusal> {
+    let note = pctwin_quicksend::Note::new(&text).map_err(crate::remembered::note_refusal)?;
+    let (mut link, _) = pairing
+        .take_link()
+        .await
+        .ok_or(crate::remembered::QsRefusal::NotPaired)?;
+    let known = app
+        .state::<crate::remembered::AppRemembered>()
+        .inner()
+        .clone();
+    tauri::async_runtime::spawn(async move {
+        let sent = async {
+            let pending = crate::remembered::swap_keys(&mut link).await?;
+            pctwin_quicksend::send_note(&mut link, &note).await?;
+            known.offer_remember(&app, pending);
+            Ok::<_, pctwin_quicksend::QuickError>(())
+        }
+        .await;
+        match sent {
+            Ok(()) => {
+                let _ = app.emit(NOTE_SENT_EVENT, NoteSentView { taken: true });
+            }
+            Err(e) => {
+                let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Open, on a received link: the system's browser opens the web address of the note shown as
+/// `id` (never another note that arrived since), only when it is a link (http or https, no user
+/// name), only because the person chose Open, and once. The screens never name the address.
+#[tauri::command]
+pub fn quicksend_open_link<R: Runtime>(
+    app: AppHandle<R>,
+    qs: State<'_, AppQuickSend>,
+    id: String,
+) -> Result<(), crate::remembered::QsRefusal> {
+    use tauri_plugin_opener::OpenerExt;
+    let link = lock(&qs.notes)
+        .take_link(&id)
+        .ok_or(crate::remembered::QsRefusal::NoLink)?;
+    app.opener()
+        .open_url(link, None::<&str>)
+        .map_err(|_| crate::remembered::QsRefusal::Failed)
+}
+
+/// Files and folders the system handed PCTwin when it started (Windows "Send to", a Linux file
+/// manager entry, the Mac open action: `--send` and the paths after it), added to what is
+/// chosen. Asked by the pick page; the list is the whole chosen list.
+#[tauri::command]
+pub fn quicksend_launch_files(qs: State<'_, AppQuickSend>) -> Vec<PickedView> {
+    add(&qs, crate::handed::take())
+}
+
 /// The folder a receive saved into, opened again, only while it is still that very folder.
-fn reopened(known: &Known) -> Option<pctwin_gate::Destination> {
+pub(crate) fn reopened(known: &Known) -> Option<pctwin_gate::Destination> {
     open_plain(&known.path)
         .filter(|(_, identity)| *identity == known.identity)
         .map(|(dest, _)| dest)
@@ -658,7 +894,7 @@ fn reopened(known: &Known) -> Option<pctwin_gate::Destination> {
 /// Gives each file this receive wrote (arrived, not one already there, which is the person's own)
 /// the time `now`, and says which ones and the date each came with. A file that cannot be read or
 /// changed keeps its date and is left out.
-fn arrival_dates(
+pub(crate) fn arrival_dates(
     dest: &pctwin_gate::Destination,
     r: &Receipt,
     now: std::time::SystemTime,
@@ -779,7 +1015,7 @@ fn hold_for_receive(qs: &QuickSend, downloads: Option<PathBuf>) -> Result<Folder
 
 /// The folder held for this receive, taken so the next receive holds its own: never anywhere
 /// else when none is held.
-fn take_held(qs: &QuickSend) -> Result<Held, MoveProblem> {
+pub(crate) fn take_held(qs: &QuickSend) -> Result<Held, MoveProblem> {
     lock(&qs.folder).take().ok_or(MoveProblem::Failed)
 }
 
@@ -808,99 +1044,19 @@ fn remember_chosen(qs: &QuickSend, folder: PathBuf) -> Result<FolderView, MovePr
     Ok(view)
 }
 
-/// Whether `path` is itself a plain folder: not a symbolic link, junction or other reparse point
-/// (a link could lead anywhere, the system's Startup folder say, while the page names the link).
-fn plain_folder(path: &std::path::Path) -> bool {
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
-        return false;
-    };
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return false;
-        }
-    }
-    meta.is_dir() && !meta.file_type().is_symlink()
-}
-
-/// Opens the plain folder at `path` and says what it is. `None` when it is not a plain folder,
-/// cannot be opened, or stopped being a plain folder while it was opened.
-fn open_plain(path: &std::path::Path) -> Option<(pctwin_gate::Destination, FileId)> {
-    open_plain_around(path, || (), || ())
-}
-
-/// [`open_plain`], with what happens just before and just after the open (for tests, which swap
-/// a link in and out there). The open follows a link, so what it opened must be the very folder
-/// that a second open of the path, which never follows one, finds there: a link swapped in for
-/// the open and out again afterwards fails that, whenever it happens.
-fn open_plain_around(
-    path: &std::path::Path,
-    before: impl FnOnce(),
-    after: impl FnOnce(),
-) -> Option<(pctwin_gate::Destination, FileId)> {
-    if !plain_folder(path) {
-        return None;
-    }
-    before();
-    let dest = pctwin_gate::Destination::open(path).ok()?;
-    after();
-    let identity = dest.folder_identity("").ok()??;
-    (plain_identity(path)? == identity).then_some((dest, identity))
-}
-
-/// What the plain folder at `path` is, from an open that never follows a link: `None` when a
-/// link, junction or anything but a plain folder is there.
-fn plain_identity(path: &std::path::Path) -> Option<FileId> {
-    #[cfg(windows)]
-    let folder = {
-        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
-        // A folder opens only with this; the second opens a link itself, never what it leads to.
-        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        let folder = std::fs::OpenOptions::new()
-            .access_mode(FILE_READ_ATTRIBUTES)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)
-            .ok()?;
-        let meta = folder.metadata().ok()?;
-        if !meta.is_dir() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return None;
-        }
-        folder
-    };
-    #[cfg(unix)]
-    let folder = {
-        use rustix::fs::{Mode, OFlags};
-        // A link at the name fails the open itself; anything but a folder fails it too.
-        std::fs::File::from(
-            rustix::fs::open(
-                path,
-                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .ok()?,
-        )
-    };
-    pctwin_gate::file_identity(&folder).ok()
-}
-
 /// Opens the folder at `folder` and holds it for the next receive, replacing any held before;
-/// what the screens show of it, and what it is. `None` (and nothing held) when it is not a plain
-/// folder, cannot be opened, or is not the folder `expect` says it was.
-fn held_folder(
+/// what the screens show of it, and what it is. `None` (and nothing held) when it fails the one
+/// check every destination passes ([`pctwin_known::folders::destination`]): a place that runs
+/// things, holds keys or is the system's (or holds one), not a plain folder, or not the folder
+/// `expect` says it was. Every receive's folder comes through here: the one chosen for this
+/// receive, the one chosen this session, Downloads, and the folder for next time.
+pub(crate) fn held_folder(
     qs: &QuickSend,
     folder: &std::path::Path,
     expect: Option<FileId>,
 ) -> Option<(FolderView, FileId)> {
     lock(&qs.folder).take();
-    let (dest, identity) = open_plain(folder)?;
-    if expect.is_some_and(|e| e != identity) {
-        return None;
-    }
+    let (dest, identity) = pctwin_known::folders::destination(folder, expect).ok()?;
     let name = folder.file_name().map_or_else(
         || folder.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -968,6 +1124,7 @@ pub fn quicksend_stop(qs: State<'_, AppQuickSend>) -> Result<(), MoveProblem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pctwin_known::folders::{open_plain_around, plain_folder, plain_identity};
     use pctwin_record::ItemId;
 
     /// Nothing is received before the person says where: Save goes on; a stop, a Save that can no
@@ -1405,6 +1562,81 @@ mod tests {
         assert!(plain_folder(&real), "the real folder is back");
         assert!(open_plain(&real).is_some(), "with nothing swapped it opens");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn note(text: &str) -> pctwin_quicksend::Note {
+        pctwin_quicksend::Note::new(text).unwrap()
+    }
+
+    /// Open names the note shown: a second note from the same laptop replaces the first (whose
+    /// Open then opens nothing), notes from two laptops are kept apart, a link opens once, and a
+    /// plain note opens nothing.
+    #[test]
+    fn open_opens_only_the_note_shown_and_only_once() {
+        let mut n = Notes::default();
+        let t = std::time::Instant::now();
+        let first = n.arrive("ada", note("https://example.org/a"), t).unwrap();
+        let second = n.arrive("ada", note("https://example.org/b"), t).unwrap();
+        let other = n.arrive("bo", note("https://example.org/c"), t).unwrap();
+        let text = n.arrive("cy", note("Wi-Fi: Home"), t).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            n.take_link(&first),
+            None,
+            "replaced: the cursor's note is gone"
+        );
+        assert_eq!(
+            n.take_link(&second).as_deref(),
+            Some("https://example.org/b")
+        );
+        assert_eq!(n.take_link(&second), None, "once");
+        assert_eq!(
+            n.take_link(&other).as_deref(),
+            Some("https://example.org/c")
+        );
+        assert_eq!(n.take_link(&text), None, "not a link");
+        assert_eq!(n.take_link(""), None);
+        // A forgotten connection's note goes.
+        let late = n.arrive("bo", note("https://example.org/d"), t).unwrap();
+        n.drop_from("bo");
+        assert_eq!(n.take_link(&late), None);
+    }
+
+    /// One laptop sending note after note is limited; others are not held up, and it may send
+    /// again after the window.
+    #[test]
+    fn notes_from_one_laptop_are_rate_limited() {
+        let mut n = Notes::default();
+        let t = std::time::Instant::now();
+        for _ in 0..NOTES_PER_WINDOW {
+            assert!(n.arrive("ada", note("hi"), t).is_some());
+        }
+        assert!(n.arrive("ada", note("hi"), t).is_none(), "dropped unshown");
+        assert!(n.arrive("bo", note("hi"), t).is_some());
+        assert!(n.arrive("ada", note("hi"), t + NOTE_WINDOW).is_some());
+    }
+
+    /// Every way a receive's folder is chosen passes the same check: Documents (which holds the
+    /// shell profile folder) is refused as a folder chosen this session, and an everyday folder
+    /// is held.
+    #[test]
+    fn a_refused_place_is_never_held_for_a_receive() {
+        let qs = QuickSend::default();
+        if cfg!(windows) {
+            let docs = pctwin_known::folders::Places::of_this_system()
+                .documents
+                .unwrap();
+            assert!(remember_chosen(&qs, docs.clone()).is_err());
+            assert!(held_folder(&qs, &docs, None).is_none());
+            assert!(lock(&qs.folder).is_none(), "nothing held");
+        }
+        let d = tempfile::tempdir().unwrap();
+        assert!(remember_chosen(&qs, d.path().to_path_buf()).is_ok());
+        // A folder whose identity no longer matches is not held either.
+        let other = d.path().join("other");
+        std::fs::create_dir(&other).unwrap();
+        let id = open_plain(d.path()).unwrap().1;
+        assert!(held_folder(&qs, &other, Some(id)).is_none());
     }
 
     #[test]

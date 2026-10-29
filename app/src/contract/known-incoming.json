@@ -1,0 +1,32 @@
+[
+  {
+    "bytes": 2400000,
+    "connection": "0011223344556677",
+    "files": [
+      {
+        "id": "00112233445566778899aabbccddeeff",
+        "path": "Holiday/beach.jpg",
+        "size": 2400000
+      }
+    ],
+    "folder": {
+      "freeBytes": 80000000000,
+      "name": "Downloads",
+      "path": "C:\\Users\\Ada\\Downloads"
+    },
+    "label": "Ada's laptop"
+  },
+  {
+    "bytes": 2400000,
+    "connection": "0011223344556677",
+    "files": [
+      {
+        "id": "00112233445566778899aabbccddeeff",
+        "path": "Holiday/beach.jpg",
+        "size": 2400000
+      }
+    ],
+    "folder": null,
+    "label": "Ada's laptop"
+  }
+]

@@ -61,6 +61,8 @@
 //!   when either clock passes it; the app also rotates the code when the laptop wakes.
 //! - Starting a session panics if the operating system's random source fails, as SPAKE2 does.
 
+pub mod known;
+
 use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::RangeInclusive;
