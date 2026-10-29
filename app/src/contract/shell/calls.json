@@ -130,6 +130,25 @@
       "name": "move_begin"
     },
     {
+      "args": [],
+      "name": "rescue_drives"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10"
+        ],
+        [
+          "fallback",
+          {
+            "music": "From your old laptop/Music"
+          }
+        ]
+      ],
+      "name": "rescue_begin"
+    },
+    {
       "args": [
         [
           "plan",

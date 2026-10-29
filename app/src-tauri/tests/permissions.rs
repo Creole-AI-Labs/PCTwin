@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 80 names: the app's seventy-seven commands, listening to and
+/// Exactly what the screens may call, 82 names: the app's seventy-nine commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 80] = [
+const SCREENS_MAY_CALL: [&str; 82] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -48,6 +48,8 @@ const SCREENS_MAY_CALL: [&str; 80] = [
     "pairing_new_search",
     "pairing_new_connect",
     "move_begin",
+    "rescue_drives",
+    "rescue_begin",
     "move_approve",
     "move_place_people",
     "move_choose_place",
@@ -271,6 +273,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_old_rename" => json!({ "name": 7 }),
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
         "move_begin" => json!({ "fallback": 1, "others": 2 }),
+        "rescue_begin" => json!({ "id": 1, "fallback": 2 }),
         "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3 }),
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
         "move_choose_place" | "move_usual_place" => json!({ "role": 1 }),

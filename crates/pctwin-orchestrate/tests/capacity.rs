@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use common::*;
 use pctwin_orchestrate::capacity::{
-    Accounting, Candidate, Choice, Decisions, Need, NeedKind, OffloadDrive, Outcome, Volume,
-    account, budget, propose,
+    Accounting, Candidate, Choice, Decisions, KEEP_FREE, Need, NeedKind, OffloadDrive, Outcome,
+    Volume, account, budget, propose,
 };
 use pctwin_record::{CloudProvider, ItemId};
 
@@ -100,7 +100,42 @@ fn cand(n: &str, bytes: u64, essential: bool, safe_in_cloud: bool) -> Candidate 
         bytes,
         essential,
         safe_in_cloud,
+        last_changed_ns: None,
     }
+}
+
+/// What was used longest ago is proposed first, before anything larger but recent; a file whose
+/// time is not known counts as recent (research notes 2.6, 29 October 2026).
+#[test]
+fn what_was_used_longest_ago_is_proposed_first() {
+    let day: i64 = 86_400 * 1_000_000_000;
+    let mut old = cand("old", 10, false, false);
+    old.last_changed_ns = Some(100 * day);
+    let mut recent_big = cand("recent", 50, false, false);
+    recent_big.last_changed_ns = Some(900 * day);
+    let unknown = cand("unknown", 80, false, false);
+    let b = budget(
+        &[vol("C:", Some(KEEP_FREE + 100))],
+        &[need("C:", NeedKind::Files, 110)],
+    );
+    // 10 short: the old file alone covers it, though both others are bigger.
+    let p = propose(
+        &b,
+        &[recent_big.clone(), unknown.clone(), old.clone()],
+        None,
+    );
+    assert_eq!(p.choices.keys().copied().collect::<Vec<_>>(), [id("old")]);
+    // 55 short: the old one, then the recent one, never the one whose time is unknown.
+    let b = budget(
+        &[vol("C:", Some(KEEP_FREE + 55))],
+        &[need("C:", NeedKind::Files, 110)],
+    );
+    let p = propose(&b, &[unknown, recent_big, old], None);
+    let mut chosen: Vec<_> = p.choices.keys().copied().collect();
+    chosen.sort();
+    let mut want = vec![id("old"), id("recent")];
+    want.sort();
+    assert_eq!(chosen, want);
 }
 
 /// T26-010: when the new laptop is too small, PCTwin proposes what to keep elsewhere: first what

@@ -3,6 +3,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import calls from "./contract/shell/calls.json";
+import rescueDriveLists from "./contract/rescue-drives.json";
 import {
   FAILED,
   HELP_STEPS,
@@ -20,6 +21,9 @@ import {
   listenPairingOld,
   moveApprove,
   moveBegin,
+  parseRescueDrive,
+  rescueBegin,
+  rescueDrives,
   moveChoosePlace,
   moveUsualPlace,
   movePeopleHere,
@@ -230,6 +234,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingNewConnect(0, "123456");
       await moveBegin({ music: "From your old laptop/Music" }, ["1001"], "Approve reading the files of {names}.");
       await movePeopleHere().catch(() => undefined);
+      await rescueDrives().catch(() => undefined);
+      await rescueBegin("2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10", { music: "From your old laptop/Music" });
       await movePrivacyAnswer(true);
       await openPrivacySettings();
       await qsPick(false);
@@ -295,5 +301,18 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenGuard(() => undefined);
     await listenUndoClosed(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
+  });
+});
+
+describe("a rescue's drives (2.6)", () => {
+  it("reads the engine's example drives and refuses anything else", () => {
+    for (const list of rescueDriveLists) for (const d of list) expect(parseRescueDrive(d)).not.toBeNull();
+    const good = rescueDriveLists[0][0];
+    expect(parseRescueDrive({ ...good, id: "" })).toBeNull();
+    expect(parseRescueDrive({ ...good, totalBytes: -1 })).toBeNull();
+    expect(parseRescueDrive({ ...good, path: "C:\\" })).toBeNull();
+    const missing: Record<string, unknown> = { ...good };
+    delete missing.looksLikeALaptop;
+    expect(parseRescueDrive(missing)).toBeNull();
   });
 });

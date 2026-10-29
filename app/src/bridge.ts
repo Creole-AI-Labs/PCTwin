@@ -681,6 +681,21 @@ export function parseReportItem(value: unknown): ReportItem | null {
 /** `approve`: the words of a Mac's administrator window, with {names} filled in there with the people ticked. */
 export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[], approve: string) => run("move_begin", { fallback, others, approve });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
+
+/** R13 Rescue a laptop: a drive connected to this laptop that a rescue can read (2.6). */
+export type RescueDrive = { id: string; name: string; fileSystem: string; totalBytes: number; looksLikeALaptop: boolean };
+
+export function parseRescueDrive(value: unknown): RescueDrive | null {
+  const f = exactly(value, ["id", "name", "fileSystem", "totalBytes", "looksLikeALaptop"]);
+  if (!f || typeof f.id !== "string" || f.id === "" || typeof f.name !== "string" || typeof f.fileSystem !== "string") return null;
+  if (typeof f.totalBytes !== "number" || !Number.isSafeInteger(f.totalBytes) || f.totalBytes < 0 || typeof f.looksLikeALaptop !== "boolean") return null;
+  return { id: f.id, name: f.name, fileSystem: f.fileSystem, totalBytes: f.totalBytes, looksLikeALaptop: f.looksLikeALaptop };
+}
+
+/** The drives a rescue could read now. */
+export const rescueDrives = () => ask("rescue_drives", (v) => listOf(v, parseRescueDrive));
+/** Starts a rescue from drive `id` (one rescueDrives gave): the move's own events follow, as on a new laptop. */
+export const rescueBegin = (id: string, fallback: Partial<Record<FolderRole, string>>) => run("rescue_begin", { id, fallback });
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
 /** What came of choosing another place for a group of folders (M05). */
 export type PlaceAnswer = { kind: "chosen"; path: string; freeBytes: number | null } | { kind: "not-chosen" | "no-safe-name" | "cannot-open" | "locked" };

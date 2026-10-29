@@ -7,7 +7,8 @@
 //! - [`propose`]: when a volume is short, PCTwin proposes what to keep elsewhere: first what is
 //!   already safe in a cloud (left there), then a separately approved, connected offload drive
 //!   with room, then leaving it on the old laptop; largest first; never the person's essentials;
-//!   only as much as the shortfall. Whatever is still short is said, never forced.
+//!   only as much as the shortfall; within each, what was used longest ago first. Whatever is still
+//!   short is said, never forced.
 //! - [`Decisions`]: a proposal changes nothing until the person approves it; the selection
 //!   itself never changes, and nothing is deleted to make room.
 //! - [`account`]: after the move every selected item is in exactly one place ([`Outcome`]). An
@@ -110,6 +111,10 @@ pub struct Candidate {
     /// Already safe in a cloud (an online-only file the person wanted a copy of): it can simply
     /// stay there.
     pub safe_in_cloud: bool,
+    /// When it was last changed on the old laptop (nanoseconds since 1970), if known: what was
+    /// used longest ago is proposed first, as Windows' own Storage Sense does (research notes
+    /// 2.6, 29 October 2026). Unknown counts as recent, so it is proposed last.
+    pub last_changed_ns: Option<i64>,
 }
 
 /// Where something kept off the new laptop goes.
@@ -163,8 +168,15 @@ pub fn propose(
             .iter()
             .filter(|c| c.volume == b.volume && !c.essential)
             .collect();
-        // Largest first; equal sizes in a fixed order.
-        here.sort_by(|x, y| y.bytes.cmp(&x.bytes).then(x.item.cmp(&y.item)));
+        // Used longest ago first (an unknown time counts as recent), then largest first, then a
+        // fixed order: what the person is least likely to miss is proposed first.
+        let age = |c: &Candidate| c.last_changed_ns.unwrap_or(i64::MAX);
+        here.sort_by(|x, y| {
+            age(x)
+                .cmp(&age(y))
+                .then(y.bytes.cmp(&x.bytes))
+                .then(x.item.cmp(&y.item))
+        });
         for pass_cloud in [true, false] {
             for c in &here {
                 if short == 0 {
