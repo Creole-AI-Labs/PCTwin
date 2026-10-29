@@ -2498,7 +2498,7 @@ accept-details = عرض التفاصيل
 accept-accept = قبول
 
 # 2.5 special categories
-special-category-email = البريد الإلكتروني
+special-category-email = البريد
 special-category-browser = المتصفحات
 special-category-game = الألعاب
 special-category-ai-tool = أدوات الذكاء الاصطناعي ومحررات الشيفرة

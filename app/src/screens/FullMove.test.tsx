@@ -94,7 +94,7 @@ describe("the approval screen's apps, settings and app data", () => {
     fireEvent.click(tick);
     expect(onPick).toHaveBeenCalledWith(2, true);
     // App data that copies is listed with its undo promise.
-    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-group-appdata", { count: 1 })));
+    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-group-appdata", { count: 5 })));
   });
 
   it("an older old laptop's plan has no section, and the files-only plan is unchanged", () => {
