@@ -782,8 +782,9 @@ pub fn work_check_remove<R: Runtime>(
 mod tests {
     use super::*;
 
-    /// The test's file reader: PCTwin's parser process is not beside a test, so the insides of
-    /// files are never read here (each such check ends could-not-read).
+    /// The test's file reader, standing in for PCTwin's parser process (not beside a test): fonts
+    /// and databases are never read here; an archive answers as the parser does for the one cut
+    /// archive these tests make (its end record is missing).
     struct NoReader;
     impl checks::FileReader for NoReader {
         fn font(&self, _: &std::fs::File, _: u64) -> Result<checks::FontNames, String> {
@@ -794,7 +795,9 @@ mod tests {
             _: &std::fs::File,
             _: u64,
         ) -> Result<pctwin_readiness::checks::Shape, String> {
-            Err("not read in tests".into())
+            Ok(pctwin_readiness::checks::Shape::Damaged(
+                pctwin_readiness::checks::Damage::NoArchiveEnd,
+            ))
         }
         fn database(
             &self,
