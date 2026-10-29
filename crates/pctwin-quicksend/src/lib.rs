@@ -13,6 +13,7 @@
 //!   failed and why. As in a move, an interrupted send continues later with only what is missing.
 
 pub mod note;
+pub mod waiting;
 
 pub use note::{Note, NoteError, NoteKind};
 

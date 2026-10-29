@@ -3680,6 +3680,7 @@ dependencies = [
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-journey",
+ "pctwin-known",
  "pctwin-link",
  "pctwin-maker",
  "pctwin-move",
@@ -4120,12 +4121,15 @@ dependencies = [
 name = "pctwin-quicksend"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "pctwin-gate",
  "pctwin-journal",
  "pctwin-move",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-transfer",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
