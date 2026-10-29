@@ -66,9 +66,58 @@ pub struct LandingRules {
 /// The longest own-folder name, in bytes.
 pub const MAX_OWN_FOLDER: usize = 120;
 
+/// Characters that change how text around them reads or that cannot be seen: direction marks
+/// and isolates, joiners, the byte-order mark and soft hyphen. A folder name holding one could
+/// look like another (second security review of the 2.6 wiring).
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{17B4}'
+            | '\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFFB}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
+}
+
+/// Whether `name`, before its first dot, is a name Windows keeps for a device (`CON`, `NUL`,
+/// `COM1`, `LPT9`, and the same with a superscript digit), in any case.
+fn reserved_on_windows(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = base.to_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    let mut chars = upper.chars();
+    let head: String = chars.by_ref().take(3).collect();
+    let rest: String = chars.collect();
+    (head == "COM" || head == "LPT")
+        && matches!(
+            rest.as_str(),
+            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "\u{B9}" | "\u{B2}" | "\u{B3}"
+        )
+}
+
 /// Whether `name` may be an old laptop's own folder: one plain folder name (no folder marks,
-/// nothing a system reads as special), as fallback names are checked. Every system's own name
-/// rules are still checked by the safety gate where it lands.
+/// nothing a system reads as special: no name Windows keeps for a device, no invisible or
+/// direction-changing character), as fallback names are checked. Every system's own name rules
+/// are still checked by the safety gate where it lands.
 pub fn own_folder_fine(name: &str) -> bool {
     let trimmed = name.trim();
     trimmed == name
@@ -77,9 +126,30 @@ pub fn own_folder_fine(name: &str) -> bool {
         && name != "."
         && name != ".."
         && !name.ends_with('.')
+        && !reserved_on_windows(name)
         && !name.chars().any(|c| {
-            c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            c.is_control()
+                || invisible(c)
+                || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })
+}
+
+/// The most numbers tried for an own folder ("From Ada's laptop (2)" to "(100)").
+pub const MOST_OWN_FOLDER_NAMES: u32 = 100;
+
+/// The own folder for an old laptop: `name`, or, when `taken(candidate)` says that name is
+/// already used here by another old laptop (two old laptops with the same name), "name (2)",
+/// "name (3)" and on; `None` when none is free or the name is not a plain folder name.
+pub fn own_folder_free(name: &str, taken: &dyn Fn(&str) -> bool) -> Option<String> {
+    if !own_folder_fine(name) {
+        return None;
+    }
+    if !taken(name) {
+        return Some(name.to_string());
+    }
+    (2..=MOST_OWN_FOLDER_NAMES)
+        .map(|n| format!("{name} ({n})"))
+        .find(|c| own_folder_fine(c) && !taken(c))
 }
 
 impl LandingRules {
@@ -674,9 +744,60 @@ mod tests {
             assert!(!own_folder_fine(bad), "{bad:?}");
             assert!(parse_rules(&msg(bad)).is_err(), "{bad:?}");
         }
+        // Names Windows keeps for devices, and characters that cannot be seen or turn text round.
+        for bad in [
+            "CON",
+            "con",
+            "Nul",
+            "AUX",
+            "PRN",
+            "COM1",
+            "com9",
+            "LPT1",
+            "COM\u{B9}",
+            "CON.txt",
+            "nul .x",
+            "CONIN$",
+            "a\u{202E}b",
+            "a\u{200B}b",
+            "a\u{2066}b",
+            "\u{FEFF}a",
+            "a\u{00AD}b",
+            "a\u{E0041}b",
+        ] {
+            assert!(!own_folder_fine(bad), "{bad:?}");
+        }
+        for fine in [
+            "Console",
+            "COM",
+            "COM10",
+            "LPT0x",
+            "Connie's laptop",
+            "Ana Lúcia",
+            "\u{0644}\u{0627}",
+        ] {
+            assert!(own_folder_fine(fine), "{fine:?}");
+        }
         assert!(own_folder_fine(&"x".repeat(MAX_OWN_FOLDER)));
         assert!(!own_folder_fine(&"x".repeat(MAX_OWN_FOLDER + 1)));
         assert!(own_folder_fine("De l’ordinateur de Bea"));
+    }
+
+    /// Two old laptops with the same name each get their own folder: the second one's is numbered.
+    #[test]
+    fn a_second_laptop_of_the_same_name_gets_a_numbered_folder() {
+        let used = ["From Ada's laptop", "From Ada's laptop (2)"];
+        let taken = |c: &str| used.contains(&c);
+        assert_eq!(
+            own_folder_free("From Bea's laptop", &taken).as_deref(),
+            Some("From Bea's laptop")
+        );
+        assert_eq!(
+            own_folder_free("From Ada's laptop", &taken).as_deref(),
+            Some("From Ada's laptop (3)")
+        );
+        assert_eq!(own_folder_free("From Ada's laptop", &|_| true), None);
+        assert_eq!(own_folder_free("CON", &|_| false), None);
     }
 
     #[tokio::test]
