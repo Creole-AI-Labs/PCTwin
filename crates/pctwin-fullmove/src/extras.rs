@@ -190,6 +190,16 @@ pub enum ExtrasError {
     Limit,
 }
 
+/// Most notes one special line may carry across.
+pub const MAX_NOTES: usize = 16;
+
+/// A help page from the old laptop's catalogue, as the new laptop accepts it: an https address,
+/// within the text limits (security review of 2.5, 29 October 2026: a page is never trusted
+/// just because the other laptop sent it; nothing here opens it).
+fn page_ok(page: Option<&str>) -> bool {
+    page.is_none_or(|p| text_ok(p) && p.starts_with("https://") && !p.contains(char::is_whitespace))
+}
+
 fn text_ok(s: &str) -> bool {
     !s.is_empty() && s.len() <= MAX_TEXT && !s.chars().any(char::is_control)
 }
@@ -240,11 +250,12 @@ impl Extras {
             return limit;
         }
         if let Some(f) = &self.forgotten {
-            let texts = f
-                .found
-                .iter()
-                .all(|x| text_ok(&x.kind) && text_ok(&x.name) && text_ok(&x.place))
-                && f.printers.iter().all(|p| text_ok(&p.name))
+            let texts = f.found.iter().all(|x| {
+                text_ok(&x.kind)
+                    && text_ok(&x.name)
+                    && text_ok(&x.place)
+                    && page_ok(x.page.as_deref())
+            }) && f.printers.iter().all(|p| text_ok(&p.name))
                 && f.not_checked.iter().all(|(a, b)| text_ok(a) && text_ok(b));
             if f.found.len() > MAX_FORGOTTEN
                 || f.not_checked.len() > MAX_FORGOTTEN
@@ -266,7 +277,15 @@ impl Extras {
                 return limit;
             }
         }
-        if self.special.iter().any(|s| !text_ok(&s.name)) {
+        let note_ok = |n: &pctwin_special::category::Note| match n {
+            pctwin_special::category::Note::OwnSync { page } => page_ok(page.as_deref()),
+            _ => true,
+        };
+        if self
+            .special
+            .iter()
+            .any(|s| !text_ok(&s.name) || s.notes.len() > MAX_NOTES || !s.notes.iter().all(note_ok))
+        {
             return limit;
         }
         Ok(())
@@ -527,7 +546,7 @@ fn forgotten_of(
     let env = |v: &str| {
         std::env::var_os(v)
             .map(std::path::PathBuf::from)
-            .filter(|p| p.is_absolute())
+            .filter(|p| local_folder(p))
     };
     let under = |u: Under| match u {
         Under::Home => Some(home.to_path_buf()),
@@ -552,6 +571,27 @@ fn forgotten_of(
     f.not_checked.retain(|(a, b)| text_ok(a) && text_ok(b));
     f.not_checked.truncate(MAX_FORGOTTEN);
     f
+}
+
+/// A folder named by an environment value, accepted only on a drive of this laptop: never a
+/// network or device path (a share, `\\?\UNC\...`, `\\.\...`), which would make the finder reach
+/// out to another computer (security review of 2.5, F3).
+fn local_folder(p: &std::path::Path) -> bool {
+    if !p.is_absolute() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        matches!(
+            p.components().next(),
+            Some(Component::Prefix(x)) if matches!(x.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
 }
 
 /// The most places the finder's answer carries (and places it could not check).
@@ -719,6 +759,42 @@ pub const SPECIAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(3
 
 #[cfg(test)]
 mod tests {
+    use super::{local_folder, page_ok};
+
+    /// Only a folder on a drive of this laptop is taken from an environment value (F3).
+    #[cfg(windows)]
+    #[test]
+    fn only_a_local_drive_folder_is_taken_from_the_environment() {
+        assert!(local_folder(std::path::Path::new(r"C:\Program Files")));
+        for bad in [
+            r"\\server\share\x",
+            r"\\?\UNC\server\share",
+            r"\\.\pipe\x",
+            "Program Files",
+        ] {
+            assert!(!local_folder(std::path::Path::new(bad)), "{bad}");
+        }
+    }
+
+    /// A help page the other laptop sends is accepted only as a plain https address within the
+    /// limits; anything else refuses the whole message (security review of 2.5, F2).
+    #[test]
+    fn only_a_plain_https_page_crosses() {
+        assert!(page_ok(None));
+        assert!(page_ok(Some("https://support.example.org/sync")));
+        for bad in [
+            "http://example.org/",
+            "javascript:alert(1)",
+            "file:///C:/x",
+            "https://example.org/ a",
+            "https://example.org/\u{0007}",
+            "",
+        ] {
+            assert!(!page_ok(Some(bad)), "{bad}");
+        }
+        assert!(!page_ok(Some(&format!("https://{}", "a".repeat(5000)))));
+    }
+
     use super::*;
     use pctwin_recipe::SettingValue;
     use pctwin_settings::found::{Address, RegKind};

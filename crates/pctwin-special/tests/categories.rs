@@ -271,6 +271,30 @@ fn a_browser_is_known_by_either_its_history_or_its_bookmarks_alone() {
     assert_eq!(category::of_folder(folder(&r, "Neither")), Category::Other);
 }
 
+/// A settings file shaped like bookmarks that also starts a program keeps its "starts programs"
+/// hold: being browsing data never hides another fact (security review of 2.5, 29 October 2026).
+#[test]
+fn bookmarks_never_hide_a_setting_that_starts_programs() {
+    let t = temp();
+    let home = home_of(&t);
+    put(
+        &home.join("AppData/Local/Sly App/settings.json"),
+        br#"{"command":"C:/Tools/run.exe","roots":{"bar":{"children":[{"type":"url","url":"https://example.org/"}]}}}"#,
+    );
+    let r = discover(&home, &rows(""));
+    let c = holding(folder(&r, "Sly App"), "settings.json");
+    assert!(
+        c.evidence.contains(&Evidence::EnablesCommands),
+        "{:?}",
+        c.evidence
+    );
+    assert!(
+        c.evidence.contains(&Evidence::BrowsingData),
+        "{:?}",
+        c.evidence
+    );
+}
+
 #[test]
 fn notes_follow_how_each_part_ends_not_only_its_category() {
     let t = temp();

@@ -1185,26 +1185,24 @@ fn classify_within(
                         vec![Evidence::CredentialValues],
                     )
                 }
-                Some(Ok(j)) if j.bookmarks => b.push(
-                    one,
-                    Custody::Portable,
-                    false,
-                    vec![Evidence::StructuredData, Evidence::BrowsingData],
-                ),
-                Some(Ok(j)) if j.starts_programs => b.push(
-                    one,
-                    Custody::Portable,
-                    false,
-                    vec![Evidence::StructuredData, Evidence::EnablesCommands],
-                ),
+                // Each fact adds its own evidence and none can hide another: a file shaped like
+                // bookmarks that also starts programs or links outside keeps those holds
+                // (security review of 2.5, 29 October 2026).
                 Some(Ok(j)) => {
-                    let links = links(&j.paths);
-                    if links.is_empty() {
+                    let mut ev = Vec::new();
+                    if j.starts_programs {
+                        ev.push(Evidence::EnablesCommands);
+                    }
+                    ev.extend(links(&j.paths));
+                    if j.bookmarks {
+                        ev.push(Evidence::BrowsingData);
+                    }
+                    if ev.is_empty() {
                         plain.push(f.rel.clone())
                     } else {
-                        let mut ev = vec![Evidence::StructuredData];
-                        ev.extend(links);
-                        b.push(one, Custody::Portable, false, ev)
+                        let mut all = vec![Evidence::StructuredData];
+                        all.extend(ev);
+                        b.push(one, Custody::Portable, false, all)
                     }
                 }
                 Some(Err(why)) if why == OUT_OF_TIME => unchecked.push(f.rel.clone()),
