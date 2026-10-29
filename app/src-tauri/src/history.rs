@@ -227,7 +227,32 @@ pub fn history_open<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Kept, M
         return Err(MoveProblem::Failed);
     }
     let bytes = std::fs::read(dir.join(format!("{id}.json"))).map_err(|_| MoveProblem::Failed)?;
-    serde_json::from_slice(&bytes).map_err(|_| MoveProblem::Failed)
+    let mut kept: Kept = serde_json::from_slice(&bytes).map_err(|_| MoveProblem::Failed)?;
+    with_kinds(&mut kept);
+    Ok(kept)
+}
+
+/// A report kept before its lines said their kind of file gets each kind from the file's name,
+/// as the move itself works it out ([`crate::moving::FileKind::of`]), so it opens in groups like
+/// a new one instead of every file under "Other".
+fn with_kinds(kept: &mut Kept) {
+    let Kept::Report { items } = kept else {
+        return;
+    };
+    for item in items {
+        let Some(line) = item.as_object_mut() else {
+            continue;
+        };
+        if line.contains_key("kind") {
+            continue;
+        }
+        let Some(name) = line.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        if let Ok(kind) = serde_json::to_value(crate::moving::FileKind::of(name)) {
+            line.insert("kind".into(), kind);
+        }
+    }
 }
 
 /// Saves a plain copy of the history (one line per entry) in a folder the person chooses in the
@@ -300,6 +325,24 @@ pub fn csv(entries: &[Entry]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A report kept before lines had a kind opens grouped by each file's name; a line that says
+    /// its kind keeps it.
+    #[test]
+    fn an_old_report_opens_grouped_by_kind() {
+        let mut kept = Kept::Report {
+            items: vec![
+                serde_json::json!({ "name": "Photos/beach.jpg", "status": "copied" }),
+                serde_json::json!({ "name": "notes.txt", "kind": "other", "status": "copied" }),
+            ],
+        };
+        with_kinds(&mut kept);
+        let Kept::Report { items } = kept else {
+            unreachable!()
+        };
+        assert_eq!(items[0]["kind"], "photos");
+        assert_eq!(items[1]["kind"], "other");
+    }
 
     #[test]
     fn an_export_never_replaces_a_file_already_there() {
