@@ -26,6 +26,9 @@
 //!   owner-only and removed only after a verified import;
 //! - [`category`]: the category a person sees (mail, browsers, games, AI tools, secrets) and the
 //!   notes each adds, by what was found; a row may only name the category of an other folder;
+//! - [`forgotten`]: the forgotten-things finder: places a signed catalogue names per system
+//!   (fonts, signatures, dictionaries, game saves and libraries), found and counted, and the
+//!   printers the system lists, each with the person's step;
 //! - [`handoff`]: the person's step for each component, pages and apps opened as the person, the
 //!   app's own export tool only from a signed row and only if the maker check passes.
 //!
@@ -40,6 +43,7 @@ pub mod classify;
 pub mod component;
 pub mod content;
 pub mod export;
+pub mod forgotten;
 pub mod guard;
 pub mod handoff;
 pub mod land;

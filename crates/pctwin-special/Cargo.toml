@@ -38,6 +38,11 @@ tempfile = "3"
 # Files named by their own SHA-256 (model libraries) are checked against it.
 sha2 = "0.10.9"
 
+[target.'cfg(windows)'.dependencies]
+# The printers the system lists (names only, read only) for the forgotten-things finder, through
+# the same safe registry wrapper (MIT) pctwin-settings and pctwin-scan already use.
+winreg = "0.55"
+
 [target.'cfg(unix)'.dependencies]
 # Opening a file never follows a link or waits on a pipe (O_NOFOLLOW, O_NONBLOCK).
 libc = "0.2"
