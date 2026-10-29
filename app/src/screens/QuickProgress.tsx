@@ -1,4 +1,5 @@
 import { Localized, useLocalization } from "@fluent/react";
+import type { ReactNode } from "react";
 import { Banner, Button, ProgressBar, ProgressValue } from "../components/kit";
 import type { Label } from "../pairing";
 import { fileName, formatRate, fraction, useBytes, type SendProgress } from "../quicksend";
@@ -33,7 +34,9 @@ function stages(p: SendProgress, receiving: boolean, say: (id: string, vars?: Re
  * announced on every tick. Keep it compact raises an event so the shell can show lane D's mini panel
  * (this screen does not build another).
  * `side`: the receiver's page says files are arriving, in receive words; the sender's says they are on their way.
- * Events: onPause, onResume, onCompact, onStop.
+ * `openSend`: the open send's own buttons (Add files, Send to <name>: OpenSendActions), shown under
+ * the steps while the send is open.
+ * Events: onPause, onResume, onCompact (without it there is no Keep it compact), onStop.
  */
 export default function QuickProgress({
   from,
@@ -44,15 +47,17 @@ export default function QuickProgress({
   onCompact,
   onStop,
   side = "send",
+  openSend,
 }: {
   from: Label;
   to: Label;
   progress: SendProgress;
   onPause: () => void;
   onResume: () => void;
-  onCompact: () => void;
+  onCompact?: () => void;
   onStop: () => void;
   side?: "send" | "receive";
+  openSend?: ReactNode;
 }) {
   const { l10n } = useLocalization();
   const attribute = useAttribute();
@@ -130,6 +135,8 @@ export default function QuickProgress({
 
       <Steps steps={stages(p, receiving, (id, vars) => l10n.getString(id, vars))} />
 
+      {openSend}
+
       <QsActions>
         {p.phase === "complete" ? null : paused ? (
           <Button onClick={onResume}>
@@ -147,7 +154,7 @@ export default function QuickProgress({
             </Button>
           )
         )}
-        {!lost && p.phase !== "complete" && (
+        {!lost && p.phase !== "complete" && onCompact && (
           <Button onClick={onCompact}>
             <Localized id="qs-compact">
               <span />

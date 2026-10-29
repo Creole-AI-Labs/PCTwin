@@ -11,7 +11,9 @@ import { Folder, Heading, QsStrip } from "./QsParts";
  * rows are out of scope), with Choose files as the main action in the window footer. While this laptop is ready to receive, `receiving`
  * carries the name nearby laptops see for it, and `noNearby` says no other laptop was found. `notice`
  * says the engine is not connected yet (the screens exist, nothing is sent or received).
- * Events: onSend, onReceive, onStopReceiving, onBack.
+ * Under the cards, when their handlers are given: Send a note or link (Q24) as a third card, and
+ * the rows Remembered connections and Waiting sends.
+ * Events: onSend, onReceive, onNote, onKnown, onWaiting, onStopReceiving, onBack.
  */
 export default function QuickHome({
   receiving,
@@ -19,6 +21,9 @@ export default function QuickHome({
   notice = false,
   onSend,
   onReceive,
+  onNote,
+  onKnown,
+  onWaiting,
   onStopReceiving,
   onBack,
 }: {
@@ -27,6 +32,9 @@ export default function QuickHome({
   notice?: boolean;
   onSend: () => void;
   onReceive: () => void;
+  onNote?: () => void;
+  onKnown?: () => void;
+  onWaiting?: () => void;
   onStopReceiving?: () => void;
   onBack: () => void;
 }) {
@@ -34,6 +42,11 @@ export default function QuickHome({
   const cards = [
     { id: "send", go: onSend },
     { id: "receive", go: onReceive },
+    ...(onNote ? [{ id: "note-card", go: onNote }] : []),
+  ];
+  const rows = [
+    ...(onKnown ? [{ id: "qs-home-known", go: onKnown }] : []),
+    ...(onWaiting ? [{ id: "qs-home-waiting", go: onWaiting }] : []),
   ];
   return (
     <>
@@ -96,6 +109,19 @@ export default function QuickHome({
           </li>
         ))}
       </ul>
+
+      {rows.length > 0 && (
+        <ul className="qs-home-rows">
+          {rows.map(({ id, go }) => (
+            <li key={id}>
+              <button type="button" className="qs-home-row" onClick={go}>
+                <span>{l10n.getString(id)}</span>
+                <ArrowForward />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <FrameFooter note="send">
         <Button variant="primary" onClick={onSend}>

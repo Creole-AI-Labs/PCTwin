@@ -1,6 +1,12 @@
 /** Samples: Quick Send and My PCTwin history (F08), each screen in each state, from made-up data. */
 import { useState } from "react";
-import { BLUE_FOX, GREEN_OWL, HISTORY, OFFER, PICKED, PROGRESS, RECEIPT_PARTIAL, RECEIPT_PROBLEMS, RECEIPT_WHOLE } from "../../quicksend.fixtures";
+import { BLUE_FOX, GREEN_OWL, HISTORY, INCOMING, KNOWN, NOTE_LINK, NOTE_TEXT, OFFER, PICKED, PROGRESS, RECEIPT_PARTIAL, RECEIPT_PROBLEMS, RECEIPT_WHOLE, REMEMBER_CHOICES, WAITING } from "../../quicksend.fixtures";
+import KnownList from "../../screens/QsKnown";
+import { KnownIncomingAsk } from "../../screens/QsKnownIncoming";
+import { NoteCompose, NoteReceived, NoteSent } from "../../screens/QsNote";
+import QsRecipients from "../../screens/QsRecipients";
+import { RememberOffer } from "../../screens/QsRemember";
+import { WaitingList } from "../../screens/QsWaiting";
 import type { PickedItem } from "../../quicksend";
 import History from "../../screens/History";
 import QuickDone from "../../screens/QuickDone";
@@ -30,6 +36,11 @@ function Pick({ items, dragging = false }: { items: PickedItem[]; dragging?: boo
   );
 }
 
+const known = { onRename: nothing, onForget: nothing, onAllowFolder: nothing, onRevokeFolder: nothing, onRenewFolder: nothing, onNextFolder: nothing, onClearNextFolder: nothing, onSend: nothing, onBack: nothing };
+const to = { onToggle: nothing, onWhen: nothing, onDays: nothing, onCode: nothing, onSendNow: nothing, onApprove: nothing, onBack: nothing };
+const ask = { onChoose: nothing, onNextTime: nothing, onDecline: nothing, onSave: nothing };
+const DOWNLOADS = { name: "Downloads", path: "C:\\Users\\Ada\\Downloads", freeBytes: 80_000_000_000 };
+
 const progress = (patch: Partial<typeof PROGRESS>) => (
   <QuickProgress from={BLUE_FOX} to={GREEN_OWL} progress={{ ...PROGRESS, ...patch }} onPause={nothing} onResume={nothing} onCompact={nothing} onStop={nothing} />
 );
@@ -41,6 +52,32 @@ export const samples: Sample[] = [
   { id: "Q01-receiving", title: "Quick Send home, ready to receive", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onBack={nothing} /> },
   { id: "Q01-no-nearby", title: "Quick Send home, no laptop found nearby", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} noNearby onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onBack={nothing} /> },
   { id: "Q01-not-connected", title: "Quick Send home, engine not connected yet", size: "everyday", render: () => <QuickHome notice onSend={nothing} onReceive={nothing} onBack={nothing} /> },
+
+  { id: "Q01-stage1", title: "Quick Send home, with notes, remembered connections and waiting sends", size: "everyday", render: () => <QuickHome onSend={nothing} onReceive={nothing} onNote={nothing} onKnown={nothing} onWaiting={nothing} onBack={nothing} /> },
+
+  { id: "Q24-compose", title: "Send a note or link", size: "everyday", render: () => <NoteCompose text="Wi-Fi: Home" problem={null} onChange={nothing} onContinue={nothing} onBack={nothing} /> },
+  { id: "Q24-too-long", title: "Send a note or link, too long", size: "everyday", render: () => <NoteCompose text="..." problem={{ kind: "note-too-long" }} onChange={nothing} onContinue={nothing} onBack={nothing} /> },
+  { id: "Q24-sending", title: "Note on its way", size: "everyday", render: () => <NoteSent sent={false} onDone={nothing} /> },
+  { id: "Q24-sent", title: "Note arrived", size: "everyday", render: () => <NoteSent sent onDone={nothing} /> },
+  { id: "Q24-received-note", title: "A note arrived", size: "everyday", render: () => <NoteReceived note={NOTE_TEXT} onCopy={nothing} onOpen={nothing} onDone={nothing} /> },
+  { id: "Q24-received-link", title: "A link arrived from a remembered laptop", size: "everyday", render: () => <NoteReceived note={NOTE_LINK} copy="copied" onCopy={nothing} onOpen={nothing} onDone={nothing} /> },
+
+  { id: "Q21-remember", title: "Remember this connection", size: "everyday", render: () => <RememberOffer fallbackStore={false} connections={[]} onRemember={nothing} /> },
+  { id: "Q21-replace", title: "Remember this connection, may replace an earlier one", size: "everyday", render: () => <RememberOffer fallbackStore connections={REMEMBER_CHOICES} suggestedName="Kitchen laptop" onRemember={nothing} /> },
+  { id: "Q21-remembered", title: "Remember this connection, remembered", size: "everyday", render: () => <RememberOffer fallbackStore={false} connections={[]} remembered="Ada's laptop" onRemember={nothing} /> },
+
+  { id: "Q27-known", title: "Remembered connections", size: "everyday", render: () => <KnownList connections={KNOWN} {...known} /> },
+  { id: "Q27-known-problem", title: "Remembered connections, a folder refused", size: "everyday", render: () => <KnownList connections={KNOWN} problem={{ id: KNOWN[1].id, refusal: { kind: "folder-holds-keys" } }} {...known} /> },
+  { id: "Q27-known-empty", title: "Remembered connections, none yet", size: "everyday", render: () => <KnownList connections={[]} {...known} /> },
+
+  { id: "Q08-known", title: "A remembered laptop wants to send files", size: "everyday", render: () => <KnownIncomingAsk incoming={INCOMING} folder={DOWNLOADS} nextTime={false} {...ask} /> },
+
+  { id: "Q04-one", title: "Who should get these, one laptop now", size: "everyday", render: () => <QsRecipients connections={KNOWN} chosen={[KNOWN[0].id]} when="now" days="7" {...to} /> },
+  { id: "Q04-several", title: "Who should get these, several laptops waiting", size: "everyday", render: () => <QsRecipients connections={KNOWN} chosen={[KNOWN[0].id, KNOWN[2].id]} when="later" days="7" {...to} /> },
+
+  { id: "Q18-waiting", title: "Waiting sends, results for each laptop", size: "everyday", render: () => <WaitingList sends={WAITING} now={1_792_400_000} onRenew={nothing} onCancel={nothing} onSend={nothing} onBack={nothing} /> },
+  { id: "Q18-ended", title: "Waiting sends, one ended", size: "everyday", render: () => <WaitingList sends={WAITING} now={1_800_000_000} onRenew={nothing} onCancel={nothing} onSend={nothing} onBack={nothing} /> },
+  { id: "Q18-empty", title: "Waiting sends, nothing waiting", size: "everyday", render: () => <WaitingList sends={[]} now={1_792_400_000} onRenew={nothing} onCancel={nothing} onSend={nothing} onBack={nothing} /> },
 
   { id: "Q02-empty", title: "Choose files, nothing chosen", size: "everyday", render: () => <Pick items={[]} /> },
   { id: "Q02-chosen", title: "Choose files, three chosen", size: "everyday", render: () => <Pick items={PICKED} /> },

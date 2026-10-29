@@ -2,7 +2,12 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type Label, type Problem, type ReadyNote, type RescueDrive } from "./bridge";
+import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, listenKnown, qsLaunchFiles, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type KnownDelivered, type KnownIncoming, type Label, type Problem, type QsNote, type ReadyNote, type RescueDrive } from "./bridge";
+import { Toast } from "./components/kit";
+import KnownHost from "./screens/QsKnownHost";
+import KnownReceiveHost from "./screens/QsKnownIncoming";
+import { NoteInHost } from "./screens/QsNote";
+import WaitingHost from "./screens/QsWaiting";
 import ThingsReady from "./screens/ThingsReady";
 import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
@@ -45,8 +50,15 @@ type Screen =
   | { id: "ready"; note: ReadyNote }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
   | { id: "pickup"; unfinished: number }
-  // Quick Send, either way, from its home.
-  | { id: "qs"; mode: "send" | "receive" }
+  // Quick Send, either way, or a note or link, from its home.
+  | { id: "qs"; mode: "send" | "receive" | "note" }
+  // Remembered connections and waiting sends (Quick Send stage 1), from Quick Send's home.
+  | { id: "known" }
+  | { id: "waiting" }
+  // A remembered laptop wants to send files: where should they go? (Shown whenever it asks, but never over a move, a pairing or a send.)
+  | { id: "known-in"; incoming: KnownIncoming }
+  // A note or link from a remembered laptop.
+  | { id: "note-in"; note: QsNote }
   // My PCTwin history (F08), from Home; Back returns there.
   | { id: "history" }
   // Help (S01), from the footer; Back returns to where it was opened.
@@ -61,6 +73,13 @@ type Screen =
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
   const [language, setLanguage] = useState<LanguageCode>(() => initialLanguage ?? savedLanguage() ?? pickLanguage(navigator.languages));
   const [screen, setScreen] = useState<Screen>({ id: "welcome" });
+  // The screen now, for the engine's Quick Send events (the listener is set once).
+  const screenRef = useRef<Screen>(screen);
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
+  // Files that landed under "allow future sends into this folder", told on the first after a quiet spell.
+  const [delivered, setDelivered] = useState<KnownDelivered | null>(null);
   // A move that stopped part way on this laptop: Home shows "Resume your move" until it is tidied up.
   const [unfinished, setUnfinished] = useState(0);
   // What went wrong on the naming page (a name that cannot be used), or null.
@@ -112,6 +131,41 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     );
     return () => {
       live = false;
+    };
+  }, []);
+
+  // Quick Send from outside its pages: a remembered laptop asking to send, a note from one, and
+  // files the system handed PCTwin (Send to, a file manager entry). None of them takes the person
+  // away from a move, a pairing, a send or another question: the engine then declines or waits.
+  useEffect(() => {
+    let live = true;
+    let unlisten: (() => void) | null = null;
+    const busy = () => ["move", "pair", "qs", "known-in", "name", "pickup"].includes(screenRef.current.id);
+    void listenKnown((event) => {
+      if (!live) return;
+      if (event.kind === "incoming" && !busy()) setScreen({ id: "known-in", incoming: event.incoming });
+      else if (event.kind === "note" && event.note.from !== null && !busy()) setScreen({ id: "note-in", note: event.note });
+      else if (event.kind === "launch" && !busy()) setScreen({ id: "qs", mode: "send" });
+      else if (event.kind === "delivered") {
+        const d = event.delivered;
+        const whole = d.lines.every((l) => l.outcome.kind === "arrived" || l.outcome.kind === "already-there");
+        // Said on the first after a quiet spell, and whenever something did not arrive.
+        if (d.tell || !whole) setDelivered(d);
+      }
+    }).then((stop) => {
+      if (live) unlisten = stop;
+      else stop();
+    });
+    // PCTwin was started to send something (Send to): the pick page opens with it.
+    qsLaunchFiles().then(
+      (items) => {
+        if (live && items.length > 0) setScreen((s) => (s.id === "welcome" ? { id: "qs", mode: "send" } : s));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+      unlisten?.();
     };
   }, []);
 
@@ -232,9 +286,16 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 notice={screen.notice}
                 onSend={() => { setScreen({ id: "qs", mode: "send" }); }}
                 onReceive={() => { setScreen({ id: "qs", mode: "receive" }); }}
+                onNote={() => { setScreen({ id: "qs", mode: "note" }); }}
+                onKnown={() => { setScreen({ id: "known" }); }}
+                onWaiting={() => { setScreen({ id: "waiting" }); }}
                 onBack={() => { setScreen({ id: "welcome" }); }}
               />
             )}
+            {screen.id === "known" && <KnownHost onSend={() => { setScreen({ id: "qs", mode: "send" }); }} onBack={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "waiting" && <WaitingHost onSend={() => { setScreen({ id: "qs", mode: "send" }); }} onBack={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "known-in" && <KnownReceiveHost incoming={screen.incoming} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "note-in" && <NoteInHost note={screen.note} onDone={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "name" && (
               <NameLaptop
                 suggested={screen.suggested}
@@ -263,7 +324,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               />
             )}
             {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
-            {screen.id === "qs" && <QuickHost mode={screen.mode} onWindow={onWindow} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "qs" && <QuickHost mode={screen.mode} onWindow={onWindow} onWaiting={() => { setScreen({ id: "waiting" }); }} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "rescue" && <RescuePick onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(drive) => { setScreen({ id: "move", role: "new", rescue: drive }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
@@ -297,6 +358,15 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               />
             )}
           </main>
+          {delivered && (
+            <Toast onDismiss={() => { setDelivered(null); }}>
+              {l10n.getString("qs-known-delivered", { label: delivered.label, folder: delivered.folder })}{" "}
+              {l10n.getString("qs-known-delivered-counts", {
+                arrived: delivered.lines.filter((l) => l.outcome.kind === "arrived" || l.outcome.kind === "already-there").length,
+                total: delivered.lines.length,
+              })}
+            </Toast>
+          )}
         </FooterProvider>
       </div>
       {(opening === "wordplay" || opening === "still") && (

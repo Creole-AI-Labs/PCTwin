@@ -501,3 +501,187 @@
     border: 1px solid CanvasText;
   }
 }
+
+/* ---------- Quick Send stage 1: notes, remembered connections, waiting sends ---------- */
+
+/* Home: the rows under the cards */
+.qs-home-rows {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.qs-home-rows li + li {
+  border-block-start: 1px solid var(--colour-line-quiet);
+}
+
+.qs-home-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  inline-size: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: none;
+  color: var(--colour-ink);
+  font: inherit;
+  font-size: var(--type-row-title);
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+.qs-home-row:hover {
+  color: var(--colour-blue);
+}
+
+/* A note: the box it is typed in, and the text that arrived exactly as sent */
+.qs-note-field {
+  margin-top: var(--space-4);
+}
+
+.qs-note-box {
+  inline-size: 100%;
+  min-block-size: 8rem;
+  padding: var(--space-3);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.qs-note-shown {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.qs-note-host {
+  margin-top: var(--space-3);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+/* A card of its own: Remember this connection, each connection and each waiting send */
+.qs-card {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.qs-card-title {
+  display: block;
+  margin: 0;
+  font-size: var(--type-row-title);
+  font-weight: 600;
+}
+
+.qs-card .kit-field,
+.qs-card .kit-setting {
+  margin-top: var(--space-3);
+}
+
+.qs-choice-list {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.qs-choice-list legend {
+  padding: 0;
+  font-size: var(--type-small);
+  font-weight: 600;
+}
+
+.qs-choice-list .kit-check {
+  margin-top: var(--space-2);
+}
+
+.qs-known-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.qs-known-head,
+.qs-recipient-results li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.qs-known-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.qs-known-warn {
+  color: var(--colour-attention-text);
+  font-size: var(--type-supporting);
+}
+
+.qs-known-part {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-block-start: 1px solid var(--colour-line-quiet);
+}
+
+.qs-known-sub {
+  font-size: var(--type-small);
+}
+
+.qs-known-part .qs-folder-line {
+  margin-top: var(--space-3);
+}
+
+.qs-known-rename {
+  margin-top: var(--space-3);
+}
+
+/* Who it is coming from, by name */
+.qs-name-list {
+  margin: var(--space-3) 0 0;
+  padding-inline-start: var(--space-5);
+  overflow-wrap: anywhere;
+}
+
+.qs-recipient-results {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+
+.qs-waiting .kit-banner {
+  margin-top: var(--space-3);
+}
+
+.qs-waiting-renew {
+  margin-top: var(--space-3);
+}
+
+.qs-known-text .kit-hint,
+.qs-known-text .qs-known-warn,
+.qs-card > .qs-small:first-child {
+  margin-top: 0;
+}
