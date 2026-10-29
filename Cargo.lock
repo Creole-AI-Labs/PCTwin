@@ -3757,6 +3757,7 @@ dependencies = [
  "getrandom 0.4.3",
  "if-addrs",
  "mdns-sd",
+ "pctwin-types",
  "serde",
  "wmi",
 ]
@@ -3862,6 +3863,7 @@ dependencies = [
  "pctwin-record",
  "pctwin-scan",
  "pctwin-staged-seal",
+ "pctwin-types",
  "rustix",
  "serde",
  "serde_json",
@@ -3884,6 +3886,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-open-directory",
  "objc2-service-management",
+ "pctwin-types",
  "rustix",
  "security-framework",
  "security-framework-sys",
@@ -4025,6 +4028,7 @@ dependencies = [
  "pctwin-record",
  "pctwin-scan",
  "pctwin-transfer",
+ "pctwin-types",
  "serde",
  "serde_json",
  "tempfile",
@@ -4154,6 +4158,7 @@ dependencies = [
  "thiserror 2.0.21",
  "thread-priority",
  "winapi-util",
+ "winreg",
 ]
 
 [[package]]
@@ -4236,6 +4241,7 @@ dependencies = [
  "pctwin-pairing",
  "pctwin-record",
  "pctwin-scan",
+ "pctwin-types",
  "proptest",
  "serde",
  "serde_json",

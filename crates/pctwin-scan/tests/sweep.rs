@@ -2192,3 +2192,61 @@ fn everything_shown_as_moving_is_in_a_file_the_move_sends() {
     assert!(!mine.iter().any(|i| shown(i).contains("pad/")));
     s.record.validate().unwrap();
 }
+
+/// A folder the laptop itself names as an installed program's place (a game library such as
+/// `C:\XboxGames`, or a program's install folder on another drive) is counted as a program,
+/// never offered as the person's files; a folder holding a person's home never is, whatever an
+/// installer wrote (found in the two-copy test, 29 October 2026).
+#[test]
+fn a_place_the_laptop_names_as_a_programs_is_counted_not_moved() {
+    let lab = lab();
+    write(&lab.c.join("XboxGames/Game/Content/game.exe"), 300);
+    write(&lab.d.join("Games/Racer/racer.bin"), 200);
+    write(&lab.d.join("Photos/beach.jpg"), 20);
+    write(&lab.ada.join("Documents/cv.docx"), 40);
+    write(&lab.c.join("Users/Shared/menu.txt"), 10);
+    // Windows and macOS compare names ignoring case: an installer's own spelling still matches.
+    let library = if cfg!(any(windows, target_os = "macos")) {
+        "xboxgames"
+    } else {
+        "XboxGames"
+    };
+    let mut f = sized(facts(&lab, false), 0);
+    f.rules = f.rules.with_programs([
+        lab.c.join(library),
+        lab.d.join("Games").join("Racer"),
+        // An installer that wrote a home's parent as its place is ignored.
+        lab.c.join("Users"),
+    ]);
+    let s = run(f, &mut Answers::default());
+    assert!(s.finished);
+    let listed: Vec<String> = s.record.items.iter().map(shown).collect();
+    assert!(
+        !listed
+            .iter()
+            .any(|p| p.contains("game.exe") || p.contains("racer.bin")),
+        "{listed:#?}"
+    );
+    find(&s, FolderRole::Other, "Photos/beach.jpg");
+    find(&s, FolderRole::Documents, "cv.docx");
+    let menu = s
+        .record
+        .items
+        .iter()
+        .find(|i| shown(i).ends_with("menu.txt"))
+        .expect("a place holding homes is never a program's");
+    assert_eq!(
+        menu.inclusion,
+        Inclusion::Included,
+        "a place holding homes is never a program's"
+    );
+    let game = s
+        .places
+        .iter()
+        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with("XboxGames")))
+        .expect("the game library is counted");
+    assert!(
+        matches!(&game.placement.rule, Rule::RulesFile { row } if row.starts_with("installed program"))
+    );
+    assert_eq!(game.bytes, 300);
+}
