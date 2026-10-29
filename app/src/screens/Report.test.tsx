@@ -66,10 +66,14 @@ describe("R02 beyond files", () => {
     expect(screen.queryByText(text("report-none"))).toBeNull();
   });
 
-  it("opens apps into each app with its result, and the apps already here as their own plain line", async () => {
+  it("opens apps on their own page: each app with its result, and the apps already here as their own plain line", async () => {
     const o = full();
-    inApp(<Report items={[]} rebuilt={o.rebuilt} people={o.people} onBack={noop} />);
+    const onBack = vi.fn();
+    inApp(<Report items={[]} rebuilt={o.rebuilt} people={o.people} onBack={onBack} />);
     fireEvent.click(head("report-group-apps"));
+    const page = screen.getByRole("heading", { level: 1 });
+    expect(page.textContent).toBe(text("report-group-apps"));
+    expect(document.activeElement).toBe(page);
     const body = document.querySelector<HTMLElement>(".rp-body");
     if (!body) throw new Error("the apps group opened");
     expect(within(body).getByText("Sketch Tool")).toBeTruthy();
@@ -77,6 +81,10 @@ describe("R02 beyond files", () => {
     expect(plain(body.textContent)).toContain(plain(text("report-here", { count: 2 })));
     expect(within(body).getByText("Paint")).toBeTruthy();
     expect(await violations()).toEqual([]);
+    // Back returns to the overview, not out of the report.
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(onBack).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("report-title"));
   });
 
   it("lists what needs the person first: apps, app data and people who did not finish", () => {
@@ -96,11 +104,11 @@ describe("R02 beyond files", () => {
     const o = full();
     const rebuilt = o.rebuilt ? { ...o.rebuilt, more: 40, hereMore: 3 } : undefined;
     inApp(<Report items={[]} rebuilt={rebuilt} onBack={noop} />);
+    expect(plain(document.body.textContent)).toContain(plain(text("report-beyond-more", { count: 40 })));
     fireEvent.click(head("report-group-apps"));
     const body = document.querySelector<HTMLElement>(".rp-body");
     expect(plain(body?.textContent ?? "")).toContain(plain(text("report-here", { count: 5 })));
     expect(plain(body?.textContent ?? "")).toContain(plain(text("fullmove-more", { count: 3 })));
-    expect(plain(document.body.textContent)).toContain(plain(text("report-beyond-more", { count: 40 })));
   });
 
   it("opens other people into one line each", () => {

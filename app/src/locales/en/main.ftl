@@ -1171,11 +1171,11 @@ drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Your move, by kind.
-report-body = Open a kind to see its files. Anything that needs you comes first.
+report-title = What moved
+report-body = Select a group to see what is in it. Things that need you are at the top.
 report-needs-title = { $count ->
-        [one] 1 thing needs you
-       *[other] { $count } things need you
+        [one] Needs you: 1
+       *[other] Needs you: { $count }
     }
 report-group-photos = Photos
 report-group-videos = Videos
@@ -1189,8 +1189,8 @@ report-group-size = { $files ->
 report-group-done = All copied and checked
 report-group-some = { $done } of { $total } copied and checked
 report-group-left = { $count ->
-        [one] 1 left on your old laptop, as you chose
-       *[other] { $count } left on your old laptop, as you chose
+        [one] 1 not moved: you left it out
+       *[other] { $count } not moved: you left them out
     }
 report-filter-label = Show
 report-col-item = Item
@@ -2060,7 +2060,7 @@ accept-accept = Accept
 report-group-apps = Apps
 report-group-settings = Settings
 report-group-special = App data and other things
-report-group-people = Other people moved
+report-group-people = Other people
 report-count-apps = { $count ->
         [one] 1 app
        *[other] { $count } apps
@@ -2080,12 +2080,12 @@ report-count-people = { $count ->
 report-beyond-done = All done and checked
 report-beyond-some = { $done } of { $total } done and checked
 report-beyond-left = { $count ->
-        [one] 1 left out, as you chose
-       *[other] { $count } left out, as you chose
+        [one] 1 not moved: you left it out
+       *[other] { $count } not moved: you left them out
     }
 report-beyond-more = { $count ->
-        [one] And 1 more app, setting or other thing that this list does not show.
-       *[other] And { $count } more apps, settings or other things that this list does not show.
+        [one] 1 more is not shown here.
+       *[other] { $count } more are not shown here.
     }
 report-here = { $count ->
         [one] 1 app was already on this laptop. PCTwin left it as it is.

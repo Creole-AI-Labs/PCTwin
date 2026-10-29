@@ -1296,11 +1296,11 @@ drive-problem-carry-on = जारी रखें
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = आपका स्थानांतरण, प्रकार के अनुसार।
-report-body = किसी प्रकार को खोलकर उसकी फ़ाइलें देखें। जिन चीज़ों पर आपका ध्यान चाहिए, वे सबसे पहले हैं।
+report-title = क्या ले जाया गया
+report-body = कोई समूह चुनें और देखें कि उसमें क्या है। जिन चीज़ों पर आपको ध्यान देना है, वे सबसे ऊपर हैं।
 report-needs-title = { $count ->
-        [one] { $count } चीज़ पर आपका ध्यान चाहिए
-       *[other] { $count } चीज़ों पर आपका ध्यान चाहिए
+        [one] आपको देखना है: { $count }
+       *[other] आपको देखना है: { $count }
     }
 report-group-photos = फ़ोटो
 report-group-videos = वीडियो
@@ -1314,8 +1314,8 @@ report-group-size = { $files ->
 report-group-done = सब कॉपी और जाँच लिया गया
 report-group-some = { $total } में से { $done } कॉपी और जाँच लिए गए
 report-group-left = { $count ->
-        [one] { $count } आपके पुराने लैपटॉप पर रहा, जैसा आपने चुना
-       *[other] { $count } आपके पुराने लैपटॉप पर रहे, जैसा आपने चुना
+        [one] { $count } नहीं ले जाया गया: आपने इसे छोड़ा
+       *[other] { $count } नहीं ले जाए गए: आपने इन्हें छोड़ा
     }
 report-filter-label = दिखाएं
 report-col-item = आइटम
@@ -2182,7 +2182,7 @@ accept-accept = स्वीकार करें
 report-group-apps = ऐप
 report-group-settings = सेटिंग्स
 report-group-special = ऐप डेटा और दूसरी चीज़ें
-report-group-people = साथ में ले जाए गए दूसरे लोग
+report-group-people = दूसरे लोग
 report-count-apps = { $count ->
         [one] { $count } ऐप
        *[other] { $count } ऐप
@@ -2202,12 +2202,12 @@ report-count-people = { $count ->
 report-beyond-done = सब पूरा हुआ और जाँच लिया गया
 report-beyond-some = { $total } में से { $done } पूरे हुए और जाँच लिए गए
 report-beyond-left = { $count ->
-        [one] { $count } छोड़ा गया, जैसा आपने चुना
-       *[other] { $count } छोड़े गए, जैसा आपने चुना
+        [one] { $count } नहीं ले जाया गया: आपने इसे छोड़ा
+       *[other] { $count } नहीं ले जाए गए: आपने इन्हें छोड़ा
     }
 report-beyond-more = { $count ->
-        [one] और { $count } ऐप, सेटिंग या दूसरी चीज़ जो यह सूची नहीं दिखाती।
-       *[other] और { $count } ऐप, सेटिंग्स या दूसरी चीज़ें जो यह सूची नहीं दिखाती।
+        [one] { $count } और यहाँ नहीं दिखाया गया।
+       *[other] { $count } और यहाँ नहीं दिखाए गए।
     }
 report-here = { $count ->
         [one] { $count } ऐप इस लैपटॉप पर पहले से था। PCTwin ने उसे वैसा ही छोड़ दिया।

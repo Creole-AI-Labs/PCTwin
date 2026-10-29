@@ -1097,10 +1097,10 @@ drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = 你的搬迁，按类型。
-report-body = 打开一个类型即可查看其中的文件。需要你处理的内容排在最前。
+report-title = 迁移了什么
+report-body = 选择一个分组，查看其中的内容。需要你处理的在最上面。
 report-needs-title = { $count ->
-       *[other] { $count } 项需要你处理
+       *[other] 需要你处理：{ $count }
     }
 report-group-photos = 照片
 report-group-videos = 视频
@@ -1113,7 +1113,7 @@ report-group-size = { $files ->
 report-group-done = 全部已复制并检查
 report-group-some = { $total } 个中的 { $done } 个已复制并检查
 report-group-left = { $count ->
-       *[other] 按你的选择，{ $count } 个留在旧笔记本电脑上
+       *[other] { $count } 项未迁移：你没有选择它们
     }
 report-filter-label = 显示
 report-col-item = 项目
@@ -1938,7 +1938,7 @@ accept-accept = 接受
 report-group-apps = 应用
 report-group-settings = 设置
 report-group-special = 应用数据和其他内容
-report-group-people = 一起迁移的其他人
+report-group-people = 其他人
 report-count-apps = { $count ->
        *[other] { $count } 个应用
     }
@@ -1954,10 +1954,10 @@ report-count-people = { $count ->
 report-beyond-done = 全部完成并已检查
 report-beyond-some = { $total } 项中的 { $done } 项已完成并检查
 report-beyond-left = { $count ->
-       *[other] 按你的选择，{ $count } 项未包含
+       *[other] { $count } 项未迁移：你没有选择它们
     }
 report-beyond-more = { $count ->
-       *[other] 还有 { $count } 个应用、设置或其他内容未在此列表中显示。
+       *[other] 还有 { $count } 项未在这里显示。
     }
 report-here = { $count ->
        *[other] { $count } 个应用原本就在这台电脑上。PCTwin 保持了原样。

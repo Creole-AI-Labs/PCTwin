@@ -1338,12 +1338,12 @@ drive-problem-carry-on = Continuer
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Votre transfert, par type.
-report-body = Ouvrez un type pour voir ses fichiers. Ce qui demande votre attention vient en premier.
+report-title = Ce qui a été déplacé
+report-body = Sélectionnez un groupe pour voir ce qu’il contient. Ce qui a besoin de vous est en haut.
 report-needs-title = { $count ->
-        [one] { $count } élément demande votre attention
-        [many] { $count } éléments demandent votre attention
-       *[other] { $count } éléments demandent votre attention
+        [one] À faire par vous : { $count }
+        [many] À faire par vous : { $count }
+       *[other] À faire par vous : { $count }
     }
 report-group-photos = Photos
 report-group-videos = Vidéos
@@ -1358,9 +1358,9 @@ report-group-size = { $files ->
 report-group-done = Tout est copié et vérifié
 report-group-some = { $done } sur { $total } copiés et vérifiés
 report-group-left = { $count ->
-        [one] { $count } laissé sur votre ancien portable, comme vous l'avez choisi
-        [many] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
-       *[other] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
+        [one] { $count } non déplacé : vous l’avez laissé de côté
+        [many] { $count } non déplacés : vous les avez laissés de côté
+       *[other] { $count } non déplacés : vous les avez laissés de côté
     }
 report-filter-label = Afficher
 report-col-item = Élément
@@ -2260,7 +2260,7 @@ accept-accept = Accepter
 report-group-apps = Applications
 report-group-settings = Réglages
 report-group-special = Données d’applications et autres choses
-report-group-people = Autres personnes déplacées
+report-group-people = Autres personnes
 report-count-apps = { $count ->
         [one] { $count } appli
         [many] { $count } d’applis
@@ -2284,14 +2284,14 @@ report-count-people = { $count ->
 report-beyond-done = Tout est fait et vérifié
 report-beyond-some = { $done } sur { $total } faits et vérifiés
 report-beyond-left = { $count ->
-        [one] { $count } laissé de côté, comme vous l’avez choisi
-        [many] { $count } laissés de côté, comme vous l’avez choisi
-       *[other] { $count } laissés de côté, comme vous l’avez choisi
+        [one] { $count } non déplacé : vous l’avez laissé de côté
+        [many] { $count } non déplacés : vous les avez laissés de côté
+       *[other] { $count } non déplacés : vous les avez laissés de côté
     }
 report-beyond-more = { $count ->
-        [one] Et { $count } autre application, réglage ou élément que cette liste ne montre pas.
-        [many] Et { $count } autres applications, réglages ou éléments que cette liste ne montre pas.
-       *[other] Et { $count } autres applications, réglages ou éléments que cette liste ne montre pas.
+        [one] { $count } autre n’est pas affiché ici.
+        [many] { $count } autres ne sont pas affichés ici.
+       *[other] { $count } autres ne sont pas affichés ici.
     }
 report-here = { $count ->
         [one] { $count } application était déjà sur cet ordinateur. PCTwin l’a laissée telle quelle.

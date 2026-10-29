@@ -1333,12 +1333,12 @@ drive-problem-carry-on = Continuar
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Sua transferência, por tipo.
-report-body = Abra um tipo para ver seus arquivos. O que precisa de você aparece primeiro.
+report-title = O que foi transferido
+report-body = Selecione um grupo para ver o que tem nele. O que precisa de você está no topo.
 report-needs-title = { $count ->
-        [one] { $count } item precisa de você
-        [many] { $count } itens precisam de você
-       *[other] { $count } itens precisam de você
+        [one] Precisa de você: { $count }
+        [many] Precisam de você: { $count }
+       *[other] Precisam de você: { $count }
     }
 report-group-photos = Fotos
 report-group-videos = Vídeos
@@ -1353,9 +1353,9 @@ report-group-size = { $files ->
 report-group-done = Tudo copiado e verificado
 report-group-some = { $done } de { $total } copiados e verificados
 report-group-left = { $count ->
-        [one] { $count } ficou no seu notebook antigo, como você escolheu
-        [many] { $count } ficaram no seu notebook antigo, como você escolheu
-       *[other] { $count } ficaram no seu notebook antigo, como você escolheu
+        [one] { $count } não transferido: você o deixou de fora
+        [many] { $count } não transferidos: você os deixou de fora
+       *[other] { $count } não transferidos: você os deixou de fora
     }
 report-filter-label = Mostrar
 report-col-item = Item
@@ -2255,7 +2255,7 @@ accept-accept = Aceitar
 report-group-apps = Apps
 report-group-settings = Configurações
 report-group-special = Dados de apps e outras coisas
-report-group-people = Outras pessoas transferidas
+report-group-people = Outras pessoas
 report-count-apps = { $count ->
         [one] { $count } app
         [many] { $count } apps
@@ -2279,14 +2279,14 @@ report-count-people = { $count ->
 report-beyond-done = Tudo feito e verificado
 report-beyond-some = { $done } de { $total } feitos e verificados
 report-beyond-left = { $count ->
-        [one] { $count } deixado de fora, como você escolheu
-        [many] { $count } deixados de fora, como você escolheu
-       *[other] { $count } deixados de fora, como você escolheu
+        [one] { $count } não transferido: você o deixou de fora
+        [many] { $count } não transferidos: você os deixou de fora
+       *[other] { $count } não transferidos: você os deixou de fora
     }
 report-beyond-more = { $count ->
-        [one] E mais { $count } app, configuração ou outra coisa que esta lista não mostra.
-        [many] E mais { $count } apps, configurações ou outras coisas que esta lista não mostra.
-       *[other] E mais { $count } apps, configurações ou outras coisas que esta lista não mostra.
+        [one] Mais { $count } não aparece aqui.
+        [many] Mais { $count } não aparecem aqui.
+       *[other] Mais { $count } não aparecem aqui.
     }
 report-here = { $count ->
         [one] { $count } app já estava neste notebook. O PCTwin o deixou como estava.

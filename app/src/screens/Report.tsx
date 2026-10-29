@@ -31,11 +31,12 @@ function folderOf(item: ReportItem): string {
 }
 
 /**
- * R02 Your move, by kind (decided 29 October 2026, after the person saw a list of every file and
+ * R02 What moved (decided 29 October 2026, after the person saw a list of every file and
  * said nobody would understand it): like a phone's storage page. Anything that needs the person
  * comes first, in its own list, never folded away. Then one line per kind of file (photos, videos,
  * music, documents, other files) with how many, how much, and how it went in words, under a bar
- * that shows their sizes. A kind opens into its files, by folder, a page at a time; each file keeps
+ * that shows their sizes. Selecting a group opens its own page (Back returns to the overview): its
+ * files, by folder, a page at a time; each file keeps
  * its result chip, its reason, and how it was checked, with where it came from and went behind
  * More details. A copied file was either read back from the drive or checked from this laptop's
  * memory, and the two are different lines, never merged.
@@ -43,7 +44,7 @@ function folderOf(item: ReportItem): string {
  * A laptop holds more than a phone (decided 29 October 2026): after the files come the apps (with
  * the apps already on this laptop, left as they are, as their own plain line), the settings, the
  * app data and other things (Wi-Fi, fonts, browser data and the like), and the other people
- * moved, each one line that opens into its lines. Whatever of them needs the person is also in
+ * moved, each one line that opens its own page. Whatever of them needs the person is also in
  * "Needs you" at the top. When the engine sent fewer lines than there are, the report says how
  * many more, never a shorter list as if it were all.
  *
@@ -210,32 +211,81 @@ export default function Report({
     );
   }
 
-  /** A group's line: a button that opens it (the same for files and for what is beyond them). */
-  const groupHead = (key: FileKind | Beyond, label: string, size: string, state: ReactNode, swatch: boolean) => {
-    const isOpen = open === key;
-    return (
-      <button
-        type="button"
-        className="rp-head"
-        aria-expanded={isOpen}
-        onClick={() => {
-          setOpen(isOpen ? null : key);
-          setShown(PAGE);
+  /** A group's line on the overview: a button that opens the group's own page. */
+  const groupHead = (key: FileKind | Beyond, label: string, size: string, state: ReactNode, swatch: boolean) => (
+    <button
+      type="button"
+      className="rp-head"
+      onClick={() => {
+        setOpen(key);
+        setShown(PAGE);
+      }}
+    >
+      <span className={swatch ? `rp-swatch rp-${key}` : "rp-swatch rp-beyond"} aria-hidden="true" />
+      <span className="rp-name">{label}</span>
+      <span className="rp-size">{size}</span>
+      <span className="rp-state">{state}</span>
+    </button>
+  );
+
+  const fileState = (g: (typeof groups)[number]) => (
+    <>
+      {g.asked > 0 && (g.done === g.asked ? l10n.getString("report-group-done") : l10n.getString("report-group-some", { done: g.done, total: g.asked }))}
+      {g.left > 0 && <span className="rp-left">{l10n.getString("report-group-left", { count: g.left })}</span>}
+    </>
+  );
+  const fileSize = (g: (typeof groups)[number]) => l10n.getString("report-group-size", { files: g.lines.length, size: formatBytes(g.bytes, pageLocale()) });
+
+  /** A group's own page: Back to the overview, its name as the heading, then its lines. */
+  const groupPage = (key: FileKind | Beyond, size: string, state: ReactNode, body: ReactNode) => (
+    <>
+      <TopStrip
+        onBack={() => {
+          setOpen(null);
         }}
-      >
-        <span className={swatch ? `rp-swatch rp-${key}` : "rp-swatch rp-beyond"} aria-hidden="true" />
-        <span className="rp-name">{label}</span>
-        <span className="rp-size">{size}</span>
-        <span className="rp-state">{state}</span>
-      </button>
-    );
-  };
+        labelId="outcome-eyebrow"
+      />
+      <Heading key={key} id={`report-group-${key}`} />
+      <p className="subhead rp-page-line">
+        <span>{size}</span> <span>{state}</span>
+      </p>
+      <div className="rp-body">{body}</div>
+    </>
+  );
+
+  if (open !== null) {
+    const file = groups.find((g) => g.kind === open);
+    if (file) {
+      return groupPage(
+        file.kind,
+        fileSize(file),
+        fileState(file),
+        <>
+          {table(file.lines.slice(0, shown))}
+          {file.lines.length > shown && (
+            <>
+              <p className="mv-count">{l10n.getString("report-showing", { shown, total: file.lines.length })}</p>
+              <Button
+                onClick={() => {
+                  setShown(shown + PAGE);
+                }}
+              >
+                {l10n.getString("report-show-more")}
+              </Button>
+            </>
+          )}
+        </>,
+      );
+    }
+    const other = beyond.find((g) => g.key === open);
+    if (other) return groupPage(other.key, other.count, other.state, other.body);
+  }
 
   const nothing = items.length === 0 && beyond.length === 0;
   return (
     <>
       <TopStrip onBack={onBack} labelId="outcome-eyebrow" />
-      <Heading id="report-title" />
+      <Heading key="overview" id="report-title" />
       <p className="subhead">{l10n.getString("report-body")}</p>
       {nothing ? (
         <p className="mv-empty">{l10n.getString("report-none")}</p>
@@ -262,39 +312,12 @@ export default function Report({
           <ul className="rp-groups">
             {groups.map((g) => (
               <li key={g.kind} className="rp-group">
-                {groupHead(
-                  g.kind,
-                  name(g.kind),
-                  l10n.getString("report-group-size", { files: g.lines.length, size: formatBytes(g.bytes, pageLocale()) }),
-                  <>
-                    {g.asked > 0 && (g.done === g.asked ? l10n.getString("report-group-done") : l10n.getString("report-group-some", { done: g.done, total: g.asked }))}
-                    {g.left > 0 && <span className="rp-left">{l10n.getString("report-group-left", { count: g.left })}</span>}
-                  </>,
-                  true,
-                )}
-                {open === g.kind && (
-                  <div className="rp-body">
-                    {table(g.lines.slice(0, shown))}
-                    {g.lines.length > shown && (
-                      <>
-                        <p className="mv-count">{l10n.getString("report-showing", { shown, total: g.lines.length })}</p>
-                        <Button
-                          onClick={() => {
-                            setShown(shown + PAGE);
-                          }}
-                        >
-                          {l10n.getString("report-show-more")}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
+                {groupHead(g.kind, name(g.kind), fileSize(g), fileState(g), true)}
               </li>
             ))}
             {beyond.map((g) => (
               <li key={g.key} className="rp-group">
                 {groupHead(g.key, l10n.getString(`report-group-${g.key}`), g.count, g.state, false)}
-                {open === g.key && <div className="rp-body">{g.body}</div>}
               </li>
             ))}
           </ul>

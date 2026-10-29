@@ -1471,15 +1471,15 @@ drive-problem-carry-on = متابعة
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = نقلك، حسب النوع.
-report-body = افتح نوعًا لترى ملفاته. ما يحتاج إليك يظهر أولًا.
+report-title = ما نُقل
+report-body = اختر مجموعة لترى ما فيها. ما يحتاج إليك في الأعلى.
 report-needs-title = { $count ->
-        [zero] لا شيء يحتاج إليك
-        [one] شيء واحد يحتاج إليك
-        [two] شيئان يحتاجان إليك
-        [few] { $count } أشياء تحتاج إليك
-        [many] { $count } شيئًا يحتاج إليك
-       *[other] { $count } شيء يحتاج إليك
+        [zero] يحتاج إليك: لا شيء
+        [one] يحتاج إليك: واحد
+        [two] يحتاج إليك: اثنان
+        [few] يحتاج إليك: { $count }
+        [many] يحتاج إليك: { $count }
+       *[other] يحتاج إليك: { $count }
     }
 report-group-photos = الصور
 report-group-videos = الفيديوهات
@@ -1497,12 +1497,12 @@ report-group-size = { $files ->
 report-group-done = نُسخ كل شيء وتم التحقق منه
 report-group-some = نُسخ { $done } من { $total } وتم التحقق منها
 report-group-left = { $count ->
-        [zero] لم يبقَ شيء على حاسوبك القديم
-        [one] بقي واحد على حاسوبك القديم، كما اخترت
-        [two] بقي اثنان على حاسوبك القديم، كما اخترت
-        [few] بقيت { $count } على حاسوبك القديم، كما اخترت
-        [many] بقي { $count } على حاسوبك القديم، كما اخترت
-       *[other] بقي { $count } على حاسوبك القديم، كما اخترت
+        [zero] لا شيء لم يُنقل
+        [one] واحد لم يُنقل: تركته أنت
+        [two] اثنان لم يُنقلا: تركتهما أنت
+        [few] { $count } لم تُنقل: تركتها أنت
+        [many] { $count } لم يُنقل: تركتها أنت
+       *[other] { $count } لم يُنقل: تركتها أنت
     }
 report-filter-label = عرض
 report-col-item = العنصر
@@ -2501,7 +2501,7 @@ accept-accept = قبول
 report-group-apps = التطبيقات
 report-group-settings = الإعدادات
 report-group-special = بيانات التطبيقات وأشياء أخرى
-report-group-people = أشخاص آخرون نُقلت أشياؤهم
+report-group-people = أشخاص آخرون
 report-count-apps = { $count ->
         [zero] لا تطبيقات
         [one] تطبيق واحد
@@ -2537,20 +2537,20 @@ report-count-people = { $count ->
 report-beyond-done = اكتمل كل شيء وتم التحقق منه
 report-beyond-some = اكتمل { $done } من { $total } وتم التحقق منها
 report-beyond-left = { $count ->
-        [zero] لم يُترك شيء
-        [one] تُرك واحد، كما اخترت
-        [two] تُرك اثنان، كما اخترت
-        [few] تُركت { $count }، كما اخترت
-        [many] تُرك { $count }، كما اخترت
-       *[other] تُرك { $count }، كما اخترت
+        [zero] لا شيء لم يُنقل
+        [one] واحد لم يُنقل: تركته أنت
+        [two] اثنان لم يُنقلا: تركتهما أنت
+        [few] { $count } لم تُنقل: تركتها أنت
+        [many] { $count } لم يُنقل: تركتها أنت
+       *[other] { $count } لم يُنقل: تركتها أنت
     }
 report-beyond-more = { $count ->
-        [zero] لا شيء آخر خارج هذه القائمة.
-        [one] وشيء واحد آخر من التطبيقات أو الإعدادات لا تعرضه هذه القائمة.
-        [two] وشيئان آخران من التطبيقات أو الإعدادات لا تعرضهما هذه القائمة.
-        [few] و{ $count } أشياء أخرى من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
-        [many] و{ $count } شيئًا آخر من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
-       *[other] و{ $count } شيء آخر من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
+        [zero] لا شيء آخر.
+        [one] واحد آخر لا يظهر هنا.
+        [two] اثنان آخران لا يظهران هنا.
+        [few] { $count } أخرى لا تظهر هنا.
+        [many] { $count } آخر لا يظهر هنا.
+       *[other] { $count } آخر لا يظهر هنا.
     }
 report-here = { $count ->
         [zero] لم يكن أي تطبيق موجودًا على هذا الحاسوب.
