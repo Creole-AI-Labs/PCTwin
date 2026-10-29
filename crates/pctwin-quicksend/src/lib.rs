@@ -13,12 +13,14 @@
 //!   failed and why. As in a move, an interrupted send continues later with only what is missing.
 
 pub mod note;
+pub mod sealed;
 pub mod waiting;
 
 pub use note::{Note, NoteError, NoteKind};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use pctwin_gate::Destinations;
 use pctwin_journal::{DownloadMark, Ledger};
@@ -27,9 +29,9 @@ use pctwin_record::{
     ManagedBy, Owner, Place, Portability, Record, RecordError, Storage,
 };
 use pctwin_transfer::{
-    Allowance, Cause, Channel, KEEP_FREE, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome,
-    ReceiverSession, SendJob, SendOutcome, SenderSession, SizeRoom, TransferError, agree_version,
-    receive_inventory, send_inventory, shown_path,
+    Allowance, Cause, Channel, FsOpener, KEEP_FREE, LandingPlace, MOVE_PROTOCOL, Opener,
+    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, SizeRoom, TransferError,
+    agree_version, receive_inventory, send_inventory, shown_path,
 };
 
 /// The destination label everything of a Quick Send lands under: the folder the receiver chose.
@@ -108,6 +110,8 @@ pub struct OfferedFile {
 pub struct Offer {
     record: Record,
     jobs: Vec<SendJob>,
+    /// What reads the files (the disk, or a waiting send's sealed copies).
+    opener: Arc<dyn Opener>,
 }
 
 fn place() -> Place {
@@ -241,7 +245,66 @@ impl Offer {
         // Sent as a move sends: in the order a move plans, each landing inside the chosen folder.
         // What a folder holds that cannot be read is left out by the record and not sent.
         let jobs = pctwin_move::send_plan(&record, |i| sources.get(&i.id).cloned(), landing).jobs;
-        Ok(Self { record, jobs })
+        Ok(Self {
+            record,
+            jobs,
+            opener: Arc::new(FsOpener),
+        })
+    }
+
+    /// An offer of exactly `files` (each its path in the send, its size, and where `opener`
+    /// reads it), under `laptop`'s IDs: a waiting send's approved files, read from its sealed
+    /// copy. The folders they are in are offered too.
+    pub fn of_files(
+        laptop: LaptopId,
+        files: Vec<(ItemPath, u64, PathBuf)>,
+        opener: Arc<dyn Opener>,
+    ) -> Result<Self, QuickError> {
+        if files.is_empty() {
+            return Err(QuickError::NothingChosen);
+        }
+        let owner = Owner::Shared;
+        let place = place();
+        let mut record = Record::new(laptop);
+        let mut sources = BTreeMap::new();
+        let mut folders = BTreeSet::new();
+        let item = |kind, path: ItemPath, size_bytes| Item {
+            id: ItemId::derive(&laptop, &owner, &place, &path),
+            kind,
+            owner: owner.clone(),
+            place: place.clone(),
+            path,
+            size_bytes,
+            modified_ns: None,
+            portability: Portability::Portable,
+            managed_by: ManagedBy::Personal,
+            download_bytes: None,
+            inclusion: Inclusion::Included,
+        };
+        for (path, size, source) in files {
+            let parts = path.parts();
+            for n in 1..parts.len() {
+                let folder = ItemPath::new(parts[..n].to_vec())?;
+                if folders.insert(shown_path(&folder)) {
+                    record.items.push(item(ItemKind::Folder, folder, 0));
+                }
+            }
+            let file = item(ItemKind::File, path, size);
+            sources.insert(file.id, source);
+            record.items.push(file);
+        }
+        if record.items.len() > MOST_OFFERED_ITEMS {
+            return Err(QuickError::TooMany {
+                files: record.items.len(),
+            });
+        }
+        record.validate()?;
+        let jobs = pctwin_move::send_plan(&record, |i| sources.get(&i.id).cloned(), landing).jobs;
+        Ok(Self {
+            record,
+            jobs,
+            opener,
+        })
     }
 
     /// The files offered, in path order.
@@ -374,6 +437,7 @@ pub async fn send_live(
         .filter(|j| accepted.contains(&j.item))
         .collect();
     let mut sender = SenderSession::new(jobs, LANES)
+        .with_opener(offer.opener.clone())
         .with_protocol(version)
         .with_meter(live.meter.clone())
         .with_control(live.control.clone());
@@ -869,6 +933,7 @@ mod tests {
         let offer = Offer {
             record,
             jobs: Vec::new(),
+            opener: Arc::new(FsOpener),
         };
         let receipt = Receipt {
             lines: vec![

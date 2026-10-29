@@ -5,8 +5,11 @@
 //!   only: where it lands is the recipient's to choose) and a deadline ([`DEFAULT_DAYS`] days,
 //!   renewed only when the person asks, [`WaitingStore::renew`]).
 //! - The approved versions are copied into PCTwin's own folder on this laptop: **Preparing**
-//!   until every copy is made and fingerprinted, then **Waiting**. What is sent is that copy, its
-//!   fingerprints checked again just before each delivery; a copy that no longer matches is never
+//!   until every copy is made and fingerprinted, then **Waiting**. A send Preparing holds a lease
+//!   it renews while it copies ([`LEASE`]): only one whose lease ran out (PCTwin stopped while
+//!   copying) is tidied away, never one still being copied. What is sent is that copy, its
+//!   fingerprints checked again just before each delivery ([`WaitingStore::offer_for`], on a
+//!   thread that may wait, once the recipient was found); a copy that no longer matches is never
 //!   sent. A source changed since only says "a newer version exists, review again": it is never
 //!   swapped in.
 //! - Several recipients: one approval lists each recipient's key; there is no way to add one to
@@ -15,22 +18,29 @@
 //!   they got the same send.
 //! - The copies have a total cap ([`WaitingStore::with_cap`]), need free space first (keeping
 //!   [`KEEP_FREE`] spare), show as used space ([`WaitingStore::used_bytes`]), and are deleted at
-//!   the deadline ([`WaitingStore::sweep`]) or on cancel. On an SSD deleting is not a guaranteed
-//!   wipe (Part G).
+//!   the deadline ([`WaitingStore::sweep`]) or on cancel. Cancel marks the send cancelled first,
+//!   so nothing more is delivered, and removes its key: a copy another program still holds open
+//!   is removed by the next tidy, and is unreadable from the moment its key is gone.
 //! - The deadline is this laptop's clock; a waiting send delivers only while this laptop is on.
 //!
-//! Protected storage (Part G): the copies are the person's own files, kept in PCTwin's folder
-//! under the person's account (on Mac and Linux made `0700`), not encrypted; nothing secret is
-//! kept beside them.
+//! Protected storage (Part G): the copies are sealed at rest ([`crate::sealed`]) with a key of
+//! their own for each send, kept only in the system's key store (as the connection keys are) and
+//! deleted with the send; PCTwin's folder is the person's own (on Mac and Linux made `0700`).
+//! Nothing secret is kept beside the copies. On an SSD deleting is not a guaranteed wipe, which
+//! is why the key going is what makes a deleted copy unreadable.
 
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use pctwin_record::{ItemKind, LaptopId};
+use pctwin_known::SecretStore;
+use pctwin_record::{ItemKind, ItemPath, LaptopId};
 use pctwin_transfer::{Channel, KEEP_FREE};
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
+use crate::sealed::{KEY_LEN, SealedOpener, Unsealed};
 use crate::{Offer, Outcome, QuickError, Receipt};
 
 const DAY: u64 = 24 * 60 * 60;
@@ -42,9 +52,14 @@ pub const MOST_DAYS: u64 = 30;
 pub const DEFAULT_CAP: u64 = 20 * 1024 * 1024 * 1024;
 /// Most recipients in one approval.
 pub const MOST_RECIPIENTS: usize = 20;
+/// How long a send Preparing is held while nothing renews it: a copy still running renews it
+/// after every chunk.
+pub const LEASE: u64 = 5 * 60;
+/// How often a running copy writes its renewed lease.
+const RENEW_EVERY: u64 = 30;
 const MANIFEST: &str = "waiting.json";
 const FILES: &str = "files";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// Why a waiting send could not be made, or delivered.
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +83,9 @@ pub enum WaitingError {
     PastDeadline,
     #[error("the waiting send could not be read or saved")]
     File,
+    /// The system's key store could not keep or give the send's key.
+    #[error("the system's key store could not be reached")]
+    Store,
     #[error(transparent)]
     Quick(#[from] QuickError),
 }
@@ -80,6 +98,8 @@ pub enum State {
     Preparing,
     /// Copied and fingerprinted, waiting for its recipients.
     Waiting,
+    /// Cancelled: nothing more is delivered; removed as soon as nothing holds it open.
+    Cancelled,
 }
 
 /// One approved file.
@@ -87,6 +107,8 @@ pub enum State {
 pub struct WaitingFile {
     /// Its path in the send, `/` between folders.
     pub path: String,
+    /// Its path in the send, name by name, as offered.
+    item: ItemPath,
     /// Where the copy is, inside the send's folder, part by part.
     parts: Vec<PathBuf>,
     pub size: u64,
@@ -138,8 +160,8 @@ struct Manifest {
     made_at: u64,
     deadline: u64,
     state: State,
-    /// The chosen things' top-level names, in the order chosen.
-    tops: Vec<PathBuf>,
+    /// While Preparing: held until then unless the copy renews it.
+    lease_until: u64,
     files: Vec<WaitingFile>,
     recipients: Vec<Recipient>,
 }
@@ -158,13 +180,14 @@ pub struct WaitingInfo {
     pub newer: Vec<String>,
 }
 
-/// PCTwin's folder of waiting sends.
+/// PCTwin's folder of waiting sends, their keys in `keys`.
 pub struct WaitingStore {
     root: PathBuf,
     cap: u64,
+    keys: Arc<dyn SecretStore>,
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -176,44 +199,15 @@ fn modified(meta: &std::fs::Metadata) -> Option<u128> {
         .map(|d| d.as_nanos())
 }
 
-/// Copies `from` to the new file `to`, fingerprinting what is written; the bytes copied and the
-/// fingerprint.
-fn copy_fingerprinted(from: &Path, to: &Path) -> std::io::Result<(u64, String)> {
-    let mut src = std::fs::File::open(from)?;
-    let mut dst = std::fs::File::options()
-        .write(true)
-        .create_new(true)
-        .open(to)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = vec![0u8; 256 * 1024];
-    let mut n = 0u64;
-    loop {
-        let got = src.read(&mut buf)?;
-        if got == 0 {
-            break;
-        }
-        hasher.update(&buf[..got]);
-        dst.write_all(&buf[..got])?;
-        n += got as u64;
-    }
-    dst.sync_all()?;
-    Ok((n, hex(hasher.finalize().as_bytes())))
+fn key_name(id: &str) -> String {
+    format!("waiting-{id}-key")
 }
 
-fn fingerprint_of(path: &Path) -> std::io::Result<(u64, String)> {
-    let mut f = std::fs::File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = vec![0u8; 256 * 1024];
-    let mut n = 0u64;
-    loop {
-        let got = f.read(&mut buf)?;
-        if got == 0 {
-            break;
-        }
-        hasher.update(&buf[..got]);
-        n += got as u64;
-    }
-    Ok((n, hex(hasher.finalize().as_bytes())))
+/// Seconds since 1970, by this laptop's clock.
+fn clock() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 fn make_private_dir(dir: &Path) -> std::io::Result<()> {
@@ -232,11 +226,40 @@ fn make_private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 impl WaitingStore {
-    /// The waiting sends kept in `root` (PCTwin's own folder for them), with [`DEFAULT_CAP`].
-    pub fn new(root: &Path) -> Self {
+    /// The waiting sends kept in `root` (PCTwin's own folder for them), with [`DEFAULT_CAP`],
+    /// each send's key in `keys` (the system's key store).
+    pub fn new(root: &Path, keys: Arc<dyn SecretStore>) -> Self {
         Self {
             root: root.to_path_buf(),
             cap: DEFAULT_CAP,
+            keys,
+        }
+    }
+
+    fn key(&self, id: &str) -> Result<Zeroizing<[u8; KEY_LEN]>, WaitingError> {
+        let bytes = self
+            .keys
+            .get(&key_name(id))
+            .map_err(|_| WaitingError::Store)?
+            .ok_or(WaitingError::CopyDamaged)?;
+        let k: [u8; KEY_LEN] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| WaitingError::CopyDamaged)?;
+        Ok(Zeroizing::new(k))
+    }
+
+    /// Removes send `id`: its key first (the copy is unreadable from then on), then its folder.
+    /// `false` when the folder is still there (something holds it open; the next tidy tries
+    /// again).
+    fn remove(&self, id: &str) -> bool {
+        let Ok(dir) = self.dir(id) else { return false };
+        if self.keys.delete(&key_name(id)).is_err() {
+            return false;
+        }
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => true,
+            Err(e) => e.kind() == std::io::ErrorKind::NotFound,
         }
     }
 
@@ -299,9 +322,9 @@ impl WaitingStore {
 
     /// Approve this delivery only: the `chosen` files and folders, as they are now, for each of
     /// `recipients` (a connection id and its public key), until `days` days after `now`. Checks
-    /// the cap and `free` space (`None`: the drive cannot say) before copying anything; copies
-    /// and fingerprints each file (Preparing), then marks it Waiting. A file that changed while
-    /// it was copied ends it, nothing kept.
+    /// the cap and `free` space (`None`: the drive cannot say) before copying anything; seals and
+    /// fingerprints each file (Preparing, its lease renewed as it goes), then marks it Waiting. A
+    /// file that changed while it was copied ends it, nothing kept.
     pub fn prepare(
         &self,
         chosen: &[PathBuf],
@@ -309,6 +332,19 @@ impl WaitingStore {
         days: u64,
         now: u64,
         free: Option<u64>,
+    ) -> Result<WaitingInfo, WaitingError> {
+        self.prepare_with_clock(chosen, recipients, days, now, free, &clock)
+    }
+
+    /// As [`prepare`](Self::prepare), the lease renewed by `clock` (tests).
+    pub fn prepare_with_clock(
+        &self,
+        chosen: &[PathBuf],
+        recipients: &[(String, [u8; 32])],
+        days: u64,
+        now: u64,
+        free: Option<u64>,
+        clock: &dyn Fn() -> u64,
     ) -> Result<WaitingInfo, WaitingError> {
         if recipients.is_empty() || recipients.len() > MOST_RECIPIENTS {
             return Err(WaitingError::Recipients);
@@ -346,7 +382,6 @@ impl WaitingStore {
         }
         let id = LaptopId::generate().map_err(QuickError::from)?.to_hex();
         let dir = self.dir(&id)?;
-        make_private_dir(&dir.join(FILES)).map_err(|_| WaitingError::File)?;
         let mut recipients_out = Vec::new();
         for (connection, key) in recipients {
             recipients_out.push(Recipient {
@@ -356,18 +391,29 @@ impl WaitingStore {
                 delivery: Delivery::Waiting,
             });
         }
+        // The send's key, kept in the system's store and read back before anything is sealed.
+        let key = crate::sealed::new_key().map_err(|_| WaitingError::Store)?;
+        self.keys
+            .put(&key_name(&id), key.as_ref())
+            .map_err(|_| WaitingError::Store)?;
+        if self.key(&id).ok().as_deref() != Some(&*key) {
+            let _ = self.keys.delete(&key_name(&id));
+            return Err(WaitingError::Store);
+        }
         let mut m = Manifest {
             version: VERSION,
             id: id.clone(),
             made_at: now,
             deadline: now.saturating_add(days * DAY),
             state: State::Preparing,
-            tops: Vec::new(),
+            lease_until: clock().saturating_add(LEASE),
             files: Vec::new(),
             recipients: recipients_out,
         };
-        self.write(&m)?;
         let copied = (|| {
+            make_private_dir(&dir.join(FILES)).map_err(|_| WaitingError::File)?;
+            self.write(&m)?;
+            let mut renewed = clock();
             for job in &jobs {
                 let Some(item) = items.get(&job.item) else {
                     continue;
@@ -375,6 +421,12 @@ impl WaitingStore {
                 if item.kind != ItemKind::File {
                     continue;
                 }
+                let index = u32::try_from(m.files.len())
+                    .ok()
+                    .filter(|i| *i < crate::sealed::MOST_FILES)
+                    .ok_or(WaitingError::Quick(QuickError::TooMany {
+                        files: m.files.len(),
+                    }))?;
                 let parts: Vec<PathBuf> = item
                     .path
                     .parts()
@@ -388,17 +440,29 @@ impl WaitingStore {
                 if let Some(parent) = to.parent() {
                     make_private_dir(parent).map_err(|_| WaitingError::File)?;
                 }
-                let before = std::fs::metadata(&job.source)
-                    .map_err(|_| WaitingError::ChangedWhileCopying(job.path.clone()))?;
-                let (n, fingerprint) = copy_fingerprinted(&job.source, &to)
-                    .map_err(|_| WaitingError::ChangedWhileCopying(job.path.clone()))?;
-                let after = std::fs::metadata(&job.source)
-                    .map_err(|_| WaitingError::ChangedWhileCopying(job.path.clone()))?;
+                let changed = || WaitingError::ChangedWhileCopying(job.path.clone());
+                let before = std::fs::metadata(&job.source).map_err(|_| changed())?;
+                let mut src = std::fs::File::open(&job.source).map_err(|_| changed())?;
+                let mut lease_failed = false;
+                let (n, fingerprint) = crate::sealed::seal(&mut src, &to, &key, index, &mut || {
+                    let t = clock();
+                    if t.saturating_sub(renewed) >= RENEW_EVERY {
+                        renewed = t;
+                        m.lease_until = t.saturating_add(LEASE);
+                        lease_failed |= self.write(&m).is_err();
+                    }
+                })
+                .map_err(|_| changed())?;
+                if lease_failed {
+                    return Err(WaitingError::File);
+                }
+                let after = std::fs::metadata(&job.source).map_err(|_| changed())?;
                 if n != before.len() || after.len() != n || modified(&before) != modified(&after) {
-                    return Err(WaitingError::ChangedWhileCopying(job.path.clone()));
+                    return Err(changed());
                 }
                 m.files.push(WaitingFile {
                     path: job.path.clone(),
+                    item: item.path.clone(),
                     parts,
                     size: n,
                     fingerprint,
@@ -406,23 +470,11 @@ impl WaitingStore {
                     source_modified: modified(&after),
                 });
             }
-            Ok(())
+            m.state = State::Waiting;
+            self.write(&m)
         })();
         if let Err(e) = copied {
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(e);
-        }
-        // The copy's own top-level names (two chosen things with one name were kept apart).
-        for f in &m.files {
-            if let Some(top) = f.parts.first()
-                && !m.tops.contains(top)
-            {
-                m.tops.push(top.clone());
-            }
-        }
-        m.state = State::Waiting;
-        if let Err(e) = self.write(&m) {
-            let _ = std::fs::remove_dir_all(&dir);
+            self.remove(&id);
             return Err(e);
         }
         Ok(self.info(&m))
@@ -450,20 +502,16 @@ impl WaitingStore {
         }
     }
 
-    /// Every waiting send, oldest first. One left Preparing (PCTwin stopped while copying) is
-    /// removed: it was never approved as complete.
+    /// Every waiting send, oldest first (one still Preparing, or cancelled, is not listed; the
+    /// tidy, [`sweep`](Self::sweep), removes what should go). Listing never deletes anything.
     pub fn list(&self) -> Vec<WaitingInfo> {
-        let mut out = Vec::new();
-        for id in self.ids() {
-            match self.read(&id) {
-                Ok(m) if m.state == State::Waiting => out.push(self.info(&m)),
-                _ => {
-                    if let Ok(dir) = self.dir(&id) {
-                        let _ = std::fs::remove_dir_all(dir);
-                    }
-                }
-            }
-        }
+        let mut out: Vec<WaitingInfo> = self
+            .ids()
+            .iter()
+            .filter_map(|id| self.read(id).ok())
+            .filter(|m| m.state == State::Waiting)
+            .map(|m| self.info(&m))
+            .collect();
         out.sort_by_key(|w| (w.made_at, w.id.clone()));
         out
     }
@@ -483,17 +531,35 @@ impl WaitingStore {
             return Err(WaitingError::Days);
         }
         let mut m = self.read(id)?;
+        if m.state != State::Waiting {
+            return Err(WaitingError::NotFound);
+        }
         m.deadline = now.saturating_add(days * DAY);
         self.write(&m)
     }
 
-    /// Cancels a waiting send: its copies are deleted.
+    /// Cancels a waiting send: marked cancelled first (nothing more is delivered), then its key
+    /// and copies are deleted. A copy something still holds open (a delivery the caller is
+    /// stopping) is unreadable already and is removed by the next tidy.
     pub fn cancel(&self, id: &str) -> Result<(), WaitingError> {
+        self.mark_cancelled(id)?;
+        self.remove(id);
+        Ok(())
+    }
+
+    /// The first step of [`cancel`](Self::cancel): from now nothing of send `id` is offered or
+    /// delivered, so a caller can stop a delivery in flight before the copy is deleted.
+    pub fn mark_cancelled(&self, id: &str) -> Result<(), WaitingError> {
         let dir = self.dir(id)?;
-        if !dir.exists() {
-            return Err(WaitingError::NotFound);
+        match self.read(id) {
+            Ok(mut m) if m.state != State::Cancelled => {
+                m.state = State::Cancelled;
+                self.write(&m)
+            }
+            Ok(_) => Ok(()),
+            Err(_) if dir.exists() => Ok(()),
+            Err(e) => Err(e),
         }
-        std::fs::remove_dir_all(&dir).map_err(|_| WaitingError::File)
     }
 
     /// Ends every delivery to connection `connection` (it was forgotten): it is taken off each
@@ -517,34 +583,41 @@ impl WaitingStore {
         changed
     }
 
-    /// Deletes every waiting send past its deadline at `now`, and any left Preparing; returns
-    /// the ids deleted.
+    /// The tidy: deletes every waiting send past its deadline at `now`, every cancelled one, and
+    /// any left Preparing whose lease ran out (PCTwin stopped while copying; a copy still running
+    /// renews its lease, so it is never deleted from under it); returns the ids deleted.
     pub fn sweep(&self, now: u64) -> Vec<String> {
         let mut gone = Vec::new();
         for id in self.ids() {
             let expired = match self.read(&id) {
-                Ok(m) => m.state != State::Waiting || now >= m.deadline,
-                Err(_) => true,
+                Ok(m) => match m.state {
+                    State::Waiting => now >= m.deadline,
+                    State::Preparing => now >= m.lease_until,
+                    State::Cancelled => true,
+                },
+                // No readable record: a damaged one, or one a copy has only just begun. Only
+                // one untouched for a whole lease goes.
+                Err(_) => self.dir(&id).ok().is_some_and(|d| untouched_for(&d, LEASE)),
             };
-            if expired && self.cancel(&id).is_ok() {
+            if expired && self.remove(&id) {
                 gone.push(id);
             }
         }
         gone
     }
 
-    /// The copy checked against the approval: every file there, with its approved size and
-    /// fingerprint, and nothing else in the folder.
-    fn verify(&self, m: &Manifest) -> Result<(), WaitingError> {
+    /// The copy checked against the approval: every file there, its seal intact and its plain
+    /// bytes the approved size and fingerprint, and nothing else in the folder.
+    fn verify(&self, m: &Manifest, key: &[u8; KEY_LEN]) -> Result<(), WaitingError> {
         let files = self.dir(&m.id)?.join(FILES);
         let mut expected = std::collections::BTreeSet::new();
-        for f in &m.files {
-            let mut at = files.clone();
-            for p in &f.parts {
-                at.push(p);
-            }
-            let (n, fp) = fingerprint_of(&at).map_err(|_| WaitingError::CopyDamaged)?;
-            if n != f.size || fp != f.fingerprint {
+        for (index, f) in m.files.iter().enumerate() {
+            let at = self.copy_path(m, f)?;
+            let index = u32::try_from(index).map_err(|_| WaitingError::CopyDamaged)?;
+            let fp = Unsealed::open(&at, key, index, f.size)
+                .and_then(|mut u| u.fingerprint())
+                .map_err(|_| WaitingError::CopyDamaged)?;
+            if fp != f.fingerprint {
                 return Err(WaitingError::CopyDamaged);
             }
             expected.insert(at);
@@ -565,8 +638,30 @@ impl WaitingStore {
         Ok(())
     }
 
+    fn copy_path(&self, m: &Manifest, f: &WaitingFile) -> Result<PathBuf, WaitingError> {
+        let mut at = self.dir(&m.id)?.join(FILES);
+        for p in &f.parts {
+            at.push(p);
+        }
+        Ok(at)
+    }
+
+    /// Whether send `id` may still be delivered to `connection` at `now` (Waiting, before its
+    /// deadline, that recipient still waiting): cheap, read before looking for the recipient.
+    pub fn due(&self, id: &str, connection: &str, now: u64) -> bool {
+        self.read(id).is_ok_and(|m| {
+            m.state == State::Waiting
+                && now < m.deadline
+                && m.recipients
+                    .iter()
+                    .any(|r| r.connection == connection && r.delivery == Delivery::Waiting)
+        })
+    }
+
     /// The offer of the protected copy for recipient `connection`, checked against the approval
-    /// just now: the same files, sizes and fingerprints. Also the key it may go to.
+    /// just now: every sealed copy read through and its plain bytes the approved size and
+    /// fingerprint. Also the key it may go to. This reads every copied byte, so it runs on a
+    /// thread that may wait, after the recipient was found nearby and just before sending.
     pub fn offer_for(
         &self,
         id: &str,
@@ -585,11 +680,18 @@ impl WaitingStore {
             .iter()
             .find(|r| r.connection == connection)
             .ok_or(WaitingError::NotFound)?;
-        self.verify(&m)?;
-        let files = self.dir(id)?.join(FILES);
-        let tops: Vec<PathBuf> = m.tops.iter().map(|t| files.join(t)).collect();
+        let key = self.key(id)?;
+        self.verify(&m, &key)?;
         let laptop = LaptopId::from_hex(&r.laptop).map_err(|_| WaitingError::File)?;
-        let offer = Offer::of_again(&tops, laptop)?;
+        let mut files = Vec::new();
+        let mut opened = Vec::new();
+        for (index, f) in m.files.iter().enumerate() {
+            let at = self.copy_path(&m, f)?;
+            let index = u32::try_from(index).map_err(|_| WaitingError::CopyDamaged)?;
+            opened.push((at.clone(), index, f.size));
+            files.push((f.item.clone(), f.size, at));
+        }
+        let offer = Offer::of_files(laptop, files, Arc::new(SealedOpener::new(key, opened)))?;
         // The offer must list exactly the approved files.
         let offered: BTreeMap<String, u64> = offer
             .files()
@@ -601,22 +703,23 @@ impl WaitingStore {
         if offered != approved {
             return Err(WaitingError::CopyDamaged);
         }
-        let key = decode_key(&r.key).ok_or(WaitingError::File)?;
-        Ok((offer, key))
+        let peer = decode_key(&r.key).ok_or(WaitingError::File)?;
+        Ok((offer, peer))
     }
 
-    /// Delivers waiting send `id` to recipient `connection` over `ch` (a known-keys session
-    /// with exactly that recipient's key, opened by the caller with [`offer_for`](Self::offer_for)'s
-    /// key), and records the result. A recipient that did not answer stays waiting.
+    /// Delivers `offer` (from [`offer_for`](Self::offer_for)) of waiting send `id` to recipient
+    /// `connection` over `ch` (a known-keys session with exactly that recipient's key), and
+    /// records the result. A recipient that did not answer stays waiting; a send cancelled or
+    /// gone meanwhile records nothing.
     pub async fn deliver(
         &self,
         id: &str,
         connection: &str,
+        offer: Offer,
         ch: &mut impl Channel,
         live: &pctwin_move::Live,
         now: u64,
     ) -> Result<Receipt, WaitingError> {
-        let (offer, _) = self.offer_for(id, connection, now)?;
         let sent = crate::send_live(ch, offer, live).await;
         let delivery = match &sent {
             Ok(r) => summarise(r, now),
@@ -627,13 +730,25 @@ impl WaitingStore {
                 at: now,
             },
         };
-        let mut m = self.read(id)?;
-        if let Some(r) = m.recipients.iter_mut().find(|r| r.connection == connection) {
-            r.delivery = delivery;
+        if let Ok(mut m) = self.read(id)
+            && m.state == State::Waiting
+        {
+            if let Some(r) = m.recipients.iter_mut().find(|r| r.connection == connection) {
+                r.delivery = delivery;
+            }
+            self.write(&m)?;
         }
-        self.write(&m)?;
         Ok(sent?)
     }
+}
+
+/// Whether the folder `dir` was last changed at least `secs` ago.
+fn untouched_for(dir: &Path, secs: u64) -> bool {
+    std::fs::metadata(dir)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age.as_secs() >= secs)
 }
 
 fn decode_key(text: &str) -> Option<[u8; 32]> {

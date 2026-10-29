@@ -342,6 +342,8 @@ async fn an_offer_with_a_persons_things_is_refused() {
             let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
                 .await
                 .unwrap_or(pctwin_transfer::PAGED_FROM);
+            // "Files", as a Quick Send says first.
+            let _ = a.send(&[40, 1]).await;
             let _ = pctwin_transfer::send_inventory(&mut a, &record, v).await;
         },
         receive_offer(&mut b)
@@ -373,6 +375,8 @@ async fn declined_files_sent_anyway_are_refused_and_never_written() {
         let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
+        // "Files", as a Quick Send says first.
+        a.send(&[40, 1]).await.unwrap();
         pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();
@@ -485,6 +489,8 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
         let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
+        // "Files", as a Quick Send says first.
+        a.send(&[40, 1]).await.unwrap();
         pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();

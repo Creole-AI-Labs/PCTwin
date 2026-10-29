@@ -99,7 +99,13 @@ async fn a_note_that_breaks_the_rules_is_refused_on_arrival() {
             drop(a.tx);
             a.rx.recv().await
         };
-        let (answer, got) = tokio::join!(rogue, receive(&mut b));
+        // The receiver's side ends with its answer, if any, so the rogue's wait ends too.
+        let receiver = async move {
+            let got = receive(&mut b).await;
+            drop(b);
+            got
+        };
+        let (answer, got) = tokio::join!(rogue, receiver);
         assert!(
             matches!(got, Err(QuickError::BadAnswer | QuickError::Note(_))),
             "{body:?}"

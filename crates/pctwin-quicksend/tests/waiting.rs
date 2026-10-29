@@ -1,9 +1,11 @@
 //! Waiting sends: approve this delivery only (Security Design Part T, Quick Send Stage 1).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use pctwin_known::{MemoryStore, SecretStore};
 use pctwin_quicksend::waiting::{
-    DEFAULT_DAYS, Delivery, MOST_DAYS, State, WaitingError, WaitingStore,
+    DEFAULT_DAYS, Delivery, LEASE, MOST_DAYS, State, WaitingError, WaitingStore,
 };
 use pctwin_quicksend::{Arrival, Outcome, receive};
 use pctwin_transfer::{Channel, ChannelError};
@@ -47,6 +49,16 @@ fn bo() -> (String, [u8; 32]) {
     ("bo".into(), [2; 32])
 }
 
+/// A store of waiting sends at `root`, keys in a store of their own (returned too).
+fn store_at(root: &Path) -> (WaitingStore, Arc<MemoryStore>) {
+    let keys = Arc::new(MemoryStore::default());
+    (WaitingStore::new(root, keys.clone()), keys)
+}
+
+fn new_store(root: &Path) -> WaitingStore {
+    store_at(root).0
+}
+
 fn journal(dir: &Path) -> pctwin_journal::Journal {
     pctwin_journal::Journal::open(&dir.join("journal.redb")).unwrap()
 }
@@ -62,7 +74,11 @@ async fn deliver(
 ) -> (Result<pctwin_quicksend::Receipt, WaitingError>, Vec<String>) {
     let (mut a, mut b) = pair();
     let live = pctwin_move::Live::default();
-    let (sent, got) = tokio::join!(store.deliver(id, who, &mut a, &live, now), async {
+    let (offer, _) = match store.offer_for(id, who, now) {
+        Ok(o) => o,
+        Err(e) => return (Err(e), Vec::new()),
+    };
+    let (sent, got) = tokio::join!(store.deliver(id, who, offer, &mut a, &live, now), async {
         let Ok(Arrival::Files(incoming)) = receive(&mut b).await else {
             panic!("files")
         };
@@ -84,7 +100,7 @@ async fn deliver(
 #[tokio::test]
 async fn an_approved_send_is_copied_then_waits_then_delivers_the_copy() {
     let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex()], DEFAULT_DAYS, T0, None)
         .unwrap();
@@ -119,7 +135,7 @@ async fn an_approved_send_is_copied_then_waits_then_delivers_the_copy() {
 #[tokio::test]
 async fn a_changed_source_only_says_review_again_and_the_approved_copy_is_what_goes() {
     let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex()], DEFAULT_DAYS, T0, None)
         .unwrap();
@@ -142,17 +158,24 @@ async fn a_changed_source_only_says_review_again_and_the_approved_copy_is_what_g
 #[tokio::test]
 async fn a_copy_that_no_longer_matches_is_never_sent() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex()], DEFAULT_DAYS, T0, None)
         .unwrap();
     let copy = keep.path().join(&w.id).join("files").join("menu.txt");
-    std::fs::write(&copy, b"rice and BEANS").unwrap();
+    let sealed = std::fs::read(&copy).unwrap();
+    assert!(
+        !sealed.windows(4).any(|x| x == b"rice"),
+        "the copy is sealed at rest"
+    );
+    let mut changed = sealed.clone();
+    changed[3] ^= 0x20;
+    std::fs::write(&copy, &changed).unwrap();
     assert!(matches!(
         store.offer_for(&w.id, "alex", T0),
         Err(WaitingError::CopyDamaged)
     ));
-    std::fs::write(&copy, b"rice and beans").unwrap();
+    std::fs::write(&copy, &sealed).unwrap();
     assert!(store.offer_for(&w.id, "alex", T0).is_ok());
     // Something added beside the approved files.
     std::fs::write(keep.path().join(&w.id).join("files/Trip/extra.exe"), b"MZ").unwrap();
@@ -172,7 +195,7 @@ async fn a_copy_that_no_longer_matches_is_never_sent() {
 #[test]
 fn the_cap_and_free_space_are_checked_before_anything_is_copied() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path()).with_cap(20);
+    let store = new_store(keep.path()).with_cap(20);
     let c = chosen(old.path());
     assert!(matches!(
         store.prepare(&c, &[alex()], 7, T0, None),
@@ -181,7 +204,7 @@ fn the_cap_and_free_space_are_checked_before_anything_is_copied() {
             room: 20
         })
     ));
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     assert!(matches!(
         store.prepare(&c, &[alex()], 7, T0, Some(1000)),
         Err(WaitingError::NoRoom { needed: 21, .. })
@@ -197,7 +220,7 @@ fn the_cap_and_free_space_are_checked_before_anything_is_copied() {
 #[test]
 fn the_deadline_is_bounded_renewed_only_when_asked_and_ends_it() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let c = chosen(old.path());
     for bad in [0, MOST_DAYS + 1] {
         assert!(matches!(
@@ -226,12 +249,13 @@ fn the_deadline_is_bounded_renewed_only_when_asked_and_ends_it() {
 #[test]
 fn cancel_deletes_the_copy() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
         .unwrap();
     store.cancel(&w.id).unwrap();
     assert!(!keep.path().join(&w.id).exists());
+    assert_eq!(store.used_bytes(), 0);
     assert!(matches!(store.cancel(&w.id), Err(WaitingError::NotFound)));
     assert!(matches!(
         store.cancel("../../etc"),
@@ -242,7 +266,7 @@ fn cancel_deletes_the_copy() {
 #[tokio::test]
 async fn several_recipients_each_get_their_own_session_result_and_offer_ids() {
     let (old, keep, d1, d2, j1, j2) = (dirs(), dirs(), dirs(), dirs(), dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex(), bo()], 7, T0, None)
         .unwrap();
@@ -269,7 +293,7 @@ async fn several_recipients_each_get_their_own_session_result_and_offer_ids() {
 #[test]
 fn an_approval_names_each_recipient_once() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let c = chosen(old.path());
     for bad in [
         vec![],
@@ -287,7 +311,7 @@ fn an_approval_names_each_recipient_once() {
 #[test]
 fn forgetting_a_connection_ends_its_deliveries() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let both = store
         .prepare(&chosen(old.path()), &[alex(), bo()], 7, T0, None)
         .unwrap();
@@ -303,19 +327,138 @@ fn forgetting_a_connection_ends_its_deliveries() {
     assert!(!keep.path().join(&only.id).exists());
 }
 
+/// A send left Preparing (PCTwin stopped while copying) is never offered or listed, and is tidied
+/// away only once its lease ran out: a long copy still running renews its lease and is never
+/// deleted from under it, and listing deletes nothing.
 #[test]
-fn a_send_left_preparing_is_removed_not_offered() {
+fn a_send_left_preparing_is_removed_only_when_its_lease_ran_out() {
     let (old, keep) = (dirs(), dirs());
-    let store = WaitingStore::new(keep.path());
+    let store = new_store(keep.path());
     let w = store
         .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
         .unwrap();
     let manifest = keep.path().join(&w.id).join("waiting.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"waiting\"", "\"preparing\"")).unwrap();
+    let lease = |until: u64| {
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["state"] = "preparing".into();
+        v["lease_until"] = until.into();
+        std::fs::write(&manifest, v.to_string()).unwrap();
+    };
+    lease(T0 + LEASE);
     assert!(store.offer_for(&w.id, "alex", T0).is_err());
     assert!(store.list().is_empty());
+    assert!(keep.path().join(&w.id).exists(), "listing deletes nothing");
+    assert!(store.sweep(T0 + LEASE - 1).is_empty(), "still being copied");
+    assert!(keep.path().join(&w.id).exists());
+    assert_eq!(store.sweep(T0 + LEASE), vec![w.id.clone()]);
     assert!(!keep.path().join(&w.id).exists());
+}
+
+/// A copy that takes long renews its lease as it goes, so a tidy during it deletes nothing.
+#[test]
+fn a_long_copy_keeps_renewing_its_lease() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let (old, keep) = (dirs(), dirs());
+    let (store, _) = store_at(keep.path());
+    std::fs::create_dir_all(old.path().join("Big")).unwrap();
+    for n in 0..40 {
+        std::fs::write(
+            old.path().join(format!("Big/part{n}.bin")),
+            vec![n as u8; 70_000],
+        )
+        .unwrap();
+    }
+    // Each read of the clock is a minute later: the copy runs for about an hour.
+    let t = AtomicU64::new(T0);
+    let swept = std::cell::RefCell::new(Vec::new());
+    let clock = || {
+        let now = t.fetch_add(60, Ordering::Relaxed);
+        // A tidy runs alongside, at the time the copy has reached.
+        swept.borrow_mut().extend(store.sweep(now));
+        now
+    };
+    let w = store
+        .prepare_with_clock(&[old.path().join("Big")], &[alex()], 7, T0, None, &clock)
+        .unwrap();
+    assert!(t.load(Ordering::Relaxed) > T0 + 2 * LEASE, "a long copy");
+    assert!(swept.borrow().is_empty(), "{:?}", swept.borrow());
+    assert_eq!(store.get(&w.id).unwrap().files, 40);
+}
+
+/// Each send's copy is sealed with a key of its own, kept in the key store and deleted with the
+/// send: once cancelled, swept or forgotten, nothing of it stays readable.
+#[tokio::test]
+async fn each_send_has_its_own_key_in_the_store_deleted_with_it() {
+    let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
+    let (store, keys) = store_at(keep.path());
+    let a = store
+        .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
+        .unwrap();
+    let b = store
+        .prepare(&chosen(old.path()), &[alex(), bo()], 7, T0, None)
+        .unwrap();
+    let names = keys.names();
+    assert_eq!(names.len(), 2, "{names:?}");
+    let ka = keys.get(&format!("waiting-{}-key", a.id)).unwrap().unwrap();
+    let kb = keys.get(&format!("waiting-{}-key", b.id)).unwrap().unwrap();
+    assert_ne!(*ka, *kb);
+    // Delivered through the seal, the plain bytes arrive.
+    deliver(&store, &a.id, "alex", Some(dest.path()), j.path(), T0)
+        .await
+        .0
+        .unwrap();
+    assert_eq!(
+        std::fs::read(dest.path().join("menu.txt")).unwrap(),
+        b"rice and beans"
+    );
+    // Without its key the copy is refused, never sent.
+    keys.delete(&format!("waiting-{}-key", b.id)).unwrap();
+    assert!(matches!(
+        store.offer_for(&b.id, "bo", T0),
+        Err(WaitingError::CopyDamaged)
+    ));
+    store.cancel(&a.id).unwrap();
+    assert!(keys.names().is_empty(), "{:?}", keys.names());
+}
+
+/// Cancel marks the send first: a delivery that was about to start finds nothing to send, and a
+/// delivery in flight records nothing afterwards.
+#[tokio::test]
+async fn a_cancelled_send_is_never_delivered_again() {
+    let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
+    let store = new_store(keep.path());
+    let w = store
+        .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
+        .unwrap();
+    let (offer, _) = store.offer_for(&w.id, "alex", T0).unwrap();
+    assert!(store.due(&w.id, "alex", T0));
+    store.cancel(&w.id).unwrap();
+    assert!(!store.due(&w.id, "alex", T0));
+    assert!(store.offer_for(&w.id, "alex", T0).is_err());
+    // An offer taken before the cancel cannot read the copy any more.
+    let (mut a, mut b) = pair();
+    let live = pctwin_move::Live::default();
+    let (sent, _) = tokio::join!(
+        store.deliver(&w.id, "alex", offer, &mut a, &live, T0),
+        async {
+            if let Ok(Arrival::Files(incoming)) = receive(&mut b).await {
+                let _ = incoming
+                    .accept(&mut b, dest.path(), None, &journal(j.path()), "1001")
+                    .await;
+            }
+        }
+    );
+    if let Ok(r) = sent {
+        assert!(
+            r.lines
+                .iter()
+                .all(|l| !matches!(l.outcome, Outcome::Arrived { .. })),
+            "{r:?}"
+        );
+    }
+    assert!(!dest.path().join("menu.txt").exists());
+    assert!(store.list().is_empty());
 }
 
 fn dirs() -> tempfile::TempDir {
