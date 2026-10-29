@@ -210,14 +210,23 @@ pub fn put_back_left<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let system32 = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
             .ok()
             .map(|w| w.join("System32"));
-        let _ =
-            pctwin_orchestrate::local_copy_send::put_back_listed(&FileList(list), &mut |root| {
+        // The cloud folders as found on this laptop now, never the ones the list names.
+        let roots: Vec<PathBuf> = pctwin_scan::list_people()
+            .into_iter()
+            .find(|p| p.is_me)
+            .map(|p| cloud_folders(&p.home).into_iter().map(|f| f.root).collect())
+            .unwrap_or_default();
+        let _ = pctwin_orchestrate::local_copy_send::put_back_listed(
+            &FileList(list),
+            &roots,
+            &mut |root| {
                 Box::new(pctwin_orchestrate::local_copy::WindowsCloudFiles::new(
                     root,
                     PUT_BACK_WAIT,
                     system32.as_deref(),
                 ))
-            });
+            },
+        );
     }
     #[cfg(not(windows))]
     let _ = app;

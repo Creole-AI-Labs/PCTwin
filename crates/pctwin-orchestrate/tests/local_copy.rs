@@ -90,7 +90,7 @@ impl Fake {
 }
 
 impl CloudFiles for Fake {
-    fn bring_down(&mut self, path: &Path) -> io::Result<()> {
+    fn bring_down(&mut self, path: &Path, _size: u64) -> io::Result<()> {
         self.log.push(format!("down {}", shown(path)));
         if self.fail_down.contains(path) {
             return Err(io::Error::other("no connection"));
@@ -103,6 +103,9 @@ impl CloudFiles for Fake {
     }
     fn is_online_only(&self, path: &Path) -> io::Result<bool> {
         Ok(self.online.contains(path))
+    }
+    fn open_read(&self, path: &Path) -> io::Result<std::fs::File> {
+        std::fs::File::open(path)
     }
     fn size_on_laptop(&self, path: &Path) -> io::Result<u64> {
         Ok(self.sizes[path])
@@ -515,7 +518,12 @@ fn the_windows_adapter_on_an_ordinary_file() {
         Some(system32),
     );
     assert!(!w.is_online_only(&p).unwrap());
-    w.bring_down(&p).unwrap();
+    w.bring_down(&p, 5).unwrap();
+    // Not the approved size: refused before anything comes down.
+    assert_eq!(
+        w.bring_down(&p, 6).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
     assert_eq!(w.size_on_laptop(&p).unwrap(), 5);
     // An ordinary file never becomes online only: asking is reported as not done.
     assert!(w.put_back(&p).is_err());
@@ -751,25 +759,51 @@ fn the_windows_adapter_stays_in_the_consented_folder() {
     let system32 = std::path::Path::new(r"C:\Windows\System32");
     let mut w =
         WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), Some(system32));
-    assert!(w.bring_down(&theirs).is_err(), "outside the folder");
+    assert!(
+        w.bring_down(
+            &theirs,
+            std::fs::metadata(&theirs).map(|m| m.len()).unwrap_or(0)
+        )
+        .is_err(),
+        "outside the folder"
+    );
     // Refused before attrib is ever asked: not a wait that ran out.
     assert_eq!(
         w.put_back(&theirs).unwrap_err().kind(),
         std::io::ErrorKind::PermissionDenied
     );
     let through = root.join("link").join("secret.txt");
-    assert!(w.bring_down(&through).is_err(), "through a link");
+    assert!(
+        w.bring_down(
+            &through,
+            std::fs::metadata(&through).map(|m| m.len()).unwrap_or(0)
+        )
+        .is_err(),
+        "through a link"
+    );
     assert_eq!(
         w.put_back(&through).unwrap_err().kind(),
         std::io::ErrorKind::PermissionDenied
     );
     let dotdot = root.join("..").join("Other").join("secret.txt");
-    assert!(w.bring_down(&dotdot).is_err());
+    assert!(
+        w.bring_down(
+            &dotdot,
+            std::fs::metadata(&dotdot).map(|m| m.len()).unwrap_or(0)
+        )
+        .is_err()
+    );
     // A file of its own is touched, and attrib runs from the system folder given, never one an
     // environment value names: with no system folder known, nothing is put back.
     let mine = root.join("mine.txt");
     std::fs::write(&mine, b"mine").unwrap();
-    assert!(w.bring_down(&mine).is_ok());
+    assert!(
+        w.bring_down(
+            &mine,
+            std::fs::metadata(&mine).map(|m| m.len()).unwrap_or(0)
+        )
+        .is_ok()
+    );
     let mut none = WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), None);
     let e = none.put_back(&mine).unwrap_err();
     assert!(e.to_string().contains("system folder"), "{e}");

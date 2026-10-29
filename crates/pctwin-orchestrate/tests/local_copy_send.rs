@@ -40,7 +40,10 @@ struct Cloud {
     fail_down: BTreeSet<PathBuf>,
     refuse_put_back: BTreeSet<PathBuf>,
     content: BTreeMap<PathBuf, Vec<u8>>,
+    /// Its size as the laptop sees it differs from the plan before anything comes down.
     changed: BTreeSet<PathBuf>,
+    /// Comes down at another size than it showed.
+    grows: BTreeSet<PathBuf>,
     log: Vec<String>,
 }
 
@@ -62,8 +65,11 @@ fn name(p: &Path) -> String {
 }
 
 impl CloudFiles for Shared {
-    fn bring_down(&mut self, path: &Path) -> io::Result<()> {
+    fn bring_down(&mut self, path: &Path, size: u64) -> io::Result<()> {
         self.with(|c| {
+            if c.sizes[path] + u64::from(c.changed.contains(path)) != size {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "not the size"));
+            }
             c.log.push(format!("down {}", name(path)));
             if c.fail_down.contains(path) {
                 return Err(io::Error::other("no connection"));
@@ -76,8 +82,13 @@ impl CloudFiles for Shared {
     fn is_online_only(&self, path: &Path) -> io::Result<bool> {
         Ok(self.with(|c| c.online.contains(path)))
     }
+    fn open_read(&self, path: &Path) -> io::Result<std::fs::File> {
+        std::fs::File::open(path)
+    }
     fn size_on_laptop(&self, path: &Path) -> io::Result<u64> {
-        Ok(self.with(|c| c.sizes[path] + u64::from(c.changed.contains(path))))
+        Ok(self.with(|c| {
+            c.sizes[path] + u64::from(c.changed.contains(path)) + u64::from(c.grows.contains(path))
+        }))
     }
     fn put_back(&mut self, path: &Path) -> io::Result<()> {
         self.with(|c| {
@@ -297,7 +308,7 @@ fn account_state_or_a_changed_file_is_put_back_and_never_read() {
     lab.cloud.with(|c| {
         c.content
             .insert(token.path.clone(), br#"{"refresh_token":"abc"}"#.to_vec());
-        c.changed.insert(changed.path.clone());
+        c.grows.insert(changed.path.clone());
     });
     let o = lab.opener(&[token.clone(), changed.clone()], Network::Unmetered, false);
     assert!(safe_in_cloud(&read_all(&o, &token.path).unwrap_err()));
@@ -316,6 +327,25 @@ fn account_state_or_a_changed_file_is_put_back_and_never_read() {
             "back c.mp4"
         ]
     );
+}
+
+/// A file whose size on the laptop is not the approved one is refused before anything comes
+/// down (second security review): it changed in the cloud since the plan.
+#[test]
+fn a_file_not_the_approved_size_is_never_downloaded() {
+    let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+    let a = lab.file("a.mp4", MB);
+    lab.cloud.with(|c| c.changed.insert(a.path.clone()));
+    let o = lab.opener(std::slice::from_ref(&a), Network::Unmetered, false);
+    assert!(safe_in_cloud(&read_all(&o, &a.path).unwrap_err()));
+    let r = o.finish(&|_| true);
+    assert_eq!(r.files[&a.item].why_not, Some(WhyNot::Changed));
+    assert_eq!(
+        r.files[&a.item].back_online_only, None,
+        "never brought down"
+    );
+    assert!(lab.cloud.log().is_empty());
+    assert_eq!(r.downloaded_bytes, 0);
 }
 
 #[test]
@@ -466,10 +496,14 @@ mod durable {
         drop(o);
         assert!(!lab.cloud.with(|c| c.online.contains(&a.path)));
         let cloud = lab.cloud.clone();
-        let done = put_back_listed(store(&list).as_ref(), &mut |root| {
-            assert_eq!(root, lab.home.join("OneDrive"));
-            Box::new(cloud.clone())
-        })
+        let done = put_back_listed(
+            store(&list).as_ref(),
+            &[lab.home.join("OneDrive")],
+            &mut |root| {
+                assert_eq!(root, lab.home.join("OneDrive"));
+                Box::new(cloud.clone())
+            },
+        )
         .unwrap();
         assert_eq!(done.back, std::slice::from_ref(&a.path));
         assert!(done.still_down.is_empty());
@@ -478,7 +512,12 @@ mod durable {
         assert!(!list.exists(), "the list is removed");
         // Nothing left: a second start does nothing.
         assert_eq!(
-            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap(),
+            put_back_listed(
+                store(&list).as_ref(),
+                &[lab.home.join("OneDrive")],
+                &mut |_| Box::new(cloud.clone())
+            )
+            .unwrap(),
             Default::default()
         );
     }
@@ -501,16 +540,45 @@ mod durable {
         assert_eq!(down_in(&list), [("b.mp4".to_string(), true)]);
         // Still refused at the next start: kept on the list.
         let cloud = lab.cloud.clone();
-        let done =
-            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap();
+        let done = put_back_listed(
+            store(&list).as_ref(),
+            &[lab.home.join("OneDrive")],
+            &mut |_| Box::new(cloud.clone()),
+        )
+        .unwrap();
         assert_eq!(done.still_down, std::slice::from_ref(&b.path));
         assert!(list.exists());
         // The start after that, it goes back, and the list is gone.
         lab.cloud.with(|c| c.refuse_put_back.clear());
-        let done =
-            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap();
+        let done = put_back_listed(
+            store(&list).as_ref(),
+            &[lab.home.join("OneDrive")],
+            &mut |_| Box::new(cloud.clone()),
+        )
+        .unwrap();
         assert_eq!(done.back, std::slice::from_ref(&b.path));
         assert!(!list.exists());
+    }
+
+    /// The cloud folders are found again at the start: a file the list places in a folder that
+    /// is not one of them is never touched (the list could have been changed).
+    #[test]
+    fn a_left_list_is_put_back_only_inside_the_cloud_folders_found_now() {
+        let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+        let a = lab.file("a.mp4", 10 * MB);
+        let list = lab.home.join("kept-local.json");
+        let o = listed(&lab, &list, std::slice::from_ref(&a));
+        read_all(&o, &a.path).unwrap();
+        drop(o);
+        let cloud = lab.cloud.clone();
+        let elsewhere = [lab.home.join("Elsewhere")];
+        let done = put_back_listed(store(&list).as_ref(), &elsewhere, &mut |_| {
+            Box::new(cloud.clone())
+        })
+        .unwrap();
+        assert_eq!(done.still_down, std::slice::from_ref(&a.path));
+        assert_eq!(lab.cloud.log(), ["down a.mp4"], "not touched");
+        assert!(list.exists());
     }
 
     #[test]
@@ -539,7 +607,14 @@ mod durable {
         std::fs::write(&list, b"not a list").unwrap();
         assert!(KeptList::create(store(&list), &[], &[]).is_err());
         let cloud = lab.cloud.clone();
-        assert!(put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).is_err());
+        assert!(
+            put_back_listed(
+                store(&list).as_ref(),
+                &[lab.home.join("OneDrive")],
+                &mut |_| Box::new(cloud.clone())
+            )
+            .is_err()
+        );
         assert!(list.exists(), "kept, never acted on");
         assert!(lab.cloud.log().is_empty());
     }

@@ -42,8 +42,14 @@ pub const KEEP_FREE_OLD: u64 = 1024 * 1024 * 1024;
 
 /// What the old laptop's cloud app can do with one file.
 pub trait CloudFiles {
-    /// Brings the file's contents down onto the laptop (a read right through it).
-    fn bring_down(&mut self, path: &Path) -> io::Result<()>;
+    /// Brings the file's contents down onto the laptop (a read right through it), and only if
+    /// its size as the laptop sees it before anything comes down is `size`, the approved size; at
+    /// most `size` bytes are read. A different size is refused before anything is downloaded, with
+    /// [`io::ErrorKind::InvalidData`] (it changed in the cloud since the plan).
+    fn bring_down(&mut self, path: &Path, size: u64) -> io::Result<()>;
+    /// Opens the file for reading inside the consented folder, through that folder's handle and
+    /// each folder's below it, never through a link: the check and the open are one handle.
+    fn open_read(&self, path: &Path) -> io::Result<std::fs::File>;
     /// Whether its contents are only online right now.
     fn is_online_only(&self, path: &Path) -> io::Result<bool>;
     /// Its size as the laptop sees it now.
@@ -402,8 +408,14 @@ impl KeepLocal {
             let mut down = Vec::new();
             let mut good = Vec::new();
             for w in &in_batch {
-                let came = cloud.bring_down(&w.path).is_ok()
-                    && cloud.is_online_only(&w.path).ok() == Some(false);
+                let came = match cloud.bring_down(&w.path, w.size) {
+                    Ok(()) => cloud.is_online_only(&w.path).ok() == Some(false),
+                    Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                        mark(&mut report, w, Some(WhyNot::Changed));
+                        continue;
+                    }
+                    Err(_) => false,
+                };
                 if !came {
                     mark(&mut report, w, Some(WhyNot::DownloadFailed));
                     continue;
@@ -512,11 +524,43 @@ impl WindowsCloudFiles {
 }
 
 impl CloudFiles for WindowsCloudFiles {
-    fn bring_down(&mut self, path: &Path) -> io::Result<()> {
-        self.in_scope(path)?;
-        let mut file = std::fs::File::open(path)?;
-        io::copy(&mut file, &mut io::sink())?;
+    fn bring_down(&mut self, path: &Path, size: u64) -> io::Result<()> {
+        use std::io::Read;
+        let file = self.open_read(path)?;
+        // Its size as the laptop sees it, before anything comes down (opening does not download).
+        if file.metadata()?.len() != size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "it is not the size the plan approved",
+            ));
+        }
+        io::copy(&mut file.take(size), &mut io::sink())?;
         Ok(())
+    }
+
+    fn open_read(&self, path: &Path) -> io::Result<std::fs::File> {
+        use cap_fs_ext::OpenOptionsFollowExt;
+        use cap_primitives::fs as cap;
+        let below = path.strip_prefix(&self.root).map_err(|_| not_in_scope())?;
+        let mut names = Vec::new();
+        for part in below.components() {
+            let std::path::Component::Normal(name) = part else {
+                return Err(not_in_scope());
+            };
+            names.push(name);
+        }
+        let (last, folders) = names.split_last().ok_or_else(not_in_scope)?;
+        let mut dir = cap::open_ambient_dir(&self.root, cap_primitives::ambient_authority())?;
+        for name in folders {
+            dir = cap::open_dir_nofollow(&dir, Path::new(name))?;
+        }
+        let mut options = cap::OpenOptions::new();
+        options.read(true).follow(cap::FollowSymlinks::No);
+        let file = cap::open(&dir, Path::new(last), &options)?;
+        if !file.metadata()?.is_file() {
+            return Err(not_in_scope());
+        }
+        Ok(file)
     }
 
     fn is_online_only(&self, path: &Path) -> io::Result<bool> {

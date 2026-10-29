@@ -184,9 +184,12 @@ pub struct PutBack {
 
 /// At the start of PCTwin, or of a move: puts back every file a list left in `store` still names
 /// as down, through `cloud_for(its cloud folder)`, then removes the list (or keeps only what is
-/// still down). No list: nothing to do. A list that cannot be read is kept, never acted on.
+/// still down). The cloud folders are `roots`, as found on the laptop again now; the folders the
+/// list names are never trusted: a file in none of `roots` is not touched and stays on the list.
+/// No list: nothing to do. A list that cannot be read is kept, never acted on.
 pub fn put_back_listed(
     store: &dyn ListStore,
+    roots: &[PathBuf],
     cloud_for: &mut dyn FnMut(&Path) -> Box<dyn CloudFiles>,
 ) -> io::Result<PutBack> {
     let Some(bytes) = store.read()? else {
@@ -199,7 +202,17 @@ pub fn put_back_listed(
     let mut done = PutBack::default();
     let mut left = Vec::new();
     for f in list.files.into_iter().filter(|f| f.down) {
-        let mut cloud = cloud_for(&f.root);
+        // The deepest cloud folder found now that holds it; none: left alone, kept on the list.
+        let Some(root) = roots
+            .iter()
+            .filter(|r| f.path.starts_with(r))
+            .max_by_key(|r| r.as_os_str().len())
+        else {
+            done.still_down.push(f.path.clone());
+            left.push(f);
+            continue;
+        };
+        let mut cloud = cloud_for(root);
         let back = cloud.is_online_only(&f.path).ok() == Some(true)
             || (cloud.put_back(&f.path).is_ok()
                 && cloud.is_online_only(&f.path).ok() == Some(true));
@@ -337,7 +350,7 @@ impl KeepOpener {
             if cloud.is_online_only(&w.path).ok() == Some(false)
                 && cloud.size_on_laptop(&w.path).ok() == Some(w.size)
             {
-                return self.reader(&mut state, w);
+                return self.reader(&mut state, cloud, w);
             }
             put_back(&mut state, cloud, w);
         }
@@ -391,8 +404,18 @@ impl KeepOpener {
             return Err(safe_in_cloud());
         }
         let cloud = clouds[f.cloud].as_mut();
-        let came =
-            cloud.bring_down(&w.path).is_ok() && cloud.is_online_only(&w.path).ok() == Some(false);
+        let came = match cloud.bring_down(&w.path, w.size) {
+            Ok(()) => cloud.is_online_only(&w.path).ok() == Some(false),
+            // Not the approved size: refused before anything came down.
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                if let Some(list) = state.list.as_mut() {
+                    let _ = list.mark(&w.path, false);
+                }
+                Self::mark(&mut state, w, Some(WhyNot::Changed));
+                return Err(safe_in_cloud());
+            }
+            Err(_) => false,
+        };
         if !came {
             // Whatever part came down goes back.
             state.down.insert(w.item);
@@ -428,11 +451,18 @@ impl KeepOpener {
             return Err(safe_in_cloud());
         }
         Self::mark(&mut state, w, Some(WhyNot::NotSent));
-        self.reader(&mut state, w)
+        self.reader(&mut state, cloud, w)
     }
 
-    fn reader(&self, state: &mut State, w: &Wanted) -> io::Result<Box<dyn Source>> {
-        let file = std::fs::File::open(&w.path)?;
+    /// The file, opened inside its cloud folder by handle ([`CloudFiles::open_read`]), never by
+    /// its path again.
+    fn reader(
+        &self,
+        state: &mut State,
+        cloud: &dyn CloudFiles,
+        w: &Wanted,
+    ) -> io::Result<Box<dyn Source>> {
+        let file = cloud.open_read(&w.path)?;
         *state.readers.entry(w.item).or_default() += 1;
         Ok(Box::new(Kept {
             file,
