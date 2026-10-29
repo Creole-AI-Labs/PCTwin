@@ -330,8 +330,8 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     expect(screen.queryByText("Coming soon")).toBeNull();
     // Nothing reaches the shell but the start-up looks (a move that stopped part way, this
-    // laptop's name, a newer version, a hand-over note).
-    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "laptop_name", "update_check", "things_ready"]);
+    // laptop's name, a newer version, a hand-over note, files PCTwin was started to send).
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "laptop_name", "update_check", "things_ready", "quicksend_launch_files"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.
     const footer = within(screen.getByRole("contentinfo"));
     expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();

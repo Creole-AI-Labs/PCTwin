@@ -1,4 +1,9 @@
 /** Made-up data for the Quick Send screens: used by the screens page and by the tests. Nothing here is real. */
+import knownExamples from "./contract/known-connection.json";
+import incomingExamples from "./contract/known-incoming.json";
+import noteExamples from "./contract/qs-note.json";
+import waitingExamples from "./contract/waiting-send.json";
+import { parseKnownConnection, parseKnownIncoming, parseQsNote, parseWaitingSend, type KnownConnection, type KnownIncoming, type QsNote, type RememberChoice, type WaitingSend } from "./bridge";
 import type { Label } from "./pairing";
 import type { HistoryEntry, OfferedFile, PickedItem, Receipt, SendProgress } from "./quicksend";
 
@@ -64,3 +69,15 @@ export const HISTORY: HistoryEntry[] = [
   { id: "h4", kind: "move", when: "2026-09-28T09:00:00Z", from: "Studio PC", to: "Studio laptop", state: "steps-left", stepsLeft: 2 },
   { id: "h5", kind: "move", when: "2026-09-20T16:40:00Z", from: "Office PC", to: "Office laptop", state: "stopped" },
 ];
+
+/* ---------- Quick Send stage 1: the engine's own example shapes (contract/), read as the app reads them ---------- */
+
+const only = <T,>(list: (T | null)[]): T[] => list.filter((x): x is T => x !== null);
+
+/** Three remembered connections: the same laptop with a folder allowed, a restored one, one that cannot be told apart. */
+export const KNOWN: KnownConnection[] = only((knownExamples as unknown[]).map(parseKnownConnection));
+/** A waiting send with one recipient waiting, one delivered, one declined (forgotten since) and one failed. */
+export const WAITING: WaitingSend[] = only((waitingExamples as unknown[]).map(parseWaitingSend));
+export const INCOMING: KnownIncoming = only((incomingExamples as unknown[]).map(parseKnownIncoming))[0];
+export const [NOTE_TEXT, NOTE_LINK]: QsNote[] = only((noteExamples as unknown[]).map(parseQsNote));
+export const REMEMBER_CHOICES: RememberChoice[] = KNOWN.map((c) => ({ id: c.id, label: c.label, lastUsed: c.lastUsed }));

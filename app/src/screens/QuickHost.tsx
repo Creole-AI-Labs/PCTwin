@@ -2,7 +2,19 @@ import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
 import { useSettle } from "../motion/screen";
 import {
+  knownConnections,
+  knownRemember,
+  knownSend,
+  listenKnown,
   listenQuickSend,
+  qsLaunchFiles,
+  qsSendNote,
+  toQsRefusal,
+  waitingPrepare,
+  type KnownConnection,
+  type QsNote,
+  type QsRefusal,
+  type RememberChoice,
   qsChooseFolder,
   qsAcceptDrops,
   qsClear,
@@ -36,12 +48,23 @@ import QuickPick from "./QuickPick";
 import QuickProgress from "./QuickProgress";
 import QuickStop from "./QuickStop";
 import { Folder, Tile } from "./QsParts";
+import { NoteCompose, NoteInHost, NoteSent, noteProblem } from "./QsNote";
+import OpenSendActions from "./QsOpenSend";
+import QsRecipients, { type WaitDays, type When } from "./QsRecipients";
+import { RememberOffer } from "./QsRemember";
 import "./progress.css";
 import MiniPanel from "./MiniPanel";
 import { setWindowMode, type WindowMode } from "../native";
 
 type View =
   | { kind: "pick" }
+  /** The sender: who gets the files, when there are remembered laptops (Q04, Q17). */
+  | { kind: "to" }
+  /** A note or link: typed (Q24), then paired, then on its way and taken. */
+  | { kind: "compose" }
+  | { kind: "note-sent"; sent: boolean }
+  /** The receiver: a note or link arrived over the code. */
+  | { kind: "note"; note: QsNote }
   /** The receiver, before pairing: finding the folder the files will go to. */
   | { kind: "folder" }
   /** The receiver has no folder (no Downloads folder could be found or opened): choose one first. */
@@ -52,6 +75,9 @@ type View =
   | { kind: "progress"; progress: SendProgress }
   | { kind: "done"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem };
+
+/** "Remember this connection", offered after an exchange over the code; `remembered`: the name it took. */
+type Remember = { fallbackStore: boolean; connections: RememberChoice[]; remembered: string | null; problem: QsRefusal | null };
 
 const STARTING: SendProgress = { phase: "copying", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, current: null, failed: 0, speed: null, minutesLeft: null };
 
@@ -72,20 +98,35 @@ function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
 export default function QuickHost({
   mode,
   onHome,
+  onWaiting,
   onWindow,
 }: {
-  mode: "send" | "receive";
+  /** `note`: send a note or link (Q24) over the code. */
+  mode: "send" | "receive" | "note";
   onHome: () => void;
+  /** A waiting send was approved: show the waiting sends. */
+  onWaiting?: () => void;
   /** The window size the page asks for, so the frame can fit it (the mini box has no header). */
   onWindow?: (mode: WindowMode) => void;
 }) {
   const { l10n } = useLocalization();
   const bytes = useBytes();
-  const sender = mode === "send";
+  const sender = mode !== "receive";
   // For the engine's events (the listener is set once): which side this is, and whether Save here was pressed.
   const senderRef = useRef(sender);
   const savedRef = useRef(false);
-  const [view, setView] = useState<View>({ kind: sender ? "pick" : "folder" });
+  const [view, setView] = useState<View>({ kind: mode === "note" ? "compose" : sender ? "pick" : "folder" });
+  // The note being typed, and why the last try was refused.
+  const [noteText, setNoteText] = useState("");
+  const [noteRefused, setNoteRefused] = useState<QsRefusal | null>(null);
+  // Remembered laptops the sender may choose, and the choice (Q04, Q17).
+  const [known, setKnown] = useState<KnownConnection[]>([]);
+  const [chosenTo, setChosenTo] = useState<string[]>([]);
+  const [when, setWhen] = useState<When>("now");
+  const [days, setDays] = useState<WaitDays>("7");
+  const [toRefused, setToRefused] = useState<QsRefusal | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [remember, setRemember] = useState<Remember | null>(null);
   // Each step settles in like a new screen; a problem arrives without travel.
   useSettle(view.kind, { calm: view.kind === "problem" });
   const [items, setItems] = useState<PickedItem[]>([]);
@@ -139,8 +180,9 @@ export default function QuickHost({
         return;
       }
       setView((v) => {
-        // Waiting for where the files go: only a problem (the sender stopped, the link was lost) moves the page.
-        if (v.kind === "where") return event.kind === "problem" ? { kind: "problem", problem: event.problem } : v;
+        // Waiting for where the files go, or for the note to be taken: only a problem (the sender
+        // stopped, the link was lost) moves the page.
+        if (v.kind === "where" || (v.kind === "note-sent" && !v.sent)) return event.kind === "problem" ? { kind: "problem", problem: event.problem } : v;
         // Only a send that is going on moves the page: a late word never takes the person off
         // the page they are on.
         if (v.kind !== "progress" && v.kind !== "pair") return v;
@@ -164,6 +206,55 @@ export default function QuickHost({
       void qsClear().catch(() => undefined);
     };
   }, []);
+
+  // Notes, "Remember this connection" and files the system handed PCTwin, for this page.
+  useEffect(() => {
+    let on = true;
+    let unlisten: (() => void) | null = null;
+    void listenKnown((event) => {
+      if (!on) return;
+      if (event.kind === "remember") {
+        setRemember({ fallbackStore: event.fallbackStore, connections: event.connections, remembered: null, problem: null });
+      } else if (event.kind === "note-sent") {
+        setView((v) => (v.kind === "note-sent" ? { kind: "note-sent", sent: true } : v));
+      } else if (event.kind === "note" && !senderRef.current) {
+        // Over the code, a note comes instead of files; one from a remembered laptop is the app's to show.
+        const note = event.note;
+        if (note.from === null) setView((v) => (v.kind === "progress" || v.kind === "note" ? { kind: "note", note } : v));
+      } else if (event.kind === "launch") {
+        setItems((old) => merged(old, event.items));
+      }
+    }).then((stop) => {
+      if (on) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      on = false;
+      unlisten?.();
+    };
+  }, []);
+
+  // The sender: what the system handed PCTwin to send joins the pick page, and the remembered
+  // laptops it may go to are asked once.
+  useEffect(() => {
+    if (mode !== "send") return;
+    let on = true;
+    qsLaunchFiles().then(
+      (fresh) => {
+        if (on && fresh.length > 0) setItems((old) => merged(old, fresh));
+      },
+      () => undefined,
+    );
+    knownConnections().then(
+      (list) => {
+        if (on) setKnown(list);
+      },
+      () => undefined,
+    );
+    return () => {
+      on = false;
+    };
+  }, [mode]);
 
   // The receiver: the folder the files will go to, held from now (the one chosen this session, or
   // Downloads). Without one, the person chooses a folder before pairing.
@@ -234,7 +325,115 @@ export default function QuickHost({
     </div>
   );
 
+  const rememberOffer = remember && (
+    <RememberOffer
+      fallbackStore={remember.fallbackStore}
+      connections={remember.connections}
+      suggestedName={peer ? labelShownSafely(l10n, peer) : ""}
+      remembered={remember.remembered}
+      problem={remember.problem}
+      onRemember={(label, replaces) => {
+        knownRemember(label, replaces).then(
+          () => {
+            setRemember((r) => r && { ...r, remembered: label, problem: null });
+          },
+          (error: unknown) => {
+            setRemember((r) => r && { ...r, problem: toQsRefusal(error) });
+          },
+        );
+      }}
+    />
+  );
+
+  const peerName = peer ? labelShownSafely(l10n, peer) : l10n.getString(sender ? "qs-label-receiving" : "qs-label-sending");
+
   switch (view.kind) {
+    case "compose":
+      return (
+        <NoteCompose
+          text={noteText}
+          problem={noteRefused}
+          onChange={(t) => {
+            setNoteText(t);
+            setNoteRefused(null);
+          }}
+          onContinue={() => {
+            // Said before pairing, by the engine's own rules; the engine checks again.
+            const refused = noteProblem(noteText);
+            setNoteRefused(refused);
+            if (!refused) setView({ kind: "pair" });
+          }}
+          onBack={onHome}
+        />
+      );
+    case "note-sent":
+      return (
+        <>
+          <NoteSent sent={view.sent} onDone={onHome} />
+          {view.sent && rememberOffer}
+        </>
+      );
+    case "note":
+      return (
+        <>
+          <NoteInHost key={view.note.id} note={view.note} onDone={onHome} />
+          {rememberOffer}
+        </>
+      );
+    case "to":
+      return (
+        <QsRecipients
+          connections={known}
+          chosen={chosenTo}
+          when={when}
+          days={days}
+          problem={toRefused}
+          busy={busy}
+          onToggle={(id, on) => {
+            setToRefused(null);
+            setChosenTo((list) => (on ? [...list.filter((x) => x !== id), id] : list.filter((x) => x !== id)));
+          }}
+          onWhen={setWhen}
+          onDays={setDays}
+          onCode={() => {
+            setView({ kind: "pair" });
+          }}
+          onSendNow={() => {
+            const id = chosenTo[0];
+            const to = known.find((c) => c.id === id);
+            setToRefused(null);
+            setBusy(true);
+            knownSend(id).then(
+              () => {
+                setBusy(false);
+                if (to) setPeer({ kind: "named", name: to.label });
+                setView({ kind: "progress", progress: STARTING });
+              },
+              (error: unknown) => {
+                setBusy(false);
+                setToRefused(toQsRefusal(error));
+              },
+            );
+          }}
+          onApprove={() => {
+            setToRefused(null);
+            setBusy(true);
+            waitingPrepare(chosenTo, Number(days)).then(
+              () => {
+                setBusy(false);
+                (onWaiting ?? onHome)();
+              },
+              (error: unknown) => {
+                setBusy(false);
+                setToRefused(toQsRefusal(error));
+              },
+            );
+          }}
+          onBack={() => {
+            setView({ kind: "pick" });
+          }}
+        />
+      );
     case "pick":
       return (
         <>
@@ -257,7 +456,8 @@ export default function QuickHost({
               qsOffer(ids).then(
                 (files) => {
                   setOffered(files);
-                  setView({ kind: "pair" });
+                  // Remembered laptops: choose who gets it; otherwise pair with the code.
+                  setView({ kind: known.length > 0 ? "to" : "pair" });
                 },
                 (error: unknown) => {
                   // Said before anything is sent, on the page where the choice can change.
@@ -299,9 +499,21 @@ export default function QuickHost({
         <PairOld
           quick
           onBack={() => {
-            setView({ kind: "pick" });
+            setView({ kind: mode === "note" ? "compose" : known.length > 0 ? "to" : "pick" });
           }}
           onPaired={() => {
+            if (mode === "note") {
+              setView({ kind: "note-sent", sent: false });
+              qsSendNote(noteText).catch((error: unknown) => {
+                const refused = toQsRefusal(error);
+                // A note the engine would not take goes back to the box, said there.
+                if (refused.kind.startsWith("note-")) {
+                  setNoteRefused(refused);
+                  setView({ kind: "compose" });
+                } else fail();
+              });
+              return;
+            }
             setView({ kind: "progress", progress: STARTING });
             qsSend().catch(fail);
           }}
@@ -393,6 +605,8 @@ export default function QuickHost({
             to={to}
             progress={view.progress}
             side={sender ? "send" : "receive"}
+            // Add files (sender) and Send to <name> (receiver) go here once the engine has them.
+            openSend={<OpenSendActions peer={peerName} />}
             onPause={() => void qsPause().catch(() => undefined)}
             onResume={() => void qsResume().catch(() => undefined)}
             onCompact={() => {
@@ -416,7 +630,8 @@ export default function QuickHost({
       );
     case "done":
       return (
-        <QuickDone
+        <>
+          <QuickDone
           side={view.receipt.side === "sender" ? "send" : "receive"}
           receipt={{ lines: view.receipt.lines }}
           files={offered}
@@ -450,7 +665,9 @@ export default function QuickHost({
             }, fail);
           }}
           onDone={onHome}
-        />
+          />
+          {rememberOffer}
+        </>
       );
     case "problem":
       if (view.problem.kind === "no-room")
