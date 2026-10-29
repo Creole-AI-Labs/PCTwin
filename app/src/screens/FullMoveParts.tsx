@@ -266,7 +266,9 @@ export function Rebuilding({ step, waitsForFreeWifi = false }: { step: RebuildSt
       ? null
       : step.step === "permission"
         ? l10n.getString("fullmove-rebuilding-permission")
-        : l10n.getString(`fullmove-rebuilding-${step.step}`, { done: step.done.toLocaleString(pageLocale()), total: step.total.toLocaleString(pageLocale()) });
+        : step.step === "waiting-free-wifi"
+          ? l10n.getString("fullmove-rebuilding-waiting-wifi", { minutes: step.minutesLeft })
+          : l10n.getString(`fullmove-rebuilding-${step.step}`, { done: step.done.toLocaleString(pageLocale()), total: step.total.toLocaleString(pageLocale()) });
   return (
     <>
       <TopStrip labelId="outcome-eyebrow" />
@@ -277,7 +279,7 @@ export function Rebuilding({ step, waitsForFreeWifi = false }: { step: RebuildSt
           {line}
         </p>
       )}
-      {waitsForFreeWifi && step?.step !== "settings" && (
+      {waitsForFreeWifi && step?.step !== "settings" && step?.step !== "waiting-free-wifi" && (
         <div className="mv-note">
           <Banner tone="info">{l10n.getString("fullmove-rebuilding-wait-wifi")}</Banner>
         </div>

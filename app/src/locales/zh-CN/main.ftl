@@ -2869,3 +2869,8 @@ qs-asking-later = 你离开此页面时，PCTwin 会问你。
 qs-asking-show = 选择保存位置
 qs-asking-show-note = 显示便条
 progress-current-open-in = PCTwin 复制 { $name } 期间，{ $app } 无法保存对它的更改。如果 { $app } 提示文件正在使用，请等复制完成。
+
+# 2.6 waiting for free Wi-Fi
+fullmove-rebuilding-waiting-wifi = { $minutes ->
+       *[other] 正在等待免费 Wi-Fi 后再下载应用：最多再等 { $minutes } 分钟
+    }

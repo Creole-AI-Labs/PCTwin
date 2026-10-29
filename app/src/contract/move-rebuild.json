@@ -11,5 +11,9 @@
     "done": 40,
     "step": "settings",
     "total": 120
+  },
+  {
+    "minutesLeft": 18,
+    "step": "waiting-free-wifi"
   }
 ]

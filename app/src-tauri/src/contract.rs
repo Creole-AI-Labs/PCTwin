@@ -1348,6 +1348,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     done: 40,
                     total: 120,
                 },
+                pctwin_fullmove::run::Progress::WaitingFreeWifi { minutes_left: 18 },
             ]),
         ),
         ("report-item", json(report_items())),

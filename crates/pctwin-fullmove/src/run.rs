@@ -160,6 +160,12 @@ pub enum Progress {
         done: u64,
         total: u64,
     },
+    /// Waiting for free Wi-Fi before the apps download (the person chose it): at most this many
+    /// minutes more, then the apps that need a download end needs-action.
+    #[serde(rename_all = "camelCase")]
+    WaitingFreeWifi {
+        minutes_left: u64,
+    },
 }
 
 /// What undo needs to find and check this move's settings again, saved beside the journal.

@@ -740,8 +740,13 @@ mod choices {
         ]);
         let w = winget();
         let mut helper = FakeHelper::default();
+        let told = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let t = told.clone();
+        let wait = wait.telling(Box::new(move |m| t.borrow_mut().push(m)));
         let results = run_with(&w, &mut helper, vec![entry(app())], |c| c.waiting(wait));
         assert_eq!(slept.borrow().len(), 2, "waited twice");
+        // Each wait says how long at most is left (90 s, then 60 s, rounded up to minutes).
+        assert_eq!(*told.borrow(), [2, 1]);
         assert!(downloaded(&w));
         assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
     }

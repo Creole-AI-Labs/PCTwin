@@ -3144,3 +3144,9 @@ qs-asking-later = जब आप यह पेज छोड़ेंगे, PCTwi
 qs-asking-show = सेव करने की जगह चुनें
 qs-asking-show-note = नोट दिखाएँ
 progress-current-open-in = जब तक PCTwin { $name } कॉपी करता है, { $app } उसमें बदलाव सेव नहीं कर सकता। अगर { $app } कहे कि फ़ाइल इस्तेमाल में है, तो कॉपी पूरी होने का इंतज़ार करें।
+
+# 2.6 waiting for free Wi-Fi
+fullmove-rebuilding-waiting-wifi = { $minutes ->
+        [one] ऐप डाउनलोड करने से पहले मुफ़्त Wi-Fi का इंतज़ार: ज़्यादा से ज़्यादा 1 मिनट और
+       *[other] ऐप डाउनलोड करने से पहले मुफ़्त Wi-Fi का इंतज़ार: ज़्यादा से ज़्यादा { $minutes } मिनट और
+    }

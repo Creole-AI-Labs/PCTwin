@@ -63,6 +63,8 @@ pub struct WaitFree {
     every: std::time::Duration,
     at_most: std::time::Duration,
     gave_up: std::cell::Cell<bool>,
+    /// Told before each wait how many minutes are left at most (the screens say it).
+    told: Option<Box<dyn Fn(u64)>>,
 }
 
 /// How often the connection is looked at again while waiting, and how long PCTwin waits at most.
@@ -83,7 +85,15 @@ impl WaitFree {
             every,
             at_most,
             gave_up: std::cell::Cell::new(false),
+            told: None,
         }
+    }
+
+    /// Tells `told` how many minutes are left at most before each wait.
+    #[must_use]
+    pub fn telling(mut self, told: Box<dyn Fn(u64)>) -> Self {
+        self.told = Some(told);
+        self
     }
 
     /// Whether downloading may go ahead: the connection is free now, or becomes free within the
@@ -101,6 +111,9 @@ impl WaitFree {
             if waited >= self.at_most {
                 self.gave_up.set(true);
                 return false;
+            }
+            if let Some(told) = &self.told {
+                told((self.at_most - waited).as_secs().div_ceil(60));
             }
             (self.sleep)(self.every);
             waited += self.every;

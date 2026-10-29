@@ -924,12 +924,19 @@ pub fn rebuild_full<R: Runtime>(
         })
         .map(|chain| {
             if choices.wait_free_wifi {
-                chain.waiting(pctwin_fullmove::install::WaitFree::new(
-                    Box::new(pctwin_apps::fetch::network_cost),
-                    Box::new(std::thread::sleep),
-                    pctwin_fullmove::install::WAIT_FREE_EVERY,
-                    pctwin_fullmove::install::WAIT_FREE_AT_MOST,
-                ))
+                let app = app.clone();
+                chain.waiting(
+                    pctwin_fullmove::install::WaitFree::new(
+                        Box::new(pctwin_apps::fetch::network_cost),
+                        Box::new(std::thread::sleep),
+                        pctwin_fullmove::install::WAIT_FREE_EVERY,
+                        pctwin_fullmove::install::WAIT_FREE_AT_MOST,
+                    )
+                    // The screens say it is waiting, and for how long at most.
+                    .telling(Box::new(move |minutes_left| {
+                        let _ = app.emit(REBUILD_EVENT, Progress::WaitingFreeWifi { minutes_left });
+                    })),
+                )
             } else {
                 chain
             }

@@ -3253,3 +3253,10 @@ qs-asking-later = PCTwin vous pose la question quand vous quittez cette page.
 qs-asking-show = Choisir où enregistrer
 qs-asking-show-note = Afficher la note
 progress-current-open-in = Pendant que PCTwin copie { $name }, { $app } ne peut pas y enregistrer de modifications. Si { $app } indique que le fichier est utilisé, attendez la fin de la copie.
+
+# 2.6 waiting for free Wi-Fi
+fullmove-rebuilding-waiting-wifi = { $minutes ->
+        [one] En attente d’un Wi-Fi gratuit avant de télécharger les applis : encore 1 minute au plus
+        [many] En attente d’un Wi-Fi gratuit avant de télécharger les applis : encore { $minutes } minutes au plus
+       *[other] En attente d’un Wi-Fi gratuit avant de télécharger les applis : encore { $minutes } minutes au plus
+    }

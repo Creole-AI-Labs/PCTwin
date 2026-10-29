@@ -179,7 +179,7 @@ export type Rebuilt = {
   undoId: string | null;
 };
 
-export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number };
+export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number } | { step: "waiting-free-wifi"; minutesLeft: number };
 
 type Fields = Record<string, unknown>;
 
@@ -376,6 +376,10 @@ export function parseRebuildStep(v: unknown): RebuildStep | null {
   if (step === "apps" || step === "settings") {
     const f = exactly(v, ["step", "done", "total"]);
     return f && isCount(f.done) && isCount(f.total) && f.done <= f.total ? { step, done: f.done, total: f.total } : null;
+  }
+  if (step === "waiting-free-wifi") {
+    const f = exactly(v, ["step", "minutesLeft"]);
+    return f && isCount(f.minutesLeft) ? { step, minutesLeft: f.minutesLeft } : null;
   }
   return null;
 }
