@@ -492,7 +492,25 @@ impl Opener for FsOpener {
         if std::fs::symlink_metadata(path).is_ok_and(|m| pctwin_scan::is_cloud_only(&m)) {
             return Err(io::Error::other(OnlineOnly));
         }
-        Ok(Box::new(File::open(path)?))
+        // Opened without bringing it back (exit-gate review W1, 29 October 2026): one freed by its
+        // cloud app between the look above and this open is found online only on the open file
+        // itself, and refused, never downloaded.
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_FLAG_OPEN_NO_RECALL.
+            options.custom_flags(0x0010_0000);
+        }
+        let file = options.open(path)?;
+        if file
+            .metadata()
+            .is_ok_and(|m| pctwin_scan::is_cloud_only(&m))
+        {
+            return Err(io::Error::other(OnlineOnly));
+        }
+        Ok(Box::new(file))
     }
 }
 
