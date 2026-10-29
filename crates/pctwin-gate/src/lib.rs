@@ -3779,6 +3779,20 @@ mod tests {
     //! reservation's error means, since the test machines' disks can all reserve.
     use super::*;
 
+    /// BitLocker's own code for a locked drive is a locked drive on Windows; no other code is.
+    #[test]
+    fn a_locked_drive_is_told_by_bitlockers_own_code_only() {
+        let locked = io::Error::from_raw_os_error(0x8031_0000_u32 as i32);
+        assert_eq!(is_drive_locked(&locked), cfg!(windows));
+        for other in [0, 5, 21, 32, 0x8031_0001_u32 as i32, 0x0031_0000] {
+            assert!(
+                !is_drive_locked(&io::Error::from_raw_os_error(other)),
+                "{other:#x}"
+            );
+        }
+        assert!(!is_drive_locked(&io::Error::other("locked")));
+    }
+
     #[test]
     fn a_damaged_copy_of_a_long_name_still_fits_on_every_drive() {
         for len in [10, 200, 230, 250, 255] {

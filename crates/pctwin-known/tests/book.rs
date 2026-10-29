@@ -614,3 +614,86 @@ fn an_ended_permission_names_no_folder_to_open() {
     assert_eq!(b.grant_folder(&id, T0), Some(inbox));
     assert_eq!(b.grant_folder(&id, T0 + GRANT_LIFETIME), None);
 }
+
+/// Clear removes the folder for next time, and only that.
+#[test]
+fn clearing_the_folder_for_next_time_clears_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mut b = book(dir.path(), &store, "m1");
+    let (pa, _) = pendings();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
+    b.set_next_folder(&id, NextFolder(folder(dir.path(), "Next")))
+        .unwrap();
+    assert!(b.next_folder(&id).unwrap().is_some());
+    b.clear_next_folder(&id).unwrap();
+    assert_eq!(b.next_folder(&id).unwrap(), None);
+    assert_eq!(
+        book(dir.path(), &store, "m1").next_folder(&id).unwrap(),
+        None,
+        "cleared on disk too"
+    );
+    assert_eq!(
+        b.clear_next_folder("nobody").err(),
+        Some(BookError::NotFound)
+    );
+}
+
+/// Permission 3's size cap lets a day's deliveries reach exactly the cap, and not a byte past it.
+#[test]
+fn the_daily_size_cap_is_reached_exactly() {
+    use pctwin_known::book::DEFAULT_DAILY_BYTES;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mut b = book(dir.path(), &store, "m1");
+    let (pa, _) = pendings();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
+    b.allow_folder(&id, folder(dir.path(), "In"), T0).unwrap();
+    assert!(admit(&mut b, &id, DEFAULT_DAILY_BYTES - 10, T0).is_ok());
+    assert!(admit(&mut b, &id, 10, T0).is_ok(), "exactly the cap");
+    assert_eq!(admit(&mut b, &id, 1, T0).err(), Some(GrantProblem::OverCap));
+    let mut b2 = book(dir.path(), &store, "m1");
+    assert!(
+        admit(&mut b2, &id, DEFAULT_DAILY_BYTES, T0 + DAY_SECONDS).is_ok(),
+        "a new day"
+    );
+}
+
+/// The limits are what the screens and the Security Design say.
+#[test]
+fn the_limits_are_the_stated_ones() {
+    use pctwin_known::book::{DEFAULT_DAILY_BYTES, MAX_CONNECTIONS, MAX_LABEL_CHARS};
+    assert_eq!(DAY_SECONDS, 86_400);
+    assert_eq!(DEFAULT_DAILY_BYTES, 5 * 1024 * 1024 * 1024);
+    assert_eq!(DEFAULT_DAILY_SENDS, 20);
+    assert_eq!(TOKEN_PERIOD, 15 * 60);
+    assert_eq!(UNUSED_FOR, 90 * 86_400);
+    assert_eq!(GRANT_LIFETIME, 30 * 86_400);
+    assert_eq!(QUIET_SPELL, 7 * 86_400);
+    assert_eq!(MAX_LABEL_CHARS, 40);
+    assert_eq!(MAX_CONNECTIONS, 200);
+}
+
+/// The other laptop is looked for under its token of the window before, this one and the next:
+/// a clock a whole window ahead still finds it.
+#[test]
+fn the_next_token_window_is_looked_for_too() {
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (sa, sb) = (
+        Arc::new(MemoryStore::default()),
+        Arc::new(MemoryStore::default()),
+    );
+    let (pa, pb) = pendings();
+    let mut a = book(da.path(), &sa, "ma");
+    let mut b = book(db.path(), &sb, "mb");
+    let ida = a.remember(&pa, "B", T0, None).unwrap();
+    let idb = b.remember(&pb, "A", T0, None).unwrap();
+    let looked = b.peer_tokens(&idb, T0).unwrap();
+    assert_eq!(looked.len(), 3);
+    for (offset, at) in [(-1i64, 0usize), (0, 1), (1, 2)] {
+        let when = (T0 as i64 + offset * TOKEN_PERIOD as i64) as u64;
+        let announced = a.announced(when);
+        let t = announced.iter().find(|(id, _)| *id == ida).unwrap().1;
+        assert_eq!(looked[at], t, "window {offset}");
+    }
+}

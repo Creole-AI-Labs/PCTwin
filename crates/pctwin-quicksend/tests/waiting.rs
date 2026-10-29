@@ -623,3 +623,54 @@ fn a_send_cancelled_while_copying_never_starts_waiting() {
     assert!(got.is_err());
     assert!(store.list().is_empty());
 }
+
+/// A source rewritten at the same length, later: a newer version exists (said, never sent).
+#[test]
+fn a_source_rewritten_at_the_same_length_is_newer() {
+    let (old, keep) = (dirs(), dirs());
+    let store = new_store(keep.path());
+    let c = chosen(old.path());
+    let w = store.prepare(&c, &[alex()], 7, T0, None).unwrap();
+    assert!(store.get(&w.id).unwrap().newer.is_empty());
+    let menu = old.path().join("menu.txt");
+    let was = std::fs::metadata(&menu).unwrap().modified().unwrap();
+    std::fs::write(&menu, b"rice and BEANS").unwrap();
+    let f = std::fs::File::options().write(true).open(&menu).unwrap();
+    f.set_modified(was + std::time::Duration::from_secs(60))
+        .unwrap();
+    drop(f);
+    assert_eq!(std::fs::metadata(&menu).unwrap().len(), 14);
+    assert_eq!(
+        store.get(&w.id).unwrap().newer,
+        vec!["menu.txt".to_string()]
+    );
+}
+
+/// A source rewritten at the same length while it is being copied ends the approval: nothing
+/// is kept.
+#[test]
+fn a_source_rewritten_at_the_same_length_during_the_copy_ends_it() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let (old, keep) = (dirs(), dirs());
+    let store = new_store(keep.path());
+    let big = old.path().join("big.bin");
+    std::fs::write(&big, vec![1u8; 200_000]).unwrap();
+    let calls = AtomicU32::new(0);
+    let clock = || {
+        // Part way through the copy: the same length, a later time.
+        if calls.fetch_add(1, Ordering::Relaxed) == 3 {
+            let was = std::fs::metadata(&big).unwrap().modified().unwrap();
+            std::fs::write(&big, vec![2u8; 200_000]).unwrap();
+            let f = std::fs::File::options().write(true).open(&big).unwrap();
+            f.set_modified(was + std::time::Duration::from_secs(60))
+                .unwrap();
+        }
+        T0
+    };
+    let got = store.prepare_with_clock(&[big.clone()], &[alex()], 7, T0, None, &clock);
+    assert!(
+        matches!(got, Err(WaitingError::ChangedWhileCopying(_))),
+        "{got:?}"
+    );
+    assert!(store.list().is_empty());
+}

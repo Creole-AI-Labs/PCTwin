@@ -895,6 +895,12 @@ mod tests {
         w.answer(7, g, true).unwrap();
         w.run(&NO_READER);
         assert_eq!(states(&w)[7], (Task, PersonConfirmed, AllThere));
+        let confirmed = &w.view().checks[7];
+        assert_eq!(
+            (confirmed.checked, confirmed.of),
+            (1, 1),
+            "the person's yes counts"
+        );
         let g = w.view().generation;
         w.answer(7, g, false).unwrap();
         assert_eq!(states(&w)[7], (Task, StillNeedsAttention, YouSaidNo));

@@ -418,8 +418,13 @@ mod tests {
         assert_ne!(a, b);
         assert!(unseal_bytes(&d.path().join("f1"), &key, 2, 100).is_err());
         assert!(
-            unseal_bytes(&d.path().join("f1"), &key, 1, 5).is_err(),
+            unseal_bytes(&d.path().join("f1"), &key, 1, 9).is_err(),
             "too large"
+        );
+        assert_eq!(
+            unseal_bytes(&d.path().join("f1"), &key, 1, 10).unwrap(),
+            b"same bytes",
+            "exactly the most is allowed"
         );
     }
 }

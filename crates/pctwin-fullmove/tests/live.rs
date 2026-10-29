@@ -305,3 +305,30 @@ fn a_database_whose_log_is_held_is_not_read_and_its_log_is_held_while_it_is() {
             .is_ok()
     );
 }
+
+/// A database's own file beside it that cannot be opened for some other reason than being held
+/// (it is not there, or it is a folder) never stops the database being read; and what is read is
+/// the very file, by its identity.
+#[cfg(windows)]
+#[test]
+fn a_side_file_that_is_not_held_never_stops_the_read_and_the_file_is_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    std::fs::write(d.join("money.db"), sqlite_bytes()).unwrap();
+    std::fs::create_dir(d.join("money.db-shm")).unwrap();
+    let mut file = live(d, "money.db", 1);
+    file.sidecars = vec![d.join("money.db-wal"), d.join("money.db-shm")];
+    let opener = LiveOpener::new(
+        Arc::new(FsOpener),
+        std::slice::from_ref(&file),
+        Arc::new(Fake::held_for(0, &[])),
+    );
+    let mut reading = opener.open(&d.join("money.db")).expect("read");
+    let mut direct = FsOpener.open(&d.join("money.db")).unwrap();
+    let id = reading.identity().unwrap();
+    assert!(id.is_some(), "the file's own identity");
+    assert_eq!(id, direct.identity().unwrap());
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut reading, &mut bytes).unwrap();
+    assert_eq!(bytes, sqlite_bytes());
+}

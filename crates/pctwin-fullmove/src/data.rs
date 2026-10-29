@@ -904,11 +904,7 @@ pub fn land_all(
             out.push(needs("its record did not arrive", DataWhy::NotWhole));
             continue;
         };
-        let whole = !a.refused
-            && r.capture
-                .files
-                .iter()
-                .all(|f| a.files.get(&f.rel).copied() == Some(true));
+        let whole = arrived_whole(a, r.capture.files.iter().map(|f| f.rel.as_str()));
         if !whole || r.component.secret != secret {
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
@@ -916,6 +912,15 @@ pub fn land_all(
         out.push(laptop.land(id, r, step as u32, secret, &sink.folder(id)));
     }
     out
+}
+
+/// Whether a component arrived whole: nothing about it was refused, and every file its record
+/// names (`wanted`) arrived checked. Anything less ends "needs action", never landed as whole.
+fn arrived_whole<'w>(a: &Arrived, wanted: impl IntoIterator<Item = &'w str>) -> bool {
+    !a.refused
+        && wanted
+            .into_iter()
+            .all(|rel| a.files.get(rel).copied() == Some(true))
 }
 
 struct NewLaptopOf<'a, 'r> {
@@ -1059,4 +1064,51 @@ pub fn why_of(applied: &api::Applied) -> Option<DataWhy> {
         },
         _ => DataWhy::NotLanded,
     })
+}
+
+#[cfg(test)]
+mod whole_tests {
+    use super::*;
+
+    fn arrived(files: &[(&str, bool)], refused: bool) -> Arrived {
+        Arrived {
+            files: files.iter().map(|(r, ok)| (r.to_string(), *ok)).collect(),
+            refused,
+            ..Arrived::default()
+        }
+    }
+
+    /// One file not checked, one missing, or the set refused: never landed as whole.
+    #[test]
+    fn a_component_is_whole_only_when_every_file_arrived_checked_and_nothing_was_refused() {
+        let wanted = ["a.db", "b.db"];
+        assert!(arrived_whole(
+            &arrived(&[("a.db", true), ("b.db", true)], false),
+            wanted
+        ));
+        assert!(!arrived_whole(
+            &arrived(&[("a.db", true), ("b.db", false)], false),
+            wanted
+        ));
+        assert!(!arrived_whole(
+            &arrived(&[("a.db", false), ("b.db", true)], false),
+            wanted
+        ));
+        assert!(
+            !arrived_whole(&arrived(&[("a.db", true)], false), wanted),
+            "one missing"
+        );
+        assert!(!arrived_whole(
+            &arrived(&[("a.db", true), ("b.db", true)], true),
+            wanted
+        ));
+        assert!(
+            arrived_whole(&arrived(&[], false), []),
+            "a record naming no files"
+        );
+        assert!(
+            !arrived_whole(&arrived(&[], true), []),
+            "refused, even with no files"
+        );
+    }
 }

@@ -907,24 +907,6 @@ impl JournalProbe {
         Self { copies }
     }
 
-    /// Reads `journal` (read only): its entries, and which undo took back.
-    pub fn read(
-        journal: &Journal,
-        source: LaptopId,
-        scope: JournalScope,
-    ) -> Result<Self, JournalError> {
-        let entries = journal.entries()?;
-        let mut undone = BTreeSet::new();
-        for e in &entries {
-            if let Some(Undo::Done { outcome }) = journal.undo_of(e.id)?
-                && taken_back(&outcome)
-            {
-                undone.insert(e.id);
-            }
-        }
-        Ok(Self::from_entries(&entries, &undone, source, scope))
-    }
-
     /// Reads `journal` (read only) for every move from the old laptop `source`, whatever its
     /// scope, never Quick Send's: item IDs are the old laptop's own, so a copy is this laptop's
     /// whichever move of it wrote it. Of an item's copies written and checked, the newest stands;

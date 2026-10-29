@@ -904,3 +904,104 @@ fn summarise(r: &Receipt, now: u64) -> Delivery {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ReceiptLine;
+    use pctwin_record::ItemId;
+    use pctwin_transfer::Cause;
+
+    fn line(n: u8, outcome: Outcome) -> ReceiptLine {
+        ReceiptLine {
+            id: ItemId::from_hex(&format!("{n:02x}").repeat(16)).unwrap(),
+            path: format!("f{n}"),
+            outcome,
+        }
+    }
+
+    fn arrived(n: u8) -> ReceiptLine {
+        line(
+            n,
+            Outcome::Arrived {
+                landed_as: format!("f{n}"),
+            },
+        )
+    }
+
+    fn of(lines: Vec<ReceiptLine>) -> Delivery {
+        summarise(&Receipt { lines }, 7)
+    }
+
+    /// A delivery is Delivered only when nothing failed and nothing was declined beside what
+    /// arrived; each failure and each declined file is counted, never one for all.
+    #[test]
+    fn a_delivery_is_delivered_only_when_nothing_failed_or_was_left_out() {
+        let failed = |n: u8, why: &str| {
+            line(
+                n,
+                Outcome::Failed {
+                    cause: Cause::Stopped,
+                    why: why.into(),
+                },
+            )
+        };
+        assert_eq!(
+            of(vec![arrived(1), failed(2, "first"), failed(3, "second")]),
+            Delivery::Failed {
+                failed: 2,
+                why: "first".into(),
+                at: 7
+            }
+        );
+        assert_eq!(
+            of(vec![
+                arrived(1),
+                line(2, Outcome::Declined),
+                line(3, Outcome::Declined)
+            ]),
+            Delivery::Failed {
+                failed: 2,
+                why: String::new(),
+                at: 7
+            },
+            "some declined beside what arrived"
+        );
+        let needs = line(
+            2,
+            Outcome::NeedsAction {
+                landed_as: "f2".into(),
+                why: "check it".into(),
+            },
+        );
+        assert_eq!(
+            of(vec![needs.clone(), line(3, Outcome::Declined)]),
+            Delivery::Failed {
+                failed: 1,
+                why: String::new(),
+                at: 7
+            },
+            "declined beside one needing care"
+        );
+        assert_eq!(
+            of(vec![arrived(1), needs.clone(), needs]),
+            Delivery::Delivered {
+                arrived: 1,
+                needs_action: 2,
+                at: 7
+            }
+        );
+        assert_eq!(
+            of(vec![line(1, Outcome::Declined)]),
+            Delivery::Declined { at: 7 }
+        );
+        assert_eq!(
+            of(vec![arrived(1), arrived(2)]),
+            Delivery::Delivered {
+                arrived: 2,
+                needs_action: 0,
+                at: 7
+            }
+        );
+    }
+}

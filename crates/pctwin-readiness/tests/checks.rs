@@ -300,6 +300,50 @@ fn a_link_whose_target_is_gone_is_missing() {
     );
 }
 
+/// A font whose family name comes after other names (a copyright line first) is still read.
+#[test]
+fn a_family_name_after_other_names_is_still_read() {
+    let copyright: Vec<u8> = "(c) Ada"
+        .encode_utf16()
+        .flat_map(u16::to_be_bytes)
+        .collect();
+    let family: Vec<u8> = "Later Sans"
+        .encode_utf16()
+        .flat_map(u16::to_be_bytes)
+        .collect();
+    let mut table = Vec::new();
+    table.extend(0u16.to_be_bytes()); // format
+    table.extend(2u16.to_be_bytes()); // count
+    table.extend(30u16.to_be_bytes()); // string offset: 6 + 2 * 12
+    for v in [3u16, 1, 0x409, 0, copyright.len() as u16, 0] {
+        table.extend(v.to_be_bytes());
+    }
+    for v in [
+        3u16,
+        1,
+        0x409,
+        1,
+        family.len() as u16,
+        copyright.len() as u16,
+    ] {
+        table.extend(v.to_be_bytes());
+    }
+    table.extend(&copyright);
+    table.extend(&family);
+    let mut f = Vec::new();
+    f.extend(0x0001_0000u32.to_be_bytes());
+    f.extend(1u16.to_be_bytes());
+    f.extend([0u8; 6]);
+    f.extend(*b"name");
+    f.extend(0u32.to_be_bytes());
+    f.extend(28u32.to_be_bytes());
+    f.extend((table.len() as u32).to_be_bytes());
+    f.extend(table);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "Later.ttf", &f);
+    assert_eq!(families(&path), ["Later Sans"]);
+}
+
 /// A font is found by the family name inside the font file, never guessed from the file name.
 #[test]
 fn a_font_is_found_by_its_own_name_table() {

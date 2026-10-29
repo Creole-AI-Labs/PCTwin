@@ -144,3 +144,21 @@ async fn the_sender_accepts_only_the_exact_taken_answer() {
         assert!(matches!(sent, Err(QuickError::BadAnswer)), "{answer:?}");
     }
 }
+
+/// The longest note in the widest characters (1,000 emoji, four bytes each) arrives whole; one
+/// more character is refused before it is sent.
+#[tokio::test]
+async fn the_longest_note_in_four_byte_characters_arrives() {
+    let text = "\u{1F600}".repeat(pctwin_quicksend::note::MAX_NOTE_CHARS);
+    assert_eq!(text.len(), pctwin_quicksend::note::MAX_NOTE_BYTES);
+    let note = Note::new(&text).unwrap();
+    let (mut a, mut b) = pair();
+    let (sent, got) = tokio::join!(send_note(&mut a, &note), receive(&mut b));
+    sent.unwrap();
+    match got.unwrap() {
+        Arrival::Note(n) => assert_eq!(n.text(), text),
+        Arrival::Files(_) => panic!("a note"),
+    }
+    let longer = format!("{text}\u{1F600}");
+    assert!(Note::new(&longer).is_err());
+}

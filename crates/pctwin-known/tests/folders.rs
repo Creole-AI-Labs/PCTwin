@@ -250,3 +250,36 @@ fn nothing_swapped_opens_and_a_missing_folder_does_not() {
     assert!(open_plain_around(&f, || (), || ()).is_some());
     assert!(open_plain_around(&d.path().join("nope"), || (), || ()).is_none());
 }
+
+/// A junction swapped in just before the open and left there (leading to a place that runs things)
+/// is refused: the open that checks what is at the path never follows a link.
+#[cfg(windows)]
+#[test]
+fn a_link_swapped_in_and_left_there_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let real = d.path().join("Downloads");
+    let aside = d.path().join("Downloads-aside");
+    let elsewhere = d.path().join("Startup");
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let opened = open_plain_around(
+        &real,
+        || {
+            std::fs::rename(&real, &aside).unwrap();
+            let made = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&real)
+                .arg(&elsewhere)
+                .output()
+                .unwrap();
+            assert!(made.status.success());
+        },
+        || (),
+    );
+    assert!(
+        opened.is_none(),
+        "the junction's target was opened and accepted"
+    );
+    assert!(pctwin_known::folders::plain_identity(&real).is_none());
+    let _ = std::fs::remove_dir(&real);
+}

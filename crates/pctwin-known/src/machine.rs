@@ -133,3 +133,23 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod this_laptop {
+    /// This laptop's fingerprint is none, or 64 lower-case hex characters: never an empty or
+    /// short one that every laptop without an identity would share.
+    #[test]
+    fn this_machine_is_none_or_a_whole_fingerprint() {
+        if let Some(f) = super::this_machine() {
+            assert_eq!(f.len(), 64, "{f}");
+            assert!(
+                f.bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            );
+        }
+        assert_eq!(
+            super::fingerprint("4C4C4544-0051-3510-8052-B4C04F4A3732").map(|f| f.len()),
+            Some(64)
+        );
+    }
+}
