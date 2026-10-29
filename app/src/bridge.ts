@@ -1027,6 +1027,8 @@ export const qsReceive = () => run("quicksend_receive");
 export const qsFolder = () => ask("quicksend_folder", parseQsFolder);
 /** Change: a folder from the system's picker, used from now on this session ({ none } when none was chosen). */
 export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
+/** Save: what arrived goes into the folder shown now (Downloads, or the one chosen); nothing is saved before this. */
+export const qsSaveHere = () => run("quicksend_save_here");
 /** Opens the folder the last receive saved into, in the system's file manager (never a file). */
 export const qsOpenFolder = () => run("quicksend_open_folder");
 /** Keep original dates: how many of the last receive's files got their original dates back. */

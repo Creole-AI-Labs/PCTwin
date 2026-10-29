@@ -49,6 +49,7 @@
     "allow-quicksend-receive",
     "allow-quicksend-folder",
     "allow-quicksend-choose-folder",
+    "allow-quicksend-save-here",
     "allow-quicksend-open-folder",
     "allow-quicksend-keep-original-dates",
     "allow-quicksend-pause",

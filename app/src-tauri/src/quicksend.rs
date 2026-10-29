@@ -86,6 +86,9 @@ pub struct QuickSend {
     /// The files the last receive wrote, given the arrival time, with their original dates: what
     /// Keep original dates gives back. Kept in memory for this window only, never on disk.
     dated: Mutex<Vec<Dated>>,
+    /// A receive waiting for the person to say where the files go (decided 29 October 2026: the
+    /// receiver is asked when they arrive, not before): [`quicksend_save_here`] answers it.
+    save: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 /// A file a receive wrote and gave the arrival time, as Keep original dates needs it: where it
@@ -552,10 +555,12 @@ pub async fn quicksend_send<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
-/// The receiver: once paired, receives everything offered over the paired link into the folder
-/// held for this receive. There is no second question: choosing Receive, typing the code and
-/// matching the number was the acceptance (Security Design T). With no folder held, nothing is
-/// taken from the link and the screens say so.
+/// The receiver: once paired, says what is offered and asks where it goes (Security Design T,
+/// 29 October 2026: choosing Receive, typing the code and matching the number accepts the send;
+/// where it goes is asked when it arrives). Downloads, or the folder chosen this session, is the
+/// one shown already; "Choose another folder" changes it ([`quicksend_choose_folder`]); Save
+/// ([`quicksend_save_here`]) receives into whichever is held then. Nothing is taken from the
+/// link before that, and never with no folder held.
 #[tauri::command]
 pub async fn quicksend_receive<R: Runtime>(
     app: AppHandle<R>,
@@ -568,15 +573,10 @@ pub async fn quicksend_receive<R: Runtime>(
         .map(|p| p.account_id)
         .ok_or(MoveProblem::Failed)?;
     let journal_at = journal_path(&app).ok_or(MoveProblem::Failed)?;
-    // Held for this receive only: the next one holds its folder again.
-    let held = take_held(&qs)?;
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
-    let into = Known {
-        path: held.path.clone(),
-        identity: held.identity,
-    };
-    *lock(&qs.received_into) = Some(into.clone());
     lock(&qs.dated).clear();
+    let (answered, answer) = tokio::sync::oneshot::channel();
+    *lock(&qs.save) = Some(answered);
     let state = Arc::clone(&qs);
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
@@ -592,6 +592,22 @@ pub async fn quicksend_receive<R: Runtime>(
                         files: offered(incoming.files()),
                     },
                 );
+                // Where it goes: asked now, answered by Save (the sender waits as long).
+                wait_for_save(
+                    answer,
+                    live.control.wait_stopped(),
+                    pctwin_quicksend::ANSWER_WAIT,
+                )
+                .await?;
+                // Held for this receive only: the next one holds its folder again.
+                let held = take_held(&state).map_err(|_| {
+                    pctwin_quicksend::QuickError::Destination("no folder was chosen".into())
+                })?;
+                let into = Known {
+                    path: held.path.clone(),
+                    identity: held.identity,
+                };
+                *lock(&state.received_into) = Some(into);
                 if let Some(dir) = journal_at.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
@@ -603,6 +619,7 @@ pub async fn quicksend_receive<R: Runtime>(
                 let r = incoming
                     .accept_into(&mut link, held.dest, None, &journal, &me, &live)
                     .await;
+                lock(&state.save).take();
                 done.store(true, Ordering::Release);
                 r
             });
@@ -612,7 +629,10 @@ pub async fn quicksend_receive<R: Runtime>(
                     let mut view = receipt_view("receiver", &r, stopped);
                     // Received files show when they arrived, at the top of the folder; the person
                     // can give them their original dates back from the Done page.
-                    let dated = reopened(&into)
+                    let into = lock(&state.received_into).clone();
+                    let dated = into
+                        .as_ref()
+                        .and_then(reopened)
                         .map(|dest| arrival_dates(&dest, &r, std::time::SystemTime::now()))
                         .unwrap_or_default();
                     view.new_dates = dated.len() as u64;
@@ -687,6 +707,30 @@ fn keep_original_dates(qs: &QuickSend) -> Result<u64, MoveProblem> {
                 .unwrap_or(false)
         })
         .count() as u64)
+}
+
+/// Save: the files that arrived go into the folder held now (Downloads, or the one chosen).
+#[tauri::command]
+pub fn quicksend_save_here(qs: State<'_, AppQuickSend>) -> Result<(), MoveProblem> {
+    if lock(&qs.folder).is_none() {
+        return Err(MoveProblem::Failed);
+    }
+    let waiting = lock(&qs.save).take().ok_or(MoveProblem::NotMoving)?;
+    waiting.send(()).map_err(|_| MoveProblem::NotMoving)
+}
+
+/// Waits for the person's Save, unless they stop or the sender's own wait for an answer is over.
+async fn wait_for_save(
+    answer: tokio::sync::oneshot::Receiver<()>,
+    stopped: impl std::future::Future<Output = ()>,
+    longest: std::time::Duration,
+) -> Result<(), pctwin_quicksend::QuickError> {
+    tokio::select! {
+        biased;
+        () = stopped => Err(pctwin_quicksend::QuickError::NotAnswered),
+        a = answer => a.map_err(|_| pctwin_quicksend::QuickError::NotAnswered),
+        () = tokio::time::sleep(longest) => Err(pctwin_quicksend::QuickError::NotAnswered),
+    }
 }
 
 /// Where the receiver's files go, as the pairing page says it.
@@ -925,6 +969,42 @@ pub fn quicksend_stop(qs: State<'_, AppQuickSend>) -> Result<(), MoveProblem> {
 mod tests {
     use super::*;
     use pctwin_record::ItemId;
+
+    /// Nothing is received before the person says where: Save goes on; a stop, a Save that can no
+    /// longer come, or the sender's wait running out ends it as not answered (29 October 2026).
+    #[tokio::test]
+    async fn a_receive_waits_for_save() {
+        let long = std::time::Duration::from_secs(600);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tx.send(()).unwrap();
+        assert!(
+            wait_for_save(rx, std::future::pending(), long)
+                .await
+                .is_ok()
+        );
+        let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
+        assert!(matches!(
+            wait_for_save(rx, std::future::ready(()), long).await,
+            Err(pctwin_quicksend::QuickError::NotAnswered)
+        ));
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        drop(tx);
+        assert!(
+            wait_for_save(rx, std::future::pending(), long)
+                .await
+                .is_err()
+        );
+        let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
+        assert!(
+            wait_for_save(
+                rx,
+                std::future::pending(),
+                std::time::Duration::from_millis(5)
+            )
+            .await
+            .is_err()
+        );
+    }
 
     #[test]
     fn a_receipt_names_every_outcome_and_needs_action_is_never_arrived() {

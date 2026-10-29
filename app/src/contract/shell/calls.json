@@ -362,6 +362,10 @@
     },
     {
       "args": [],
+      "name": "quicksend_save_here"
+    },
+    {
+      "args": [],
       "name": "quicksend_open_folder"
     },
     {
