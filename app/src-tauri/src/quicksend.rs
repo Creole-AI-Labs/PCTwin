@@ -1594,6 +1594,11 @@ mod tests {
             save_here(&qs, empty).is_err(),
             "no folder: Save cannot go on"
         );
+        // Asked with no folder to hold (no Downloads, none chosen): Save says so and answers
+        // nothing.
+        let (asked, mut answer) = ask_save(&qs, None);
+        assert_eq!(save_here(&qs, asked), Err(MoveProblem::Failed));
+        assert!(answer.try_recv().is_err(), "the question is still waiting");
         let d = dir("taken");
         let held = held_folder(&d, None).map(|(_, h)| h);
         let one = open_prompt(&qs, held);
