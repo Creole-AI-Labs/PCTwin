@@ -1315,6 +1315,49 @@ export const waitingRenew = (id: string, days: number) => ask("waiting_renew", w
 /** Cancel a waiting send: its kept copy is deleted. */
 export const waitingCancel = (id: string) => ask("waiting_cancel", waitingList, { id });
 
+/* ---------- Open sends: Add files, Send to <name>, several sends at once (src-tauri/src/sessions.rs) ---------- */
+
+/** An open send: either side may offer more in it until it ends. `name`: the remembered laptop's, for "Send to <name>". */
+export type QsSession = { id: string; name: string | null; ending: boolean };
+
+export function parseQsSession(value: unknown): QsSession | null {
+  const f = exactly(value, ["id", "name", "ending"]);
+  return f && typeof f.id === "string" && isTextOrNull(f.name) && typeof f.ending === "boolean" ? { id: f.id, name: f.name, ending: f.ending } : null;
+}
+
+/** A send in the list: waiting its turn or being sent, each with Pause and Cancel. */
+export type QsSend = { id: number; session: string; name: string | null; files: number; bytes: number; state: "waiting" | "sending"; paused: boolean };
+
+export function parseQsSend(value: unknown): QsSend | null {
+  const f = exactly(value, ["id", "session", "name", "files", "bytes", "state", "paused"]);
+  if (!f || !isCount(f.id) || typeof f.session !== "string" || !isTextOrNull(f.name) || !isCount(f.files) || !isCount(f.bytes)) return null;
+  if (!oneOf(f.state, ["waiting", "sending"] as const) || typeof f.paused !== "boolean") return null;
+  return { id: f.id, session: f.session, name: f.name, files: f.files, bytes: f.bytes, state: f.state, paused: f.paused };
+}
+
+/** An offer in an open send ended: `send` is one of ours by id, `null` the other laptop's received here. */
+export type QsSessionReceipt = { session: string; send: number | null; receipt: QsReceipt };
+
+export function parseQsSessionReceipt(value: unknown): QsSessionReceipt | null {
+  const f = exactly(value, ["session", "send", "receipt"]);
+  if (!f || typeof f.session !== "string" || !(f.send === null || isCount(f.send))) return null;
+  const receipt = parseQsReceipt(f.receipt);
+  return receipt ? { session: f.session, send: f.send, receipt } : null;
+}
+
+const sendList = (v: unknown) => listOf(v, parseQsSend);
+
+/** Add files (sender) or Send to <name> (receiver): the offer made on the pick page goes into open send `session`. */
+export const qsSessionAdd = (session: string) => ask("quicksend_session_add", sendList, { session });
+/** End an open send: nothing more goes or arrives in it. */
+export const qsSessionEnd = (session: string) => run("quicksend_session_end", { session });
+export const qsSessions = () => ask("quicksend_sessions", (v) => listOf(v, parseQsSession));
+export const qsSends = () => ask("quicksend_sends", sendList);
+export const qsSendPause = (id: number) => ask("quicksend_send_pause", sendList, { id });
+export const qsSendResume = (id: number) => ask("quicksend_send_resume", sendList, { id });
+/** Cancel a send: a waiting one leaves the list; a running one stops (its result says what arrived). */
+export const qsSendCancel = (id: number) => ask("quicksend_send_cancel", sendList, { id });
+
 export type KnownEvent =
   | { kind: "note"; note: QsNote }
   | { kind: "note-sent" }
@@ -1324,6 +1367,9 @@ export type KnownEvent =
   | { kind: "delivered"; delivered: KnownDelivered }
   | { kind: "connections"; connections: KnownConnection[] }
   | { kind: "waiting"; sends: WaitingSend[] }
+  | { kind: "sessions"; sessions: QsSession[] }
+  | { kind: "sends"; sends: QsSend[] }
+  | { kind: "session-receipt"; result: QsSessionReceipt }
   | { kind: "unreadable" };
 
 export async function listenKnown(handler: (event: KnownEvent) => void): Promise<UnlistenFn> {
@@ -1341,6 +1387,9 @@ export async function listenKnown(handler: (event: KnownEvent) => void): Promise
     on("known-delivered", parseKnownDelivered, (delivered) => ({ kind: "delivered", delivered })),
     on("known-changed", knownList, (connections) => ({ kind: "connections", connections })),
     on("waiting-changed", waitingList, (sends) => ({ kind: "waiting", sends })),
+    on("quicksend-sessions", (v) => listOf(v, parseQsSession), (sessions) => ({ kind: "sessions", sessions })),
+    on("quicksend-sends", sendList, (sends) => ({ kind: "sends", sends })),
+    on("quicksend-session-receipt", parseQsSessionReceipt, (result) => ({ kind: "session-receipt", result })),
   ]);
   return () => {
     for (const stop of all) stop();

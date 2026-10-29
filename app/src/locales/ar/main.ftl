@@ -3367,3 +3367,16 @@ qs-remember-replaces = هل سبق أن وصلت هذا الجهاز؟ اختر�
 qs-remember-replaces-suggested = قد يكون هذا { $label } مرة أخرى. هل تريد استبداله؟
 qs-remember-replace = استبدال
 qs-remember-keep-both = لا، احتفظ بالاثنين
+
+# Quick Send more
+qs-session-add-files = إضافة ملفات
+qs-session-send-to = إرسال إلى { $name }
+qs-session-send-back = إرسال ملفات في المقابل
+qs-session-end = إنهاء
+qs-session-ended = انتهى هذا الإرسال. لن يصل شيء آخر.
+qs-sends-waiting = ينتظر دوره
+qs-sends-sending = جارٍ الإرسال
+qs-sends-paused = متوقف مؤقتًا
+qs-send-pause = إيقاف مؤقت
+qs-send-resume = متابعة
+qs-send-cancel = إلغاء

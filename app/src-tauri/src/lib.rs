@@ -49,6 +49,7 @@ pub mod rebuild;
 mod recovery;
 mod remembered;
 mod restart;
+mod sessions;
 mod undo_books;
 mod updates;
 
@@ -343,6 +344,13 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         remembered::waiting_list,
         remembered::waiting_renew,
         remembered::waiting_cancel,
+        sessions::quicksend_session_add,
+        sessions::quicksend_session_end,
+        sessions::quicksend_sessions,
+        sessions::quicksend_sends,
+        sessions::quicksend_send_pause,
+        sessions::quicksend_send_resume,
+        sessions::quicksend_send_cancel,
         updates::update_check,
         updates::update_install,
         laptop_name::laptop_name,
@@ -417,6 +425,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .manage(moving::new_state())
         .manage(quicksend::new_state())
         .manage(remembered::new_state())
+        .manage(sessions::new_state())
         .manage(laptop_name::new_state())
         .manage(guard::new_state())
         // The Phase 2 role keys, made once as the program starts (pctwin-grant).

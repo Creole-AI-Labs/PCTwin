@@ -2826,3 +2826,16 @@ qs-remember-replaces = Connected these two before? Choose the earlier connection
 qs-remember-replaces-suggested = This may be { $label } again. Replace it?
 qs-remember-replace = Replace
 qs-remember-keep-both = No, keep both
+
+# Quick Send more
+qs-session-add-files = Add files
+qs-session-send-to = Send to { $name }
+qs-session-send-back = Send files back
+qs-session-end = End
+qs-session-ended = This send is over. Nothing more arrives.
+qs-sends-waiting = Waiting its turn
+qs-sends-sending = Sending
+qs-sends-paused = Paused
+qs-send-pause = Pause
+qs-send-resume = Resume
+qs-send-cancel = Cancel

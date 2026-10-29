@@ -3046,3 +3046,16 @@ qs-remember-replaces = Você já conectou este notebook antes? Escolha-o e a con
 qs-remember-replaces-suggested = Pode ser { $label } de novo. Substituir?
 qs-remember-replace = Substituir
 qs-remember-keep-both = Não, manter as duas
+
+# Quick Send more
+qs-session-add-files = Adicionar arquivos
+qs-session-send-to = Enviar para { $name }
+qs-session-send-back = Enviar arquivos de volta
+qs-session-end = Encerrar
+qs-session-ended = Este envio terminou. Nada mais chega.
+qs-sends-waiting = Esperando a vez
+qs-sends-sending = Enviando
+qs-sends-paused = Pausado
+qs-send-pause = Pausar
+qs-send-resume = Continuar
+qs-send-cancel = Cancelar

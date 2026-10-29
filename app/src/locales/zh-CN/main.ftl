@@ -2679,3 +2679,16 @@ qs-remember-replaces = 你以前连接过这台电脑吗？选择它，旧的连
 qs-remember-replaces-suggested = 这可能又是 { $label }。要替换它吗？
 qs-remember-replace = 替换
 qs-remember-keep-both = 不，两个都保留
+
+# Quick Send more
+qs-session-add-files = 添加文件
+qs-session-send-to = 发送给 { $name }
+qs-session-send-back = 回传文件
+qs-session-end = 结束
+qs-session-ended = 这次发送已结束，不会再收到任何内容。
+qs-sends-waiting = 排队等候
+qs-sends-sending = 正在发送
+qs-sends-paused = 已暂停
+qs-send-pause = 暂停
+qs-send-resume = 继续
+qs-send-cancel = 取消

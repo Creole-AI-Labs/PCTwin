@@ -1,0 +1,20 @@
+[
+  {
+    "bytes": 4200000,
+    "files": 3,
+    "id": 1,
+    "name": "Ada's laptop",
+    "paused": false,
+    "session": "00112233445566778899aabbccddeeff",
+    "state": "sending"
+  },
+  {
+    "bytes": 12,
+    "files": 1,
+    "id": 2,
+    "name": null,
+    "paused": true,
+    "session": "ffeeddccbbaa99887766554433221100",
+    "state": "waiting"
+  }
+]

@@ -554,6 +554,59 @@
       "name": "waiting_cancel"
     },
     {
+      "args": [
+        [
+          "session",
+          "00112233445566778899aabbccddeeff"
+        ]
+      ],
+      "name": "quicksend_session_add"
+    },
+    {
+      "args": [
+        [
+          "session",
+          "00112233445566778899aabbccddeeff"
+        ]
+      ],
+      "name": "quicksend_session_end"
+    },
+    {
+      "args": [],
+      "name": "quicksend_sessions"
+    },
+    {
+      "args": [],
+      "name": "quicksend_sends"
+    },
+    {
+      "args": [
+        [
+          "id",
+          2
+        ]
+      ],
+      "name": "quicksend_send_pause"
+    },
+    {
+      "args": [
+        [
+          "id",
+          2
+        ]
+      ],
+      "name": "quicksend_send_resume"
+    },
+    {
+      "args": [
+        [
+          "id",
+          2
+        ]
+      ],
+      "name": "quicksend_send_cancel"
+    },
+    {
       "args": [],
       "name": "update_check"
     },
@@ -775,6 +828,9 @@
     "qsProgress": "quicksend-progress",
     "qsReceipt": "quicksend-receipt",
     "qsRemember": "quicksend-remember",
+    "qsSends": "quicksend-sends",
+    "qsSessionReceipt": "quicksend-session-receipt",
+    "qsSessions": "quicksend-sessions",
     "safeStop": "safe-stop",
     "waitingChanged": "waiting-changed"
   },

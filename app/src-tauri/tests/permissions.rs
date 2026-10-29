@@ -32,7 +32,7 @@ use tauri::{App, WebviewUrl, WebviewWindow};
 /// Exactly what the screens may call, 94 names: the app's ninety-one commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 113] = [
+const SCREENS_MAY_CALL: [&str; 120] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -103,6 +103,13 @@ const SCREENS_MAY_CALL: [&str; 113] = [
     "waiting_list",
     "waiting_renew",
     "waiting_cancel",
+    "quicksend_session_add",
+    "quicksend_session_end",
+    "quicksend_sessions",
+    "quicksend_sends",
+    "quicksend_send_pause",
+    "quicksend_send_resume",
+    "quicksend_send_cancel",
     "update_check",
     "update_install",
     "laptop_name",

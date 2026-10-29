@@ -62,6 +62,13 @@ import {
   qsLaunchFiles,
   knownConnections,
   knownRemember,
+  qsSessionAdd,
+  qsSessionEnd,
+  qsSessions,
+  qsSends,
+  qsSendPause,
+  qsSendResume,
+  qsSendCancel,
   suggestReplacement,
   knownForget,
   knownRename,
@@ -254,7 +261,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list" || command === "quicksend_launch_files" || command.startsWith("known_") || command.startsWith("waiting_")
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list" || command === "quicksend_launch_files" || command.startsWith("known_") || command.startsWith("waiting_") || command.startsWith("quicksend_session") || command.startsWith("quicksend_send")
                 ? []
                 : command === "recovery_check"
                 ? { unfinished: 0 }
@@ -319,6 +326,13 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await waitingSends();
       await waitingRenew("00112233445566778899aabbccddeeff", 7);
       await waitingCancel("00112233445566778899aabbccddeeff");
+      await qsSessionAdd("00112233445566778899aabbccddeeff");
+      await qsSessionEnd("00112233445566778899aabbccddeeff");
+      await qsSessions();
+      await qsSends();
+      await qsSendPause(2);
+      await qsSendResume(2);
+      await qsSendCancel(2);
       await updateCheck();
       await updateInstall();
       await laptopName().catch(() => undefined);

@@ -225,6 +225,14 @@ impl<T> Sends<T> {
         Some((q.id, what.take()?))
     }
 
+    /// A send started for a turn that went to the other laptop: waiting again, in its place.
+    pub fn unstart(&mut self, id: u64, what: T) {
+        if let Some((q, slot)) = self.items.iter_mut().find(|(q, _)| q.id == id) {
+            q.state = SendState::Waiting;
+            *slot = Some(what);
+        }
+    }
+
     /// Send `id` finished (sent, failed or stopped): it leaves the list.
     pub fn finished(&mut self, id: u64) {
         self.items.retain(|(q, _)| q.id != id);
@@ -349,6 +357,8 @@ mod tests {
         let c = s.add("c", 1, 1, "c");
         let d = s.add("d", 1, 1, "d");
         assert_eq!(s.start("a"), Some((a1, "a1")));
+        s.unstart(a1, "a1");
+        assert_eq!(s.start("a"), Some((a1, "a1")), "back in its place");
         assert!(!s.ready("a"), "one after another to the same laptop");
         assert_eq!(s.start("b"), Some((b, "b")));
         assert_eq!(s.start("c"), Some((c, "c")));

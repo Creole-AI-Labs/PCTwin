@@ -2948,3 +2948,16 @@ qs-remember-replaces = क्या आपने इस लैपटॉप क�
 qs-remember-replaces-suggested = यह फिर से { $label } हो सकता है। क्या इसे बदलें?
 qs-remember-replace = बदलें
 qs-remember-keep-both = नहीं, दोनों रखें
+
+# Quick Send more
+qs-session-add-files = फ़ाइलें जोड़ें
+qs-session-send-to = { $name } को भेजें
+qs-session-send-back = फ़ाइलें वापस भेजें
+qs-session-end = खत्म करें
+qs-session-ended = यह भेजना खत्म हो गया। अब कुछ और नहीं आएगा।
+qs-sends-waiting = अपनी बारी का इंतज़ार
+qs-sends-sending = भेजा जा रहा है
+qs-sends-paused = रुका हुआ
+qs-send-pause = रोकें
+qs-send-resume = जारी रखें
+qs-send-cancel = रद्द करें
