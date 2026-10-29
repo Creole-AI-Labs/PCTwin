@@ -4124,6 +4124,7 @@ name = "pctwin-quicksend"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "chacha20poly1305",
  "getrandom 0.4.3",
  "pctwin-gate",
  "pctwin-journal",
@@ -4134,7 +4135,6 @@ dependencies = [
  "pctwin-transfer",
  "serde",
  "serde_json",
- "snow",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

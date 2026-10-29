@@ -47,7 +47,7 @@ fn remembering_keeps_the_secrets_in_the_store_and_only_public_things_in_the_file
     let (pa, _) = pendings();
     let own = pa.own_public();
     let mut b = book(dir.path(), &store, "m1");
-    let id = b.remember(pa, "Ada's laptop", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada's laptop", T0, None).unwrap();
     let names = store.names();
     assert_eq!(names.len(), 2, "{names:?}");
     let private = store.get(&format!("known-{id}-key")).unwrap().unwrap();
@@ -73,7 +73,7 @@ fn forget_deletes_the_key_and_every_permission() {
     let store = Arc::new(MemoryStore::default());
     let (pa, _) = pendings();
     let mut b = book(dir.path(), &store, "m1");
-    let id = b.remember(pa, "Ada", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
     b.allow_folder(&id, folder(dir.path(), "In"), T0).unwrap();
     b.set_next_folder(&id, NextFolder(folder(dir.path(), "Next")))
         .unwrap();
@@ -106,7 +106,7 @@ fn forget_with_the_store_out_of_reach_claims_nothing() {
     let store = Arc::new(Broken(MemoryStore::default()));
     let mut b = Book::open(&dir.path().join("c.json"), store, None).unwrap();
     let (pa, _) = pendings();
-    let id = b.remember(pa, "Ada", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
     assert_eq!(
         b.forget(&id).err(),
         Some(BookError::Store(StoreError::Unavailable))
@@ -125,8 +125,8 @@ fn a_connection_unused_for_90_days_expires_and_use_keeps_it() {
     let mut b = book(dir.path(), &store, "m1");
     let (p1, _) = pendings();
     let (p2, _) = pendings();
-    let used = b.remember(p1, "Used", T0, None).unwrap();
-    let idle = b.remember(p2, "Idle", T0, None).unwrap();
+    let used = b.remember(&p1, "Used", T0, None).unwrap();
+    let idle = b.remember(&p2, "Idle", T0, None).unwrap();
     b.touch(&used, T0 + UNUSED_FOR - 10).unwrap();
     assert!(b.expire(T0 + UNUSED_FOR - 1).unwrap().is_empty());
     assert_eq!(b.expire(T0 + UNUSED_FOR).unwrap(), vec![idle.clone()]);
@@ -152,13 +152,13 @@ fn tokens_are_recognised_only_by_the_other_laptop_and_change_over_time() {
     let (pa, pb) = pendings();
     let mut a = book(dir_a.path(), &sa, "ma");
     let mut b = book(dir_b.path(), &sb, "mb");
-    let ida = a.remember(pa, "B", T0, None).unwrap();
-    let idb = b.remember(pb, "A", T0, None).unwrap();
+    let ida = a.remember(&pa, "B", T0, None).unwrap();
+    let idb = b.remember(&pb, "A", T0, None).unwrap();
     // C remembers A too, through a pairing of its own.
     let (pa2, pc) = pendings();
-    let ida2 = a.remember(pa2, "C", T0, None).unwrap();
+    let ida2 = a.remember(&pa2, "C", T0, None).unwrap();
     let mut c = book(dir_c.path(), &sc, "mc");
-    let idc = c.remember(pc, "A", T0, None).unwrap();
+    let idc = c.remember(&pc, "A", T0, None).unwrap();
 
     let announced_a = a.announced(T0);
     assert_eq!(announced_a.len(), 2, "one token per connection");
@@ -199,7 +199,7 @@ fn a_restored_or_copied_laptop_is_said_and_its_keys_are_not_used() {
     let store = Arc::new(MemoryStore::default());
     let (pa, _) = pendings();
     let id = book(dir.path(), &store, "m1")
-        .remember(pa, "Ada", T0, None)
+        .remember(&pa, "Ada", T0, None)
         .unwrap();
     let mut copied = book(dir.path(), &store, "m2");
     assert_eq!(copied.list(T0)[0].device, Device::Restored);
@@ -220,7 +220,7 @@ fn permission_3_is_off_at_first_ends_on_its_own_and_is_capped() {
     let store = Arc::new(MemoryStore::default());
     let (pa, _) = pendings();
     let mut b = book(dir.path(), &store, "m1");
-    let id = b.remember(pa, "Ada", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
     assert_eq!(
         admit(&mut b, &id, 1, T0).err(),
         Some(GrantProblem::None),
@@ -278,7 +278,7 @@ fn folder_for_next_time_never_becomes_permission_3_or_the_other_way() {
     let store = Arc::new(MemoryStore::default());
     let (pa, _) = pendings();
     let mut b = book(dir.path(), &store, "m1");
-    let id = b.remember(pa, "Ada", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
     let next = folder(dir.path(), "Next");
     b.set_next_folder(&id, NextFolder(next.clone())).unwrap();
     assert_eq!(admit(&mut b, &id, 1, T0).err(), Some(GrantProblem::None));
@@ -307,14 +307,14 @@ fn names_are_the_person_s_own_and_bounded() {
     for bad in ["", "   ", &"x".repeat(41), "a\u{0007}b"] {
         let (p, _) = pendings();
         assert_eq!(
-            b.remember(p, bad, T0, None).err(),
+            b.remember(&p, bad, T0, None).err(),
             Some(BookError::BadLabel),
             "{bad:?}"
         );
     }
     assert!(store.names().is_empty(), "nothing kept for a refused name");
     let (p, _) = pendings();
-    let id = b.remember(p, "  Ada  ", T0, None).unwrap();
+    let id = b.remember(&p, "  Ada  ", T0, None).unwrap();
     assert_eq!(b.label(&id).unwrap(), "Ada");
     b.rename(&id, "Ada (work)").unwrap();
     assert_eq!(b.label(&id).unwrap(), "Ada (work)");
@@ -328,11 +328,11 @@ fn the_same_other_laptop_remembered_again_replaces_the_old_connection() {
     let (a1, b1) = (Swap::new().unwrap(), Swap::new().unwrap());
     let m1 = b1.message();
     let first = b
-        .remember(a1.finish(&m1).unwrap(), "Ada", T0, None)
+        .remember(&a1.finish(&m1).unwrap(), "Ada", T0, None)
         .unwrap();
     // The same message from the other laptop again (it kept its half): the old one goes.
     let again = b
-        .remember(Swap::new().unwrap().finish(&m1).unwrap(), "Ada", T0, None)
+        .remember(&Swap::new().unwrap().finish(&m1).unwrap(), "Ada", T0, None)
         .unwrap();
     assert_ne!(first, again);
     assert_eq!(b.list(T0).len(), 1);
@@ -362,21 +362,21 @@ fn pairing_again_replaces_the_connection_the_person_names() {
     let store = Arc::new(MemoryStore::default());
     let mut b = book(dir.path(), &store, "m1");
     let (p1, _) = pendings();
-    let old = b.remember(p1, "Ada's laptop", T0, None).unwrap();
+    let old = b.remember(&p1, "Ada's laptop", T0, None).unwrap();
     b.allow_folder(&old, folder(dir.path(), "In"), T0).unwrap();
     let (p2, _) = pendings();
-    let other = b.remember(p2, "Bo", T0, None).unwrap();
+    let other = b.remember(&p2, "Bo", T0, None).unwrap();
     assert_eq!(b.same_label("  ada's LAPTOP "), vec![old.clone()]);
     // A connection that is not there: nothing is kept.
     let (p3, _) = pendings();
     assert_eq!(
-        b.remember(p3, "Ada's laptop", T0, Some("0011223344556677"))
+        b.remember(&p3, "Ada's laptop", T0, Some("0011223344556677"))
             .err(),
         Some(BookError::NotFound)
     );
     assert_eq!(store.names().len(), 4);
     let (p4, _) = pendings();
-    let new = b.remember(p4, "Ada's laptop", T0 + 5, Some(&old)).unwrap();
+    let new = b.remember(&p4, "Ada's laptop", T0 + 5, Some(&old)).unwrap();
     assert!(!b.has(&old));
     assert!(b.has(&new) && b.has(&other));
     assert_eq!(b.keys_for(&old).err(), Some(BookError::NotFound));
@@ -387,7 +387,7 @@ fn pairing_again_replaces_the_connection_the_person_names() {
     assert!(names.iter().all(|n| !n.contains(&old)), "{names:?}");
     // Without `replaces` the earlier connection stays (two connections with one name).
     let (p5, _) = pendings();
-    b.remember(p5, "Bo", T0, None).unwrap();
+    b.remember(&p5, "Bo", T0, None).unwrap();
     assert_eq!(b.same_label("Bo").len(), 2);
 }
 
@@ -419,17 +419,12 @@ fn a_laptop_that_cannot_tell_says_so_and_never_same_device() {
     let (pa, _) = pendings();
     let path = dir.path().join("connections.json");
     let mut unknown = Book::open(&path, store.clone(), None).unwrap();
-    let id = unknown.remember(pa, "Ada", T0, None).unwrap();
+    let id = unknown.remember(&pa, "Ada", T0, None).unwrap();
     assert_eq!(unknown.list(T0)[0].device, Device::CannotTell);
     assert!(unknown.keys_for(&id).is_ok(), "still usable, said plainly");
-    // Remembered on a laptop that could tell, opened where it cannot: cannot tell either.
-    let (pb, _) = pendings();
-    let id2 = book(dir.path(), &store, "m1")
-        .remember(pb, "Bo", T0, None)
-        .unwrap();
-    let now_unknown = Book::open(&path, store.clone(), None).unwrap();
-    let bo = now_unknown.list(T0).into_iter().find(|c| c.id == id2);
-    assert_eq!(bo.unwrap().device, Device::CannotTell);
+    // Remembered where it could not tell, opened where it can: still cannot tell.
+    let now_known = book(dir.path(), &store, "m1");
+    assert_eq!(now_known.list(T0)[0].device, Device::CannotTell);
 }
 
 /// At most so many connections; replacing one at the limit is still allowed.
@@ -442,18 +437,18 @@ fn the_book_holds_at_most_its_limit() {
     let mut first = String::new();
     for n in 0..MAX_CONNECTIONS {
         let (p, _) = pendings();
-        let id = b.remember(p, &format!("L{n}"), T0, None).unwrap();
+        let id = b.remember(&p, &format!("L{n}"), T0, None).unwrap();
         if n == 0 {
             first = id;
         }
     }
     let (p, _) = pendings();
     assert_eq!(
-        b.remember(p, "One more", T0, None).err(),
+        b.remember(&p, "One more", T0, None).err(),
         Some(BookError::Full)
     );
     let (p, _) = pendings();
-    assert!(b.remember(p, "L0", T0, Some(&first)).is_ok());
+    assert!(b.remember(&p, "L0", T0, Some(&first)).is_ok());
     assert_eq!(b.list(T0).len(), MAX_CONNECTIONS);
 }
 
@@ -487,7 +482,7 @@ fn hellos_never_read_the_key_store() {
     let mut ids = Vec::new();
     for n in 0..3 {
         let (p, _) = pendings();
-        ids.push(b.remember(p, &format!("L{n}"), T0, None).unwrap());
+        ids.push(b.remember(&p, &format!("L{n}"), T0, None).unwrap());
     }
     let mine = b.announced(T0);
     let after_first = store.1.load(Relaxed);
@@ -523,7 +518,7 @@ fn a_delivery_that_could_not_use_the_folder_counts_nothing() {
     let store = Arc::new(MemoryStore::default());
     let mut b = book(dir.path(), &store, "m1");
     let (pa, _) = pendings();
-    let id = b.remember(pa, "Ada", T0, None).unwrap();
+    let id = b.remember(&pa, "Ada", T0, None).unwrap();
     b.allow_folder(&id, folder(dir.path(), "In"), T0).unwrap();
     for _ in 0..DEFAULT_DAILY_SENDS + 5 {
         let r: Result<(Admitted, ()), _> =
@@ -543,4 +538,64 @@ fn a_delivery_that_could_not_use_the_folder_counts_nothing() {
         Ok(())
     });
     assert!(!opened);
+}
+
+/// Remembered on hardware that could tell, and now the hardware cannot: that is never taken for
+/// the same laptop.
+#[test]
+fn a_laptop_that_now_cannot_tell_is_taken_for_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let (pa, _) = pendings();
+    let id = book(dir.path(), &store, "m1")
+        .remember(&pa, "Ada", T0, None)
+        .unwrap();
+    let now = Book::open(&dir.path().join("connections.json"), store.clone(), None).unwrap();
+    assert_eq!(now.list(T0)[0].device, Device::Restored);
+    assert_eq!(now.keys_for(&id).err(), Some(BookError::Restored));
+}
+
+/// The new connection is written before the old one is forgotten; when forgetting fails, the new
+/// one is taken back and the old one stays, so nothing is lost and the person can try again.
+#[test]
+fn replacing_writes_the_new_one_first_and_takes_it_back_on_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let inner = Arc::new(MemoryStore::default());
+    let store = Arc::new(Flaky(
+        inner.clone(),
+        std::sync::atomic::AtomicBool::new(false),
+    ));
+    let mut b = Book::open(&dir.path().join("c.json"), store.clone(), Some("m1".into())).unwrap();
+    let (p1, _) = pendings();
+    let old = b.remember(&p1, "Ada", T0, None).unwrap();
+    store.1.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (p2, _) = pendings();
+    assert!(b.remember(&p2, "Ada", T0, Some(&old)).is_err());
+    assert_eq!(b.list(T0).len(), 1, "only the old one: nothing half done");
+    assert!(b.has(&old));
+    store.1.store(false, std::sync::atomic::Ordering::Relaxed);
+    // The same pending, still held, works the second time.
+    let new = b.remember(&p2, "Ada", T0, Some(&old)).unwrap();
+    assert!(!b.has(&old) && b.has(&new));
+    let names = inner.names();
+    assert!(names.iter().all(|n| !n.contains(&old)), "{names:?}");
+    assert!(names.iter().any(|n| n.contains(&new)), "{names:?}");
+}
+
+/// A store whose deletes fail while its flag is set (puts and reads work).
+struct Flaky(Arc<MemoryStore>, std::sync::atomic::AtomicBool);
+
+impl SecretStore for Flaky {
+    fn get(&self, n: &str) -> Result<Option<Zeroizing<Vec<u8>>>, StoreError> {
+        self.0.get(n)
+    }
+    fn put(&self, n: &str, s: &[u8]) -> Result<(), StoreError> {
+        self.0.put(n, s)
+    }
+    fn delete(&self, n: &str) -> Result<(), StoreError> {
+        if self.1.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(StoreError::Unavailable);
+        }
+        self.0.delete(n)
+    }
 }

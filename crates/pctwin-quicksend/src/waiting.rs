@@ -26,13 +26,20 @@
 //! Protected storage (Part G): the copies are sealed at rest ([`crate::sealed`]) with a key of
 //! their own for each send, kept only in the system's key store (as the connection keys are) and
 //! deleted with the send; PCTwin's folder is the person's own (on Mac and Linux made `0700`).
-//! Nothing secret is kept beside the copies. On an SSD deleting is not a guaranteed wipe, which
-//! is why the key going is what makes a deleted copy unreadable.
+//! What the send holds (names, folders, sizes, fingerprints, where each was read from) is sealed
+//! too, in the send's own list; the copies are stored under numbers, so the drive alone shows only
+//! how many files wait, their total size, for which connections and until when. On an SSD
+//! deleting is not a guaranteed wipe, which is why the key going is what makes a deleted copy
+//! unreadable.
+//!
+//! Every change to a send's record (a delivery's result, a recipient forgotten, a renewal, a
+//! cancel, a lease renewed) is made under that send's own lock, read and written together, so one
+//! never overwrites another.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use pctwin_known::SecretStore;
 use pctwin_record::{ItemKind, ItemPath, LaptopId};
@@ -40,7 +47,7 @@ use pctwin_transfer::{Channel, KEEP_FREE};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::sealed::{KEY_LEN, SealedOpener, Unsealed};
+use crate::sealed::{KEY_LEN, LIST_STREAM, SealedOpener, Unsealed};
 use crate::{Offer, Outcome, QuickError, Receipt};
 
 const DAY: u64 = 24 * 60 * 60;
@@ -58,8 +65,12 @@ pub const LEASE: u64 = 5 * 60;
 /// How often a running copy writes its renewed lease.
 const RENEW_EVERY: u64 = 30;
 const MANIFEST: &str = "waiting.json";
+/// The send's sealed list of what it holds.
+const LIST: &str = "list.sealed";
 const FILES: &str = "files";
-const VERSION: u32 = 2;
+/// Largest sealed list read back.
+const MOST_LIST_BYTES: u64 = 256 * 1024 * 1024;
+const VERSION: u32 = 3;
 
 /// Why a waiting send could not be made, or delivered.
 #[derive(Debug, thiserror::Error)]
@@ -102,15 +113,14 @@ pub enum State {
     Cancelled,
 }
 
-/// One approved file.
+/// One approved file, as the send's sealed list keeps it (its copy is `files/<n>.sealed`, `n`
+/// its place in the list).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitingFile {
     /// Its path in the send, `/` between folders.
     pub path: String,
     /// Its path in the send, name by name, as offered.
     item: ItemPath,
-    /// Where the copy is, inside the send's folder, part by part.
-    parts: Vec<PathBuf>,
     pub size: u64,
     /// The approved version's BLAKE3 fingerprint, hex.
     pub fingerprint: String,
@@ -162,8 +172,27 @@ struct Manifest {
     state: State,
     /// While Preparing: held until then unless the copy renews it.
     lease_until: u64,
-    files: Vec<WaitingFile>,
+    /// How many files, and their approved bytes (the rest is in the sealed list).
+    files: u64,
+    bytes: u64,
     recipients: Vec<Recipient>,
+}
+
+/// What a send holds, sealed with its key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct List {
+    id: String,
+    files: Vec<WaitingFile>,
+}
+
+/// Each send's lock, by its folder: every read-and-write of its record holds it.
+fn send_lock(dir: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut all = LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    all.entry(dir.to_path_buf()).or_default().clone()
 }
 
 /// A waiting send as the screens list it.
@@ -298,6 +327,41 @@ impl WaitingStore {
         std::fs::rename(&part, dir.join(MANIFEST)).map_err(|_| WaitingError::File)
     }
 
+    /// Changes send `id`'s record by `change` under the send's lock, read and written together:
+    /// `false` from `change` writes nothing. Whether it was written.
+    fn update(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut Manifest) -> bool,
+    ) -> Result<bool, WaitingError> {
+        let lock = send_lock(&self.dir(id)?);
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut m = self.read(id)?;
+        if !change(&mut m) {
+            return Ok(false);
+        }
+        self.write(&m)?;
+        Ok(true)
+    }
+
+    /// What send `id` holds, from its sealed list.
+    fn list_of(&self, id: &str, key: &[u8; KEY_LEN]) -> Result<Vec<WaitingFile>, WaitingError> {
+        let bytes = crate::sealed::unseal_bytes(
+            &self.dir(id)?.join(LIST),
+            key,
+            LIST_STREAM,
+            MOST_LIST_BYTES,
+        )
+        .map_err(|_| WaitingError::CopyDamaged)?;
+        let list: List = serde_json::from_slice(&bytes).map_err(|_| WaitingError::CopyDamaged)?;
+        if list.id != id {
+            return Err(WaitingError::CopyDamaged);
+        }
+        Ok(list.files)
+    }
+
     fn ids(&self) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(&self.root) else {
             return Vec::new();
@@ -316,7 +380,7 @@ impl WaitingStore {
         self.ids()
             .iter()
             .filter_map(|id| self.read(id).ok())
-            .flat_map(|m| m.files.into_iter().map(|f| f.size))
+            .map(|m| m.bytes)
             .fold(0u64, u64::saturating_add)
     }
 
@@ -400,19 +464,21 @@ impl WaitingStore {
             let _ = self.keys.delete(&key_name(&id));
             return Err(WaitingError::Store);
         }
-        let mut m = Manifest {
+        let m = Manifest {
             version: VERSION,
             id: id.clone(),
             made_at: now,
             deadline: now.saturating_add(days * DAY),
             state: State::Preparing,
             lease_until: clock().saturating_add(LEASE),
-            files: Vec::new(),
+            files: 0,
+            bytes: total,
             recipients: recipients_out,
         };
         let copied = (|| {
             make_private_dir(&dir.join(FILES)).map_err(|_| WaitingError::File)?;
             self.write(&m)?;
+            let mut files: Vec<WaitingFile> = Vec::new();
             let mut renewed = clock();
             for job in &jobs {
                 let Some(item) = items.get(&job.item) else {
@@ -421,38 +487,32 @@ impl WaitingStore {
                 if item.kind != ItemKind::File {
                     continue;
                 }
-                let index = u32::try_from(m.files.len())
+                let stream = u32::try_from(files.len() + 1)
                     .ok()
-                    .filter(|i| *i < crate::sealed::MOST_FILES)
+                    .filter(|n| *n < u32::MAX)
                     .ok_or(WaitingError::Quick(QuickError::TooMany {
-                        files: m.files.len(),
+                        files: files.len(),
                     }))?;
-                let parts: Vec<PathBuf> = item
-                    .path
-                    .parts()
-                    .iter()
-                    .map(|p| PathBuf::from(p.on_disk()))
-                    .collect();
-                let mut to = dir.join(FILES);
-                for p in &parts {
-                    to.push(p);
-                }
-                if let Some(parent) = to.parent() {
-                    make_private_dir(parent).map_err(|_| WaitingError::File)?;
-                }
+                let to = copy_path(&dir, files.len());
                 let changed = || WaitingError::ChangedWhileCopying(job.path.clone());
                 let before = std::fs::metadata(&job.source).map_err(|_| changed())?;
                 let mut src = std::fs::File::open(&job.source).map_err(|_| changed())?;
                 let mut lease_failed = false;
-                let (n, fingerprint) = crate::sealed::seal(&mut src, &to, &key, index, &mut || {
-                    let t = clock();
-                    if t.saturating_sub(renewed) >= RENEW_EVERY {
-                        renewed = t;
-                        m.lease_until = t.saturating_add(LEASE);
-                        lease_failed |= self.write(&m).is_err();
-                    }
-                })
-                .map_err(|_| changed())?;
+                let (n, fingerprint) =
+                    crate::sealed::seal(&mut src, &to, &key, stream, &mut || {
+                        let t = clock();
+                        if t.saturating_sub(renewed) >= RENEW_EVERY {
+                            renewed = t;
+                            let lease = t.saturating_add(LEASE);
+                            lease_failed |= self
+                                .update(&id, |m| {
+                                    m.lease_until = lease;
+                                    true
+                                })
+                                .is_err();
+                        }
+                    })
+                    .map_err(|_| changed())?;
                 if lease_failed {
                     return Err(WaitingError::File);
                 }
@@ -460,29 +520,54 @@ impl WaitingStore {
                 if n != before.len() || after.len() != n || modified(&before) != modified(&after) {
                     return Err(changed());
                 }
-                m.files.push(WaitingFile {
+                files.push(WaitingFile {
                     path: job.path.clone(),
                     item: item.path.clone(),
-                    parts,
                     size: n,
                     fingerprint,
                     source: job.source.clone(),
                     source_modified: modified(&after),
                 });
             }
-            m.state = State::Waiting;
-            self.write(&m)
+            // What it holds, sealed once; then Waiting, unless it was cancelled meanwhile.
+            let list = serde_json::to_vec(&List {
+                id: id.clone(),
+                files: files.clone(),
+            })
+            .map_err(|_| WaitingError::File)?;
+            crate::sealed::seal_bytes(&list, &dir.join(LIST), &key, LIST_STREAM)
+                .map_err(|_| WaitingError::File)?;
+            let (count, bytes) = (
+                files.len() as u64,
+                files.iter().fold(0u64, |t, f| t.saturating_add(f.size)),
+            );
+            let ready = self.update(&id, |m| {
+                if m.state != State::Preparing {
+                    return false;
+                }
+                m.state = State::Waiting;
+                m.files = count;
+                m.bytes = bytes;
+                true
+            })?;
+            if !ready {
+                return Err(WaitingError::NotFound);
+            }
+            Ok(())
         })();
         if let Err(e) = copied {
             self.remove(&id);
             return Err(e);
         }
-        Ok(self.info(&m))
+        Ok(self.info(&self.read(&id)?))
     }
 
     fn info(&self, m: &Manifest) -> WaitingInfo {
-        let newer = m
-            .files
+        // What changed since needs the sealed list; without the key nothing can be said.
+        let newer = self
+            .key(&m.id)
+            .and_then(|k| self.list_of(&m.id, &k))
+            .unwrap_or_default()
             .iter()
             .filter(|f| match std::fs::metadata(&f.source) {
                 Ok(meta) => meta.len() != f.size || modified(&meta) != f.source_modified,
@@ -495,8 +580,8 @@ impl WaitingStore {
             made_at: m.made_at,
             deadline: m.deadline,
             state: m.state,
-            files: m.files.len() as u64,
-            bytes: m.files.iter().fold(0u64, |t, f| t.saturating_add(f.size)),
+            files: m.files,
+            bytes: m.bytes,
             recipients: m.recipients.clone(),
             newer,
         }
@@ -530,12 +615,19 @@ impl WaitingStore {
         if days == 0 || days > MOST_DAYS {
             return Err(WaitingError::Days);
         }
-        let mut m = self.read(id)?;
-        if m.state != State::Waiting {
-            return Err(WaitingError::NotFound);
+        let deadline = now.saturating_add(days * DAY);
+        let renewed = self.update(id, |m| {
+            if m.state != State::Waiting {
+                return false;
+            }
+            m.deadline = deadline;
+            true
+        })?;
+        if renewed {
+            Ok(())
+        } else {
+            Err(WaitingError::NotFound)
         }
-        m.deadline = now.saturating_add(days * DAY);
-        self.write(&m)
     }
 
     /// Cancels a waiting send: marked cancelled first (nothing more is delivered), then its key
@@ -551,11 +643,12 @@ impl WaitingStore {
     /// delivered, so a caller can stop a delivery in flight before the copy is deleted.
     pub fn mark_cancelled(&self, id: &str) -> Result<(), WaitingError> {
         let dir = self.dir(id)?;
-        match self.read(id) {
-            Ok(mut m) if m.state != State::Cancelled => {
-                m.state = State::Cancelled;
-                self.write(&m)
-            }
+        let marked = self.update(id, |m| {
+            let fresh = m.state != State::Cancelled;
+            m.state = State::Cancelled;
+            fresh
+        });
+        match marked {
             Ok(_) => Ok(()),
             Err(_) if dir.exists() => Ok(()),
             Err(e) => Err(e),
@@ -567,17 +660,19 @@ impl WaitingStore {
     pub fn forget_recipient(&self, connection: &str) -> usize {
         let mut changed = 0;
         for id in self.ids() {
-            let Ok(mut m) = self.read(&id) else { continue };
-            let before = m.recipients.len();
-            m.recipients.retain(|r| r.connection != connection);
-            if m.recipients.len() == before {
+            let mut nobody = false;
+            let took = self.update(&id, |m| {
+                let before = m.recipients.len();
+                m.recipients.retain(|r| r.connection != connection);
+                nobody = m.recipients.is_empty();
+                m.recipients.len() != before
+            });
+            if !matches!(took, Ok(true)) {
                 continue;
             }
             changed += 1;
-            if m.recipients.is_empty() {
+            if nobody {
                 let _ = self.cancel(&id);
-            } else {
-                let _ = self.write(&m);
             }
         }
         changed
@@ -608,13 +703,18 @@ impl WaitingStore {
 
     /// The copy checked against the approval: every file there, its seal intact and its plain
     /// bytes the approved size and fingerprint, and nothing else in the folder.
-    fn verify(&self, m: &Manifest, key: &[u8; KEY_LEN]) -> Result<(), WaitingError> {
-        let files = self.dir(&m.id)?.join(FILES);
+    fn verify(
+        &self,
+        id: &str,
+        files: &[WaitingFile],
+        key: &[u8; KEY_LEN],
+    ) -> Result<(), WaitingError> {
+        let dir = self.dir(id)?;
         let mut expected = std::collections::BTreeSet::new();
-        for (index, f) in m.files.iter().enumerate() {
-            let at = self.copy_path(m, f)?;
-            let index = u32::try_from(index).map_err(|_| WaitingError::CopyDamaged)?;
-            let fp = Unsealed::open(&at, key, index, f.size)
+        for (n, f) in files.iter().enumerate() {
+            let at = copy_path(&dir, n);
+            let stream = u32::try_from(n + 1).map_err(|_| WaitingError::CopyDamaged)?;
+            let fp = Unsealed::open(&at, key, stream, f.size)
                 .and_then(|mut u| u.fingerprint())
                 .map_err(|_| WaitingError::CopyDamaged)?;
             if fp != f.fingerprint {
@@ -622,28 +722,15 @@ impl WaitingStore {
             }
             expected.insert(at);
         }
-        // Nothing added beside the approved files.
-        let mut stack = vec![files];
-        while let Some(dir) = stack.pop() {
-            for e in std::fs::read_dir(&dir).map_err(|_| WaitingError::CopyDamaged)? {
-                let e = e.map_err(|_| WaitingError::CopyDamaged)?;
-                let t = e.file_type().map_err(|_| WaitingError::CopyDamaged)?;
-                if t.is_dir() {
-                    stack.push(e.path());
-                } else if !t.is_file() || !expected.contains(&e.path()) {
-                    return Err(WaitingError::CopyDamaged);
-                }
+        // Nothing added beside the approved copies.
+        for e in std::fs::read_dir(dir.join(FILES)).map_err(|_| WaitingError::CopyDamaged)? {
+            let e = e.map_err(|_| WaitingError::CopyDamaged)?;
+            let t = e.file_type().map_err(|_| WaitingError::CopyDamaged)?;
+            if !t.is_file() || !expected.contains(&e.path()) {
+                return Err(WaitingError::CopyDamaged);
             }
         }
         Ok(())
-    }
-
-    fn copy_path(&self, m: &Manifest, f: &WaitingFile) -> Result<PathBuf, WaitingError> {
-        let mut at = self.dir(&m.id)?.join(FILES);
-        for p in &f.parts {
-            at.push(p);
-        }
-        Ok(at)
     }
 
     /// Whether send `id` may still be delivered to `connection` at `now` (Waiting, before its
@@ -681,14 +768,19 @@ impl WaitingStore {
             .find(|r| r.connection == connection)
             .ok_or(WaitingError::NotFound)?;
         let key = self.key(id)?;
-        self.verify(&m, &key)?;
+        let listed = self.list_of(id, &key)?;
+        if listed.len() as u64 != m.files {
+            return Err(WaitingError::CopyDamaged);
+        }
+        self.verify(id, &listed, &key)?;
         let laptop = LaptopId::from_hex(&r.laptop).map_err(|_| WaitingError::File)?;
+        let dir = self.dir(id)?;
         let mut files = Vec::new();
         let mut opened = Vec::new();
-        for (index, f) in m.files.iter().enumerate() {
-            let at = self.copy_path(&m, f)?;
-            let index = u32::try_from(index).map_err(|_| WaitingError::CopyDamaged)?;
-            opened.push((at.clone(), index, f.size));
+        for (n, f) in listed.iter().enumerate() {
+            let at = copy_path(&dir, n);
+            let stream = u32::try_from(n + 1).map_err(|_| WaitingError::CopyDamaged)?;
+            opened.push((at.clone(), stream, f.size));
             files.push((f.item.clone(), f.size, at));
         }
         let offer = Offer::of_files(laptop, files, Arc::new(SealedOpener::new(key, opened)))?;
@@ -699,7 +791,7 @@ impl WaitingStore {
             .map(|f| (f.path, f.size))
             .collect();
         let approved: BTreeMap<String, u64> =
-            m.files.iter().map(|f| (f.path.clone(), f.size)).collect();
+            listed.iter().map(|f| (f.path.clone(), f.size)).collect();
         if offered != approved {
             return Err(WaitingError::CopyDamaged);
         }
@@ -730,16 +822,33 @@ impl WaitingStore {
                 at: now,
             },
         };
-        if let Ok(mut m) = self.read(id)
-            && m.state == State::Waiting
-        {
-            if let Some(r) = m.recipients.iter_mut().find(|r| r.connection == connection) {
-                r.delivery = delivery;
+        // Read and written under the send's lock: a recipient forgotten or a cancel meanwhile is
+        // kept, never written over.
+        let recorded = self.update(id, |m| {
+            if m.state != State::Waiting {
+                return false;
             }
-            self.write(&m)?;
+            match m.recipients.iter_mut().find(|r| r.connection == connection) {
+                Some(r) => {
+                    r.delivery = delivery;
+                    true
+                }
+                None => false,
+            }
+        });
+        if let Err(e) = recorded
+            && !matches!(e, WaitingError::NotFound)
+        {
+            return Err(e);
         }
         Ok(sent?)
     }
+}
+
+/// Where the copy of a send's file number `n` is, inside the send's folder `dir`: a number, never
+/// its name.
+fn copy_path(dir: &Path, n: usize) -> PathBuf {
+    dir.join(FILES).join(format!("{n}.sealed"))
 }
 
 /// Whether the folder `dir` was last changed at least `secs` ago.

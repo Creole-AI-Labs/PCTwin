@@ -162,12 +162,9 @@ async fn a_copy_that_no_longer_matches_is_never_sent() {
     let w = store
         .prepare(&chosen(old.path()), &[alex()], DEFAULT_DAYS, T0, None)
         .unwrap();
-    let copy = keep.path().join(&w.id).join("files").join("menu.txt");
+    let files = keep.path().join(&w.id).join("files");
+    let copy = files.join("0.sealed");
     let sealed = std::fs::read(&copy).unwrap();
-    assert!(
-        !sealed.windows(4).any(|x| x == b"rice"),
-        "the copy is sealed at rest"
-    );
     let mut changed = sealed.clone();
     changed[3] ^= 0x20;
     std::fs::write(&copy, &changed).unwrap();
@@ -177,19 +174,101 @@ async fn a_copy_that_no_longer_matches_is_never_sent() {
     ));
     std::fs::write(&copy, &sealed).unwrap();
     assert!(store.offer_for(&w.id, "alex", T0).is_ok());
-    // Something added beside the approved files.
-    std::fs::write(keep.path().join(&w.id).join("files/Trip/extra.exe"), b"MZ").unwrap();
+    // Something added beside the approved copies.
+    std::fs::write(files.join("2.sealed"), b"MZ").unwrap();
     assert!(matches!(
         store.offer_for(&w.id, "alex", T0),
         Err(WaitingError::CopyDamaged)
     ));
-    std::fs::remove_file(keep.path().join(&w.id).join("files/Trip/extra.exe")).unwrap();
+    std::fs::remove_file(files.join("2.sealed")).unwrap();
+    // Two copies swapped between their places.
+    let other = std::fs::read(files.join("1.sealed")).unwrap();
+    std::fs::write(files.join("1.sealed"), &sealed).unwrap();
+    std::fs::write(&copy, &other).unwrap();
+    assert!(matches!(
+        store.offer_for(&w.id, "alex", T0),
+        Err(WaitingError::CopyDamaged)
+    ));
     // One taken away.
-    std::fs::remove_file(keep.path().join(&w.id).join("files/Trip/day1.jpg")).unwrap();
+    std::fs::remove_file(files.join("1.sealed")).unwrap();
     assert!(matches!(
         store.offer_for(&w.id, "alex", T0),
         Err(WaitingError::CopyDamaged)
     ));
+}
+
+/// The drive alone says nothing about what is waiting: no name, folder, plain byte or
+/// fingerprint of the approved files in any file name or file of the send.
+#[test]
+fn the_drive_shows_nothing_of_what_is_waiting() {
+    let (old, keep) = (dirs(), dirs());
+    let store = new_store(keep.path());
+    let w = store
+        .prepare(&chosen(old.path()), &[alex()], 7, T0, None)
+        .unwrap();
+    let fingerprints = [
+        blake3::hash(b"sunrise").to_hex().to_string(),
+        blake3::hash(b"rice and beans").to_hex().to_string(),
+    ];
+    let mut stack = vec![keep.path().join(&w.id)];
+    let mut seen = 0;
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let e = e.unwrap();
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            for word in ["menu", "trip", "day1", "jpg", "txt"] {
+                assert!(!name.contains(word), "{name}");
+            }
+            if e.file_type().unwrap().is_dir() {
+                stack.push(e.path());
+                continue;
+            }
+            seen += 1;
+            let bytes = std::fs::read(e.path()).unwrap();
+            let text = String::from_utf8_lossy(&bytes).to_lowercase();
+            for word in ["menu", "trip", "day1", "sunrise", "rice", "beans"] {
+                assert!(!text.contains(word), "{word} in {name}");
+            }
+            for fp in &fingerprints {
+                assert!(!text.contains(fp.as_str()), "a fingerprint in {name}");
+            }
+        }
+    }
+    assert!(seen >= 4, "the record, the list and two copies");
+    // With the key, everything is still known.
+    let info = store.get(&w.id).unwrap();
+    assert_eq!((info.files, info.bytes), (2, 21));
+}
+
+/// A delivery's result and a recipient forgotten at the same moment: neither is lost.
+#[tokio::test]
+async fn a_recipient_forgotten_during_a_delivery_is_not_written_back() {
+    let (old, keep, dest, j) = (dirs(), dirs(), dirs(), dirs());
+    let store = new_store(keep.path());
+    let w = store
+        .prepare(&chosen(old.path()), &[alex(), bo()], 7, T0, None)
+        .unwrap();
+    let (offer, _) = store.offer_for(&w.id, "alex", T0).unwrap();
+    let (mut a, mut b) = pair();
+    let live = pctwin_move::Live::default();
+    let (sent, ()) = tokio::join!(
+        store.deliver(&w.id, "alex", offer, &mut a, &live, T0),
+        async {
+            let Ok(Arrival::Files(incoming)) = receive(&mut b).await else {
+                panic!("files")
+            };
+            // Bo is forgotten while Alex's delivery runs.
+            assert_eq!(store.forget_recipient("bo"), 1);
+            incoming
+                .accept(&mut b, dest.path(), None, &journal(j.path()), "1001")
+                .await
+                .unwrap();
+        }
+    );
+    sent.unwrap();
+    let r = store.get(&w.id).unwrap().recipients;
+    assert_eq!(r.len(), 1, "Bo stays forgotten: {r:?}");
+    assert!(matches!(r[0].delivery, Delivery::Delivered { .. }));
 }
 
 #[test]

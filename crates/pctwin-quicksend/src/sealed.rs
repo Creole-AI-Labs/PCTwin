@@ -1,61 +1,47 @@
-//! Waiting sends' copies sealed at rest (Security Design Part G, Part T): each copy is written in
-//! chunks, each chunk sealed with ChaCha20-Poly1305 through `snow` (the Noise library Part A
-//! names; its own cipher, used as Noise uses it: a 32-byte key and a 64-bit counter nonce). One
-//! fresh random key per waiting send, kept only in the system's key store beside the connection
-//! keys and deleted with the send, so a deleted send's copy cannot be read again even where the
-//! drive keeps the old bytes.
+//! Waiting sends sealed at rest (Security Design Part G, Part T): every copy, and the list of what
+//! the send holds, is encrypted with RustCrypto's `chacha20poly1305` through its STREAM
+//! construction (`aead::stream`, the published online-encryption scheme of Hoang, Reyhanitabar,
+//! Rogaway and Vizár), the one Part G names: no chunk framing of PCTwin's own. STREAM seals each
+//! chunk with a counter and a last-chunk mark in its nonce, so a chunk changed, reordered, cut off
+//! or added is refused. One fresh random key per waiting send, kept only in the system's key store
+//! and deleted with the send; each sealed thing in the send is its own stream under that key
+//! (its own nonce prefix), so a copy moved to another file's place is refused too.
 //!
-//! The framing is Part T's for chunked data: every chunk's nonce holds the file's number in the
-//! send and the chunk's number, and its associated data also says whether it is the last chunk,
-//! so a chunk changed, moved to another place or file, cut off or added is refused. The
-//! fingerprints of the approval stay over the plain bytes.
+//! Reading seeks by chunk: the stream's own position-addressed decryption (STREAM's counter set
+//! to the chunk's number) opens any chunk, which a resumed send needs.
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use snow::resolvers::{CryptoResolver, DefaultResolver};
-use snow::types::Cipher;
+use chacha20poly1305::aead::stream::{EncryptorBE32, NewStream, StreamBE32, StreamPrimitive};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use zeroize::Zeroizing;
 
-/// Plain bytes in each chunk (the last may hold fewer, an empty file one empty chunk).
+/// Plain bytes in each chunk (the last may hold fewer, an empty stream one empty chunk).
 pub const CHUNK: usize = 64 * 1024;
 /// The seal on each chunk.
 pub const TAG: usize = 16;
 /// Bytes in a send's key.
 pub const KEY_LEN: usize = 32;
-const LABEL: &[u8] = b"pctwin/v1/waiting-copy";
-/// Chunk numbers live in the low 40 bits of the nonce, file numbers in the 24 above.
-const CHUNK_BITS: u32 = 40;
-/// Most files one sealed send may hold.
-pub const MOST_FILES: u32 = 1 << (64 - CHUNK_BITS);
+/// The stream that holds the send's own list of what it holds; each copied file is the stream
+/// of its number plus one.
+pub const LIST_STREAM: u32 = 0;
 
 fn damaged(why: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, why)
 }
 
-fn cipher(key: &[u8; KEY_LEN]) -> io::Result<Box<dyn Cipher>> {
-    let mut c = DefaultResolver
-        .resolve_cipher(&snow::params::CipherChoice::ChaChaPoly)
-        .ok_or_else(|| io::Error::other("no cipher"))?;
-    c.set(key);
-    Ok(c)
+/// The STREAM nonce prefix (7 bytes) of stream `id` in a send: unique under the send's key.
+fn prefix(id: u32) -> [u8; 7] {
+    let mut p = [0u8; 7];
+    p[3..].copy_from_slice(&id.to_be_bytes());
+    p
 }
 
-fn nonce(file: u32, chunk: u64) -> io::Result<u64> {
-    if file >= MOST_FILES || chunk >= 1 << CHUNK_BITS {
-        return Err(damaged("too large to seal"));
-    }
-    Ok((u64::from(file) << CHUNK_BITS) | chunk)
-}
-
-fn associated(file: u32, chunk: u64, last: bool) -> Vec<u8> {
-    let mut ad = Vec::with_capacity(LABEL.len() + 13);
-    ad.extend_from_slice(LABEL);
-    ad.extend_from_slice(&file.to_be_bytes());
-    ad.extend_from_slice(&chunk.to_be_bytes());
-    ad.push(u8::from(last));
-    ad
+fn stream(key: &[u8; KEY_LEN], id: u32) -> StreamBE32<ChaCha20Poly1305> {
+    let aead = ChaCha20Poly1305::new(key.into());
+    StreamBE32::from_aead(aead, (&prefix(id)).into())
 }
 
 /// How many chunks hold `size` plain bytes.
@@ -63,9 +49,17 @@ pub fn chunks(size: u64) -> u64 {
     size.div_ceil(CHUNK as u64).max(1)
 }
 
-/// The sealed copy's length on the drive for `size` plain bytes.
+/// The sealed length on the drive for `size` plain bytes.
 pub fn sealed_len(size: u64) -> u64 {
     size.saturating_add(chunks(size).saturating_mul(TAG as u64))
+}
+
+/// The plain size a sealed length stands for, when it is one.
+fn plain_len(sealed: u64) -> Option<u64> {
+    let whole = CHUNK as u64 + TAG as u64;
+    let n = sealed.div_ceil(whole).max(1);
+    let size = sealed.checked_sub(n * TAG as u64)?;
+    (sealed_len(size) == sealed).then_some(size)
 }
 
 /// A fresh send key from the system's random generator.
@@ -89,24 +83,25 @@ fn read_full(r: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     Ok(n)
 }
 
-/// Seals what `from` holds into `to`, a new file, as file `file` of a send with `key`; returns
-/// the plain bytes and their BLAKE3 fingerprint (hex). `renew` is called after every chunk (a
-/// long copy keeps its lease).
+/// Seals what `from` holds into `to`, a new file, as stream `id` of a send with `key`; returns the
+/// plain bytes and their BLAKE3 fingerprint (hex). `renew` is called after every chunk (a long
+/// copy keeps its lease). Each stream id is sealed once only.
 pub fn seal(
     from: &mut impl Read,
     to: &Path,
     key: &[u8; KEY_LEN],
-    file: u32,
+    id: u32,
     renew: &mut dyn FnMut(),
 ) -> io::Result<(u64, String)> {
-    let c = cipher(key)?;
     let mut dst = File::options().write(true).create_new(true).open(to)?;
+    let mut enc = Some(EncryptorBE32::from_aead(
+        ChaCha20Poly1305::new(key.into()),
+        (&prefix(id)).into(),
+    ));
     let mut hasher = blake3::Hasher::new();
     let mut cur = vec![0u8; CHUNK];
     let mut next = vec![0u8; CHUNK];
-    let mut out = vec![0u8; CHUNK + TAG];
     let mut have = read_full(from, &mut cur)?;
-    let mut chunk = 0u64;
     let mut total = 0u64;
     loop {
         // Read ahead: a chunk is the last when nothing follows it.
@@ -115,33 +110,54 @@ pub fn seal(
         } else {
             0
         };
-        let last = ahead == 0;
         hasher.update(&cur[..have]);
-        let n = c.encrypt(
-            nonce(file, chunk)?,
-            &associated(file, chunk, last),
-            &cur[..have],
-            &mut out,
-        );
-        dst.write_all(&out[..n])?;
+        let mut sealed = Vec::with_capacity(have + TAG);
+        sealed.extend_from_slice(&cur[..have]);
+        let sealing = if ahead == 0 {
+            enc.take()
+                .ok_or_else(|| io::Error::other("sealed already"))?
+                .encrypt_last_in_place(b"", &mut sealed)
+        } else {
+            enc.as_mut()
+                .ok_or_else(|| io::Error::other("sealed already"))?
+                .encrypt_next_in_place(b"", &mut sealed)
+        };
+        sealing.map_err(|_| io::Error::other("too long to seal"))?;
+        dst.write_all(&sealed)?;
         total += have as u64;
         renew();
-        if last {
+        if ahead == 0 {
             break;
         }
         std::mem::swap(&mut cur, &mut next);
         have = ahead;
-        chunk += 1;
     }
     dst.sync_all()?;
     Ok((total, crate::waiting::hex(hasher.finalize().as_bytes())))
 }
 
+/// Seals `bytes` into `to` (a new file) as stream `id`.
+pub fn seal_bytes(bytes: &[u8], to: &Path, key: &[u8; KEY_LEN], id: u32) -> io::Result<()> {
+    seal(&mut &bytes[..], to, key, id, &mut || ()).map(|_| ())
+}
+
+/// Every plain byte of the sealed stream `id` at `path`, at most `most` of them.
+pub fn unseal_bytes(path: &Path, key: &[u8; KEY_LEN], id: u32, most: u64) -> io::Result<Vec<u8>> {
+    let len = std::fs::metadata(path)?.len();
+    let size = plain_len(len).ok_or_else(|| damaged("not a sealed length"))?;
+    if size > most {
+        return Err(damaged("too large"));
+    }
+    let mut u = Unsealed::open(path, key, id, size)?;
+    let mut out = Vec::new();
+    u.read_to_end(&mut out)?;
+    Ok(out)
+}
+
 /// A sealed copy opened for reading its plain bytes, in any order (a resumed send seeks).
 pub struct Unsealed {
     file: File,
-    cipher: Box<dyn Cipher>,
-    index: u32,
+    stream: StreamBE32<ChaCha20Poly1305>,
     size: u64,
     pos: u64,
     /// The plain bytes of chunk `held`.
@@ -150,17 +166,19 @@ pub struct Unsealed {
 }
 
 impl Unsealed {
-    /// The sealed copy at `path`, file `index` of a send with `key`, holding `size` plain bytes:
-    /// refused at once when its length on the drive is not what `size` seals to.
-    pub fn open(path: &Path, key: &[u8; KEY_LEN], index: u32, size: u64) -> io::Result<Self> {
+    /// The sealed stream `id` at `path`, of a send with `key`, holding `size` plain bytes: refused
+    /// at once when its length on the drive is not what `size` seals to.
+    pub fn open(path: &Path, key: &[u8; KEY_LEN], id: u32, size: u64) -> io::Result<Self> {
         let file = File::open(path)?;
         if file.metadata()?.len() != sealed_len(size) {
             return Err(damaged("the sealed copy is not its sealed length"));
         }
+        if chunks(size) > u64::from(u32::MAX) {
+            return Err(damaged("too large"));
+        }
         Ok(Self {
             file,
-            cipher: cipher(key)?,
-            index,
+            stream: stream(key, id),
             size,
             pos: 0,
             plain: Vec::new(),
@@ -175,23 +193,15 @@ impl Unsealed {
         let last = chunk + 1 == chunks(self.size);
         let start = chunk * CHUNK as u64;
         let plain_len = (self.size - start).min(CHUNK as u64) as usize;
-        let mut sealed = vec![0u8; plain_len + TAG];
+        let mut buf = vec![0u8; plain_len + TAG];
         self.file
             .seek(SeekFrom::Start(chunk * (CHUNK + TAG) as u64))?;
-        self.file.read_exact(&mut sealed)?;
-        self.plain.resize(plain_len, 0);
-        let n = self
-            .cipher
-            .decrypt(
-                nonce(self.index, chunk)?,
-                &associated(self.index, chunk, last),
-                &sealed,
-                &mut self.plain,
-            )
+        self.file.read_exact(&mut buf)?;
+        let position = u32::try_from(chunk).map_err(|_| damaged("too large"))?;
+        self.stream
+            .decrypt_in_place(position, last, b"", &mut buf)
             .map_err(|_| damaged("a sealed chunk was changed"))?;
-        if n != plain_len {
-            return Err(damaged("a sealed chunk is the wrong length"));
-        }
+        self.plain = buf;
         self.held = Some(chunk);
         Ok(())
     }
@@ -216,7 +226,7 @@ impl Unsealed {
 impl Read for Unsealed {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.pos >= self.size || buf.is_empty() {
-            // An empty file is still one sealed chunk: its seal is checked too.
+            // An empty stream is still one sealed chunk: its seal is checked too.
             if self.size == 0 {
                 self.load(0)?;
             }
@@ -257,7 +267,7 @@ impl pctwin_transfer::Source for Unsealed {
 /// Opens a send's sealed copies, and only those: each by the path its offer reads it from.
 pub struct SealedOpener {
     key: Zeroizing<[u8; KEY_LEN]>,
-    /// Each copy's path, number in the send and plain size.
+    /// Each copy's path, stream id and plain size.
     files: Vec<(PathBuf, u32, u64)>,
 }
 
@@ -269,12 +279,12 @@ impl SealedOpener {
 
 impl pctwin_transfer::Opener for SealedOpener {
     fn open(&self, path: &Path) -> io::Result<Box<dyn pctwin_transfer::Source>> {
-        let (_, index, size) = self
+        let (_, id, size) = self
             .files
             .iter()
             .find(|(p, _, _)| p == path)
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
-        Ok(Box::new(Unsealed::open(path, &self.key, *index, *size)?))
+        Ok(Box::new(Unsealed::open(path, &self.key, *id, *size)?))
     }
 }
 
@@ -282,9 +292,9 @@ impl pctwin_transfer::Opener for SealedOpener {
 mod tests {
     use super::*;
 
-    fn sealed(dir: &Path, plain: &[u8], key: &[u8; 32], index: u32) -> PathBuf {
-        let p = dir.join(format!("f{index}"));
-        let (n, _) = seal(&mut &plain[..], &p, key, index, &mut || ()).unwrap();
+    fn sealed(dir: &Path, plain: &[u8], key: &[u8; 32], id: u32) -> PathBuf {
+        let p = dir.join(format!("f{id}"));
+        let (n, _) = seal(&mut &plain[..], &p, key, id, &mut || ()).unwrap();
         assert_eq!(n, plain.len() as u64);
         p
     }
@@ -304,6 +314,7 @@ mod tests {
             let p = sealed(d.path(), &plain, &key, size as u32);
             let on_disk = std::fs::read(&p).unwrap();
             assert_eq!(on_disk.len() as u64, sealed_len(size as u64));
+            assert_eq!(plain_len(on_disk.len() as u64), Some(size as u64));
             if size > 16 {
                 assert!(
                     !on_disk.windows(16).any(|w| w == &plain[..16]),
@@ -320,6 +331,10 @@ mod tests {
                 u.seek(SeekFrom::Start(size as u64 - 10)).unwrap();
                 assert_eq!(all(&mut u).unwrap(), &plain[size - 10..]);
             }
+            assert_eq!(
+                unseal_bytes(&p, &key, size as u32, u64::MAX).unwrap(),
+                plain
+            );
         }
     }
 
@@ -331,7 +346,7 @@ mod tests {
         let size = plain.len() as u64;
         let p = sealed(d.path(), &plain, &key, 3);
         let good = std::fs::read(&p).unwrap();
-        // The wrong key, or read as another file of the send.
+        // The wrong key, or read as another file of the send (swapped between files).
         assert!(all(&mut Unsealed::open(&p, &[8; 32], 3, size).unwrap()).is_err());
         assert!(all(&mut Unsealed::open(&p, &key, 4, size).unwrap()).is_err());
         // One byte changed.
@@ -339,7 +354,7 @@ mod tests {
         bad[CHUNK + 20] ^= 1;
         std::fs::write(&p, &bad).unwrap();
         assert!(all(&mut Unsealed::open(&p, &key, 3, size).unwrap()).is_err());
-        // Two chunks swapped.
+        // Two chunks reordered.
         let mut swapped = good.clone();
         let w = CHUNK + TAG;
         let (a, b) = swapped.split_at_mut(w);
@@ -349,6 +364,7 @@ mod tests {
         // Cut after a whole chunk, and said to be that short: the last chunk is not marked last.
         std::fs::write(&p, &good[..w]).unwrap();
         assert!(all(&mut Unsealed::open(&p, &key, 3, CHUNK as u64).unwrap()).is_err());
+        assert!(unseal_bytes(&p, &key, 3, u64::MAX).is_err());
         // Cut or lengthened against the approved size: refused at once.
         std::fs::write(&p, &good[..good.len() - 1]).unwrap();
         assert!(Unsealed::open(&p, &key, 3, size).is_err());
@@ -356,11 +372,27 @@ mod tests {
         longer.push(0);
         std::fs::write(&p, &longer).unwrap();
         assert!(Unsealed::open(&p, &key, 3, size).is_err());
-        // An empty file's one chunk is checked too.
+        // An empty stream's one chunk is checked too.
         let e = sealed(d.path(), b"", &key, 9);
         let mut v = std::fs::read(&e).unwrap();
         v[0] ^= 1;
         std::fs::write(&e, &v).unwrap();
         assert!(all(&mut Unsealed::open(&e, &key, 9, 0).unwrap()).is_err());
+    }
+
+    /// The same bytes in two streams of one send seal differently, so neither stands in for the
+    /// other.
+    #[test]
+    fn each_stream_of_a_send_seals_on_its_own() {
+        let d = tempfile::tempdir().unwrap();
+        let key = [7u8; 32];
+        let a = std::fs::read(sealed(d.path(), b"same bytes", &key, 1)).unwrap();
+        let b = std::fs::read(sealed(d.path(), b"same bytes", &key, 2)).unwrap();
+        assert_ne!(a, b);
+        assert!(unseal_bytes(&d.path().join("f1"), &key, 2, 100).is_err());
+        assert!(
+            unseal_bytes(&d.path().join("f1"), &key, 1, 5).is_err(),
+            "too large"
+        );
     }
 }

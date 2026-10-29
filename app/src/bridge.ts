@@ -1152,7 +1152,10 @@ export function parseQsRemember(value: unknown): QsRemember | null {
   return connections ? { fallbackStore: f.fallbackStore, connections } : null;
 }
 
-/** The remembered connection to suggest replacing: the one with the name the person typed (case and spaces aside). */
+/**
+ * The remembered connection replaced by default: the one with the name the person typed (case and spaces aside). The
+ * screens show it already chosen, and the person can untick it; otherwise a lost laptop's old connection would stay.
+ */
 export function suggestReplacement(connections: RememberChoice[], typed: string): RememberChoice | null {
   const name = typed.trim().toLowerCase();
   if (name === "") return null;

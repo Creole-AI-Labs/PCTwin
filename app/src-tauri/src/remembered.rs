@@ -317,7 +317,7 @@ impl RememberedState {
     }
 
     /// Whether connection `id` is still remembered.
-    fn remembered<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> bool {
+    pub(crate) fn remembered<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> bool {
         self.with_book(app, |b| Ok(b.has(id))).unwrap_or(false)
     }
 
@@ -530,8 +530,13 @@ pub fn known_remember<R: Runtime>(
     let pending = lock(&st.pending).take().ok_or(QsRefusal::NotWaiting)?;
     let t = now();
     let kept = st.with_book(&app, |b| {
-        b.remember(pending, &label, t, replaces.as_deref())
+        b.remember(&pending, &label, t, replaces.as_deref())
     });
+    if kept.is_err() {
+        // Nothing was kept: the pairing's keys stay for another try (unless a newer exchange
+        // offered its own meanwhile).
+        lock(&st.pending).get_or_insert(pending);
+    }
     if let Some(old) = &replaces
         && !st.remembered(&app, old)
     {
@@ -1268,9 +1273,24 @@ async fn receive_files<R: Runtime>(
     let bytes = incoming.total_bytes();
     let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
     // Permission 3: into its folder, within its caps, the folder rechecked now; counted only
-    // when the folder could be used (otherwise the person is asked, and nothing is counted).
-    if let Ok(Ok((admitted, dest))) =
-        st.with_book(app, |b| Ok(b.admit_with(id, bytes, now(), delivery_folder)))
+    // when the folder could be used (otherwise the person is asked, and nothing is counted). The
+    // folder is opened outside the book's lock (a slow drive never holds up other book calls),
+    // then confirmed under it to be still the folder permission 3 names.
+    let opened = st
+        .with_book(app, |b| Ok(b.grant_folder(id, now())))
+        .ok()
+        .flatten()
+        .and_then(|f| delivery_folder(&f).ok().map(|d| (f, d)));
+    if let Some((folder, dest)) = opened
+        && let Ok(Ok((admitted, dest))) = st.with_book(app, |b| {
+            Ok(b.admit_with(id, bytes, now(), |g| {
+                if *g == folder {
+                    Ok(dest)
+                } else {
+                    Err(FolderProblem::NotTheSame)
+                }
+            }))
+        })
     {
         let (journal, me) = journal(app)?;
         let reopen = delivery_folder(&admitted.folder).ok();

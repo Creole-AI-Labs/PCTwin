@@ -12,10 +12,11 @@ publish.workspace = true
 # Waiting sends: each approved version's fingerprint.
 blake3 = "1.8"
 # Waiting sends sealed at rest: a fresh key per send, in the system's key store beside the
-# connection keys (Security Design Part G), sealed with snow's ChaCha20-Poly1305 (Part A).
+# connection keys, sealed with RustCrypto's ChaCha20-Poly1305 STREAM construction (Security
+# Design Part G names it; the same crate snow already brings).
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc", "stream"] }
 getrandom = "0.4.3"
 pctwin-known = { path = "../pctwin-known" }
-snow = "0.10.0"
 zeroize = "1.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

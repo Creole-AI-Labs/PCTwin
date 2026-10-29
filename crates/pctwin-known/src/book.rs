@@ -297,20 +297,23 @@ impl Book {
     fn device(&self, c: &Connection) -> Device {
         match (&c.machine, &self.machine) {
             (Some(then), Some(now)) if then == now => Device::Same,
-            (Some(_), Some(_)) => Device::Restored,
-            // Remembered where the system could not tell laptops apart, or cannot now.
-            _ => Device::CannotTell,
+            // Remembered on hardware that could tell, and this one now cannot or differs: never
+            // taken for the same laptop (a flaky hardware query asks to pair again: accepted).
+            (Some(_), _) => Device::Restored,
+            // Remembered where the system could not tell laptops apart.
+            (None, _) => Device::CannotTell,
         }
     }
 
     /// Remember this connection (permission 1), named `label`, at time `now` (seconds since
-    /// 1970). When the person said it `replaces` an earlier connection (the same other laptop,
-    /// paired again: its keys are fresh, so nothing else can tell), that one is forgotten first:
-    /// its keys and every permission. The secrets go to the store first and are read back; only
-    /// then is the connection written to the book. Returns its id.
+    /// 1970). The secrets go to the store first and are read back; then the connection is written
+    /// to the book. Only once it is kept is the earlier connection it `replaces` (the same other
+    /// laptop paired again: its keys are fresh, so only the person can say) forgotten, its keys
+    /// and every permission; if that cannot be done the new one is taken back, so nothing is half
+    /// done. `pending` is only read: on any error the caller still holds it. Returns its id.
     pub fn remember(
         &mut self,
-        pending: Pending,
+        pending: &Pending,
         label: &str,
         now: u64,
         replaces: Option<&str>,
@@ -323,21 +326,7 @@ impl Book {
         if kept >= MAX_CONNECTIONS {
             return Err(BookError::Full);
         }
-        if let Some(old) = replaces {
-            self.forget(old)?;
-        }
-        // The same other laptop remembered again replaces the old connection (and its keys).
         let peer = hex(&pending.peer_public);
-        let again: Vec<String> = self
-            .file
-            .connections
-            .iter()
-            .filter(|c| c.peer_public == peer)
-            .map(|c| c.id.clone())
-            .collect();
-        for id in again {
-            self.forget(&id)?;
-        }
         let mut raw = [0u8; 8];
         getrandom::fill(&mut raw).map_err(|_| BookError::Store(StoreError::Unavailable))?;
         let id = hex(&raw);
@@ -354,7 +343,7 @@ impl Book {
         self.file.connections.push(Connection {
             id: id.clone(),
             label,
-            peer_public: peer,
+            peer_public: peer.clone(),
             made_at: now,
             last_used: now,
             machine: self.machine.clone(),
@@ -368,7 +357,38 @@ impl Book {
             let _ = self.store.delete(&pair_name(&id));
             return Err(e);
         }
+        // Now the earlier connection goes: the one named, and any with this very key.
+        let mut old: Vec<String> = self
+            .file
+            .connections
+            .iter()
+            .filter(|c| c.id != id && c.peer_public == peer)
+            .map(|c| c.id.clone())
+            .collect();
+        if let Some(r) = replaces
+            && !old.iter().any(|o| o == r)
+        {
+            old.push(r.to_string());
+        }
+        for o in old {
+            if let Err(e) = self.forget(&o) {
+                // Taken back, so the person can try again with nothing half done.
+                self.file.connections.retain(|c| c.id != id);
+                self.tokens = None;
+                let _ = self.save();
+                let _ = self.store.delete(&key_name(&id));
+                let _ = self.store.delete(&pair_name(&id));
+                return Err(e);
+            }
+        }
         Ok(id)
+    }
+
+    /// Permission 3's folder for connection `id`, when it is given and has not ended at `now`:
+    /// what to open (outside any lock) before [`admit_with`](Self::admit_with) confirms it.
+    pub fn grant_folder(&self, id: &str, now: u64) -> Option<KnownFolder> {
+        let g = self.find(id).ok()?.grant.as_ref()?;
+        (now < g.ends_at).then(|| g.folder.clone())
     }
 
     /// The connections with the same name as `label` (ignoring case and spaces around it): the

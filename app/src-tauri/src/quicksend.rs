@@ -792,7 +792,19 @@ pub(crate) fn show_note<R: Runtime>(
     source: &str,
 ) {
     let view_of = |id: String| note_view(id, &note, from.clone());
-    let shown = lock(&qs.notes).arrive(source, note.clone(), std::time::Instant::now());
+    let shown = {
+        let mut notes = lock(&qs.notes);
+        // Checked under the notes' lock: a Forget that ran just before drops nothing later, and
+        // one that runs just after drops this note.
+        if source != FROM_PAIRING
+            && !app
+                .state::<crate::remembered::AppRemembered>()
+                .remembered(app, source)
+        {
+            return;
+        }
+        notes.arrive(source, note.clone(), std::time::Instant::now())
+    };
     if let Some(id) = shown {
         let _ = app.emit(NOTE_EVENT, view_of(id));
     }
