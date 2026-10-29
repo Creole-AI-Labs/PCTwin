@@ -20,9 +20,7 @@ export default function FinishDoctor({ onBack }: { onBack: () => void }) {
   const [view, setView] = useState<DoctorView | null>(null);
   const [running, setRunning] = useState(false);
   const [problem, setProblem] = useState<FinishProblem | null>(null);
-  const hotspot = view && (
-    <p>{view.hotspot.suggested ? l10n.getString("finish-doctor-hotspot-first") : l10n.getString("finish-doctor-hotspot-last")}</p>
-  );
+  const hotspot = <Banner tone="info">{l10n.getString("doctor-hotspot")}</Banner>;
   return (
     <FinishPage titleId="finish-doctor-title" onBack={onBack}>
       <p className="subhead">{l10n.getString("finish-doctor-body")}</p>
@@ -63,10 +61,11 @@ export default function FinishDoctor({ onBack }: { onBack: () => void }) {
         {view && !running && (
           <>
             <h2 className="fin-block">{l10n.getString("finish-doctor-found")}</h2>
+            {view.hotspot.suggested && hotspot}
             {view.findings.length === 0 && <p>{l10n.getString("finish-doctor-none")}</p>}
             <RowList>
               {view.findings.map((f, i) => {
-                const vars = { names: listText(f.names) };
+                const vars = { name: listText(f.names) };
                 return (
                   <Row
                     key={`${f.cause}-${String(i)}`}
@@ -78,13 +77,13 @@ export default function FinishDoctor({ onBack }: { onBack: () => void }) {
                 );
               })}
             </RowList>
-            <Banner tone="info">{hotspot}</Banner>
+            {!view.hotspot.suggested && hotspot}
             {view.notChecked.length > 0 && (
               <>
                 <h2 className="fin-block">{l10n.getString("finish-doctor-not-checked")}</h2>
                 <ul className="fin-list">
                   {view.notChecked.map((k) => (
-                    <li key={k}>{has(`finish-notchecked-${k}`) ? l10n.getString(`finish-notchecked-${k}`) : l10n.getString("finish-notchecked-unknown")}</li>
+                    <li key={k}>{has(k) ? l10n.getString(k) : l10n.getString("finish-notchecked-unknown")}</li>
                   ))}
                 </ul>
               </>

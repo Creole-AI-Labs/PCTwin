@@ -11,6 +11,7 @@ import type { ChangeView } from "../fullmove";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
+import SpaceBox from "./SpaceBox";
 
 
 /**
@@ -99,6 +100,9 @@ export interface PlanReviewProps {
   onPick?: (line: number, bring: boolean) => void;
   updates?: readonly number[];
   onUpdate?: (app: number, update: boolean) => void;
+  /** The smaller-laptop proposal (2.6): the person chose to leave those files on the old laptop. */
+  leaveBehind?: boolean;
+  onLeaveBehind?: (on: boolean) => void;
 }
 
 /**
@@ -110,7 +114,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick, updates = [], onUpdate }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick, updates = [], onUpdate, leaveBehind = false, onLeaveBehind }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const [compat, setCompat] = useState<ChangeView | null>(null);
@@ -154,7 +158,13 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
   };
   const roomless = plan.groups.some((g) => noRoom(g.role));
   const blocked = plan.blocked;
-  const canStart = holds && !blocked && !roomless;
+  // Too big for this laptop (2.6): it fits once what is left behind (the proposal, if accepted, and
+  // the folders left out) covers what is short. The engine checks again.
+  const space = plan.space;
+  const short = space ? space.bytes + space.stillShortBytes : 0;
+  const freed = (space && leaveBehind ? space.bytes : 0) + plan.groups.filter((g) => leftOut.includes(g.role)).reduce((n, g) => n + (g.size.kind === "unreadable" ? 0 : g.size.bytes), 0);
+  const tooBig = space !== undefined && freed < short;
+  const canStart = holds && !blocked && !roomless && !tooBig;
   const reference = plan.fingerprint.slice(0, 8).toUpperCase();
   // One app's compatibility record opens on its own page; Back returns to the plan.
   if (compat?.tested) {
@@ -199,6 +209,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
       )}
 
       {plan.preview && <PreviewNotes preview={plan.preview} first={movesFirst(plan, leftOut)} />}
+      {space && onLeaveBehind && <SpaceBox space={space} accepted={leaveBehind} onChange={onLeaveBehind} />}
 
       <div className="plan-columns">
         <PlanBox title={l10n.getString("plan-what-title")}>
@@ -337,7 +348,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
             aria-describedby={holds ? undefined : "plan-hint"}
             onClick={() => {
               // Checked again at the moment of the click: the approval must still be for this exact plan.
-              if (approval && approvalHolds(plan, approval) && !blocked && !roomless) onStart(approval);
+              if (approval && approvalHolds(plan, approval) && !blocked && !roomless && !tooBig) onStart(approval);
             }}
           >
             {l10n.getString("plan-start")}

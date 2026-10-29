@@ -276,6 +276,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
   const [picked, setPicked] = useState<number[]>([]);
   // The older apps here the person ticked "Update it" for: none unless ticked.
   const [updates, setUpdates] = useState<number[]>([]);
+  // The smaller-laptop proposal (2.6): leave the files used longest ago on the old laptop. Not unless ticked.
+  const [leaveBehind, setLeaveBehind] = useState(false);
   // The places the person chose for some folders (M05), and why the last one was not taken.
   const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
@@ -539,7 +541,7 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
             plan={view.plan}
             from={otherLaptop}
             onAccept={() => {
-              moveApprove(key, true, [], []).then(
+              moveApprove(key, true, [], [], [], leaveBehind).then(
                 () => {
                   setView({ kind: "wait", stage: "moving" });
                 },
@@ -552,6 +554,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
             onDetails={() => {
               setOverviewSeen(true);
             }}
+            leaveBehind={leaveBehind}
+            onLeaveBehind={setLeaveBehind}
             onNotNow={() => {
               void moveApprove(key, false).catch(() => undefined);
             }}
@@ -590,6 +594,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
             );
           }}
           onApprovalChange={setApproval}
+          leaveBehind={leaveBehind}
+          onLeaveBehind={setLeaveBehind}
           picked={picked}
           onPick={(line, bring) => {
             setPicked((p) => (bring ? (p.includes(line) ? p : [...p, line]) : p.filter((l) => l !== line)));
@@ -599,7 +605,7 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
             setUpdates((u) => (update ? (u.includes(app) ? u : [...u, app]) : u.filter((a) => a !== app)));
           }}
           onStart={(a) => {
-            moveApprove(a, true, leftOut, picked, updates).then(
+            moveApprove(a, true, leftOut, picked, updates, leaveBehind).then(
               () => {
                 setView({ kind: "wait", stage: "moving" });
               },

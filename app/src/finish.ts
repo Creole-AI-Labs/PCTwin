@@ -63,7 +63,7 @@ export function parseFinishProblem(value: unknown): FinishProblem | null {
 
 /* ---------- The overview ---------- */
 
-export const HEADLINES = ["ready-for-selected", "finished-with-tasks", "data-preserved-access-unresolved", "handover-unresolved", "nothing-moved"] as const;
+export const HEADLINES = ["ready-for-selected-work", "data-preserved", "finished-with-tasks", "handover-unresolved", "nothing-moved"] as const;
 export type Headline = (typeof HEADLINES)[number];
 
 export const STANDINGS = ["copied", "reinstalled", "converted", "needs-action", "failed", "waiting", "not-reachable", "no-result-yet", "skipped-by-user", "left-out"] as const;
@@ -346,12 +346,13 @@ export type HandoverNote = (typeof HANDOVER_NOTES)[number];
 export const SYSTEM_KEYS = ["windows", "macos", "linux"] as const;
 export type SystemKey = (typeof SYSTEM_KEYS)[number];
 
-export type Route = { system: SystemKey; route: string; steps: string[]; canOpen: boolean };
+/** `system` is null when PCTwin cannot tell which system the old laptop runs: the steps are then the general ones. */
+export type Route = { system: SystemKey | null; route: string; steps: string[]; canOpen: boolean };
 
 function parseRoute(v: unknown): Route | null {
   const f = exactly(v, ["system", "route", "steps", "canOpen"]);
   const steps = f && listOf(f.steps, (x) => (isKey(x) ? x : null));
-  return f && steps && oneOf(f.system, SYSTEM_KEYS) && isKey(f.route) && typeof f.canOpen === "boolean" ? { system: f.system, route: f.route, steps, canOpen: f.canOpen } : null;
+  return f && steps && (f.system === null || oneOf(f.system, SYSTEM_KEYS)) && isKey(f.route) && typeof f.canOpen === "boolean" ? { system: f.system, route: f.route, steps, canOpen: f.canOpen } : null;
 }
 
 export type HandoverView =

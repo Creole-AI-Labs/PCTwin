@@ -7,6 +7,7 @@ import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import "./progress.css";
 import { useRescueDrive } from "./rescueContext";
+import SpaceBox, { fitsWith } from "./SpaceBox";
 
 /**
  * The new laptop: what the old laptop's person chose to send, for one tap to accept (decided 28
@@ -20,6 +21,8 @@ export default function AcceptMove({
   onAccept,
   onDetails,
   onNotNow,
+  leaveBehind = false,
+  onLeaveBehind,
 }: {
   plan: PlanView;
   /** The old laptop's name, as pairing showed it. */
@@ -27,13 +30,18 @@ export default function AcceptMove({
   onAccept: () => void;
   onDetails: () => void;
   onNotNow: () => void;
+  /** The smaller-laptop proposal (2.6): the person chose to leave those files on the old laptop. */
+  leaveBehind?: boolean;
+  onLeaveBehind?: (on: boolean) => void;
 }) {
   const { l10n } = useLocalization();
   // A rescue: nobody chose this on another laptop; it is what was found on the drive.
   const drive = useRescueDrive();
   const { chosen } = overviewOf(plan);
   const attention = planAttention(plan);
-  const needs = attention.space || attention.files > 0 || plan.blocked !== undefined;
+  // With a proposal for the room, the plan fits once the person accepts it and nothing is still short.
+  const roomOk = plan.space ? fitsWith(plan.space, leaveBehind) : !attention.space;
+  const needs = !roomOk || attention.files > 0 || plan.blocked !== undefined;
   // Only what changes this laptop is listed: an app already here, or a line about what stays
   // behind, is not coming.
   const changes = (plan.rebuild?.changes ?? []).filter((c) => c.action !== "leave-alone");
@@ -49,6 +57,7 @@ export default function AcceptMove({
         {apps > 0 && <Row title={l10n.getString("accept-apps", { count: apps })} />}
         {settings && <Row title={l10n.getString("accept-settings")} />}
       </RowList>
+      {plan.space && onLeaveBehind && <SpaceBox space={plan.space} accepted={leaveBehind} onChange={onLeaveBehind} />}
       <div className="mv-note">
         <Banner tone={needs ? "attention" : "ready"}>{l10n.getString(needs ? "accept-needs" : "accept-fits")}</Banner>
       </div>

@@ -94,10 +94,10 @@ function RouteSteps({ route }: { route: Route }) {
   const has = useHas();
   return (
     <>
-      <p>{l10n.getString(`finish-route-system-${route.system}`)}</p>
+      {route.system !== null && <p>{l10n.getString(`finish-route-system-${route.system}`)}</p>}
       <ol className="fin-list">
         {route.steps.map((s, i) => (
-          <li key={`${s}-${String(i)}`}>{has(`finish-route-${s}`) ? l10n.getString(`finish-route-${s}`) : l10n.getString("finish-route-unknown-step")}</li>
+          <li key={`${s}-${String(i)}`}>{has(s) ? l10n.getString(s) : l10n.getString("finish-route-unknown-step")}</li>
         ))}
       </ol>
     </>

@@ -66,7 +66,7 @@ const first = <T,>(parse: (v: unknown) => T | null, list: unknown[], pick: (x: T
   }
   throw new Error("no example");
 };
-const view = (headline: fin.Headline = "ready-for-selected", notes?: fin.FinishNote[]): fin.FinishView => ({ ...first(fin.parseFinishView, viewJson), headline, ...(notes ? { notes } : {}) });
+const view = (headline: fin.Headline = "ready-for-selected-work", notes?: fin.FinishNote[]): fin.FinishView => ({ ...first(fin.parseFinishView, viewJson), headline, ...(notes ? { notes } : {}) });
 const goodbye = (over: Partial<fin.GoodbyeView> = {}): fin.GoodbyeView => ({ ...first(fin.parseGoodbyeView, goodbyeJson), ...over });
 const ready = first(fin.parseHandoverView, handoverJson, (v) => v.kind === "ready");
 
@@ -125,16 +125,16 @@ describe("Finish your move (the hub)", () => {
     const h1 = await heading(text("finish-title"));
     expect(document.activeElement).toBe(h1);
     expect(api.finishOverview).toHaveBeenCalledWith(null);
-    expect(screen.getByRole("heading", { level: 2, name: text("finish-headline-ready-for-selected") })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: text("finish-headline-ready-for-selected-work") })).toBeTruthy();
     expect(screen.getByText(plain(text("finish-others", { count: "120" })))).toBeTruthy();
     await accessible();
   });
 
-  it.each(["finished-with-tasks", "data-preserved-access-unresolved", "handover-unresolved", "nothing-moved"] as const)("a partial result (%s) says so and never says everything is there", async (headline) => {
+  it.each(["finished-with-tasks", "data-preserved", "handover-unresolved", "nothing-moved"] as const)("a partial result (%s) says so and never says everything is there", async (headline) => {
     api.finishOverview.mockResolvedValue(view(headline));
     host();
     expect(await screen.findByRole("heading", { level: 2, name: text(`finish-headline-${headline}`) })).toBeTruthy();
-    expect(screen.queryByText(text("finish-headline-ready-for-selected"))).toBeNull();
+    expect(screen.queryByText(text("finish-headline-ready-for-selected-work"))).toBeNull();
     expect(document.querySelector(".seal, [data-confetti]")).toBeNull();
   });
 
@@ -147,10 +147,10 @@ describe("Finish your move (the hub)", () => {
   });
 
   it("offers undo only while undo is open, and every step opens its own page with Back to the list", async () => {
-    api.finishOverview.mockResolvedValue(view("ready-for-selected", []));
+    api.finishOverview.mockResolvedValue(view("ready-for-selected-work", []));
     const user = userEvent.setup();
     host();
-    await screen.findByRole("heading", { level: 2, name: text("finish-headline-ready-for-selected") });
+    await screen.findByRole("heading", { level: 2, name: text("finish-headline-ready-for-selected-work") });
     expect(screen.queryByRole("button", { name: text("finish-open-name", { title: text("finish-step-undo") }) })).toBeNull();
     await open(user, "doctor");
     expect(document.activeElement).toBe(await heading(text("finish-doctor-title")));
@@ -321,7 +321,7 @@ describe("Hand the old laptop on (R08 to R10)", () => {
     await heading(text("finish-handover-preview-erase"));
     expect(screen.getByText("Samsung SSD 980")).toBeTruthy();
     expect(screen.getByText(text("finish-handover-keeps-none"))).toBeTruthy();
-    expect(screen.getByText(text("finish-route-windows-clean-drive"))).toBeTruthy();
+    expect(screen.getByText(text("windows-open-recovery"))).toBeTruthy();
     expect(screen.getByText(text("finish-hnote-ssd-not-secure-wipe"))).toBeTruthy();
     expect(api.handoverPreview).toHaveBeenCalledWith("1792627200000-0", "erase-old-laptop");
     await accessible();
@@ -435,9 +435,9 @@ describe("Connection doctor", () => {
     await heading(text("finish-doctor-title"));
     await user.click(screen.getByRole("button", { name: text("finish-doctor-run") }));
     expect(api.doctorRun).toHaveBeenCalledWith("new");
-    await screen.findByText(plain(text("doctor-windows-public-network", { names: "Wi-Fi" })));
-    expect(screen.getByText(text("finish-doctor-hotspot-first"))).toBeTruthy();
-    expect(screen.getByText(text("finish-notchecked-doctor-probe-hears-itself"))).toBeTruthy();
+    await screen.findByText(plain(text("doctor-windows-public-network", { name: "Wi-Fi" })));
+    expect(screen.getByText(text("doctor-hotspot"))).toBeTruthy();
+    expect(screen.getByText(text("doctor-probe-hears-itself"))).toBeTruthy();
     await accessible();
   });
 });

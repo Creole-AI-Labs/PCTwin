@@ -92,7 +92,7 @@ export default function FinishHub({ id, onBack, onOpen }: { id: string | null; o
 
 function Headline({ view }: { view: FinishView }) {
   const { l10n } = useLocalization();
-  const ok = view.headline === "ready-for-selected";
+  const ok = view.headline === "ready-for-selected-work";
   return (
     <div className="fin-headline">
       {ok ? <Check className="mv-icon" /> : view.headline === "nothing-moved" ? <Info className="mv-icon" /> : <Attention className="mv-icon" />}

@@ -2715,12 +2715,12 @@ finish-problem-changed = ما يظهر قديم. انظر إليه مرة أخر
 finish-problem-not-allowed = لا يمكن القيام بذلك. لم يتغير شيء.
 finish-problem-busy = هناك عملية نقل أو خطوة أخرى قيد التنفيذ. انتظر حتى تنتهي ثم حاول مرة أخرى. لم يتغير شيء.
 finish-problem-failed = حدث خطأ على هذا الحاسوب المحمول. لم يتغير شيء. حاول مرة أخرى.
-finish-headline-ready-for-selected = كل ما اخترته موجود على هذا الحاسوب المحمول
-finish-headline-ready-for-selected-body = وجد PCTwin كل عنصر اخترته على هذا الحاسوب المحمول وتحقق منه بقدر ما يستطيع. هذا لا يضمن أن كل تطبيق سيعمل كما كان.
+finish-headline-ready-for-selected-work = كل ما اخترته موجود على هذا الحاسوب المحمول
+finish-headline-ready-for-selected-work-body = وجد PCTwin كل عنصر اخترته على هذا الحاسوب المحمول وتحقق منه بقدر ما يستطيع. هذا لا يضمن أن كل تطبيق سيعمل كما كان.
 finish-headline-finished-with-tasks = اكتمل النقل، وبقيت بعض المهام
 finish-headline-finished-with-tasks-body = بعض العناصر تحتاج إليك، أو لم يتم نسخها. وهي مدرجة في هذه الصفحة.
-finish-headline-data-preserved-access-unresolved = ملفاتك محفوظة بأمان، لكن بعضها لا يمكن فتحه بعد
-finish-headline-data-preserved-access-unresolved-body = كل شيء موجود على هذا الحاسوب المحمول. فتح بعضها يحتاج إلى مفتاح أو رمز استرداد، ولم يستطع PCTwin التحقق من ذلك هنا.
+finish-headline-data-preserved = ملفاتك محفوظة بأمان، لكن بعضها لا يمكن فتحه بعد
+finish-headline-data-preserved-body = كل شيء موجود على هذا الحاسوب المحمول. فتح بعضها يحتاج إلى مفتاح أو رمز استرداد، ولم يستطع PCTwin التحقق من ذلك هنا.
 finish-headline-handover-unresolved = لم يتم تسليم الحاسوب المحمول القديم بعد
 finish-headline-handover-unresolved-body = انتهى العمل على هذا الحاسوب المحمول. قائمة ما قبل ترك الحاسوب المحمول القديم ما زالت فيها أمور مفتوحة.
 finish-headline-nothing-moved = لم يتم اختيار شيء للنقل
@@ -2901,10 +2901,6 @@ finish-handover-to-list = اذهب إلى قائمة ما قبل المغادر�
 finish-route-system-windows = Windows
 finish-route-system-macos = macOS
 finish-route-system-linux = Linux
-finish-route-windows-open-recovery = افتح إعدادات الاسترداد في Windows.
-finish-route-windows-reset-this-pc = اختر إعادة تعيين هذا الكمبيوتر.
-finish-route-windows-remove-everything = اختر إزالة كل شيء.
-finish-route-windows-clean-drive = اختر تنظيف محرك الأقراص.
 finish-route-unknown-step = اتبع الخطوة التالية التي يعرضها النظام.
 finish-hnote-ssd-not-secure-wipe = حذف الملفات على SSD ليس مسحًا آمنًا.
 finish-hnote-does-not-cancel-subscriptions = إزالة الحساب لا تلغي الاشتراكات ولا تُخرجك من حساباتك في أماكن أخرى.
@@ -2999,11 +2995,8 @@ finish-doctor-none = لم يجد PCTwin مشكلة على هذا الحاسوب 
 finish-doctor-sure = مؤكد
 finish-doctor-likely = محتمل
 finish-doctor-fix = ما العمل
-finish-doctor-hotspot-first = جرّب نقطة اتصال هاتفك أولًا. شغّلها، وصل بها الحاسوبين المحمولين، وحاول مرة أخرى.
-finish-doctor-hotspot-last = إذا لم ينفع شيء آخر، فاستخدم نقطة اتصال هاتفك. شغّلها، وصل بها الحاسوبين المحمولين، وحاول مرة أخرى.
 finish-doctor-not-checked = لم يستطع PCTwin فحصه
 finish-notchecked-unknown = تعذّر إجراء فحص واحد على هذا الحاسوب المحمول.
-finish-notchecked-doctor-probe-hears-itself = هل يستطيع هذا الحاسوب المحمول سماع رسالة الاختبار التي يرسلها.
 finish-report-title = شارك التقرير
 finish-report-body = اختر ما يتضمنه التقرير. لا يُضاف شيء ما لم تختره. لا يُرسل شيء. أنت تحفظ النص الذي تقرؤه، وتشاركه بنفسك.
 finish-report-choices = ضمّن في التقرير
@@ -3213,3 +3206,15 @@ finish-step-work = هل أستطيع العمل فعلًا؟
 finish-step-work-detail = تأكد أن الملفات والخطوط والمهام التي تحتاجها موجودة هنا.
 finish-step-kit = حفظ حزمة استرداد
 finish-step-kit-detail = احتفظ بسجلّ صغير لهذا النقل في مجلد تختاره.
+space-box-title = لا توجد مساحة كافية على هذا الحاسوب لكل شيء.
+space-box-choice = { $count ->
+        [zero] لا ملفات لتركها على حاسوبك القديم
+        [one] اترك على حاسوبك القديم ملفًا واحدًا ({ $size }) لم تستخدمه منذ أطول مدة
+        [two] اترك على حاسوبك القديم ملفين ({ $size }) لم تستخدمهما منذ أطول مدة
+        [few] اترك على حاسوبك القديم { $count } ملفات ({ $size }) لم تستخدمها منذ أطول مدة
+        [many] اترك على حاسوبك القديم { $count } ملفًا ({ $size }) لم تستخدمها منذ أطول مدة
+       *[other] اترك على حاسوبك القديم { $count } ملف ({ $size }) لم تستخدمها منذ أطول مدة
+    }
+space-box-kept = لا يُحذف شيء. تبقى على حاسوبك القديم.
+space-box-short = حتى مع ذلك، ما زال ينقص { $size }. ألغِ تحديد بعض المجلدات، أو اختر مكانًا آخر لها.
+space-box-fits = مع بقائها على حاسوبك القديم، يتسع كل ما تبقى.
