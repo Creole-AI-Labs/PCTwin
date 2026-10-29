@@ -379,3 +379,40 @@ fn os_start_contained(
     };
     r
 }
+
+/// Whether the administrators group counts for this process: false when it is deny-only (the
+/// parser's restricted token) or absent. Asked of Windows for this process's own token.
+pub fn administrators_count() -> Result<bool, Error> {
+    let mut admins = [0u8; SECURITY_MAX_SID_SIZE as usize];
+    os_administrators_count(&mut admins).map_err(|(call, code)| Error::Os {
+        call,
+        code: i64::from(code.0),
+    })
+}
+
+/// `CheckTokenMembership` of the administrators group, for this thread's own token. Added 28
+/// October 2026 to read back the parser's restricted token; approved by the user, 28 October
+/// 2026 (the parser's walls).
+fn os_administrators_count(buffer: &mut [u8]) -> Result<bool, (&'static str, HRESULT)> {
+    assert!(
+        buffer.len() >= SECURITY_MAX_SID_SIZE as usize,
+        "room for a SID"
+    );
+    // SAFETY: the SID is written into `buffer`, which is large enough for any SID (checked
+    // above) and lives for the whole call; CheckTokenMembership only reads it.
+    #[expect(unsafe_code, reason = "CheckTokenMembership has no safe binding")]
+    let r = unsafe {
+        let mut len = buffer.len() as u32;
+        let sid = PSID(buffer.as_mut_ptr().cast());
+        match CreateWellKnownSid(WinBuiltinAdministratorsSid, None, Some(sid), &mut len) {
+            Err(e) => Err(("CreateWellKnownSid", e.code())),
+            Ok(()) => {
+                let mut member = windows::core::BOOL::default();
+                windows::Win32::Security::CheckTokenMembership(None, sid, &mut member)
+                    .map(|()| member.as_bool())
+                    .map_err(|e| ("CheckTokenMembership", e.code()))
+            }
+        }
+    };
+    r
+}

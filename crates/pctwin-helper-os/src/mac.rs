@@ -21,7 +21,7 @@ use objc2_open_directory::{
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub(crate) fn peer(stream: &UnixStream) -> Result<Caller, Error> {
     let errno = |e: nix::errno::Errno| Error::Io(std::io::Error::from_raw_os_error(e as i32));
@@ -487,18 +487,22 @@ pub const PARSER_PROFILE: &str = "(version 1)\n(deny default)\n(allow process-in
 /// still honours it, as Chromium relies on). Once in, it cannot be undone. Added 28 October 2026
 /// for the parser's walls; approved by the user, 28 October 2026.
 fn os_sandbox_init(profile: &std::ffi::CStr) -> Result<(), String> {
-    unsafe extern "C" {
-        fn sandbox_init(
-            profile: *const std::ffi::c_char,
-            flags: u64,
-            errorbuf: *mut *mut std::ffi::c_char,
-        ) -> std::ffi::c_int;
-        fn sandbox_free_error(errorbuf: *mut std::ffi::c_char);
-    }
     // SAFETY: `profile` is a NUL-terminated string that lives for the call; flags 0 means it is
-    // the profile's text. The error text the system may give is copied, then freed once.
-    #[expect(unsafe_code, reason = "sandbox_init has no safe binding")]
+    // the profile's text. The error text the system may give is copied, then freed once. The two
+    // functions are declared here as libsandbox (part of libSystem) defines them.
+    #[expect(
+        unsafe_code,
+        reason = "sandbox_init has no safe binding: declared and called here only"
+    )]
     let r = unsafe {
+        unsafe extern "C" {
+            fn sandbox_init(
+                profile: *const std::ffi::c_char,
+                flags: u64,
+                errorbuf: *mut *mut std::ffi::c_char,
+            ) -> std::ffi::c_int;
+            fn sandbox_free_error(errorbuf: *mut std::ffi::c_char);
+        }
         let mut error: *mut std::ffi::c_char = std::ptr::null_mut();
         if sandbox_init(profile.as_ptr(), 0, &mut error) == 0 {
             Ok(())

@@ -51,8 +51,8 @@ pub enum Wall {
     NoPersonalFiles,
     /// The system refuses it starting another program.
     NoChildProcesses,
-    /// It runs with fewer rights than the app (Windows: low integrity in a container, not
-    /// elevated; macOS: a sandbox profile).
+    /// It runs with fewer rights than the app (Windows: low integrity in a container, the
+    /// administrators group deny-only; macOS: a sandbox profile).
     LowRights,
     /// The system caps its memory.
     MemoryCap,
@@ -174,7 +174,9 @@ fn system_walls() -> Vec<Wall> {
         return Vec::new();
     }
     let mut walls = vec![Wall::NoNetwork, Wall::NoPersonalFiles];
-    if pctwin_helper_os::this_process_elevated().is_ok_and(|elevated| !elevated) {
+    // Low integrity in the container, and the administrators group deny-only (the restricted
+    // token), read back from Windows itself.
+    if pctwin_helper_os::contain::administrators_count().is_ok_and(|counts| !counts) {
         walls.push(Wall::LowRights);
     }
     walls
