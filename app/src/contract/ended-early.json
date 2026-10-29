@@ -15,5 +15,8 @@
   },
   {
     "kind": "update-there"
+  },
+  {
+    "kind": "place-changed"
   }
 ]

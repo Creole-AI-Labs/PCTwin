@@ -2612,3 +2612,7 @@ qs-where-path = 完整位置：{ $path }
 qs-where-save = 保存到这里
 qs-where-choose = 选择其他文件夹
 qs-where-stop = 停止
+
+# 2.9 destination changed after approval
+move-place-changed-title = 批准后有文件夹发生了变化
+move-place-changed-body = 你批准后，目标文件夹被移动或替换了。没有复制任何内容。请检查该文件夹，然后重新开始迁移。

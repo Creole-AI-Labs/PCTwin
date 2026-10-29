@@ -2879,3 +2879,7 @@ qs-where-path = पूरी जगह: { $path }
 qs-where-save = यहाँ सेव करें
 qs-where-choose = दूसरा फ़ोल्डर चुनें
 qs-where-stop = रोकें
+
+# 2.9 destination changed after approval
+move-place-changed-title = आपकी मंज़ूरी के बाद एक फ़ोल्डर बदल गया
+move-place-changed-body = जिस फ़ोल्डर में फ़ाइलें जानी थीं, वह आपकी मंज़ूरी के बाद हटाया या बदला गया। कुछ भी कॉपी नहीं हुआ। फ़ोल्डर देखें, फिर से शुरू करें।

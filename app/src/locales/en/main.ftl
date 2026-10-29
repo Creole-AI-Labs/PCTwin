@@ -2757,3 +2757,7 @@ qs-where-path = Full place: { $path }
 qs-where-save = Save here
 qs-where-choose = Choose another folder
 qs-where-stop = Stop
+
+# 2.9 destination changed after approval
+move-place-changed-title = A folder changed after you approved
+move-place-changed-body = A folder the files were going into was moved or replaced after you approved the move. Nothing was copied. Check the folder, then start the move again.

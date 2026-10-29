@@ -599,6 +599,7 @@ fn endings() -> Vec<EndedEarly> {
         },
         EndedEarly::UpdateHere,
         EndedEarly::UpdateThere,
+        EndedEarly::PlaceChanged,
     ]
 }
 

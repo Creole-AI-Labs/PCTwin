@@ -134,6 +134,7 @@ function topicOf(end: MoveEnd): HelpTopic {
     case "failed":
     case "update-here":
     case "update-there":
+    case "place-changed":
       return "move-failed";
   }
 }

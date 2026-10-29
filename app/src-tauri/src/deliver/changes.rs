@@ -17,10 +17,12 @@
 //! line (`drift::data_changed`, `project-edited`, held step `app-data`). Yes leaves it for "Fix
 //! these", which waits for the old laptop; no ends it skipped-by-user.
 //!
-//! Not wired yet: a destination folder moved or replaced after approval. Its rule and test are
-//! `drift::places_now` / `drift::places_changed`, but the file transfer (`pctwin-move`) writes
-//! through the folder it opened before approval and does not check it again, so files are not
-//! held for it and no line is shown.
+//! A destination folder moved or replaced after approval ends the move before anything is
+//! written: the file transfer checks that each approved folder's path still leads to the very
+//! folder it holds (`pctwin_gate::Destinations::changed_since_approved`) just before the landing
+//! rules go to the old laptop, and stops with `Stop::PlaceChanged`; the screens say so
+//! (`move-place-changed-*`). On Windows the held folder and the folders above it cannot be moved
+//! at all while PCTwin holds them; the check matters on a Mac and on Linux.
 
 use pctwin_fullmove::drift::{Drift, Step, Why};
 use pctwin_fullmove::plan::{Kind, Title};

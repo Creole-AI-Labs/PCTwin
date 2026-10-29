@@ -647,6 +647,10 @@ pub enum Stop {
     /// 29 October 2026: the old laptop had already said the connection was lost).
     #[error("the other laptop went before the plan was answered")]
     LinkLost,
+    /// A folder the files were to land in was moved or replaced after the approval (Task List
+    /// 2.9): nothing is written, so nothing lands in a place the person did not see.
+    #[error("a destination folder was moved or replaced after the approval")]
+    PlaceChanged,
 }
 
 /// Waits for `answer` (a person's choice), unless the other laptop goes first (`gone`
@@ -1158,6 +1162,11 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         approved.allowance =
             Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?
                 .with_wholes(wholes);
+        // A destination folder moved or replaced since it was approved: the move ends here,
+        // before the rules are sent or anything is written.
+        if !table.changed_since_approved().is_empty() {
+            return Err(Stop::PlaceChanged.into());
+        }
         landing::send_rules(link, &rules).await?;
         // The plan is approved and the rules said: both laptops make their resume keys for
         // exactly this plan, and the old laptop says where it waits for this one's return.

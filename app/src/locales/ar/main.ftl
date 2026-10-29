@@ -3290,3 +3290,7 @@ qs-where-path = المكان الكامل: { $path }
 qs-where-save = احفظ هنا
 qs-where-choose = اختر مجلدًا آخر
 qs-where-stop = إيقاف
+
+# 2.9 destination changed after approval
+move-place-changed-title = تغيّر مجلد بعد موافقتك
+move-place-changed-body = نُقل مجلد كانت الملفات ستُنسخ إليه أو استُبدل بعد موافقتك على النقل. لم يُنسخ أي شيء. تحقق من المجلد، ثم ابدأ النقل من جديد.

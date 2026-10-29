@@ -372,7 +372,7 @@ export function parsePeopleToPlace(value: unknown): PeopleToPlace | null {
 export type PeopleHere = { people: { id: string; name: string; isYou: boolean }[]; canMoveOthers: boolean };
 
 /** Why a move ended before it finished (`EndedEarly`). `detail` is the engine's words, for "more details" only. */
-export type EndedEarly = { kind: "link-lost"; detail: string } | { kind: "not-approved" | "update-here" | "update-there" } | { kind: "failed"; detail: string };
+export type EndedEarly = { kind: "link-lost"; detail: string } | { kind: "not-approved" | "update-here" | "update-there" | "place-changed" } | { kind: "failed"; detail: string };
 
 /** The exact plan revision the person answers. */
 export type PlanKey = { revision: number; fingerprint: string };
@@ -453,7 +453,7 @@ export function parsePeopleHere(value: unknown): PeopleHere | null {
 
 export function parseEndedEarly(value: unknown): EndedEarly | null {
   const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
-  if (kind === "not-approved" || kind === "update-here" || kind === "update-there") return exactly(value, ["kind"]) ? { kind } : null;
+  if (kind === "not-approved" || kind === "update-here" || kind === "update-there" || kind === "place-changed") return exactly(value, ["kind"]) ? { kind } : null;
   if (kind === "link-lost" || kind === "failed") {
     const f = exactly(value, ["kind", "detail"]);
     return f && typeof f.detail === "string" ? { kind, detail: f.detail } : null;

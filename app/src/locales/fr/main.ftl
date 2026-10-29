@@ -2980,3 +2980,7 @@ qs-where-path = Emplacement complet : { $path }
 qs-where-save = Enregistrer ici
 qs-where-choose = Choisir un autre dossier
 qs-where-stop = Arrêter
+
+# 2.9 destination changed after approval
+move-place-changed-title = Un dossier a changé après votre accord
+move-place-changed-body = Un dossier de destination a été déplacé ou remplacé après votre accord. Rien n’a été copié. Vérifiez le dossier, puis recommencez le transfert.

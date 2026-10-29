@@ -950,6 +950,9 @@ pctwin_types::listed_enum! {
         UpdateHere,
         /// PCTwin on the other laptop is older: update it there (C06).
         UpdateThere,
+        /// A folder the files were going into was moved or replaced after the approval: nothing
+        /// was copied (Task List 2.9).
+        PlaceChanged,
     }
 }
 
@@ -959,6 +962,7 @@ impl EndedEarly {
             MoveError::Stopped(Stop::LinkLost) => Self::LinkLost {
                 detail: e.to_string(),
             },
+            MoveError::Stopped(Stop::PlaceChanged) => Self::PlaceChanged,
             MoveError::Stopped(_) => Self::NotApproved,
             MoveError::Transfer(TransferError::VersionGap(gap)) => match gap {
                 pctwin_transfer::VersionGap::ThisLaptopOlder => Self::UpdateHere,

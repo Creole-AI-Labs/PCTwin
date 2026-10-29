@@ -2971,3 +2971,7 @@ qs-where-path = Ubicación completa: { $path }
 qs-where-save = Guardar aquí
 qs-where-choose = Elegir otra carpeta
 qs-where-stop = Detener
+
+# 2.9 destination changed after approval
+move-place-changed-title = Una carpeta cambió tras tu aprobación
+move-place-changed-body = Una carpeta de destino se movió o se sustituyó después de que aprobaras el traslado. No se copió nada. Revisa la carpeta y vuelve a empezar el traslado.

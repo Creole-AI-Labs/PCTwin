@@ -689,6 +689,22 @@ impl Destination {
         self.root_path.as_deref()
     }
 
+    /// Whether the path this place was approved at still leads to the very folder held: a folder
+    /// moved, renamed or replaced since is not (Task List 2.9, a destination changed after the
+    /// approval). One handed over as a handle has no path to change. A doubt counts as changed: a
+    /// folder that cannot be read again is not called the same.
+    pub fn still_where_approved(&self) -> bool {
+        let Some(path) = self.root_path.as_deref() else {
+            return true;
+        };
+        let Ok(Some(held)) = self.folder_identity("") else {
+            return false;
+        };
+        Dir::open_ambient_dir(path, ambient_authority())
+            .and_then(|d| identity(&d.into_std_file()))
+            .is_ok_and(|(now, _)| now == held)
+    }
+
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut dest = Self::from_dir(Dir::open_ambient_dir(path, ambient_authority())?);
@@ -2633,6 +2649,19 @@ impl Destinations {
         self.entries
             .insert(id.to_string(), (place, destination.with_faults(plan)));
         Ok(())
+    }
+
+    /// The labels of the approved places whose folder is no longer where it was approved
+    /// ([`Destination::still_where_approved`]), in order.
+    pub fn changed_since_approved(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, (_, d))| !d.still_where_approved())
+            .map(|(id, _)| id.clone())
+            .collect();
+        out.sort();
+        out
     }
 
     /// The approved place labelled `id`, or [`GateError::UnknownDestination`].
