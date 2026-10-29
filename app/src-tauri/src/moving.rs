@@ -929,6 +929,9 @@ pctwin_types::listed_enum! {
 impl EndedEarly {
     fn of(e: &MoveError) -> Self {
         match e {
+            MoveError::Stopped(Stop::LinkLost) => Self::LinkLost {
+                detail: e.to_string(),
+            },
             MoveError::Stopped(_) => Self::NotApproved,
             MoveError::Transfer(TransferError::VersionGap(gap)) => match gap {
                 pctwin_transfer::VersionGap::ThisLaptopOlder => Self::UpdateHere,
@@ -1910,6 +1913,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
 /// The new laptop's answers: the mover's things go to the signed-in person here, other people
 /// are not moved by this version of the app's flow, and the person approves on M23.
 struct AppSteps<R: Runtime> {
+    /// A watch on the link while the person decides on the plan (see [`pctwin_link::Link::watch`]).
+    watch: Option<pctwin_link::LinkWatch>,
     app: AppHandle<R>,
     moving: AppMoving,
     me: String,
@@ -2243,7 +2248,15 @@ impl<R: Runtime> Steps for AppSteps<R> {
             groups,
         );
         let _ = self.app.emit(PLAN_EVENT, view);
-        match answer.await {
+        // While the person decides, the link is watched: if the old laptop goes, the plan page
+        // gives way to "connection lost" instead of offering a move that cannot run.
+        let answered = match &self.watch {
+            Some(w) => pctwin_move::or_gone(w.closed(), async { Ok(answer.await) }).await?,
+            None => answer.await,
+        };
+        // The watch holds the connection open while it lives: let it go once the person answered.
+        self.watch = None;
+        match answered {
             Ok(true) => {
                 // The app data to bring: what copies, and only the secrets the person ticked,
                 // one by one (a tick on anything but a secret line counts for nothing).
@@ -2753,6 +2766,7 @@ async fn run_new<R: Runtime>(
     let held_places = pctwin_move::held_journal::HeldPlaces::default();
     let ledger = pctwin_move::held_journal::SplitLedger::new(&journal, held_places.clone());
     let mut steps = AppSteps {
+        watch: link.watch().ok(),
         app: app.clone(),
         moving,
         me: me.clone(),
