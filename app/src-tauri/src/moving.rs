@@ -3781,8 +3781,13 @@ fn own_folder_offered(
 }
 
 fn check_fallback(fallback: &BTreeMap<FolderRole, String>) -> Result<(), MoveProblem> {
+    // Each part a plain folder name, checked as the old laptop's own folder is (exit-gate review,
+    // 29 October 2026): no `..`, drive, separator of another system or reserved name ever reaches
+    // the gate from the screens.
     let fine = fallback.values().all(|name| {
-        !name.is_empty() && name.len() <= MAX_FALLBACK && !name.chars().any(char::is_control)
+        !name.is_empty()
+            && name.len() <= MAX_FALLBACK
+            && name.split('/').all(pctwin_move::landing::own_folder_fine)
     });
     if fine {
         Ok(())
@@ -4204,6 +4209,28 @@ fn old_laptop_apps(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The folder names the screens send for a group a new laptop lacks are plain names only.
+    #[test]
+    fn a_fallback_folder_is_only_plain_folder_names() {
+        let one = |name: &str| BTreeMap::from([(FolderRole::Pictures, name.to_string())]);
+        assert!(check_fallback(&one("Pictures")).is_ok());
+        assert!(check_fallback(&one("Images/Camera")).is_ok());
+        for bad in [
+            "",
+            "..",
+            "a/../b",
+            r"a\b",
+            "C:",
+            "/abs",
+            "a//b",
+            "CON",
+            "x\u{202e}y",
+            "trail.",
+        ] {
+            assert!(check_fallback(&one(bad)).is_err(), "{bad}");
+        }
+    }
 
     /// A record with one included file in each of `roles`, and one rebuildable folder left out.
     fn found_in(roles: &[FolderRole]) -> Record {
