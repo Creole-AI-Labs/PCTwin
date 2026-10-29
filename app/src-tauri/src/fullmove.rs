@@ -1063,6 +1063,9 @@ fn plan_line(l: pctwin_fullmove::undo::PlanLine) -> UndoPlanLine {
             pctwin_fullmove::undo::UndoPlan::PutBack => UndoPlan::PutBack,
             pctwin_fullmove::undo::UndoPlan::KeepChanged => UndoPlan::KeepChanged,
             pctwin_fullmove::undo::UndoPlan::RemoveYourself => UndoPlan::RemoveYourself,
+            pctwin_fullmove::undo::UndoPlan::RemoveApp => UndoPlan::RemoveApp,
+            pctwin_fullmove::undo::UndoPlan::KeepOtherVersion => UndoPlan::KeepOtherVersion,
+            pctwin_fullmove::undo::UndoPlan::AlreadyGone => UndoPlan::AlreadyGone,
         },
     }
 }
@@ -1083,6 +1086,14 @@ fn undo_line(l: pctwin_fullmove::undo::Line) -> UndoLine {
             Some(format!("{left} could not be put back this time")),
         ),
         R::RemoveYourself => (UndoResult::RemoveYourself, None),
+        R::Removed {
+            restart_needed: false,
+        } => (UndoResult::Removed, None),
+        R::Removed {
+            restart_needed: true,
+        } => (UndoResult::RemovedRestart, None),
+        R::KeptOtherVersion => (UndoResult::KeptOtherVersion, None),
+        R::NotRemoved => (UndoResult::NotRemoved, None),
     };
     UndoLine {
         name: name(&l.name),
@@ -1199,7 +1210,46 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
         close();
         return;
     };
-    let preview = pctwin_fullmove::undo::preview(&journal, book, &mut adapter)
+    // Apps PCTwin installed from a Windows Installer package: removed through the administrator
+    // helper (one system prompt, only if any is to be removed). Elsewhere: listed for the person.
+    let mut list_only = pctwin_fullmove::undo::ListOnly;
+    #[cfg(windows)]
+    let me = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.account_id);
+    #[cfg(windows)]
+    let mut helper = match (me, LaptopId::generate()) {
+        (Some(me), Ok(laptop)) => Some(AppHelper {
+            me,
+            laptop,
+            client: None,
+        }),
+        _ => None,
+    };
+    #[cfg(windows)]
+    let machine = WindowsList;
+    #[cfg(windows)]
+    let mut nonce = || {
+        let mut b = [0u8; 16];
+        getrandom::fill(&mut b).ok().map(|()| b)
+    };
+    #[cfg(windows)]
+    let mut through_helper = helper
+        .as_mut()
+        .map(|helper| pctwin_fullmove::undo::HelperUndo {
+            helper,
+            machine: &machine,
+            nonce: &mut nonce,
+        });
+    #[cfg(windows)]
+    let apps: &mut dyn pctwin_fullmove::undo::AppUndo = match through_helper.as_mut() {
+        Some(h) => h,
+        None => &mut list_only,
+    };
+    #[cfg(not(windows))]
+    let apps: &mut dyn pctwin_fullmove::undo::AppUndo = &mut list_only;
+    let preview = pctwin_fullmove::undo::preview(&journal, book, &mut adapter, apps)
         .map(|l| l.into_iter().map(plan_line).collect::<Vec<_>>())
         .unwrap_or_default();
     let (lines, more) = bounded(preview);
@@ -1251,7 +1301,8 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, book: &UndoBook) {
                         .and_then(|h| pctwin_gate::Destination::open(std::path::Path::new(h)).ok());
                     let data = home.as_ref().map(|h| (&state.keys.capture, h));
                     let (lines, display) =
-                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter, data) {
+                        match pctwin_fullmove::undo::undo(&rebuild, book, &mut adapter, data, apps)
+                        {
                             Ok(lines) => (
                                 lines.into_iter().map(undo_line).collect::<Vec<_>>(),
                                 DisplayState::Complete,
@@ -1289,6 +1340,46 @@ mod tests {
 
     /// Gap 1: an app's to-do list reaches the outcome as notes (a restart is the line's own
     /// reason; a registration with nothing in it says nothing).
+    /// Undo of apps PCTwin installed reaches the screen in its own words: removed (with a
+    /// restart when one finishes it), kept at another version, not removed.
+    #[test]
+    fn app_undo_results_and_plans_reach_the_screen_in_their_own_words() {
+        use pctwin_fullmove::undo::{Line, PlanLine, Result as R, UndoPlan as P};
+        let line = |result| {
+            undo_line(Line {
+                name: "Writer".into(),
+                result,
+            })
+            .result
+        };
+        assert_eq!(
+            line(R::Removed {
+                restart_needed: false
+            }),
+            UndoResult::Removed
+        );
+        assert_eq!(
+            line(R::Removed {
+                restart_needed: true
+            }),
+            UndoResult::RemovedRestart
+        );
+        assert_eq!(line(R::KeptOtherVersion), UndoResult::KeptOtherVersion);
+        assert_eq!(line(R::NotRemoved), UndoResult::NotRemoved);
+        assert_eq!(line(R::RemoveYourself), UndoResult::RemoveYourself);
+        let plan = |plan| {
+            plan_line(PlanLine {
+                name: "Writer".into(),
+                plan,
+            })
+            .plan
+        };
+        assert_eq!(plan(P::RemoveApp), UndoPlan::RemoveApp);
+        assert_eq!(plan(P::KeepOtherVersion), UndoPlan::KeepOtherVersion);
+        assert_eq!(plan(P::AlreadyGone), UndoPlan::AlreadyGone);
+        assert_eq!(plan(P::RemoveYourself), UndoPlan::RemoveYourself);
+    }
+
     #[test]
     fn an_apps_to_do_list_becomes_its_outcome_notes() {
         use pctwin_apps::after::Todo;

@@ -21,7 +21,7 @@ import { Heading } from "./ProgressParts";
 
 function PlanBadge({ plan }: { plan: UndoPlan }) {
   const { l10n } = useLocalization();
-  const icon = plan === "put-back" || plan === "remove-app" ? <Restore /> : plan === "elsewhere" ? <Attention /> : <Lock />;
+  const icon = plan === "put-back" || plan === "remove-app" || plan === "already-gone" ? <Restore /> : plan === "elsewhere" ? <Attention /> : <Lock />;
   return (
     <Badge tone={plan === "elsewhere" ? "warn" : "neutral"} icon={icon}>
       {l10n.getString(`guard-undo-plan-${plan}`)}
@@ -31,7 +31,7 @@ function PlanBadge({ plan }: { plan: UndoPlan }) {
 
 function ResultBadge({ result }: { result: UndoResult }) {
   const { l10n } = useLocalization();
-  const good = result.kind === "restored" || result.kind === "removed" || result.kind === "as-before";
+  const good = result.kind === "restored" || result.kind === "removed" || result.kind === "removed-restart" || result.kind === "as-before";
   const words = result.kind === "kept-at" ? l10n.getString("guard-undo-result-kept-at", { name: result.at }) : l10n.getString(`guard-undo-result-${result.kind}`);
   return (
     <Badge tone={good ? "good" : "warn"} icon={good ? <Check /> : <Attention />}>

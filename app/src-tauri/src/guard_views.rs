@@ -596,6 +596,10 @@ pctwin_types::listed_enum! {
         LeaveAlone,
         /// An app PCTwin installed: the person removes it in the system's settings if they want.
         RemoveYourself,
+        /// An app PCTwin installed that is another version now: kept.
+        KeepOtherVersion,
+        /// An app PCTwin installed that is no longer there.
+        AlreadyGone,
     }
 }
 
@@ -630,6 +634,13 @@ pctwin_types::listed_enum! {
         NotDoneYet,
         /// An app PCTwin installed, left for the person to remove in the system's settings.
         RemoveYourself,
+        /// An app PCTwin installed that is another version now: kept.
+        KeptOtherVersion,
+        /// An app PCTwin installed, removed; a restart finishes it.
+        RemovedRestart,
+        /// An app PCTwin installed that could not be removed this time: the person can remove it
+        /// in the system's settings.
+        NotRemoved,
     }
 }
 

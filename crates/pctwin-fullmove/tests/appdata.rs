@@ -617,6 +617,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
         &rebuilt.undo,
         &mut adapter,
         Some((&keys().capture, &home)),
+        &mut pctwin_fullmove::undo::ListOnly,
     )
     .unwrap();
     assert!(!lines.is_empty());

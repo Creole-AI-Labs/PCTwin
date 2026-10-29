@@ -185,6 +185,27 @@ impl UndoBook {
     }
 }
 
+/// The apps PCTwin installed, as undo keeps them: those it can remove itself (a Windows
+/// Installer product the helper recorded), and the rest, which undo lists for the person, by
+/// name.
+pub fn installed_apps(apps: &[(String, AppResult)]) -> (Vec<String>, Vec<RemovableApp>) {
+    let mut listed = Vec::new();
+    let mut removable = Vec::new();
+    for (name, a) in apps {
+        match a.removable.as_deref() {
+            Some(r) => removable.push(RemovableApp {
+                name: name.clone(),
+                removable: r.clone(),
+            }),
+            None if a.installed || a.result.status() == ItemStatus::Reinstalled => {
+                listed.push(name.clone());
+            }
+            None => {}
+        }
+    }
+    (listed, removable)
+}
+
 /// How one line of app data (an app's components with one step) ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpecialDone {
@@ -740,26 +761,14 @@ pub fn rebuild(
         .iter()
         .map(|m| (m.key.clone(), m.label.clone()))
         .collect();
+    let (listed, removable) = installed_apps(&apps);
     let undo = UndoBook {
         scope: scope.0,
         book: plan.settings.book(),
         recipes: ran.recipes,
         labels,
-        apps: apps
-            .iter()
-            .filter(|(_, a)| a.installed || a.result.status() == ItemStatus::Reinstalled)
-            .filter(|(_, a)| a.removable.is_none())
-            .map(|(n, _)| n.clone())
-            .collect(),
-        removable: apps
-            .iter()
-            .filter_map(|(n, a)| {
-                a.removable.as_deref().map(|removable| RemovableApp {
-                    name: n.clone(),
-                    removable: removable.clone(),
-                })
-            })
-            .collect(),
+        apps: listed,
+        removable,
         landed: data.effects.clone(),
         home: data.home.clone(),
         when: std::time::SystemTime::now()
@@ -775,5 +784,55 @@ pub fn rebuild(
         restore_point: ran.point.or(point),
         stopped: ran.stopped,
         undo,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pctwin_helper::broker::actions::{Hex32, InstalledProduct, ProductCode, ProductVersion};
+
+    fn removable() -> Box<Removable> {
+        Box::new(Removable {
+            product: InstalledProduct {
+                code: ProductCode::parse("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}").unwrap(),
+                version: ProductVersion::parse("2.1.0").unwrap(),
+            },
+            installed_by: Hex32([1; 32]),
+        })
+    }
+
+    /// Undo removes what the helper recorded, lists the rest PCTwin installed for the person,
+    /// and leaves out apps PCTwin did not install.
+    #[test]
+    fn the_undo_book_keeps_each_installed_app_once_in_its_place() {
+        let reinstalled = ItemResult::done(ItemStatus::Reinstalled).unwrap();
+        let mut msi = AppResult::installed(reinstalled, vec![]);
+        msi.removable = Some(removable());
+        let exe = AppResult::installed(reinstalled, vec![]);
+        let mut signs_in = AppResult::installed(ItemResult::because(Reason::SignIn), vec![]);
+        signs_in.installed = true;
+        let manual = AppResult::because(Reason::ManualInstall);
+        let apps = vec![
+            ("Writer".to_string(), msi),
+            ("Tool".to_string(), exe),
+            ("Chat".to_string(), signs_in),
+            ("Game".to_string(), manual),
+        ];
+        let (listed, kept) = installed_apps(&apps);
+        assert_eq!(listed, ["Tool", "Chat"]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].name, "Writer");
+        assert_eq!(kept[0].removable, *removable());
+        // An old book without the field still reads.
+        let old: UndoBook = serde_json::from_str(
+            r#"{"scope":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"book":{},"recipes":[],"labels":{},"apps":["Tool"]}"#,
+        )
+        .unwrap();
+        assert!(old.removable.is_empty());
+        let mut book = old.clone();
+        book.removable = kept;
+        let json = serde_json::to_string(&book).unwrap();
+        assert_eq!(serde_json::from_str::<UndoBook>(&json).unwrap(), book);
     }
 }
