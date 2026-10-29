@@ -6,7 +6,8 @@
  *   PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract
  */
 import { describe, expect, it } from "vitest";
-import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView } from "../bridge";
+import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere,
+  parseRescueDrive, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildStep } from "../fullmove";
 
@@ -36,6 +37,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   interrupted: parseInterrupted,
   "ready-note": parseReadyNote,
   "people-here": parsePeopleHere,
+  "rescue-drives": (v: unknown) => (Array.isArray(v) ? (v.every((d) => parseRescueDrive(d) !== null) ? v.map((d) => parseRescueDrive(d)) : null) : null),
   "people-to-place": parsePeopleToPlace,
   privacy: parsePrivacy,
   found: parseFound,
