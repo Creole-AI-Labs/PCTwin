@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "catalogue": "special-places",
+  "version": 1,
+  "rows": [
+    {"system": "windows", "root": "local", "path": "Microsoft/Windows/Fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},
+    {"system": "windows", "root": "roaming", "path": "Microsoft/Signatures", "kind": "mail-signatures", "name": "Mail signatures", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "root": "roaming", "path": "Microsoft/UProof", "kind": "dictionaries", "name": "Your own dictionary words", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "root": "roaming", "path": "Microsoft/Templates", "kind": "office-templates", "name": "Office templates", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "documents", "path": "Outlook Files", "kind": "mail-archives", "name": "Outlook mail kept on this laptop", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "documents", "path": "My Games", "kind": "game-saves", "name": "Game saves", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "program-files-x86", "path": "Steam/userdata", "kind": "game-saves", "name": "Game saves and settings kept by Steam", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "program-files-x86", "path": "Steam/steamapps", "kind": "game-library", "name": "Games installed by Steam", "step": "locate-verify", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "program-files", "path": "Epic Games", "kind": "game-library", "name": "Games installed by Epic Games", "step": "locate-verify", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "program-files-x86", "path": "GOG Galaxy/Games", "kind": "game-library", "name": "Games installed by GOG Galaxy", "step": "locate-verify", "checked_on": "2026-10-29"},
+    {"system": "mac", "under": "home", "path": "Library/Fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},
+    {"system": "mac", "under": "home", "path": "Library/Spelling", "kind": "dictionaries", "name": "Your own dictionary words", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "mac", "under": "home", "path": "Library/Mail", "kind": "mail-archives", "name": "Apple Mail", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "mac", "root": "group-containers", "path": "UBF8T346G9.Office/User Content", "kind": "office-templates", "name": "Office templates, signatures and dictionaries", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "mac", "root": "application-support", "path": "Steam/steamapps", "kind": "game-library", "name": "Games installed by Steam", "step": "locate-verify", "checked_on": "2026-10-29"},
+    {"system": "linux", "root": "xdg-data", "path": "fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},
+    {"system": "linux", "under": "home", "path": ".fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},
+    {"system": "linux", "root": "xdg-data", "path": "Steam/steamapps", "kind": "game-library", "name": "Games installed by Steam", "step": "locate-verify", "checked_on": "2026-10-29"}
+  ]
+}

@@ -2246,3 +2246,49 @@ accept-needs = Algo necesita tu atención primero. Mira los detalles.
 accept-not-now = Ahora no
 accept-details = Ver los detalles
 accept-accept = Aceptar
+
+# 2.5 special categories
+special-category-email = Correo
+special-category-browser = Navegadores
+special-category-game = Juegos
+special-category-ai-tool = Herramientas de IA y editores de código
+special-category-secret = Claves y contraseñas
+special-category-other = Otros datos de aplicaciones
+special-note-search-rebuilds = Tu aplicación de correo vuelve a crear su búsqueda la primera vez que se abre. Buscar puede ir lento durante un tiempo.
+special-note-server-resync = Tu correo vuelve desde el servidor de correo cuando inicias sesión. PCTwin guarda la copia antigua solo por si algo nunca llegó al servidor.
+special-note-own-sync = Lo más fácil: activa la sincronización de este navegador en tu nuevo portátil. Trae tus marcadores, tu historial, tus pestañas abiertas y tus complementos.
+special-note-passwords-guided = Las contraseñas guardadas solo se mueven con la exportación e importación del propio navegador, o con su sincronización. El archivo exportado no está protegido, así que PCTwin lo mantiene privado y lo borra después de importarlo.
+special-note-passkeys-guided = Las claves de acceso guardadas en una cuenta vuelven al iniciar sesión en ella. Las que están solo en este portátil hay que crearlas de nuevo en cada sitio web. Hazlo antes de borrar el portátil antiguo.
+special-note-cloud-saves = El lanzador del juego también puede guardar tus partidas en línea. Si te pregunta qué partidas conservar, mira primero las fechas.
+special-note-models-checked = Los modelos de IA se comprueban archivo por archivo al llegar. PCTwin nunca los ejecuta.
+special-note-tool-settings-review = Estos ajustes pueden iniciar programas o conectarse a internet. Revísalos antes de usarlos en el nuevo portátil.
+special-note-secret-tick-each = Esto solo se mueve si lo marcas. Nunca aparece en un informe.
+forgotten-title = Cosas que la gente suele olvidar
+forgotten-kind-fonts = Tus propias fuentes
+forgotten-kind-mail-signatures = Firmas de correo
+forgotten-kind-dictionaries = Tus propias palabras del diccionario
+forgotten-kind-office-templates = Plantillas de Office
+forgotten-kind-mail-archives = Correo guardado en este portátil
+forgotten-kind-game-saves = Partidas guardadas
+forgotten-kind-game-library = Juegos instalados por un lanzador de juegos
+forgotten-moving = Esto se mueve con el resto de tus cosas.
+forgotten-not-moving = Esto no está en la mudanza. Puedes copiarlo tú.
+forgotten-step-install = Después de la mudanza, abre cada fuente en el nuevo portátil y elige Instalar.
+forgotten-step-locate-verify = Instala el lanzador de juegos en el nuevo portátil e inicia sesión. Puede volver a instalar tus juegos. Si copias esta carpeta, usa la opción del lanzador para buscar juegos instalados y deja que compruebe los archivos.
+forgotten-not-whole = PCTwin dejó de contar aquí, así que puede haber más.
+forgotten-printers = Impresoras que añadir de nuevo
+forgotten-printer-step = Añade esta impresora de nuevo en tu nuevo portátil.
+forgotten-printer-network = Compartida desde otro ordenador
+forgotten-not-checked = PCTwin no pudo mirar aquí.
+forgotten-files =
+    { $count ->
+        [one] 1 archivo
+        [many] { $count } archivos
+       *[other] { $count } archivos
+    }
+forgotten-online-only =
+    { $count ->
+        [one] 1 archivo guardado solo en línea, sin descargar
+        [many] { $count } archivos guardados solo en línea, sin descargar
+       *[other] { $count } archivos guardados solo en línea, sin descargar
+    }

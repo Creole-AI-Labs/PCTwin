@@ -17,6 +17,44 @@ export type ChangeKind = (typeof CHANGE_KINDS)[number];
 export const SPECIAL_STEPS = ["copy", "export-first", "sign-in", "relink", "not-yet", "look-at-it"] as const;
 export type SpecialStep = (typeof SPECIAL_STEPS)[number];
 
+/** A special category the person sees (2.5): its words are `special-category-<category>`. */
+export const SPECIAL_CATEGORIES = ["email", "browser", "game", "ai-tool", "secret", "other"] as const;
+export type SpecialCategory = (typeof SPECIAL_CATEGORIES)[number];
+
+/** What the person is told because of a category (2.5): words `special-note-<note>`. */
+export const SPECIAL_NOTES = [
+  "search-rebuilds",
+  "server-resync",
+  "own-sync",
+  "passwords-guided",
+  "passkeys-guided",
+  "cloud-saves-may-differ",
+  "models-checked-not-run",
+  "tool-settings-review",
+  "secret-tick-each",
+] as const;
+export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };
+
+/** What the person does about a forgotten-things place (2.5). */
+export const PLACE_STEPS = ["copy", "install", "locate-verify", "add-again"] as const;
+export type PlaceStep = (typeof PLACE_STEPS)[number];
+
+/** One place the forgotten-things finder found: `kind` has words `forgotten-kind-<kind>` when the screens know it, else `name` is shown. */
+export type ForgottenPlace = {
+  kind: string;
+  name: string;
+  place: string;
+  files: number;
+  bytes: number;
+  onlineOnly: number;
+  complete: boolean;
+  moving: boolean;
+  step: PlaceStep;
+  page: string | null;
+};
+export type Printer = { name: string; network: boolean };
+export type Forgotten = { found: ForgottenPlace[]; printers: Printer[]; notChecked: [string, string][] };
+
 export const NOT_MOVED_GROUPS = ["private", "could-run", "old-laptop-only", "system-own", "not-read"] as const;
 export type NotMovedGroup = (typeof NOT_MOVED_GROUPS)[number];
 
@@ -37,6 +75,10 @@ export type ChangeView = {
   source: string | null;
   /** What else the person should know: an older version already here, or saved sign-ins to websites. */
   note: ChangeNote | null;
+  /** A special category's category (2.5). */
+  category: SpecialCategory | null;
+  /** What the person is told because of its category (2.5). */
+  notes: SpecialNote[];
 };
 
 export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" };
@@ -66,6 +108,8 @@ export type RebuildPlan = {
   links: number;
   prompt: boolean;
   restorePoint: boolean;
+  /** What the forgotten-things finder found on the old laptop (2.5). */
+  forgotten: Forgotten | null;
 };
 
 export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[] };
@@ -164,8 +208,37 @@ function parseLineNote(v: unknown): LineNote | null {
   return null;
 }
 
+function parseSpecialNote(v: unknown): SpecialNote | null {
+  const kind = typeof v === "object" && v !== null ? (v as Fields).note : undefined;
+  if (kind === "own-sync") {
+    const f = exactly(v, ["note", "page"]);
+    return f && nameOrNull(f.page) ? { note: kind, page: f.page } : null;
+  }
+  return oneOf(kind, SPECIAL_NOTES) && exactly(v, ["note"]) ? { note: kind as Exclude<SpecialNote["note"], "own-sync"> } : null;
+}
+
+function parseForgotten(v: unknown): Forgotten | null {
+  const f = exactly(v, ["found", "printers", "notChecked"]);
+  if (!f) return null;
+  const found = listOf(f.found, (x) => {
+    const p = exactly(x, ["kind", "name", "place", "files", "bytes", "onlineOnly", "complete", "moving", "step", "page"]);
+    if (!p || typeof p.kind !== "string" || typeof p.name !== "string" || typeof p.place !== "string") return null;
+    if (!isCount(p.files) || !isCount(p.bytes) || !isCount(p.onlineOnly) || typeof p.complete !== "boolean" || typeof p.moving !== "boolean") return null;
+    if (!oneOf(p.step, PLACE_STEPS) || !nameOrNull(p.page)) return null;
+    return { kind: p.kind, name: p.name, place: p.place, files: p.files, bytes: p.bytes, onlineOnly: p.onlineOnly, complete: p.complete, moving: p.moving, step: p.step, page: p.page };
+  });
+  const printers = listOf(f.printers, (x) => {
+    const p = exactly(x, ["name", "network"]);
+    return p && typeof p.name === "string" && typeof p.network === "boolean" ? { name: p.name, network: p.network } : null;
+  });
+  const notChecked = listOf(f.notChecked, (x) =>
+    Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && typeof x[1] === "string" ? ([x[0], x[1]] as [string, string]) : null,
+  );
+  return found && printers && notChecked ? { found, printers, notChecked } : null;
+}
+
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "category", "notes"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
@@ -176,25 +249,30 @@ function parseChange(v: unknown): ChangeView | null {
   if (f.source !== null && typeof f.source !== "string") return null;
   const note = parseChangeNote(f.note);
   if (note === undefined) return null;
+  if (f.category !== null && !oneOf(f.category, SPECIAL_CATEGORIES)) return null;
+  const notes = listOf(f.notes, parseSpecialNote);
+  if (!notes) return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, category: f.category, notes };
 }
 
 /** The plan section (`RebuildPlanView`). */
 export function parseRebuildPlan(v: unknown): RebuildPlan | null {
-  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint"]);
+  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint", "forgotten"]);
   if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || !isCount(f.links) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
   const changes = listOf(f.changes, parseChange);
   const notMoved = listOf(f.notMoved, (x) => {
     const n = exactly(x, ["group", "count"]);
     return n && oneOf(n.group, NOT_MOVED_GROUPS) && isCount(n.count) ? { group: n.group, count: n.count } : null;
   });
-  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint } : null;
+  const forgotten = f.forgotten === null ? null : parseForgotten(f.forgotten);
+  if (f.forgotten !== null && !forgotten) return null;
+  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint, forgotten } : null;
 }
 
 function parseLine(v: unknown): RebuiltLine | null {

@@ -2610,11 +2610,23 @@ async fn run_old<R: Runtime>(
         .into_iter()
         .find(|p| p.is_me)
         .and_then(|me| {
-            pctwin_fullmove::extras::SpecialScan::start(
+            // The person's Documents where the system has it (moved to a cloud folder, say).
+            let documents = pctwin_scan::find_special_folders()
+                .into_iter()
+                .find_map(|f| match f {
+                    pctwin_scan::FolderLookup::Found(f)
+                        if f.role == pctwin_record::FolderRole::Documents =>
+                    {
+                        Some(f.path)
+                    }
+                    _ => None,
+                });
+            pctwin_fullmove::extras::SpecialScan::start_with_documents(
                 &Owner::Person {
                     account_id: me.account_id,
                 },
                 &me.home,
+                documents,
             )
         });
     // The same ID every time this laptop sends, so a second move from it carries on in the

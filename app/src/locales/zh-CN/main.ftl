@@ -1933,3 +1933,45 @@ accept-needs = 有一项需要你先处理。请查看详情。
 accept-not-now = 暂不
 accept-details = 查看详情
 accept-accept = 接受
+
+# 2.5 special categories
+special-category-email = 电子邮件
+special-category-browser = 浏览器
+special-category-game = 游戏
+special-category-ai-tool = AI 工具和代码编辑器
+special-category-secret = 密钥和密码
+special-category-other = 其他应用数据
+special-note-search-rebuilds = 你的邮件应用第一次打开时会重新建立搜索。一段时间内搜索可能较慢。
+special-note-server-resync = 登录后，你的邮件会从邮件服务器回来。PCTwin 保留旧副本，只是以防有内容从未到达服务器。
+special-note-own-sync = 最简单的方法：在新笔记本电脑上打开这个浏览器自带的同步。它会带回你的书签、历史记录、打开的标签页和扩展。
+special-note-passwords-guided = 保存的密码只能通过浏览器自带的导出和导入，或它的同步来转移。导出的文件没有保护，所以 PCTwin 会让它保持私密，并在导入后删除。
+special-note-passkeys-guided = 保存在账户中的通行密钥，登录该账户后就会回来。只保存在这台笔记本电脑上的通行密钥，需要在每个网站上重新创建。请在清除旧笔记本电脑之前完成。
+special-note-cloud-saves = 游戏启动器也可能在线保存你的存档。如果它问要保留哪些存档，请先看看日期。
+special-note-models-checked = AI 模型到达时会逐个文件检查。PCTwin 从不运行它们。
+special-note-tool-settings-review = 这些设置可能会启动程序或连接互联网。在新笔记本电脑上使用前请先检查。
+special-note-secret-tick-each = 只有勾选后才会转移。它从不出现在报告中。
+forgotten-title = 人们常常忘记的东西
+forgotten-kind-fonts = 你自己的字体
+forgotten-kind-mail-signatures = 邮件签名
+forgotten-kind-dictionaries = 你自己的词典单词
+forgotten-kind-office-templates = Office 模板
+forgotten-kind-mail-archives = 保存在这台笔记本电脑上的邮件
+forgotten-kind-game-saves = 游戏存档
+forgotten-kind-game-library = 由游戏启动器安装的游戏
+forgotten-moving = 它会和你的其他东西一起转移。
+forgotten-not-moving = 它不在这次转移中。你可以自己复制。
+forgotten-step-install = 转移后，在新笔记本电脑上打开每个字体并选择“安装”。
+forgotten-step-locate-verify = 在新笔记本电脑上安装游戏启动器并登录。它可以重新安装你的游戏。如果你把这个文件夹复制过去，请使用启动器中查找已安装游戏的选项，并让它检查文件。
+forgotten-not-whole = PCTwin 在这里停止了计数，所以可能还有更多。
+forgotten-printers = 需要重新添加的打印机
+forgotten-printer-step = 请在新笔记本电脑上重新添加这台打印机。
+forgotten-printer-network = 从另一台电脑共享
+forgotten-not-checked = PCTwin 无法查看这里。
+forgotten-files =
+    { $count ->
+       *[other] { $count } 个文件
+    }
+forgotten-online-only =
+    { $count ->
+       *[other] { $count } 个文件只保存在网上，未下载
+    }

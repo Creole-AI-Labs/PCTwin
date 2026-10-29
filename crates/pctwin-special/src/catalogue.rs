@@ -21,6 +21,7 @@
 use pctwin_catalogue::Row;
 use serde::Deserialize;
 
+use crate::category::Category;
 use crate::component::Custody;
 use crate::roots::{AppDataFolder, RootKind, System};
 
@@ -122,6 +123,10 @@ pub struct SpecialRow {
     pub relink: Option<String>,
     #[serde(default)]
     pub exceptions: Vec<Exception>,
+    /// The special category of a folder the content rules leave as other (an editor's settings,
+    /// a game's own folder). Never `secret`: what is secret is read from the files themselves.
+    #[serde(default)]
+    pub category: Option<Category>,
 }
 
 /// How strict a class is: an exception may only raise it.
@@ -135,7 +140,7 @@ pub fn strictness(c: Custody) -> u8 {
     }
 }
 
-fn date_ok(d: &str) -> bool {
+pub(crate) fn date_ok(d: &str) -> bool {
     let b = d.as_bytes();
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return false;
@@ -157,7 +162,7 @@ fn folder_ok(f: &str) -> bool {
             .all(|p| !p.is_empty() && *p != "." && *p != ".." && !p.contains(['\\', ':', '\0']))
 }
 
-fn page_ok(u: &str) -> bool {
+pub(crate) fn page_ok(u: &str) -> bool {
     u.strip_prefix("https://")
         .is_some_and(|rest| !rest.is_empty() && !rest.contains(char::is_whitespace))
 }
@@ -175,6 +180,7 @@ impl Row for SpecialRow {
         "export",
         "relink",
         "exceptions",
+        "category",
     ];
 
     fn check(&self) -> Result<(), String> {
@@ -247,6 +253,9 @@ impl Row for SpecialRow {
         if self.relink.as_deref().is_some_and(|u| !page_ok(u)) {
             return Err("a page must be an https address".into());
         }
+        if self.category == Some(Category::Secret) {
+            return Err("a row cannot say what is secret; the files themselves say it".into());
+        }
         for e in &self.exceptions {
             if e.members.is_empty() || e.why.is_empty() || e.why.len() > 300 {
                 return Err("an exception names its files and says why".into());
@@ -290,10 +299,14 @@ impl SpecialRow {
     }
 }
 
-/// The shipped `special` catalogue (compiled in, covered by the app's own signature). It holds no
-/// rows yet: everything is found and classified by content alone, and rows arrive through the
-/// signed catalogue channel as each app's documentation is checked.
-pub const SHIPPED: &str = r#"{"format": 1, "catalogue": "special", "version": 1, "rows": []}"#;
+/// The shipped `special` catalogue (compiled in, covered by the app's own signature): a few
+/// example rows, each checked against the maker's own documentation on its date (names, the same
+/// app's places on other systems, profile path fix-ups, categories). Everything else is found and
+/// classified by content alone; more rows arrive through the signed catalogue channel.
+pub const SHIPPED: &str = include_str!("../catalogue/special.json");
+
+/// A `special` catalogue with no rows: what discovery does with no knowledge at all.
+pub const NO_ROWS: &str = r#"{"format": 1, "catalogue": "special", "version": 1, "rows": []}"#;
 
 #[cfg(test)]
 mod tests {
@@ -307,10 +320,30 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_catalogue_reads_and_is_empty() {
+    fn the_shipped_catalogue_reads_whole_and_only_enriches() {
         let c = Catalogue::<SpecialRow>::shipped(SHIPPED);
         assert!(c.report().is_clean(), "{:?}", c.report());
-        assert!(c.rows().is_empty());
+        assert!(!c.rows().is_empty());
+        for r in c.rows() {
+            // Rows only add knowledge: no shipped row makes anything looser or names a secret.
+            assert!(r.exceptions.is_empty(), "{}", r.folder);
+            assert_ne!(r.category, Some(Category::Secret));
+            // A place elsewhere is always another system's.
+            assert!(
+                r.elsewhere.iter().all(|p| !r.system.covers(p.system)),
+                "{}",
+                r.folder
+            );
+        }
+        // A row may not say what is secret.
+        let secret = load(
+            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","category":"secret"}"#,
+        );
+        assert!(secret.rows().is_empty());
+        let named = load(
+            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","category":"game"}"#,
+        );
+        assert_eq!(named.rows()[0].category, Some(Category::Game));
     }
 
     #[test]

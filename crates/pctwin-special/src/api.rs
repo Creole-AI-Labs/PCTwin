@@ -38,6 +38,7 @@ use pctwin_types::ItemResult;
 
 use crate::capture::{self, Approved, Capture, CaptureError, Holders, Method, Stop};
 use crate::catalogue::SpecialRow;
+use crate::category::{Category, Note};
 use crate::classify::{FolderReport, Placement, Skip, placement};
 use crate::component::{
     Access, Component, Custody, Evidence, Import, Outcome, Preservation, Readiness, Reversal,
@@ -66,6 +67,10 @@ pub struct Planned {
     pub placement: Placement,
     /// The folder's root on the old laptop.
     pub root: RootKind,
+    /// The special category the person sees it in.
+    pub category: Category,
+    /// What the person is told because of its category.
+    pub notes: Vec<Note>,
 }
 
 /// A thing found and not moved, with why.
@@ -164,6 +169,8 @@ pub fn plan_within(
                 base: r.folder.path(),
                 placement: place.clone(),
                 root: r.folder.root,
+                category: crate::category::of(r, c),
+                notes: crate::category::notes_for(r, c),
             });
         }
         // One line per reason in this app's folder, with how many.

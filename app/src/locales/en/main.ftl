@@ -2055,3 +2055,47 @@ accept-needs = Something needs you first. See the details.
 accept-not-now = Not now
 accept-details = See the details
 accept-accept = Accept
+
+# 2.5 special categories
+special-category-email = Email
+special-category-browser = Browsers
+special-category-game = Games
+special-category-ai-tool = AI tools and code editors
+special-category-secret = Keys and passwords
+special-category-other = Other app data
+special-note-search-rebuilds = Your mail app builds its search again the first time it opens. Searching may be slow for a while.
+special-note-server-resync = Your mail comes back from the mail server when you sign in. PCTwin keeps the old copy only in case something never reached the server.
+special-note-own-sync = The easiest way: turn on this browser's own sync on your new laptop. It brings your bookmarks, history, open tabs and add-ons.
+special-note-passwords-guided = Saved passwords move only with the browser's own export and import, or its sync. The exported file is not protected, so PCTwin keeps it private and removes it after the import.
+special-note-passkeys-guided = Passkeys saved in an account come back when you sign in to it. Passkeys kept only on this laptop must be made again on each website. Do this before you wipe the old laptop.
+special-note-cloud-saves = The game's launcher may also keep your saves online. If it asks which saves to keep, check the dates first.
+special-note-models-checked = AI models are checked file by file when they arrive. PCTwin never runs them.
+special-note-tool-settings-review = These settings can start programs or reach the internet. Check them before you use them on the new laptop.
+special-note-secret-tick-each = This moves only if you tick it. It never appears in a report.
+forgotten-title = Things people often forget
+forgotten-kind-fonts = Your own fonts
+forgotten-kind-mail-signatures = Mail signatures
+forgotten-kind-dictionaries = Your own dictionary words
+forgotten-kind-office-templates = Office templates
+forgotten-kind-mail-archives = Mail kept on this laptop
+forgotten-kind-game-saves = Game saves
+forgotten-kind-game-library = Games installed by a game launcher
+forgotten-moving = This moves with your other things.
+forgotten-not-moving = This is not in the move. You can copy it yourself.
+forgotten-step-install = After the move, open each font on the new laptop and choose Install.
+forgotten-step-locate-verify = Install the game launcher on the new laptop and sign in. It can install your games again. If you copy this folder over, use the launcher's option to find installed games, and let it check the files.
+forgotten-not-whole = PCTwin stopped counting here, so there may be more.
+forgotten-printers = Printers to add again
+forgotten-printer-step = Add this printer again on your new laptop.
+forgotten-printer-network = Shared from another computer
+forgotten-not-checked = PCTwin could not look here.
+forgotten-files =
+    { $count ->
+        [one] 1 file
+       *[other] { $count } files
+    }
+forgotten-online-only =
+    { $count ->
+        [one] 1 file kept only online, not downloaded
+       *[other] { $count } files kept only online, not downloaded
+    }

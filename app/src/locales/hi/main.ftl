@@ -2177,3 +2177,47 @@ accept-needs = पहले किसी चीज़ पर आपका ध्
 accept-not-now = अभी नहीं
 accept-details = विवरण देखें
 accept-accept = स्वीकार करें
+
+# 2.5 special categories
+special-category-email = ईमेल
+special-category-browser = ब्राउज़र
+special-category-game = गेम
+special-category-ai-tool = AI टूल और कोड एडिटर
+special-category-secret = कुंजियाँ और पासवर्ड
+special-category-other = ऐप का बाकी डेटा
+special-note-search-rebuilds = आपका मेल ऐप पहली बार खुलने पर अपनी खोज फिर से बनाता है। कुछ समय तक खोज धीमी हो सकती है।
+special-note-server-resync = साइन इन करने पर आपका मेल मेल सर्वर से वापस आ जाता है। PCTwin पुरानी कॉपी सिर्फ़ इसलिए रखता है कि शायद कुछ सर्वर तक कभी न पहुँचा हो।
+special-note-own-sync = सबसे आसान तरीका: नए लैपटॉप पर इस ब्राउज़र का अपना सिंक चालू करें। इससे आपके बुकमार्क, इतिहास, खुले टैब और ऐड-ऑन आ जाते हैं।
+special-note-passwords-guided = सेव किए गए पासवर्ड सिर्फ़ ब्राउज़र के अपने एक्सपोर्ट और इंपोर्ट से, या उसके सिंक से जाते हैं। एक्सपोर्ट की गई फ़ाइल सुरक्षित नहीं होती, इसलिए PCTwin उसे निजी रखता है और इंपोर्ट के बाद हटा देता है।
+special-note-passkeys-guided = किसी खाते में सेव की गई पासकी उसमें साइन इन करने पर वापस आ जाती हैं। जो पासकी सिर्फ़ इस लैपटॉप पर हैं, उन्हें हर वेबसाइट पर फिर से बनाना होगा। पुराना लैपटॉप मिटाने से पहले यह कर लें।
+special-note-cloud-saves = गेम का लॉन्चर आपकी सेव फ़ाइलें ऑनलाइन भी रख सकता है। अगर वह पूछे कि कौन-सी सेव रखनी हैं, तो पहले तारीखें देख लें।
+special-note-models-checked = AI मॉडल पहुँचने पर एक-एक फ़ाइल करके जाँचे जाते हैं। PCTwin उन्हें कभी नहीं चलाता।
+special-note-tool-settings-review = ये सेटिंग्स प्रोग्राम शुरू कर सकती हैं या इंटरनेट से जुड़ सकती हैं। नए लैपटॉप पर इस्तेमाल करने से पहले इन्हें देख लें।
+special-note-secret-tick-each = यह तभी जाएगा जब आप इस पर टिक करेंगे। यह किसी रिपोर्ट में कभी नहीं दिखता।
+forgotten-title = चीज़ें जो लोग अक्सर भूल जाते हैं
+forgotten-kind-fonts = आपके अपने फ़ॉन्ट
+forgotten-kind-mail-signatures = मेल सिग्नेचर
+forgotten-kind-dictionaries = आपके अपने शब्दकोश शब्द
+forgotten-kind-office-templates = Office टेम्पलेट
+forgotten-kind-mail-archives = इस लैपटॉप पर रखा मेल
+forgotten-kind-game-saves = गेम की सेव फ़ाइलें
+forgotten-kind-game-library = गेम लॉन्चर से इंस्टॉल किए गए गेम
+forgotten-moving = यह आपकी बाकी चीज़ों के साथ जाएगा।
+forgotten-not-moving = यह इस मूव में नहीं है। आप इसे खुद कॉपी कर सकते हैं।
+forgotten-step-install = मूव के बाद, नए लैपटॉप पर हर फ़ॉन्ट खोलें और इंस्टॉल चुनें।
+forgotten-step-locate-verify = नए लैपटॉप पर गेम लॉन्चर इंस्टॉल करें और साइन इन करें। वह आपके गेम फिर से इंस्टॉल कर सकता है। अगर आप यह फ़ोल्डर कॉपी करते हैं, तो लॉन्चर का इंस्टॉल किए गए गेम ढूँढने वाला विकल्प इस्तेमाल करें और उसे फ़ाइलें जाँचने दें।
+forgotten-not-whole = PCTwin ने यहाँ गिनना रोक दिया, इसलिए और भी हो सकते हैं।
+forgotten-printers = फिर से जोड़ने वाले प्रिंटर
+forgotten-printer-step = इस प्रिंटर को नए लैपटॉप पर फिर से जोड़ें।
+forgotten-printer-network = किसी दूसरे कंप्यूटर से शेयर किया गया
+forgotten-not-checked = PCTwin यहाँ नहीं देख सका।
+forgotten-files =
+    { $count ->
+        [one] 1 फ़ाइल
+       *[other] { $count } फ़ाइलें
+    }
+forgotten-online-only =
+    { $count ->
+        [one] 1 फ़ाइल सिर्फ़ ऑनलाइन है, डाउनलोड नहीं की गई
+       *[other] { $count } फ़ाइलें सिर्फ़ ऑनलाइन हैं, डाउनलोड नहीं की गईं
+    }

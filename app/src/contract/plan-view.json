@@ -93,11 +93,13 @@
       "changes": [
         {
           "action": "install",
+          "category": null,
           "count": 0,
           "files": 0,
           "kind": "app",
           "needs": null,
           "note": null,
+          "notes": [],
           "secret": null,
           "source": "Example.Writer",
           "special": null,
@@ -110,11 +112,13 @@
         },
         {
           "action": "leave-alone",
+          "category": null,
           "count": 0,
           "files": 0,
           "kind": "app",
           "needs": "manual-install",
           "note": null,
+          "notes": [],
           "secret": null,
           "source": null,
           "special": null,
@@ -127,11 +131,13 @@
         },
         {
           "action": "replace",
+          "category": null,
           "count": 12,
           "files": 0,
           "kind": "settings",
           "needs": null,
           "note": null,
+          "notes": [],
           "secret": null,
           "source": null,
           "special": null,
@@ -144,6 +150,7 @@
         },
         {
           "action": "leave-alone",
+          "category": null,
           "count": 0,
           "files": 0,
           "kind": "app",
@@ -152,6 +159,7 @@
             "note": "older-here",
             "version": "2.0"
           },
+          "notes": [],
           "secret": null,
           "source": null,
           "special": null,
@@ -164,6 +172,7 @@
         },
         {
           "action": "leave-alone",
+          "category": "browser",
           "count": 0,
           "files": 1,
           "kind": "special",
@@ -171,6 +180,15 @@
           "note": {
             "note": "sites"
           },
+          "notes": [
+            {
+              "note": "own-sync",
+              "page": null
+            },
+            {
+              "note": "passkeys-guided"
+            }
+          ],
           "secret": null,
           "source": null,
           "special": "relink",
@@ -183,11 +201,17 @@
         },
         {
           "action": "leave-alone",
+          "category": "email",
           "count": 0,
           "files": 3,
           "kind": "special",
           "needs": "sign-in",
           "note": null,
+          "notes": [
+            {
+              "note": "server-resync"
+            }
+          ],
           "secret": null,
           "source": null,
           "special": "sign-in",
@@ -200,11 +224,41 @@
         },
         {
           "action": "merge",
+          "category": "email",
+          "count": 0,
+          "files": 40,
+          "kind": "special",
+          "needs": null,
+          "note": null,
+          "notes": [
+            {
+              "note": "search-rebuilds"
+            }
+          ],
+          "secret": null,
+          "source": null,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          },
+          "undo": "can-reverse",
+          "update": null
+        },
+        {
+          "action": "merge",
+          "category": "browser",
           "count": 0,
           "files": 12,
           "kind": "special",
           "needs": null,
           "note": null,
+          "notes": [
+            {
+              "note": "own-sync",
+              "page": "https://example.org/sync"
+            }
+          ],
           "secret": null,
           "source": null,
           "special": "copy",
@@ -217,11 +271,69 @@
         },
         {
           "action": "merge",
+          "category": "game",
+          "count": 0,
+          "files": 5,
+          "kind": "special",
+          "needs": null,
+          "note": null,
+          "notes": [
+            {
+              "note": "cloud-saves-may-differ"
+            }
+          ],
+          "secret": null,
+          "source": null,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Quest"
+          },
+          "undo": "can-reverse",
+          "update": null
+        },
+        {
+          "action": "merge",
+          "category": "ai-tool",
+          "count": 0,
+          "files": 9,
+          "kind": "special",
+          "needs": null,
+          "note": null,
+          "notes": [
+            {
+              "note": "models-checked-not-run"
+            },
+            {
+              "note": "tool-settings-review"
+            }
+          ],
+          "secret": null,
+          "source": null,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Model runner"
+          },
+          "undo": "can-reverse",
+          "update": null
+        },
+        {
+          "action": "merge",
+          "category": "secret",
           "count": 0,
           "files": 2,
           "kind": "special",
           "needs": null,
           "note": null,
+          "notes": [
+            {
+              "note": "passwords-guided"
+            },
+            {
+              "note": "secret-tick-each"
+            }
+          ],
           "secret": 2,
           "source": null,
           "special": "copy",
@@ -233,12 +345,33 @@
           "update": null
         },
         {
+          "action": "merge",
+          "category": "other",
+          "count": 0,
+          "files": 4,
+          "kind": "special",
+          "needs": null,
+          "note": null,
+          "notes": [],
+          "secret": null,
+          "source": null,
+          "special": "copy",
+          "title": {
+            "kind": "name",
+            "value": "Notes app"
+          },
+          "undo": "can-reverse",
+          "update": null
+        },
+        {
           "action": "leave-alone",
+          "category": null,
           "count": 0,
           "files": 0,
           "kind": "special",
           "needs": "finish-by-hand",
           "note": null,
+          "notes": [],
           "secret": null,
           "source": null,
           "special": "not-yet",
@@ -250,6 +383,62 @@
           "update": null
         }
       ],
+      "forgotten": {
+        "found": [
+          {
+            "bytes": 120000,
+            "complete": true,
+            "files": 3,
+            "kind": "fonts",
+            "moving": true,
+            "name": "Your own fonts",
+            "onlineOnly": 0,
+            "page": null,
+            "place": "AppData/Local/Microsoft/Windows/Fonts",
+            "step": "install"
+          },
+          {
+            "bytes": 120000,
+            "complete": true,
+            "files": 3,
+            "kind": "mail-signatures",
+            "moving": true,
+            "name": "Mail signatures",
+            "onlineOnly": 0,
+            "page": null,
+            "place": "AppData/Roaming/Microsoft/Signatures",
+            "step": "copy"
+          },
+          {
+            "bytes": 120000,
+            "complete": false,
+            "files": 3,
+            "kind": "game-library",
+            "moving": false,
+            "name": "Games installed by a game launcher",
+            "onlineOnly": 2,
+            "page": null,
+            "place": "C:/Program Files (x86)/Launcher/library",
+            "step": "locate-verify"
+          }
+        ],
+        "notChecked": [
+          [
+            "Library/Mail",
+            "permission denied"
+          ]
+        ],
+        "printers": [
+          {
+            "name": "Office Laser",
+            "network": false
+          },
+          {
+            "name": "\\\\print-server\\Floor 2",
+            "network": true
+          }
+        ]
+      },
       "links": 4,
       "more": 0,
       "notMoved": [

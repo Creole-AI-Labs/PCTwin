@@ -136,6 +136,12 @@ pub struct SpecialLine {
     /// shape, the same for every app.
     #[serde(default)]
     pub sites: bool,
+    /// The special category the person sees it in (mail, browsers, games, AI tools, secrets).
+    #[serde(default)]
+    pub category: pctwin_special::category::Category,
+    /// What the person is told because of its category (typed, the screens' words).
+    #[serde(default)]
+    pub notes: Vec<pctwin_special::category::Note>,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -167,6 +173,10 @@ pub struct Extras {
     /// (decided 28 October 2026): said as their own choice, never as something left to do.
     #[serde(default)]
     pub left_out_by_person: bool,
+    /// The forgotten-things finder's answer on the old laptop (2.5): places found and counted,
+    /// and printers; `None` when it did not run.
+    #[serde(default)]
+    pub forgotten: Option<pctwin_special::forgotten::Finding>,
 }
 
 /// Why the old laptop's extras were refused.
@@ -178,6 +188,16 @@ pub enum ExtrasError {
     Format,
     #[error("the old laptop's extras break a limit")]
     Limit,
+}
+
+/// Most notes one special line may carry across.
+pub const MAX_NOTES: usize = 16;
+
+/// A help page from the old laptop's catalogue, as the new laptop accepts it: an https address,
+/// within the text limits (security review of 2.5, 29 October 2026: a page is never trusted
+/// just because the other laptop sent it; nothing here opens it).
+fn page_ok(page: Option<&str>) -> bool {
+    page.is_none_or(|p| text_ok(p) && p.starts_with("https://") && !p.contains(char::is_whitespace))
 }
 
 fn text_ok(s: &str) -> bool {
@@ -199,6 +219,7 @@ impl Extras {
             special_not_checked: 0,
             links: 0,
             left_out_by_person: false,
+            forgotten: None,
         }
     }
 
@@ -228,6 +249,22 @@ impl Extras {
         {
             return limit;
         }
+        if let Some(f) = &self.forgotten {
+            let texts = f.found.iter().all(|x| {
+                text_ok(&x.kind)
+                    && text_ok(&x.name)
+                    && text_ok(&x.place)
+                    && page_ok(x.page.as_deref())
+            }) && f.printers.iter().all(|p| text_ok(&p.name))
+                && f.not_checked.iter().all(|(a, b)| text_ok(a) && text_ok(b));
+            if f.found.len() > MAX_FORGOTTEN
+                || f.not_checked.len() > MAX_FORGOTTEN
+                || f.printers.len() > pctwin_special::forgotten::MAX_PRINTERS
+                || !texts
+            {
+                return limit;
+            }
+        }
         let mut keys = std::collections::HashSet::new();
         for s in &self.settings {
             if !setting_ok(s) || !keys.insert(s.address.key()) {
@@ -240,7 +277,15 @@ impl Extras {
                 return limit;
             }
         }
-        if self.special.iter().any(|s| !text_ok(&s.name)) {
+        let note_ok = |n: &pctwin_special::category::Note| match n {
+            pctwin_special::category::Note::OwnSync { page } => page_ok(page.as_deref()),
+            _ => true,
+        };
+        if self
+            .special
+            .iter()
+            .any(|s| !text_ok(&s.name) || s.notes.len() > MAX_NOTES || !s.notes.iter().all(note_ok))
+        {
             return limit;
         }
         Ok(())
@@ -361,6 +406,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         special_not_checked: 0,
         links: 0,
         left_out_by_person: false,
+        forgotten: None,
     }
 }
 
@@ -393,6 +439,19 @@ pub fn special_of(
     apps: &[pctwin_record::FoundApp],
     deadline: std::time::Instant,
 ) -> SpecialFound {
+    special_with(system, owner, home, None, apps, deadline)
+}
+
+/// [`special_of`] with the person's Documents folder where the system has it (`None`: its plain
+/// place in the home folder), for the forgotten-things finder's places kept there.
+pub fn special_with(
+    system: pctwin_special::roots::System,
+    owner: &pctwin_record::Owner,
+    home: &std::path::Path,
+    documents: Option<&std::path::Path>,
+    apps: &[pctwin_record::FoundApp],
+    deadline: std::time::Instant,
+) -> SpecialFound {
     use pctwin_special::component::Custody;
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
@@ -420,13 +479,22 @@ pub fn special_of(
         });
         // A secret is always its own line: the person ticks each one by itself (D07).
         let same = |l: &&mut SpecialLine| {
-            !p.component.secret && !l.secret && l.name == p.app && l.step == step
+            !p.component.secret
+                && !l.secret
+                && l.name == p.app
+                && l.step == step
+                && l.category == p.category
         };
         match lines.iter_mut().find(same) {
             Some(l) => {
                 l.files += files;
                 l.ids.push(id);
                 l.sites |= sites;
+                for n in &p.notes {
+                    if !l.notes.contains(n) {
+                        l.notes.push(n.clone());
+                    }
+                }
             }
             None => lines.push(SpecialLine {
                 name: p.app.clone(),
@@ -435,6 +503,8 @@ pub fn special_of(
                 secret: p.component.secret,
                 ids: vec![id],
                 sites,
+                category: p.category,
+                notes: p.notes.clone(),
             }),
         }
     }
@@ -447,13 +517,87 @@ pub fn special_of(
         .map(|n| n.count.max(1))
         .sum::<usize>()
         + plan.coverage.unreadable.len();
+    let forgotten = forgotten_of(system, home, documents, &plan.components, deadline);
     SpecialFound {
+        forgotten,
         lines,
         not_moved: plan.not_moved.iter().map(|n| n.count.max(1) as u64).sum(),
         not_checked: not_checked as u64,
         planned: plan.components,
     }
 }
+
+/// The forgotten-things finder for the person with home folder `home` (read only), with the
+/// places the plan already takes (`planned`: a place inside a proposed component's folder moves
+/// with it; a place in Documents moves with the person's files).
+fn forgotten_of(
+    system: pctwin_special::roots::System,
+    home: &std::path::Path,
+    documents: Option<&std::path::Path>,
+    planned: &[pctwin_special::api::Planned],
+    deadline: std::time::Instant,
+) -> pctwin_special::forgotten::Finding {
+    use pctwin_special::forgotten::{self, Under};
+    let rows = pctwin_catalogue::Catalogue::<forgotten::PlaceRow>::shipped(forgotten::SHIPPED);
+    let roots = pctwin_special::roots::roots_of(system, home, &|_| None);
+    let docs = documents
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| home.join("Documents"));
+    let env = |v: &str| {
+        std::env::var_os(v)
+            .map(std::path::PathBuf::from)
+            .filter(|p| local_folder(p))
+    };
+    let under = |u: Under| match u {
+        Under::Home => Some(home.to_path_buf()),
+        Under::Documents => Some(docs.clone()),
+        Under::ProgramFiles => env("ProgramFiles"),
+        Under::ProgramFilesX86 => env("ProgramFiles(x86)"),
+        Under::ProgramData => env("ProgramData"),
+    };
+    let moving = |p: &std::path::Path| {
+        p.starts_with(&docs)
+            || planned
+                .iter()
+                .any(|c| c.proposed && !c.base.as_os_str().is_empty() && p.starts_with(&c.base))
+    };
+    // The finder only counts; it keeps to the scan's own time, and to its own.
+    let until = deadline.min(std::time::Instant::now() + FORGOTTEN_TIME);
+    let mut f = forgotten::find(system, home, &roots, &under, &rows, &moving, until);
+    f.found
+        .retain(|x| text_ok(&x.kind) && text_ok(&x.name) && text_ok(&x.place));
+    f.found.truncate(MAX_FORGOTTEN);
+    f.printers.retain(|p| text_ok(&p.name));
+    f.not_checked.retain(|(a, b)| text_ok(a) && text_ok(b));
+    f.not_checked.truncate(MAX_FORGOTTEN);
+    f
+}
+
+/// A folder named by an environment value, accepted only on a drive of this laptop: never a
+/// network or device path (a share, `\\?\UNC\...`, `\\.\...`), which would make the finder reach
+/// out to another computer (security review of 2.5, F3).
+fn local_folder(p: &std::path::Path) -> bool {
+    if !p.is_absolute() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        matches!(
+            p.components().next(),
+            Some(Component::Prefix(x)) if matches!(x.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+/// The most places the finder's answer carries (and places it could not check).
+pub const MAX_FORGOTTEN: usize = 200;
+/// The most time the forgotten-things finder takes.
+pub const FORGOTTEN_TIME: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// What 2.5 found on the old laptop.
 #[derive(Debug, Clone, Default)]
@@ -465,6 +609,8 @@ pub struct SpecialFound {
     pub not_checked: u64,
     /// The components themselves, kept on the old laptop for capture (never sent).
     pub planned: Vec<pctwin_special::api::Planned>,
+    /// The forgotten-things finder's answer.
+    pub forgotten: pctwin_special::forgotten::Finding,
 }
 
 /// The special-category scan, running beside the scan of files and people.
@@ -480,12 +626,35 @@ impl SpecialScan {
         Self::start_for(pctwin_special::roots::System::here(), owner, home)
     }
 
+    /// [`SpecialScan::start`] with the person's Documents folder where the system has it.
+    pub fn start_with_documents(
+        owner: &pctwin_record::Owner,
+        home: &std::path::Path,
+        documents: Option<std::path::PathBuf>,
+    ) -> Option<Self> {
+        Self::spawn(
+            pctwin_special::roots::System::here(),
+            owner,
+            home,
+            documents,
+        )
+    }
+
     /// [`SpecialScan::start`] for a home laid out as `system` lays out its people's homes (see
     /// [`special_of`]).
     pub fn start_for(
         system: pctwin_special::roots::System,
         owner: &pctwin_record::Owner,
         home: &std::path::Path,
+    ) -> Option<Self> {
+        Self::spawn(system, owner, home, None)
+    }
+
+    fn spawn(
+        system: pctwin_special::roots::System,
+        owner: &pctwin_record::Owner,
+        home: &std::path::Path,
+        documents: Option<std::path::PathBuf>,
     ) -> Option<Self> {
         let (tx, rx) = std::sync::mpsc::channel();
         let (owner, home) = (owner.clone(), home.to_path_buf());
@@ -494,7 +663,14 @@ impl SpecialScan {
             .spawn(move || {
                 // 2.5 stops reading in time for its answer to arrive within the budget.
                 let deadline = std::time::Instant::now() + SPECIAL_BUDGET - SPECIAL_MARGIN;
-                let _ = tx.send(special_of(system, &owner, &home, &[], deadline));
+                let _ = tx.send(special_with(
+                    system,
+                    &owner,
+                    &home,
+                    documents.as_deref(),
+                    &[],
+                    deadline,
+                ));
             })
             .ok()?;
         Some(Self {
@@ -538,6 +714,7 @@ impl Extras {
             self.special_searched = true;
             self.special_not_moved = f.not_moved;
             self.special_not_checked = f.not_checked;
+            self.forgotten = Some(f.forgotten.clone());
         }
     }
 }
@@ -582,6 +759,42 @@ pub const SPECIAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(3
 
 #[cfg(test)]
 mod tests {
+    use super::{local_folder, page_ok};
+
+    /// Only a folder on a drive of this laptop is taken from an environment value (F3).
+    #[cfg(windows)]
+    #[test]
+    fn only_a_local_drive_folder_is_taken_from_the_environment() {
+        assert!(local_folder(std::path::Path::new(r"C:\Program Files")));
+        for bad in [
+            r"\\server\share\x",
+            r"\\?\UNC\server\share",
+            r"\\.\pipe\x",
+            "Program Files",
+        ] {
+            assert!(!local_folder(std::path::Path::new(bad)), "{bad}");
+        }
+    }
+
+    /// A help page the other laptop sends is accepted only as a plain https address within the
+    /// limits; anything else refuses the whole message (security review of 2.5, F2).
+    #[test]
+    fn only_a_plain_https_page_crosses() {
+        assert!(page_ok(None));
+        assert!(page_ok(Some("https://support.example.org/sync")));
+        for bad in [
+            "http://example.org/",
+            "javascript:alert(1)",
+            "file:///C:/x",
+            "https://example.org/ a",
+            "https://example.org/\u{0007}",
+            "",
+        ] {
+            assert!(!page_ok(Some(bad)), "{bad}");
+        }
+        assert!(!page_ok(Some(&format!("https://{}", "a".repeat(5000)))));
+    }
+
     use super::*;
     use pctwin_recipe::SettingValue;
     use pctwin_settings::found::{Address, RegKind};
@@ -681,6 +894,56 @@ mod tests {
         assert_eq!(Extras::decode(&bad.encode()), Err(ExtrasError::Limit));
         // Not JSON at all.
         assert_eq!(Extras::decode(b"\x00\x01"), Err(ExtrasError::Unreadable));
+    }
+
+    #[test]
+    fn the_forgotten_things_found_cross_within_their_bounds() {
+        use pctwin_special::forgotten::{Finding, Forgotten, MAX_PRINTERS, PlaceStep, Printer};
+        let place = Forgotten {
+            kind: "fonts".into(),
+            name: "Your own fonts".into(),
+            place: "AppData/Local/Microsoft/Windows/Fonts".into(),
+            files: 2,
+            bytes: 10,
+            online_only: 0,
+            complete: true,
+            moving: false,
+            step: PlaceStep::Install,
+            page: None,
+        };
+        let printer = Printer {
+            name: "Office".into(),
+            network: false,
+        };
+        let mut x = sample();
+        x.forgotten = Some(Finding {
+            found: vec![place.clone()],
+            printers: vec![printer.clone()],
+            not_checked: vec![("Library/Mail".into(), "denied".into())],
+        });
+        assert_eq!(Extras::decode(&x.encode()).unwrap(), x);
+        let with = |f: &dyn Fn(&mut Finding)| {
+            let mut y = x.clone();
+            f(y.forgotten.as_mut().unwrap());
+            Extras::decode(&y.encode())
+        };
+        assert!(with(&|f| f.found = vec![place.clone(); MAX_FORGOTTEN]).is_ok());
+        assert!(with(&|f| f.printers = vec![printer.clone(); MAX_PRINTERS]).is_ok());
+        type Change = Box<dyn Fn(&mut Finding)>;
+        let bad: Vec<Change> = vec![
+            Box::new(move |f| f.found = vec![f.found[0].clone(); MAX_FORGOTTEN + 1]),
+            Box::new(|f| f.not_checked = vec![("a".into(), "b".into()); MAX_FORGOTTEN + 1]),
+            Box::new(|f| f.printers = vec![f.printers[0].clone(); MAX_PRINTERS + 1]),
+            Box::new(|f| f.found[0].kind = "a\u{7}".into()),
+            Box::new(|f| f.found[0].name = String::new()),
+            Box::new(|f| f.found[0].place = "x".repeat(MAX_TEXT + 1)),
+            Box::new(|f| f.printers[0].name = "\u{0}".into()),
+            Box::new(|f| f.not_checked[0].0 = String::new()),
+            Box::new(|f| f.not_checked[0].1 = "\n".into()),
+        ];
+        for (i, b) in bad.iter().enumerate() {
+            assert_eq!(with(b.as_ref()), Err(ExtrasError::Limit), "case {i}");
+        }
     }
 
     #[test]

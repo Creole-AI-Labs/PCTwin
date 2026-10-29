@@ -166,6 +166,10 @@ pub struct ChangeView {
     pub source: Option<String>,
     /// What else the person should know (an older version here, saved sign-ins to websites).
     pub note: Option<ChangeNote>,
+    /// A special category's category (mail, browsers, games, AI tools, secrets).
+    pub category: Option<pctwin_special::category::Category>,
+    /// What the person is told because of its category, each said in the screens' own words.
+    pub notes: Vec<pctwin_special::category::Note>,
 }
 
 /// What the approval screen shows of the apps, settings and special categories.
@@ -182,6 +186,9 @@ pub struct RebuildPlanView {
     pub prompt: bool,
     /// A Windows restore point is asked for before the first change.
     pub restore_point: bool,
+    /// What the forgotten-things finder found on the old laptop: places with their counts and
+    /// steps, and printers to add again (2.5).
+    pub forgotten: Option<pctwin_special::forgotten::Finding>,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -352,6 +359,8 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
                 },
                 n => n,
             }),
+            category: c.category,
+            notes: c.notes,
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -372,6 +381,7 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         links: plan.links,
         prompt: asks,
         restore_point: asks && cfg!(windows),
+        forgotten: plan.forgotten.clone(),
     }
 }
 

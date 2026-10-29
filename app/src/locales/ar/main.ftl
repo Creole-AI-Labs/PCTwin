@@ -2496,3 +2496,55 @@ accept-needs = هناك ما يحتاج إليك أولًا. اطّلع على �
 accept-not-now = ليس الآن
 accept-details = عرض التفاصيل
 accept-accept = قبول
+
+# 2.5 special categories
+special-category-email = البريد الإلكتروني
+special-category-browser = المتصفحات
+special-category-game = الألعاب
+special-category-ai-tool = أدوات الذكاء الاصطناعي ومحررات الشيفرة
+special-category-secret = المفاتيح وكلمات المرور
+special-category-other = بيانات تطبيقات أخرى
+special-note-search-rebuilds = يعيد تطبيق البريد بناء البحث في أول مرة يُفتح فيها. قد يكون البحث بطيئًا لبعض الوقت.
+special-note-server-resync = يعود بريدك من خادم البريد عندما تسجّل الدخول. يحتفظ PCTwin بالنسخة القديمة فقط تحسّبًا لشيء لم يصل إلى الخادم.
+special-note-own-sync = أسهل طريقة: شغّل المزامنة الخاصة بهذا المتصفح على حاسوبك الجديد. فهي تجلب الإشارات المرجعية والسجل وعلامات التبويب المفتوحة والإضافات.
+special-note-passwords-guided = لا تنتقل كلمات المرور المحفوظة إلا عبر التصدير والاستيراد الخاصين بالمتصفح نفسه، أو عبر مزامنته. الملف المُصدَّر غير محمي، لذا يبقيه PCTwin خاصًا ويحذفه بعد الاستيراد.
+special-note-passkeys-guided = مفاتيح المرور المحفوظة في حساب تعود عندما تسجّل الدخول إليه. أما المحفوظة على هذا الحاسوب فقط فيجب إنشاؤها من جديد في كل موقع. افعل ذلك قبل مسح الحاسوب القديم.
+special-note-cloud-saves = قد يحتفظ مشغّل اللعبة بحفظاتك على الإنترنت أيضًا. إذا سألك أيّ الحفظات تبقي، فانظر إلى التواريخ أولًا.
+special-note-models-checked = تُفحص نماذج الذكاء الاصطناعي ملفًا ملفًا عند وصولها. لا يشغّلها PCTwin أبدًا.
+special-note-tool-settings-review = قد تشغّل هذه الإعدادات برامج أو تتصل بالإنترنت. راجعها قبل استخدامها على الحاسوب الجديد.
+special-note-secret-tick-each = لا ينتقل هذا إلا إذا وضعت علامة عليه. ولا يظهر أبدًا في أي تقرير.
+forgotten-title = أشياء ينساها الناس كثيرًا
+forgotten-kind-fonts = خطوطك الخاصة
+forgotten-kind-mail-signatures = تواقيع البريد
+forgotten-kind-dictionaries = كلماتك الخاصة في القاموس
+forgotten-kind-office-templates = قوالب Office
+forgotten-kind-mail-archives = بريد محفوظ على هذا الحاسوب
+forgotten-kind-game-saves = حفظات الألعاب
+forgotten-kind-game-library = ألعاب ثبّتها مشغّل ألعاب
+forgotten-moving = ينتقل هذا مع بقية أغراضك.
+forgotten-not-moving = هذا ليس ضمن النقل. يمكنك نسخه بنفسك.
+forgotten-step-install = بعد النقل، افتح كل خط على الحاسوب الجديد واختر تثبيت.
+forgotten-step-locate-verify = ثبّت مشغّل الألعاب على الحاسوب الجديد وسجّل الدخول. يمكنه تثبيت ألعابك من جديد. إذا نسخت هذا المجلد، فاستخدم خيار المشغّل للعثور على الألعاب المثبّتة، ودعه يفحص الملفات.
+forgotten-not-whole = توقّف PCTwin عن العدّ هنا، لذا قد يكون هناك المزيد.
+forgotten-printers = طابعات يجب إضافتها من جديد
+forgotten-printer-step = أضف هذه الطابعة من جديد على حاسوبك الجديد.
+forgotten-printer-network = مشتركة من حاسوب آخر
+forgotten-not-checked = لم يتمكّن PCTwin من النظر هنا.
+forgotten-files =
+    { $count ->
+        [zero] { $count } من الملفات
+        [one] ملف واحد
+        [two] { $count } من الملفات
+        [few] { $count } من الملفات
+        [many] { $count } من الملفات
+       *[other] { $count } من الملفات
+    }
+forgotten-online-only =
+    { $count ->
+        [zero] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
+        [one] ملف واحد محفوظ على الإنترنت فقط، ولم يُنزَّل
+        [two] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
+        [few] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
+        [many] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
+       *[other] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
+    }

@@ -90,6 +90,8 @@ pub enum Evidence {
     HashMismatch,
     /// Model weights (GGUF, safetensors) or a manifest that lists them.
     ModelData,
+    /// Saved web addresses, by the file's shape: bookmarks, or a history of visited pages.
+    BrowsingData,
     /// It uses files kept in other folders, which were not chosen (a catalog's originals, a
     /// library's attachments): the person is asked whether to add them.
     LinksOutside { folders: Vec<String> },
@@ -159,6 +161,7 @@ impl Evidence {
                 "a file whose content does not match the fingerprint in its name".into()
             }
             Evidence::ModelData => "AI model files".into(),
+            Evidence::BrowsingData => "bookmarks or the history of pages visited".into(),
             Evidence::MissingPart { what } => format!("a part it needs is missing: {what}"),
             Evidence::LinksOutside { folders } => format!(
                 "it uses files kept in {} other folder(s); add them to the move?",
@@ -680,6 +683,7 @@ mod tests {
             Evidence::ContentAddressed { verified: false },
             Evidence::HashMismatch,
             Evidence::ModelData,
+            Evidence::BrowsingData,
             Evidence::MissingPart { what: "x".into() },
             Evidence::LinksOutside {
                 folders: vec!["f".into()],

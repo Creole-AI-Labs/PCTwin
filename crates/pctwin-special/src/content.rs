@@ -54,6 +54,52 @@ pub struct JsonFacts {
     pub file_names: Vec<String>,
     /// Full local paths the values name (files the data links to).
     pub paths: Vec<String>,
+    /// The file is a tree of saved web addresses (bookmarks), by its shape (2.5 browsers).
+    #[serde(default)]
+    pub bookmarks: bool,
+}
+
+/// Whether `v` is a tree of saved web addresses, by the two shapes browsers write: a `roots`
+/// object whose nodes of `"type": "url"` carry a `url` (the Chromium bookmarks file), or nodes of
+/// a `text/x-moz-place` type that carry a `uri` (a Mozilla bookmarks backup). Shapes of the
+/// format, the same for every browser that writes it; never a file's name.
+pub fn bookmark_tree(v: &Value) -> bool {
+    fn any_node(v: &Value, f: &dyn Fn(&serde_json::Map<String, Value>) -> bool) -> bool {
+        match v {
+            Value::Object(o) => f(o) || o.values().any(|x| any_node(x, f)),
+            Value::Array(a) => a.iter().any(|x| any_node(x, f)),
+            _ => false,
+        }
+    }
+    let text = |o: &serde_json::Map<String, Value>, k: &str| {
+        o.get(k)
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_string())
+    };
+    let chromium = v.get("roots").is_some_and(|r| {
+        r.is_object()
+            && any_node(r, &|o| {
+                text(o, "type").as_deref() == Some("url")
+                    && text(o, "url").is_some_and(|u| !u.is_empty())
+            })
+    });
+    chromium
+        || any_node(v, &|o| {
+            text(o, "type").is_some_and(|t| t.starts_with("text/x-moz-place"))
+                && text(o, "uri").is_some_and(|u| !u.is_empty())
+        })
+}
+
+/// Whether a database's tables are shaped like a browser's saved web addresses: a table of
+/// addresses with how often each was visited (history), or a table named for bookmarks with
+/// titles. Rules by the shape of the tables, the same for every app.
+pub fn browsing(tables: &[Table]) -> bool {
+    tables.iter().any(|t| {
+        let has = |f: &dyn Fn(&str) -> bool| t.columns.iter().any(|c| f(c));
+        let history = has(&|c| c == "url") && has(&|c| c.contains("visit"));
+        let bookmarks = t.name.contains("bookmark") && has(&|c| c == "title");
+        history || bookmarks
+    })
 }
 
 /// The most linked paths kept per file.
@@ -134,6 +180,7 @@ pub fn json_facts(_: InChild, bytes: &[u8]) -> Result<JsonFacts, ContentError> {
         serde_json::from_slice(bytes).map_err(|e| ContentError::Damaged(e.to_string()))?;
     let mut f = JsonFacts::default();
     walk(&v, None, &mut f);
+    f.bookmarks = bookmark_tree(&v);
     f.digests.sort();
     f.digests.dedup();
     f.file_names.sort();
@@ -709,6 +756,12 @@ fn ident(name: &str) -> String {
 /// The full local paths a database names, and whether every value was read.
 pub type LinkedPaths = (Vec<String>, bool);
 
+/// A database's tables, kind and linked paths (see [`sqlite_facts`]), from one reading of it in
+/// the parser process.
+pub fn sqlite_db_facts(path: &Path, until: Instant) -> Result<DbFacts, ContentError> {
+    facts_at(path, until)
+}
+
 /// A database's kind and, for ordinary data, the full local paths its place-named columns hold,
 /// from one reading of it in the parser process. The scan of linked paths stops at `until`: the
 /// paths found by then come with `false` (not every value was read).
@@ -834,6 +887,61 @@ pub fn db_kind(tables: &[Table]) -> DbKind {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn bookmarks_are_told_by_their_trees_shape_never_by_a_name() {
+        let tree = |t: &str| bookmark_tree(&serde_json::from_str(t).unwrap());
+        assert!(tree(
+            r#"{"roots":{"bar":{"children":[{"type":"url","url":"https://example.org/"}]}}}"#
+        ));
+        assert!(tree(
+            r#"{"children":[{"type":"text/x-moz-place","uri":"https://example.org/"}]}"#
+        ));
+        // A url node outside a `roots` tree, an empty address, or another type is not.
+        assert!(!tree(
+            r#"{"items":[{"type":"url","url":"https://example.org/"}]}"#
+        ));
+        assert!(!tree(
+            r#"{"roots":{"bar":{"children":[{"type":"url","url":"  "}]}}}"#
+        ));
+        assert!(!tree(
+            r#"{"roots":{"bar":{"children":[{"type":"folder","url":"x"}]}}}"#
+        ));
+        assert!(!tree(r#"{"roots":[{"type":"url","url":"x"}]}"#));
+        assert!(!tree(r#"{"roots":"x"}"#));
+        assert!(!tree(
+            r#"{"children":[{"type":"text/x-moz-place","uri":""}]}"#
+        ));
+        assert!(!tree(r#"{"children":[{"type":"text/plain","uri":"x"}]}"#));
+        let facts = json_facts(
+            pctwin_parse_seal::in_child(),
+            br#"{"roots":{"b":{"children":[{"type":"url","url":"https://example.org/"}]}}}"#,
+        )
+        .unwrap();
+        assert!(facts.bookmarks);
+        assert!(
+            !json_facts(pctwin_parse_seal::in_child(), b"{}")
+                .unwrap()
+                .bookmarks
+        );
+    }
+
+    #[test]
+    fn browsing_data_is_told_by_the_tables_shape() {
+        let t = |name: &str, cols: &[&str]| Table {
+            name: name.into(),
+            columns: cols.iter().map(|c| c.to_string()).collect(),
+        };
+        assert!(browsing(&[t("urls", &["id", "url", "visit_count"])]));
+        assert!(browsing(&[t("places", &["url", "last_visit_date"])]));
+        assert!(browsing(&[t("moz_bookmarks", &["fk", "title"])]));
+        assert!(!browsing(&[t("urls", &["id", "url", "title"])]));
+        assert!(!browsing(&[t("links", &["href", "visit_count"])]));
+        assert!(!browsing(&[t("bookmarks", &["fk", "name"])]));
+        assert!(!browsing(&[t("notes", &["title", "body"])]));
+        assert!(!browsing(&[]));
+    }
+
     use super::*;
 
     fn sdr() -> String {

@@ -891,11 +891,17 @@ fn classify_within(
         let facts = if late() {
             Err(content::ContentError::Damaged(OUT_OF_TIME.into()))
         } else {
-            within(&f.path, move |p| content::sqlite_facts(p, until))
+            within(&f.path, move |p| content::sqlite_db_facts(p, until))
                 .unwrap_or_else(|| Err(content::ContentError::Damaged(NO_ANSWER.into())))
         };
         let (kind, db_paths) = match facts {
-            Ok((k, paths)) => (Ok(k), paths),
+            Ok(facts) => {
+                // Saved web addresses (history, bookmarks), by the tables' shape: a browser's.
+                if content::browsing(&facts.tables) {
+                    ev.push(Evidence::BrowsingData);
+                }
+                (Ok(facts.kind), facts.paths)
+            }
             Err(e) => (Err(e), None),
         };
         match kind {
@@ -1179,20 +1185,24 @@ fn classify_within(
                         vec![Evidence::CredentialValues],
                     )
                 }
-                Some(Ok(j)) if j.starts_programs => b.push(
-                    one,
-                    Custody::Portable,
-                    false,
-                    vec![Evidence::StructuredData, Evidence::EnablesCommands],
-                ),
+                // Each fact adds its own evidence and none can hide another: a file shaped like
+                // bookmarks that also starts programs or links outside keeps those holds
+                // (security review of 2.5, 29 October 2026).
                 Some(Ok(j)) => {
-                    let links = links(&j.paths);
-                    if links.is_empty() {
+                    let mut ev = Vec::new();
+                    if j.starts_programs {
+                        ev.push(Evidence::EnablesCommands);
+                    }
+                    ev.extend(links(&j.paths));
+                    if j.bookmarks {
+                        ev.push(Evidence::BrowsingData);
+                    }
+                    if ev.is_empty() {
                         plain.push(f.rel.clone())
                     } else {
-                        let mut ev = vec![Evidence::StructuredData];
-                        ev.extend(links);
-                        b.push(one, Custody::Portable, false, ev)
+                        let mut all = vec![Evidence::StructuredData];
+                        all.extend(ev);
+                        b.push(one, Custody::Portable, false, all)
                     }
                 }
                 Some(Err(why)) if why == OUT_OF_TIME => unchecked.push(f.rel.clone()),
