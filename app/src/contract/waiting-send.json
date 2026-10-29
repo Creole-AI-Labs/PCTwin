@@ -1,0 +1,49 @@
+[
+  {
+    "bytes": 4200000,
+    "deadline": 1792604800,
+    "files": 3,
+    "id": "00112233445566778899aabbccddeeff",
+    "madeAt": 1792000000,
+    "newer": [
+      "menu.txt"
+    ],
+    "recipients": [
+      {
+        "connection": "0011223344556677",
+        "delivery": {
+          "kind": "waiting"
+        },
+        "label": "Ada's laptop"
+      },
+      {
+        "connection": "8899aabbccddeeff",
+        "delivery": {
+          "arrived": 3,
+          "at": 1792100000,
+          "kind": "delivered",
+          "needsAction": 0
+        },
+        "label": "Kitchen laptop"
+      },
+      {
+        "connection": "1122334455667788",
+        "delivery": {
+          "at": 1792200000,
+          "kind": "declined"
+        },
+        "label": null
+      },
+      {
+        "connection": "2233445566778899",
+        "delivery": {
+          "at": 1792300000,
+          "failed": 1,
+          "kind": "failed",
+          "why": "it could not be written"
+        },
+        "label": "Work laptop"
+      }
+    ]
+  }
+]

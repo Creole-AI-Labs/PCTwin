@@ -2496,3 +2496,68 @@ accept-needs = هناك ما يحتاج إليك أولًا. اطّلع على �
 accept-not-now = ليس الآن
 accept-details = عرض التفاصيل
 accept-accept = قبول
+
+# Quick Send stage 1
+qs-refusal-not-paired = لم يعد الجهازان متصلين. صِلهما مرة أخرى.
+qs-refusal-not-waiting = لا يوجد شيء ينتظر هذا الآن.
+qs-refusal-failed = لم ينجح ذلك. حاول مرة أخرى.
+qs-refusal-note-empty = اكتب شيئًا لإرساله أولًا.
+qs-refusal-note-too-long = هذه الملاحظة طويلة جدًا. اجعلها أقل من 1000 حرف.
+qs-refusal-note-too-many-lines = في هذه الملاحظة أسطر كثيرة جدًا. اجعلها 20 سطرًا على الأكثر.
+qs-refusal-note-hidden = في هذه الملاحظة حرف لا يمكن عرضه بأمان. اكتبها مرة أخرى.
+qs-refusal-no-link = لا يوجد رابط لفتحه.
+qs-refusal-not-found = لم يعد هذا موجودًا.
+qs-refusal-restored = تمت استعادة هذا الجهاز أو نسخه. صِل الجهازين مرة أخرى برمز.
+qs-refusal-bad-name = اختر اسمًا من 40 حرفًا على الأكثر.
+qs-refusal-store-unavailable = تعذّر على PCTwin الوصول إلى المكان الآمن للمفاتيح في هذا الجهاز. حاول مرة أخرى بعد تسجيل الدخول.
+qs-refusal-too-many-connections = لديك اتصالات محفوظة كثيرة جدًا. انسَ واحدًا أولًا.
+qs-refusal-folder-runs-at-sign-in = هذا المجلد يشغّل برامج عند تسجيل الدخول. اختر مجلدًا آخر.
+qs-refusal-folder-shell-start-up = هذا المجلد يشغّل أشياء عند فتح الطرفية. اختر مجلدًا آخر.
+qs-refusal-folder-holds-keys = هذا المجلد يحفظ مفاتيح. اختر مجلدًا آخر.
+qs-refusal-folder-system = هذا من مجلدات النظام نفسه. اختر مجلدًا آخر.
+qs-refusal-folder-not-plain = هذا ليس مجلدًا عاديًا. اختر مجلدًا آخر.
+qs-refusal-folder-not-the-same = هذا ليس المجلد الذي اخترته من قبل. اختره مرة أخرى.
+qs-refusal-not-nearby = الجهاز الآخر ليس قريبًا. ربما يكون مطفأً أو على شبكة أخرى.
+qs-refusal-over-cap = الإرسالات المنتظرة ستشغل مساحة كبيرة جدًا. ألغِ واحدًا أولًا.
+qs-refusal-no-room = لا توجد مساحة فارغة كافية على هذا الجهاز.
+qs-refusal-bad-days = اختر من 1 إلى 30 يومًا.
+qs-refusal-bad-recipients = اختر كل شخص مرة واحدة، حتى 20.
+qs-refusal-too-many-files = الملفات كثيرة جدًا. اختر عددًا أقل.
+qs-refusal-changed-while-copying = تغيّر ملف أثناء نسخه. حاول مرة أخرى.
+qs-note-copy = نسخ
+qs-note-open = فتح
+qs-note-link-to = هذا الرابط يذهب إلى { $host }.
+qs-note-sent = وصلت الملاحظة.
+qs-remember-ask = هل تريد تذكّر هذا الاتصال؟
+qs-remember-body = في المرة القادمة يمكنك الإرسال دون رمز. هذا يعني الجهاز نفسه كما من قبل، لا شخصًا.
+qs-remember-fallback = على هذا الجهاز يُحفظ المفتاح في ملف داخل حسابك.
+qs-known-same-device = الجهاز نفسه كما من قبل
+qs-known-restored = تمت استعادة هذا الجهاز أو نسخه. صِل مرة أخرى.
+qs-known-last-used = آخر استخدام: { $date }
+qs-known-forget = نسيان
+qs-known-forget-body = يُحذف المفتاح وكل الأذونات. تبقى الملفات المرسلة من قبل في مكانها.
+qs-known-allow-folder = السماح بالإرسالات القادمة إلى مجلد
+qs-known-allow-body = تذهب الملفات إلى مجلد اسمه PCTwin Quick Send داخله. ينتهي هذا وحده بعد 30 يومًا.
+qs-known-wants-to-send = { $label } يريد أن يرسل إليك هذا.
+qs-known-delivered = وصلت ملفات من { $label } إلى { $folder }.
+qs-waiting-days =
+    { $count ->
+        [zero] ينتظر { $count } يوم
+        [one] ينتظر يومًا واحدًا
+        [two] ينتظر يومين
+        [few] ينتظر { $count } أيام
+        [many] ينتظر { $count } يومًا
+       *[other] ينتظر { $count } يوم
+    }
+qs-waiting-files =
+    { $count ->
+        [zero] لا ملفات في الانتظار
+        [one] ملف واحد في الانتظار
+        [two] ملفان في الانتظار
+        [few] { $count } ملفات في الانتظار
+        [many] { $count } ملفًا في الانتظار
+       *[other] { $count } ملف في الانتظار
+    }
+qs-waiting-newer = توجد نسخة أحدث. راجعها مرة أخرى.
+qs-waiting-on = لا يُرسل إلا وهذا الجهاز يعمل.
+qs-waiting-cancel = إلغاء وحذف النسخة

@@ -2055,3 +2055,60 @@ accept-needs = Something needs you first. See the details.
 accept-not-now = Not now
 accept-details = See the details
 accept-accept = Accept
+
+# Quick Send stage 1
+qs-refusal-not-paired = The laptops are not connected any more. Connect them again.
+qs-refusal-not-waiting = There is nothing waiting for this now.
+qs-refusal-failed = That did not work. Try again.
+qs-refusal-note-empty = Type something to send first.
+qs-refusal-note-too-long = This note is too long. Keep it under 1,000 characters.
+qs-refusal-note-too-many-lines = This note has too many lines. Keep it to 20 lines.
+qs-refusal-note-hidden = This note has a character that cannot be shown safely. Type it again.
+qs-refusal-no-link = There is no link to open.
+qs-refusal-not-found = This is not there any more.
+qs-refusal-restored = Your laptop was restored or copied. Connect the two again with a code.
+qs-refusal-bad-name = Give it a name of up to 40 letters.
+qs-refusal-store-unavailable = PCTwin could not reach your laptop's safe place for keys. Try again after signing in.
+qs-refusal-too-many-connections = You have too many saved connections. Forget one first.
+qs-refusal-folder-runs-at-sign-in = This folder starts programs when you sign in. Choose another folder.
+qs-refusal-folder-shell-start-up = This folder runs things when a terminal opens. Choose another folder.
+qs-refusal-folder-holds-keys = This folder holds keys. Choose another folder.
+qs-refusal-folder-system = This is one of the system's own folders. Choose another folder.
+qs-refusal-folder-not-plain = This is not a plain folder. Choose another folder.
+qs-refusal-folder-not-the-same = This is not the folder you chose before. Choose it again.
+qs-refusal-not-nearby = That laptop is not nearby. It may be off or on another network.
+qs-refusal-over-cap = Waiting sends would use too much space. Cancel one first.
+qs-refusal-no-room = There is not enough free space.
+qs-refusal-bad-days = Choose from 1 to 30 days.
+qs-refusal-bad-recipients = Choose each person once, up to 20.
+qs-refusal-too-many-files = There are too many files. Choose fewer.
+qs-refusal-changed-while-copying = A file changed while it was being copied. Try again.
+qs-note-copy = Copy
+qs-note-open = Open
+qs-note-link-to = This link goes to { $host }.
+qs-note-sent = The note arrived.
+qs-remember-ask = Remember this connection?
+qs-remember-body = Next time you can send without a code. It means the same laptop as before, not a person.
+qs-remember-fallback = Here, the key is kept in a file in your account.
+qs-known-same-device = Same device as before
+qs-known-restored = Your laptop was restored or copied. Connect again.
+qs-known-last-used = Last used { $date }
+qs-known-forget = Forget
+qs-known-forget-body = The key and every permission are deleted. Files already sent stay where they are.
+qs-known-allow-folder = Allow future sends into a folder
+qs-known-allow-body = Files go into a folder named PCTwin Quick Send inside it. This ends on its own after 30 days.
+qs-known-wants-to-send = { $label } wants to send you this.
+qs-known-delivered = Files from { $label } arrived in { $folder }.
+qs-waiting-days =
+    { $count ->
+        [one] Waits 1 day
+       *[other] Waits { $count } days
+    }
+qs-waiting-files =
+    { $count ->
+        [one] 1 file waiting
+       *[other] { $count } files waiting
+    }
+qs-waiting-newer = A newer version exists. Review it again.
+qs-waiting-on = Sends only while your laptop is on.
+qs-waiting-cancel = Cancel and delete the copy

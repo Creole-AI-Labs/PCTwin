@@ -45,6 +45,26 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  qsSendNote,
+  qsOpenLink,
+  qsLaunchFiles,
+  knownConnections,
+  knownRemember,
+  knownForget,
+  knownRename,
+  knownAllowFolder,
+  knownRevokeFolder,
+  knownRenewFolder,
+  knownNextFolder,
+  knownClearNextFolder,
+  knownSaveIncoming,
+  knownDeclineIncoming,
+  knownSend,
+  waitingPrepare,
+  waitingSends,
+  waitingRenew,
+  waitingCancel,
+  listenKnown,
   laptopName,
   laptopNameShuffle,
   laptopNameType,
@@ -208,7 +228,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list"
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list" || command === "quicksend_launch_files" || command.startsWith("known_") || command.startsWith("waiting_")
                 ? []
                 : command === "recovery_check"
                 ? { unfinished: 0 }
@@ -254,6 +274,25 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsPause();
       await qsResume();
       await qsStop();
+      await qsSendNote("Wi-Fi: Home");
+      await qsOpenLink();
+      await qsLaunchFiles();
+      await knownConnections();
+      await knownRemember("Ada's laptop");
+      await knownForget("0011223344556677");
+      await knownRename("0011223344556677", "Ada (work)");
+      await knownAllowFolder("0011223344556677");
+      await knownRevokeFolder("0011223344556677");
+      await knownRenewFolder("0011223344556677");
+      await knownNextFolder("0011223344556677");
+      await knownClearNextFolder("0011223344556677");
+      await knownSaveIncoming(true);
+      await knownDeclineIncoming();
+      await knownSend("0011223344556677");
+      await waitingPrepare(["0011223344556677"], 7);
+      await waitingSends();
+      await waitingRenew("00112233445566778899aabbccddeeff", 7);
+      await waitingCancel("00112233445566778899aabbccddeeff");
       await updateCheck();
       await updateInstall();
       await laptopName().catch(() => undefined);
@@ -300,6 +339,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenPairingNew(() => undefined);
     await listenMove(() => undefined);
     await listenQuickSend(() => undefined);
+    await listenKnown(() => undefined);
     await listenGuard(() => undefined);
     await listenUndoClosed(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());

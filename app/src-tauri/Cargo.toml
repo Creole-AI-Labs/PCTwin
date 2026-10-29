@@ -54,6 +54,7 @@ pctwin-executor = { path = "../../crates/pctwin-executor" }
 pctwin-recipe = { path = "../../crates/pctwin-recipe" }
 blake3 = "1.8"
 pctwin-journey = { path = "../../crates/pctwin-journey" }
+pctwin-known = { path = "../../crates/pctwin-known" }
 pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-move = { path = "../../crates/pctwin-move" }
 # More move types (2.6): the screens show their plans, budgets and reports (src/guard_views.rs).

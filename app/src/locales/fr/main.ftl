@@ -2255,3 +2255,62 @@ accept-needs = Quelque chose demande votre attention d'abord. Voyez les détails
 accept-not-now = Pas maintenant
 accept-details = Voir les détails
 accept-accept = Accepter
+
+# Quick Send stage 1
+qs-refusal-not-paired = Les ordinateurs ne sont plus connectés. Connectez-les à nouveau.
+qs-refusal-not-waiting = Rien n'attend cela pour le moment.
+qs-refusal-failed = Cela n'a pas marché. Réessayez.
+qs-refusal-note-empty = Écrivez d'abord quelque chose à envoyer.
+qs-refusal-note-too-long = Cette note est trop longue. Restez sous 1 000 caractères.
+qs-refusal-note-too-many-lines = Cette note a trop de lignes. Gardez-en 20 au plus.
+qs-refusal-note-hidden = Cette note contient un caractère qui ne peut pas être affiché sans risque. Écrivez-la à nouveau.
+qs-refusal-no-link = Il n'y a aucun lien à ouvrir.
+qs-refusal-not-found = Ceci n'est plus là.
+qs-refusal-restored = Cet ordinateur a été restauré ou copié. Connectez à nouveau les deux ordinateurs avec un code.
+qs-refusal-bad-name = Donnez-lui un nom de 40 lettres au plus.
+qs-refusal-store-unavailable = PCTwin n'a pas pu atteindre le coffre à clés de cet ordinateur. Réessayez après vous être connecté.
+qs-refusal-too-many-connections = Vous avez trop de connexions enregistrées. Oubliez-en une d'abord.
+qs-refusal-folder-runs-at-sign-in = Ce dossier lance des programmes à l'ouverture de session. Choisissez un autre dossier.
+qs-refusal-folder-shell-start-up = Ce dossier lance des choses à l'ouverture d'un terminal. Choisissez un autre dossier.
+qs-refusal-folder-holds-keys = Ce dossier contient des clés. Choisissez un autre dossier.
+qs-refusal-folder-system = C'est un dossier du système lui-même. Choisissez un autre dossier.
+qs-refusal-folder-not-plain = Ce n'est pas un dossier ordinaire. Choisissez un autre dossier.
+qs-refusal-folder-not-the-same = Ce n'est pas le dossier choisi la dernière fois. Choisissez-le à nouveau.
+qs-refusal-not-nearby = L'autre ordinateur n'est pas à proximité. Il est peut-être éteint ou sur un autre réseau.
+qs-refusal-over-cap = Les envois en attente prendraient trop de place. Annulez-en un d'abord.
+qs-refusal-no-room = Il n'y a pas assez d'espace libre sur cet ordinateur.
+qs-refusal-bad-days = Choisissez de 1 à 30 jours.
+qs-refusal-bad-recipients = Choisissez chaque personne une seule fois, 20 au plus.
+qs-refusal-too-many-files = Il y a trop de fichiers. Choisissez-en moins.
+qs-refusal-changed-while-copying = Un fichier a changé pendant la copie. Réessayez.
+qs-note-copy = Copier
+qs-note-open = Ouvrir
+qs-note-link-to = Ce lien mène à { $host }.
+qs-note-sent = La note est arrivée.
+qs-remember-ask = Se souvenir de cette connexion ?
+qs-remember-body = La prochaine fois, vous pourrez envoyer sans code. Cela désigne le même ordinateur qu'avant, pas une personne.
+qs-remember-fallback = Sur cet ordinateur, la clé est gardée dans un fichier de votre compte.
+qs-known-same-device = Le même appareil qu'avant
+qs-known-restored = Cet ordinateur a été restauré ou copié. Connectez-vous à nouveau.
+qs-known-last-used = Dernière utilisation : { $date }
+qs-known-forget = Oublier
+qs-known-forget-body = La clé et toutes les autorisations sont supprimées. Les fichiers déjà envoyés restent où ils sont.
+qs-known-allow-folder = Autoriser les prochains envois dans un dossier
+qs-known-allow-body = Les fichiers vont dans un dossier nommé PCTwin Quick Send à l'intérieur. Cela prend fin seul après 30 jours.
+qs-known-wants-to-send = { $label } veut vous envoyer ceci.
+qs-known-delivered = Des fichiers de { $label } sont arrivés dans { $folder }.
+qs-waiting-days =
+    { $count ->
+        [one] Attend 1 jour
+        [many] Attend { $count } jours
+       *[other] Attend { $count } jours
+    }
+qs-waiting-files =
+    { $count ->
+        [one] 1 fichier en attente
+        [many] { $count } fichiers en attente
+       *[other] { $count } fichiers en attente
+    }
+qs-waiting-newer = Une version plus récente existe. Vérifiez-la à nouveau.
+qs-waiting-on = L'envoi ne se fait que lorsque cet ordinateur est allumé.
+qs-waiting-cancel = Annuler et supprimer la copie

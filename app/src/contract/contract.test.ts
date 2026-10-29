@@ -7,7 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere,
-  parseRescueDrive, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView } from "../bridge";
+  parseRescueDrive, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView,
+  parseQsRefusal, parseQsNote, parseQsNoteSent, parseQsRemember, parseKnownConnection, parseKnownIncoming, parseKnownDelivered, parseWaitingSend } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildStep } from "../fullmove";
 
@@ -51,6 +52,14 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "place-answer": parsePlaceAnswer,
   peer: parsePeer,
   "qs-problem": parseQsProblem,
+  "qs-refusal": parseQsRefusal,
+  "qs-note": parseQsNote,
+  "qs-note-sent": parseQsNoteSent,
+  "qs-remember": parseQsRemember,
+  "known-connection": parseKnownConnection,
+  "known-incoming": parseKnownIncoming,
+  "known-delivered": parseKnownDelivered,
+  "waiting-send": parseWaitingSend,
   tidied: parseTidied,
   "guard-snapshot": parseSnapshot,
   "guard-refused": (v: unknown) => {

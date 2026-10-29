@@ -1,0 +1,14 @@
+[
+  {
+    "from": null,
+    "host": null,
+    "kind": "text",
+    "text": "Wi-Fi: Home\nPassword: blue-river-42"
+  },
+  {
+    "from": "Ada's laptop",
+    "host": "example.org",
+    "kind": "link",
+    "text": "https://example.org/menu"
+  }
+]

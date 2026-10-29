@@ -1933,3 +1933,58 @@ accept-needs = 有一项需要你先处理。请查看详情。
 accept-not-now = 暂不
 accept-details = 查看详情
 accept-accept = 接受
+
+# Quick Send stage 1
+qs-refusal-not-paired = 两台电脑已不再连接。请重新连接。
+qs-refusal-not-waiting = 现在没有在等待这一步的内容。
+qs-refusal-failed = 没有成功。请再试一次。
+qs-refusal-note-empty = 请先输入要发送的内容。
+qs-refusal-note-too-long = 这条便条太长。请少于 1000 个字符。
+qs-refusal-note-too-many-lines = 这条便条行数太多。最多 20 行。
+qs-refusal-note-hidden = 这条便条里有无法安全显示的字符。请重新输入。
+qs-refusal-no-link = 没有可以打开的链接。
+qs-refusal-not-found = 这已经不在了。
+qs-refusal-restored = 这台电脑经过还原或复制。请用代码重新连接两台电脑。
+qs-refusal-bad-name = 请起一个不超过 40 个字的名字。
+qs-refusal-store-unavailable = PCTwin 无法访问这台电脑保存密钥的安全位置。请登录后再试。
+qs-refusal-too-many-connections = 保存的连接太多。请先忘记一个。
+qs-refusal-folder-runs-at-sign-in = 这个文件夹会在你登录时启动程序。请选择其他文件夹。
+qs-refusal-folder-shell-start-up = 这个文件夹会在打开终端时运行内容。请选择其他文件夹。
+qs-refusal-folder-holds-keys = 这个文件夹存放密钥。请选择其他文件夹。
+qs-refusal-folder-system = 这是系统自己的文件夹。请选择其他文件夹。
+qs-refusal-folder-not-plain = 这不是普通文件夹。请选择其他文件夹。
+qs-refusal-folder-not-the-same = 这不是你之前选的文件夹。请重新选择。
+qs-refusal-not-nearby = 另一台电脑不在附近。它可能已关机或在其他网络上。
+qs-refusal-over-cap = 等待中的发送会占用太多空间。请先取消一个。
+qs-refusal-no-room = 这台电脑的可用空间不足。
+qs-refusal-bad-days = 请选择 1 到 30 天。
+qs-refusal-bad-recipients = 每个人只选一次，最多 20 个。
+qs-refusal-too-many-files = 文件太多。请少选一些。
+qs-refusal-changed-while-copying = 复制时有文件发生了变化。请再试一次。
+qs-note-copy = 复制
+qs-note-open = 打开
+qs-note-link-to = 这个链接指向 { $host }。
+qs-note-sent = 便条已送达。
+qs-remember-ask = 记住这个连接吗？
+qs-remember-body = 下次发送不需要代码。这表示还是之前那台电脑，而不是某个人。
+qs-remember-fallback = 在这台电脑上，密钥保存在你账户中的一个文件里。
+qs-known-same-device = 与之前是同一台设备
+qs-known-restored = 这台电脑经过还原或复制。请重新连接。
+qs-known-last-used = 上次使用：{ $date }
+qs-known-forget = 忘记
+qs-known-forget-body = 密钥和所有权限都会被删除。已经发送的文件留在原处。
+qs-known-allow-folder = 允许以后发送到一个文件夹
+qs-known-allow-body = 文件会放进其中名为 PCTwin Quick Send 的文件夹。30 天后自动结束。
+qs-known-wants-to-send = { $label } 想发给你这些内容。
+qs-known-delivered = 来自 { $label } 的文件已到达 { $folder }。
+qs-waiting-days =
+    { $count ->
+       *[other] 等待 { $count } 天
+    }
+qs-waiting-files =
+    { $count ->
+       *[other] { $count } 个文件等待中
+    }
+qs-waiting-newer = 有更新的版本。请重新查看。
+qs-waiting-on = 只有在这台电脑开机时才会发送。
+qs-waiting-cancel = 取消并删除副本

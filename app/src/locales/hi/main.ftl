@@ -2177,3 +2177,60 @@ accept-needs = पहले किसी चीज़ पर आपका ध्
 accept-not-now = अभी नहीं
 accept-details = विवरण देखें
 accept-accept = स्वीकार करें
+
+# Quick Send stage 1
+qs-refusal-not-paired = लैपटॉप अब जुड़े नहीं हैं। उन्हें फिर से जोड़ें।
+qs-refusal-not-waiting = अभी इसके लिए कुछ भी इंतज़ार में नहीं है।
+qs-refusal-failed = यह नहीं हुआ। फिर से कोशिश करें।
+qs-refusal-note-empty = पहले भेजने के लिए कुछ लिखें।
+qs-refusal-note-too-long = यह नोट बहुत लंबा है। 1,000 अक्षरों से कम रखें।
+qs-refusal-note-too-many-lines = इस नोट में बहुत ज़्यादा पंक्तियाँ हैं। 20 तक रखें।
+qs-refusal-note-hidden = इस नोट में ऐसा अक्षर है जिसे सुरक्षित रूप से नहीं दिखाया जा सकता। इसे फिर से लिखें।
+qs-refusal-no-link = खोलने के लिए कोई लिंक नहीं है।
+qs-refusal-not-found = यह अब यहाँ नहीं है।
+qs-refusal-restored = यह लैपटॉप रिस्टोर या कॉपी किया गया था। दोनों लैपटॉप को कोड से फिर से जोड़ें।
+qs-refusal-bad-name = 40 अक्षरों तक का नाम दें।
+qs-refusal-store-unavailable = PCTwin इस लैपटॉप की चाबियों वाली सुरक्षित जगह तक नहीं पहुँच सका। साइन इन करने के बाद फिर से कोशिश करें।
+qs-refusal-too-many-connections = आपके बहुत ज़्यादा कनेक्शन सहेजे गए हैं। पहले एक भूलें।
+qs-refusal-folder-runs-at-sign-in = यह फ़ोल्डर साइन इन करते ही प्रोग्राम चलाता है। कोई दूसरा फ़ोल्डर चुनें।
+qs-refusal-folder-shell-start-up = यह फ़ोल्डर टर्मिनल खुलते ही चीज़ें चलाता है। कोई दूसरा फ़ोल्डर चुनें।
+qs-refusal-folder-holds-keys = इस फ़ोल्डर में चाबियाँ हैं। कोई दूसरा फ़ोल्डर चुनें।
+qs-refusal-folder-system = यह सिस्टम का अपना फ़ोल्डर है। कोई दूसरा फ़ोल्डर चुनें।
+qs-refusal-folder-not-plain = यह सामान्य फ़ोल्डर नहीं है। कोई दूसरा फ़ोल्डर चुनें।
+qs-refusal-folder-not-the-same = यह वह फ़ोल्डर नहीं है जो आपने पहले चुना था। उसे फिर से चुनें।
+qs-refusal-not-nearby = दूसरा लैपटॉप पास में नहीं है। वह बंद हो सकता है या किसी दूसरे नेटवर्क पर।
+qs-refusal-over-cap = इंतज़ार में भेजे जाने वाले बहुत ज़्यादा जगह लेंगे। पहले एक रद्द करें।
+qs-refusal-no-room = इस लैपटॉप पर पर्याप्त खाली जगह नहीं है।
+qs-refusal-bad-days = 1 से 30 दिन चुनें।
+qs-refusal-bad-recipients = हर व्यक्ति को एक बार चुनें, 20 तक।
+qs-refusal-too-many-files = बहुत ज़्यादा फ़ाइलें हैं। कम चुनें।
+qs-refusal-changed-while-copying = कॉपी होते समय एक फ़ाइल बदल गई। फिर से कोशिश करें।
+qs-note-copy = कॉपी करें
+qs-note-open = खोलें
+qs-note-link-to = यह लिंक { $host } पर जाता है।
+qs-note-sent = नोट पहुँच गया।
+qs-remember-ask = इस कनेक्शन को याद रखें?
+qs-remember-body = अगली बार आप बिना कोड के भेज सकेंगे। इसका मतलब है पहले वाला ही लैपटॉप, कोई व्यक्ति नहीं।
+qs-remember-fallback = इस लैपटॉप पर चाबी आपके खाते की एक फ़ाइल में रखी जाती है।
+qs-known-same-device = पहले वाला ही डिवाइस
+qs-known-restored = यह लैपटॉप रिस्टोर या कॉपी किया गया था। फिर से जोड़ें।
+qs-known-last-used = आखिरी बार इस्तेमाल: { $date }
+qs-known-forget = भूलें
+qs-known-forget-body = चाबी और सभी अनुमतियाँ हटा दी जाती हैं। पहले से भेजी गई फ़ाइलें जहाँ हैं वहीं रहती हैं।
+qs-known-allow-folder = आगे के भेजने को एक फ़ोल्डर में आने दें
+qs-known-allow-body = फ़ाइलें उसके अंदर PCTwin Quick Send नाम के फ़ोल्डर में जाती हैं। यह 30 दिन बाद अपने आप खत्म हो जाता है।
+qs-known-wants-to-send = { $label } आपको यह भेजना चाहता है।
+qs-known-delivered = { $label } से फ़ाइलें { $folder } में आ गईं।
+qs-waiting-days =
+    { $count ->
+        [one] 1 दिन इंतज़ार
+       *[other] { $count } दिन इंतज़ार
+    }
+qs-waiting-files =
+    { $count ->
+        [one] 1 फ़ाइल इंतज़ार में
+       *[other] { $count } फ़ाइलें इंतज़ार में
+    }
+qs-waiting-newer = नया संस्करण मौजूद है। इसे फिर से देखें।
+qs-waiting-on = यह लैपटॉप चालू रहने तक ही भेजता है।
+qs-waiting-cancel = रद्द करें और कॉपी हटाएँ

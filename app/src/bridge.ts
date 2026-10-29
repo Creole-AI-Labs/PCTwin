@@ -1066,6 +1066,250 @@ export async function listenQuickSend(handler: (event: QsEvent) => void): Promis
   };
 }
 
+/* ---------- Quick Send stage 1: notes, remembered connections, waiting sends (src-tauri/src/remembered.rs) ---------- */
+
+/** Why a Quick Send stage 1 command was refused (`QsRefusal`), as a translation key. */
+export const QS_REFUSALS = [
+  "not-paired",
+  "not-waiting",
+  "failed",
+  "note-empty",
+  "note-too-long",
+  "note-too-many-lines",
+  "note-hidden",
+  "no-link",
+  "not-found",
+  "restored",
+  "bad-name",
+  "store-unavailable",
+  "too-many-connections",
+  "folder-runs-at-sign-in",
+  "folder-shell-start-up",
+  "folder-holds-keys",
+  "folder-system",
+  "folder-not-plain",
+  "folder-not-the-same",
+  "not-nearby",
+  "over-cap",
+  "no-room",
+  "bad-days",
+  "bad-recipients",
+  "too-many-files",
+  "changed-while-copying",
+] as const;
+export type QsRefusal = { kind: (typeof QS_REFUSALS)[number] };
+
+export function parseQsRefusal(value: unknown): QsRefusal | null {
+  return parseKindOnly(value, QS_REFUSALS);
+}
+
+/** A rejected Quick Send stage 1 command: the engine's reason, or "failed" for anything else. */
+export function toQsRefusal(error: unknown): QsRefusal {
+  return parseQsRefusal(error) ?? { kind: "failed" };
+}
+
+function isTextOrNull(v: unknown): v is string | null {
+  return v === null || typeof v === "string";
+}
+
+/** A note or link that arrived: shown as text with Copy; a link has its site, and opens only by the person (Open). */
+export type QsNote = { text: string; kind: "text" | "link"; host: string | null; from: string | null };
+
+export function parseQsNote(value: unknown): QsNote | null {
+  const f = exactly(value, ["text", "kind", "host", "from"]);
+  if (!f || typeof f.text !== "string" || !oneOf(f.kind, ["text", "link"] as const) || !isTextOrNull(f.host) || !isTextOrNull(f.from)) return null;
+  // A link always names its site; plain text never does.
+  if ((f.kind === "link") !== (typeof f.host === "string")) return null;
+  return { text: f.text, kind: f.kind, host: f.host, from: f.from };
+}
+
+/** The other laptop took the note (it arrived and passed its checks; never that it was read). */
+export function parseQsNoteSent(value: unknown): { taken: true } | null {
+  const f = exactly(value, ["taken"]);
+  return f && f.taken === true ? { taken: true } : null;
+}
+
+/** "Remember this connection" may be offered; `fallbackStore`: the keys would be kept in a file (Linux), said plainly. */
+export function parseQsRemember(value: unknown): { fallbackStore: boolean } | null {
+  const f = exactly(value, ["fallbackStore"]);
+  return f && typeof f.fallbackStore === "boolean" ? { fallbackStore: f.fallbackStore } : null;
+}
+
+export type KnownGrant = { name: string; path: string; endsAt: number; ended: boolean };
+export type KnownConnection = {
+  id: string;
+  label: string;
+  madeAt: number;
+  lastUsed: number;
+  expiresAt: number;
+  sameDevice: boolean;
+  folder: KnownGrant | null;
+  nextFolder: { name: string; path: string } | null;
+};
+
+function parseKnownGrant(value: unknown): KnownGrant | null {
+  const f = exactly(value, ["name", "path", "endsAt", "ended"]);
+  return f && typeof f.name === "string" && typeof f.path === "string" && isCount(f.endsAt) && typeof f.ended === "boolean"
+    ? { name: f.name, path: f.path, endsAt: f.endsAt, ended: f.ended }
+    : null;
+}
+
+function parseNamedFolder(value: unknown): { name: string; path: string } | null {
+  const f = exactly(value, ["name", "path"]);
+  return f && typeof f.name === "string" && typeof f.path === "string" ? { name: f.name, path: f.path } : null;
+}
+
+/** A remembered connection: "the same device as before", never a proven person. */
+export function parseKnownConnection(value: unknown): KnownConnection | null {
+  const f = exactly(value, ["id", "label", "madeAt", "lastUsed", "expiresAt", "sameDevice", "folder", "nextFolder"]);
+  if (!f || typeof f.id !== "string" || typeof f.label !== "string" || typeof f.sameDevice !== "boolean") return null;
+  if (!isCount(f.madeAt) || !isCount(f.lastUsed) || !isCount(f.expiresAt)) return null;
+  const folder = f.folder === null ? null : parseKnownGrant(f.folder);
+  if (f.folder !== null && folder === null) return null;
+  const nextFolder = f.nextFolder === null ? null : parseNamedFolder(f.nextFolder);
+  if (f.nextFolder !== null && nextFolder === null) return null;
+  return { id: f.id, label: f.label, madeAt: f.madeAt, lastUsed: f.lastUsed, expiresAt: f.expiresAt, sameDevice: f.sameDevice, folder, nextFolder };
+}
+
+export type KnownIncoming = { connection: string; label: string; files: OfferedFile[]; bytes: number; folder: QsFolder | null };
+
+/** Files from a remembered laptop, waiting for Save or Decline. */
+export function parseKnownIncoming(value: unknown): KnownIncoming | null {
+  const f = exactly(value, ["connection", "label", "files", "bytes", "folder"]);
+  if (!f || typeof f.connection !== "string" || typeof f.label !== "string" || !isCount(f.bytes)) return null;
+  const files = listOf(f.files, parseOffered);
+  const folder = f.folder === null ? null : parseQsFolder(f.folder);
+  if (!files || (f.folder !== null && folder === null)) return null;
+  return { connection: f.connection, label: f.label, files, bytes: f.bytes, folder };
+}
+
+export type KnownDelivered = { connection: string; label: string; folder: string; lines: Receipt["lines"]; tell: boolean };
+
+/** Files that landed under "allow future sends into this folder"; `tell`: the first after a quiet spell. */
+export function parseKnownDelivered(value: unknown): KnownDelivered | null {
+  const f = exactly(value, ["connection", "label", "folder", "lines", "tell"]);
+  if (!f || typeof f.connection !== "string" || typeof f.label !== "string" || typeof f.folder !== "string" || typeof f.tell !== "boolean") return null;
+  const lines = listOf(f.lines, (v) => {
+    const l = exactly(v, ["path", "outcome"]);
+    const outcome = l && parseQsOutcome(l.outcome);
+    return l && typeof l.path === "string" && outcome ? { path: l.path, outcome } : null;
+  });
+  return lines ? { connection: f.connection, label: f.label, folder: f.folder, lines, tell: f.tell } : null;
+}
+
+export type WaitingDelivery =
+  | { kind: "waiting" }
+  | { kind: "delivered"; arrived: number; needsAction: number; at: number }
+  | { kind: "declined"; at: number }
+  | { kind: "failed"; failed: number; why: string; at: number };
+
+function parseWaitingDelivery(value: unknown): WaitingDelivery | null {
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  if (kind === "waiting") return exactly(value, ["kind"]) ? { kind } : null;
+  if (kind === "delivered") {
+    const f = exactly(value, ["kind", "arrived", "needsAction", "at"]);
+    return f && isCount(f.arrived) && isCount(f.needsAction) && isCount(f.at) ? { kind, arrived: f.arrived, needsAction: f.needsAction, at: f.at } : null;
+  }
+  if (kind === "declined") {
+    const f = exactly(value, ["kind", "at"]);
+    return f && isCount(f.at) ? { kind, at: f.at } : null;
+  }
+  if (kind === "failed") {
+    const f = exactly(value, ["kind", "failed", "why", "at"]);
+    return f && isCount(f.failed) && typeof f.why === "string" && isCount(f.at) ? { kind, failed: f.failed, why: f.why, at: f.at } : null;
+  }
+  return null;
+}
+
+export type WaitingSend = {
+  id: string;
+  madeAt: number;
+  deadline: number;
+  files: number;
+  bytes: number;
+  recipients: { connection: string; label: string | null; delivery: WaitingDelivery }[];
+  newer: string[];
+};
+
+/** A waiting send: each recipient's own result; `newer`: files changed since approval ("review again"). */
+export function parseWaitingSend(value: unknown): WaitingSend | null {
+  const f = exactly(value, ["id", "madeAt", "deadline", "files", "bytes", "recipients", "newer"]);
+  if (!f || typeof f.id !== "string" || !isCount(f.madeAt) || !isCount(f.deadline) || !isCount(f.files) || !isCount(f.bytes)) return null;
+  const recipients = listOf(f.recipients, (v) => {
+    const r = exactly(v, ["connection", "label", "delivery"]);
+    const delivery = r && parseWaitingDelivery(r.delivery);
+    return r && typeof r.connection === "string" && isTextOrNull(r.label) && delivery ? { connection: r.connection, label: r.label, delivery } : null;
+  });
+  const newer = listOf(f.newer, (v) => (typeof v === "string" ? v : null));
+  return recipients && newer ? { id: f.id, madeAt: f.madeAt, deadline: f.deadline, files: f.files, bytes: f.bytes, recipients, newer } : null;
+}
+
+const knownList = (v: unknown) => listOf(v, parseKnownConnection);
+const waitingList = (v: unknown) => listOf(v, parseWaitingSend);
+
+/** Sends a note or link over the paired link; `quicksend-note-sent` says it was taken. */
+export const qsSendNote = (text: string) => run("quicksend_send_note", { text });
+/** Open, on a received link: the system's browser opens it (the screens never name the address). */
+export const qsOpenLink = () => run("quicksend_open_link");
+/** Files the system handed PCTwin to send (Send to, a file manager entry, the Mac open action): the whole chosen list. */
+export const qsLaunchFiles = () => ask("quicksend_launch_files", (v) => listOf(v, parsePicked));
+export const knownConnections = () => ask("known_list", knownList);
+/** Remember this connection, by the name the person gives it, from the last six-digit exchange. */
+export const knownRemember = (label: string) => ask("known_remember", knownList, { label });
+/** Forget: its key and every permission deleted, its waiting deliveries and transfers ended. */
+export const knownForget = (id: string) => ask("known_forget", knownList, { id });
+export const knownRename = (id: string, label: string) => ask("known_rename", knownList, { id, label });
+/** Allow future sends into a folder chosen in the system's picker ({ none } when none was chosen). */
+export const knownAllowFolder = (id: string) => ask("known_allow_folder", (v) => (v === null ? { none: true as const } : knownList(v)), { id });
+export const knownRevokeFolder = (id: string) => ask("known_revoke_folder", knownList, { id });
+export const knownRenewFolder = (id: string) => ask("known_renew_folder", knownList, { id });
+/** Use the folder the last receive saved into for this connection next time. */
+export const knownNextFolder = (id: string) => ask("known_next_folder", knownList, { id });
+export const knownClearNextFolder = (id: string) => ask("known_clear_next_folder", knownList, { id });
+/** Save files from a remembered laptop into the folder held now; `nextTime`: remember that folder for it. */
+export const knownSaveIncoming = (nextTime: boolean) => run("known_save_incoming", { nextTime });
+export const knownDeclineIncoming = () => run("known_decline_incoming");
+/** Sends the offer made on the pick page to a remembered laptop nearby, now. */
+export const knownSend = (id: string) => run("known_send", { id });
+/** Approve this delivery only: the offer made on the pick page, for these connections, for `days` days. */
+export const waitingPrepare = (ids: string[], days: number) => ask("waiting_prepare", waitingList, { ids, days });
+export const waitingSends = () => ask("waiting_list", waitingList);
+export const waitingRenew = (id: string, days: number) => ask("waiting_renew", waitingList, { id, days });
+/** Cancel a waiting send: its kept copy is deleted. */
+export const waitingCancel = (id: string) => ask("waiting_cancel", waitingList, { id });
+
+export type KnownEvent =
+  | { kind: "note"; note: QsNote }
+  | { kind: "note-sent" }
+  | { kind: "remember"; fallbackStore: boolean }
+  | { kind: "launch"; items: PickedItem[] }
+  | { kind: "incoming"; incoming: KnownIncoming }
+  | { kind: "delivered"; delivered: KnownDelivered }
+  | { kind: "connections"; connections: KnownConnection[] }
+  | { kind: "waiting"; sends: WaitingSend[] }
+  | { kind: "unreadable" };
+
+export async function listenKnown(handler: (event: KnownEvent) => void): Promise<UnlistenFn> {
+  const on = <T,>(name: string, parse: (v: unknown) => T | null, wrap: (v: T) => KnownEvent) =>
+    listen<unknown>(name, (e) => {
+      const parsed = parse(e.payload);
+      handler(parsed === null ? { kind: "unreadable" } : wrap(parsed));
+    });
+  const all = await Promise.all([
+    on("quicksend-note", parseQsNote, (note) => ({ kind: "note", note })),
+    on("quicksend-note-sent", parseQsNoteSent, () => ({ kind: "note-sent" })),
+    on("quicksend-remember", parseQsRemember, (r) => ({ kind: "remember", fallbackStore: r.fallbackStore })),
+    on("quicksend-launch", (v) => listOf(v, parsePicked), (items) => ({ kind: "launch", items })),
+    on("known-incoming", parseKnownIncoming, (incoming) => ({ kind: "incoming", incoming })),
+    on("known-delivered", parseKnownDelivered, (delivered) => ({ kind: "delivered", delivered })),
+    on("known-changed", knownList, (connections) => ({ kind: "connections", connections })),
+    on("waiting-changed", waitingList, (sends) => ({ kind: "waiting", sends })),
+  ]);
+  return () => {
+    for (const stop of all) stop();
+  };
+}
+
 /* ---------- History (src-tauri/src/history.rs) ---------- */
 
 /** One move done on this laptop, as the app recorded it when it ended. Quick Send keeps nothing. */

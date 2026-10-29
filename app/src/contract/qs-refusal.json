@@ -1,0 +1,80 @@
+[
+  {
+    "kind": "not-paired"
+  },
+  {
+    "kind": "not-waiting"
+  },
+  {
+    "kind": "failed"
+  },
+  {
+    "kind": "note-empty"
+  },
+  {
+    "kind": "note-too-long"
+  },
+  {
+    "kind": "note-too-many-lines"
+  },
+  {
+    "kind": "note-hidden"
+  },
+  {
+    "kind": "no-link"
+  },
+  {
+    "kind": "not-found"
+  },
+  {
+    "kind": "restored"
+  },
+  {
+    "kind": "bad-name"
+  },
+  {
+    "kind": "store-unavailable"
+  },
+  {
+    "kind": "too-many-connections"
+  },
+  {
+    "kind": "folder-runs-at-sign-in"
+  },
+  {
+    "kind": "folder-shell-start-up"
+  },
+  {
+    "kind": "folder-holds-keys"
+  },
+  {
+    "kind": "folder-system"
+  },
+  {
+    "kind": "folder-not-plain"
+  },
+  {
+    "kind": "folder-not-the-same"
+  },
+  {
+    "kind": "not-nearby"
+  },
+  {
+    "kind": "over-cap"
+  },
+  {
+    "kind": "no-room"
+  },
+  {
+    "kind": "bad-days"
+  },
+  {
+    "kind": "bad-recipients"
+  },
+  {
+    "kind": "too-many-files"
+  },
+  {
+    "kind": "changed-while-copying"
+  }
+]
