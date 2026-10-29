@@ -39,7 +39,7 @@ use pctwin_types::{ItemResult, Reason};
 use sha2::Digest;
 
 use crate::plan::AppEntry;
-use crate::run::{AppResult, Installer};
+use crate::run::{AppResult, Installer, Removable};
 
 /// The most winget searches at once.
 const SEARCHES_AT_ONCE: usize = 3;
@@ -154,6 +154,13 @@ struct Prepared {
     op: PlannedOperation,
     file: PathBuf,
     size: u64,
+}
+
+/// Whether Windows' list `entries` shows Windows Installer product `code`.
+fn lists(entries: &[RawEntry], code: &pctwin_helper::broker::actions::ProductCode) -> bool {
+    entries
+        .iter()
+        .any(|e| e.product_code().as_deref() == Some(code.as_str()))
 }
 
 fn manual() -> AppResult {
@@ -278,9 +285,15 @@ impl<'a> WingetInstaller<'a> {
         if m.sha256.is_some_and(|want| want != sha) {
             return Err(AppResult::because(Reason::NotVerified));
         }
-        let op =
-            pctwin_apps::install::operation(&format!("install.{at}"), at as u64, sha, kind, &e.app)
-                .map_err(|_| manual())?;
+        let op = pctwin_apps::install::operation(
+            &format!("install.{at}"),
+            at as u64,
+            sha,
+            kind,
+            &e.app,
+            m.product_code_of_installer(),
+        )
+        .map_err(|_| manual())?;
         Ok(Prepared { at, op, file, size })
     }
 
@@ -370,14 +383,27 @@ impl<'a> WingetInstaller<'a> {
             // installed; the person installs it from the maker.
             return AppResult::because(Reason::ManualInstall);
         }
-        let before: Vec<String> = self.machine.entries().into_iter().map(|e| e.key).collect();
+        let listed_before = self.machine.entries();
+        let before: Vec<String> = listed_before.iter().map(|e| e.key.clone()).collect();
+        let mut recorded = None;
         let installed = match self.request(&plan, &p.op.action_id, p.op.action.clone()) {
             Ok(Acted::Done(r)) => match r.outcome {
                 Outcome::Done { restart_needed } => Installed::Done { restart_needed },
-                Outcome::AlreadyInPlace => Installed::AlreadyInPlace,
-                Outcome::Failed { .. } | Outcome::Partial { .. } | Outcome::RestorePoint(_) => {
-                    Installed::Failed
+                Outcome::Installed {
+                    restart_needed,
+                    product,
+                } => {
+                    recorded = Some(Box::new(Removable {
+                        product,
+                        installed_by: r.idempotency,
+                    }));
+                    Installed::Done { restart_needed }
                 }
+                Outcome::AlreadyInPlace => Installed::AlreadyInPlace,
+                Outcome::Failed { .. }
+                | Outcome::Partial { .. }
+                | Outcome::RestorePoint(_)
+                | Outcome::Uninstall(_) => Installed::Failed,
             },
             Ok(Acted::Denied(_)) => Installed::Refused,
             Err(_) => Installed::Failed,
@@ -393,6 +419,14 @@ impl<'a> WingetInstaller<'a> {
         // Installed by PCTwin only when it ran and the laptop's own list shows it (not refused,
         // failed, missing, or there already).
         done.installed = probe.found && matches!(installed, Installed::Done { .. });
+        // Kept for undo to remove only when the helper recorded the very product the plan named
+        // and Windows' list agrees: not there before, there now.
+        done.removable = recorded.filter(|r| {
+            done.installed
+                && pkg.product_code == Some(r.product.code)
+                && !lists(&listed_before, &r.product.code)
+                && lists(&now, &r.product.code)
+        });
         done
     }
 }

@@ -230,6 +230,7 @@ impl Installer for FakeInstaller {
                     result: pctwin_types::ItemResult::done(ItemStatus::Reinstalled).unwrap(),
                     todo: vec![],
                     installed: true,
+                    removable: None,
                 }
             })
             .collect()

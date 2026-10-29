@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::actions::{ExeKind, InstallScope};
+use super::actions::{ExeKind, InstallScope, ProductCode};
 use super::staging::VerifiedArtifact;
 
 /// A system program an adapter may start.
@@ -84,6 +84,20 @@ pub fn msiexec_install(
         .arg("/i")
         .arg(package.path())
         .args(["/qn", "/norestart", "ALLUSERS=1"]);
+    Ok(command)
+}
+
+/// The arguments of Windows Installer's command that removes product `code`, quietly, without
+/// restarting the laptop: `/x <code> /qn /norestart` and nothing else. The code is a checked
+/// [`ProductCode`] (a braced GUID), so nothing else can reach the command line.
+pub fn uninstall_args(code: &ProductCode) -> [&str; 4] {
+    ["/x", code.as_str(), "/qn", "/norestart"]
+}
+
+/// Windows Installer's command that removes product `code` (see [`uninstall_args`]).
+pub fn msiexec_uninstall(code: &ProductCode) -> Result<Command, ToolError> {
+    let mut command = TrustedTool::Msiexec.command()?;
+    command.args(uninstall_args(code));
     Ok(command)
 }
 
@@ -210,6 +224,20 @@ mod meaning_tests {
     }
 
     #[test]
+    fn removing_takes_the_code_and_fixed_switches_only() {
+        let code = ProductCode::parse("{a1b2c3d4-e5f6-4789-9abc-def012345678}").unwrap();
+        assert_eq!(
+            uninstall_args(&code),
+            [
+                "/x",
+                "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}",
+                "/qn",
+                "/norestart"
+            ]
+        );
+    }
+
+    #[test]
     fn installer_switches_never_restart_and_never_come_from_outside() {
         for kind in [ExeKind::Inno, ExeKind::Burn] {
             let s = exe_switches(kind);
@@ -293,6 +321,38 @@ mod tests {
         assert_eq!(args[0], "/i");
         assert_eq!(PathBuf::from(&args[1]), package.path());
         assert_eq!(&args[2..], ["/qn", "/norestart", "ALLUSERS=1"]);
+    }
+
+    /// The uninstall command is Windows' own msiexec by its full path, in System32, with the
+    /// minimal environment, and exactly `/x <code> /qn /norestart`.
+    #[test]
+    fn the_uninstall_command_is_windows_own_msiexec_with_fixed_switches() {
+        let code = ProductCode::parse("{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}").unwrap();
+        let command = msiexec_uninstall(&code).unwrap();
+        let windows =
+            pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows).unwrap();
+        assert_eq!(
+            PathBuf::from(command.get_program()),
+            windows.join("System32").join("msiexec.exe")
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(windows.join("System32").as_path())
+        );
+        assert_eq!(command.get_envs().count(), 7);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "/x",
+                "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}",
+                "/qn",
+                "/norestart"
+            ]
+        );
     }
 
     #[test]

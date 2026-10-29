@@ -43,6 +43,7 @@ pub mod restore;
 pub mod setting_rows;
 pub mod staging;
 pub mod tool;
+pub mod uninstall;
 pub mod watch;
 
 #[cfg(test)]
@@ -58,7 +59,7 @@ use pctwin_grant::{Audience, Expiry, MAX_LIFETIME, Now};
 
 use actions::{
     Action, ApprovedPlan, Hex16, Hex32, Id, InstallFromMacAppStore, InstallVerifiedPackage,
-    NamedSetting,
+    InstalledProduct, NamedSetting, UninstallWindowsInstallerProduct,
 };
 use receipt::{Outcome, Receipt};
 use restore::RestorePointResult;
@@ -158,6 +159,8 @@ pub enum Denial {
     RecoveryRequired,
     #[error("this laptop cannot do that")]
     NotAvailable,
+    #[error("PCTwin's own record does not show it installed that app, so it does not remove it")]
+    NotInstalledByPctwin,
 }
 
 /// The system's own approval for one action.
@@ -259,10 +262,24 @@ impl std::fmt::Debug for NativeText {
 /// What an adapter observed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
-    Done { restart_needed: bool },
+    Done {
+        restart_needed: bool,
+    },
+    /// A Windows Installer package installed, its product seen to appear ([`Outcome::Installed`]).
+    Installed {
+        restart_needed: bool,
+        product: actions::InstalledProduct,
+    },
+    Uninstall(uninstall::UninstallResult),
     RestorePoint(RestorePointResult),
-    Partial { code: i64, native: NativeText },
-    Failed { code: i64, native: NativeText },
+    Partial {
+        code: i64,
+        native: NativeText,
+    },
+    Failed {
+        code: i64,
+        native: NativeText,
+    },
 }
 
 impl Effect {
@@ -270,6 +287,14 @@ impl Effect {
     fn outcome(self) -> Outcome {
         match self {
             Effect::Done { restart_needed } => Outcome::Done { restart_needed },
+            Effect::Installed {
+                restart_needed,
+                product,
+            } => Outcome::Installed {
+                restart_needed,
+                product,
+            },
+            Effect::Uninstall(u) => Outcome::Uninstall(u),
             Effect::RestorePoint(r) => Outcome::RestorePoint(r),
             Effect::Partial { code, .. } => Outcome::Partial { code },
             Effect::Failed { code, .. } => Outcome::Failed { code },
@@ -319,6 +344,20 @@ pub trait Adapters {
             native: NativeText::new(""),
         }
     }
+    /// Removes `installed`, the product the helper's own journal recorded installing for
+    /// `action` ([`uninstall`]): only while it is still there at that version.
+    fn uninstall(
+        &mut self,
+        action: &UninstallWindowsInstallerProduct,
+        installed: &actions::InstalledProduct,
+        stop: &Revoker,
+    ) -> Effect {
+        let _ = (action, installed, stop);
+        Effect::Failed {
+            code: NOT_AVAILABLE,
+            native: NativeText::new(""),
+        }
+    }
     /// Whether `action` is really in place now (after the helper stopped mid-way).
     fn observe(&mut self, action: &Action) -> Observed;
     /// The helper's own maker check of `package`, held, for `action` ([`maker::check_package`]
@@ -348,14 +387,51 @@ impl Adapters for BuiltInAdapters {
     }
 
     /// The installer runs to its end once started, whatever stop arrives meanwhile: stopping one
-    /// part way can leave an app half installed. Its real result is reported.
+    /// part way can leave an app half installed. Its real result is reported. For a Windows
+    /// Installer package naming its product code, Windows' list of installed apps is read just
+    /// before and just after, so undo can later remove what this install added, and only that.
     fn install(
         &mut self,
         package: &VerifiedArtifact,
         action: &InstallVerifiedPackage,
         _: &Revoker,
     ) -> Effect {
-        installs::install(package, action)
+        let before = installs::watches_product(action)
+            .then(uninstall::installed_products)
+            .flatten();
+        let effect = installs::install(package, action);
+        installs::with_product(
+            effect,
+            action,
+            before.as_ref(),
+            &mut uninstall::installed_products,
+        )
+    }
+
+    /// `msiexec /x` runs to its end once started, like an installer; its real result is
+    /// reported.
+    fn uninstall(
+        &mut self,
+        _: &UninstallWindowsInstallerProduct,
+        installed: &actions::InstalledProduct,
+        _: &Revoker,
+    ) -> Effect {
+        #[cfg(windows)]
+        {
+            uninstall::uninstall_with(
+                installed,
+                &mut uninstall::installed_products,
+                &mut uninstall::run_msiexec,
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = installed;
+            Effect::Failed {
+                code: NOT_AVAILABLE,
+                native: NativeText::new(""),
+            }
+        }
     }
 
     fn install_from_store(&mut self, action: &InstallFromMacAppStore, _: &Revoker) -> Effect {
@@ -401,6 +477,14 @@ impl Adapters for BuiltInAdapters {
             ),
             #[cfg(not(windows))]
             Action::InstallVerifiedPackage(_) => Observed::Unknown,
+            #[cfg(windows)]
+            Action::UninstallWindowsInstallerProduct(u) => uninstall::observed(
+                &u.product_code,
+                installs::running_command_lines(),
+                uninstall::installed_products().as_ref(),
+            ),
+            #[cfg(not(windows))]
+            Action::UninstallWindowsInstallerProduct(_) => Observed::Unknown,
             Action::InstallFromMacAppStore(_) | Action::ApplyNamedSetting(_) => Observed::Unknown,
         }
     }
@@ -629,6 +713,29 @@ impl<'a> Broker<'a> {
         }
     }
 
+    /// For a removal: the product this helper's own journal recorded installing, finished, under
+    /// the install's key the action names, and only if it is this very product code. Anything
+    /// else (no such install, unfinished, failed, an install that recorded no product or another
+    /// one, a journal that cannot be read) is refused before anything starts. Other actions:
+    /// nothing to look up.
+    fn recorded_install(&mut self, action: &Action) -> Result<Option<InstalledProduct>, Denial> {
+        let Action::UninstallWindowsInstallerProduct(u) = action else {
+            return Ok(None);
+        };
+        match self
+            .journal
+            .lookup(&u.installed_by)
+            .map_err(|_| Denial::JournalUnavailable)?
+        {
+            Recorded::Finished(_, Outcome::Installed { product, .. })
+                if product.code == u.product_code =>
+            {
+                Ok(Some(product))
+            }
+            _ => Err(Denial::NotInstalledByPctwin),
+        }
+    }
+
     /// Checks `request` and, if everything holds, makes the change.
     pub fn handle(&mut self, request: &BrokerRequest) -> Answer {
         match self.try_handle(request) {
@@ -667,6 +774,8 @@ impl<'a> Broker<'a> {
         if !request.action.needs_admin() {
             return Err(Denial::NotNeeded);
         }
+        // 5b. Removing an app: only one this helper's own journal recorded installing.
+        self.recorded_install(&request.action)?;
         // 6.
         let idempotency = self.idempotency(request);
         let earlier = match self
@@ -698,6 +807,7 @@ impl<'a> Broker<'a> {
         }
         // 9. Everything again: the approval may have taken a while.
         self.still_open()?;
+        let installed = self.recorded_install(&request.action)?;
         let package = self.verify_object(&request.action)?;
         if let (Action::InstallVerifiedPackage(p), Some(held)) = (&request.action, &package)
             && self.adapters.check_maker(held, p) != maker::MakerCheck::Approved
@@ -731,6 +841,10 @@ impl<'a> Broker<'a> {
             (Action::InstallFromMacAppStore(a), _) => self.adapters.install_from_store(a, &stop),
             (Action::ApplyNamedSetting(s), _) => self.adapters.apply_setting(&s.setting, &stop),
             (Action::CreateRestorePoint(_), _) => self.adapters.restore_point(&stop),
+            (Action::UninstallWindowsInstallerProduct(u), _) => match &installed {
+                Some(installed) => self.adapters.uninstall(u, installed, &stop),
+                None => return Err(Denial::NotInstalledByPctwin),
+            },
             (Action::InstallVerifiedPackage(_), None) => return Err(Denial::Unsafe),
         };
         drop(package);

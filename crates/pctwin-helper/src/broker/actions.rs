@@ -1,8 +1,9 @@
 //! The broker's fixed actions, each with its own schema, and the approved plan they belong to.
 //!
-//! There are four actions and no others: [`InstallVerifiedPackage`], [`InstallFromMacAppStore`],
-//! [`ApplyNamedSetting`] and [`CreateRestorePoint`]. None takes a command, a path, a program, an environment value or a web
-//! address; every field is a typed, bounded choice. A permission for one is never read as
+//! There are five actions and no others: [`InstallVerifiedPackage`], [`InstallFromMacAppStore`],
+//! [`ApplyNamedSetting`], [`CreateRestorePoint`] and [`UninstallWindowsInstallerProduct`]. None
+//! takes a command, a path, a program, an environment value or a web address; every field is a
+//! typed, bounded choice. A permission for one is never read as
 //! another: each action names the one role that may ask for it.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -117,6 +118,116 @@ impl<'de> Deserialize<'de> for Id {
     }
 }
 
+/// The length of a Windows Installer product code: `{` 32 hexadecimal digits in groups of 8, 4,
+/// 4, 4 and 12 joined by `-` `}`.
+pub const PRODUCT_CODE_LEN: usize = 38;
+
+/// A Windows Installer product code (a GUID in braces), the only thing the uninstall action
+/// takes. Exactly [`PRODUCT_CODE_LEN`] bytes: `{`, hexadecimal digits in groups of 8, 4, 4, 4
+/// and 12 joined by `-`, `}`; nothing else, not even a space. Kept in capitals, as Windows
+/// Installer names its products in the system's list. The all-zero code names no product and is
+/// refused.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProductCode([u8; PRODUCT_CODE_LEN]);
+
+impl ProductCode {
+    pub fn parse(s: &str) -> Option<Self> {
+        let b = s.as_bytes();
+        if b.len() != PRODUCT_CODE_LEN || b[0] != b'{' || b[PRODUCT_CODE_LEN - 1] != b'}' {
+            return None;
+        }
+        let mut out = [0u8; PRODUCT_CODE_LEN];
+        out[0] = b'{';
+        out[PRODUCT_CODE_LEN - 1] = b'}';
+        let mut any = false;
+        for (i, c) in b[1..PRODUCT_CODE_LEN - 1].iter().enumerate() {
+            out[i + 1] = if matches!(i, 8 | 13 | 18 | 23) {
+                if *c != b'-' {
+                    return None;
+                }
+                b'-'
+            } else {
+                if !c.is_ascii_hexdigit() {
+                    return None;
+                }
+                any |= *c != b'0';
+                c.to_ascii_uppercase()
+            };
+        }
+        any.then_some(Self(out))
+    }
+
+    pub fn as_str(&self) -> &str {
+        // Only ASCII is ever stored (checked in `parse`).
+        std::str::from_utf8(&self.0).unwrap_or("")
+    }
+}
+
+impl std::fmt::Display for ProductCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::fmt::Debug for ProductCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ProductCode({})", self.as_str())
+    }
+}
+
+impl Serialize for ProductCode {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ProductCode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::custom("not a product code"))
+    }
+}
+
+/// The longest version kept for an installed product.
+pub const MAX_VERSION: usize = 64;
+
+/// An app's version as Windows' list of installed apps writes it (`DisplayVersion`): 1 to
+/// [`MAX_VERSION`] bytes of letters, digits and `. - _ +`. Anything else is not kept (and then
+/// nothing PCTwin installed can be removed by it: the version could not be checked later).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+pub struct ProductVersion(String);
+
+impl ProductVersion {
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        let ok = !s.is_empty()
+            && s.len() <= MAX_VERSION
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'));
+        ok.then(|| Self(s.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ProductVersion {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::custom("not a version"))
+    }
+}
+
+/// A Windows Installer product the helper saw its own install add: not in the system's list
+/// before, there after, at this version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InstalledProduct {
+    pub code: ProductCode,
+    pub version: ProductVersion,
+}
+
 /// One of the fixed actions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -125,6 +236,20 @@ pub enum Action {
     InstallFromMacAppStore(InstallFromMacAppStore),
     ApplyNamedSetting(ApplyNamedSetting),
     CreateRestorePoint(CreateRestorePoint),
+    UninstallWindowsInstallerProduct(UninstallWindowsInstallerProduct),
+}
+
+/// Remove one Windows Installer product PCTwin installed (undo, decided 28 October 2026): Windows'
+/// own `msiexec /x <code> /qn /norestart`, nothing else. It takes the product code and the one key
+/// of the helper's own install that recorded it (from that install's receipt); the helper refuses
+/// it unless its own journal holds that install, finished, recording this very product as absent
+/// before and present after. It is removed only while the version installed is still there; a
+/// different version is kept.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct UninstallWindowsInstallerProduct {
+    pub product_code: ProductCode,
+    pub installed_by: Hex32,
 }
 
 /// Install one exact package already staged in the helper's own administrators-only folder: by
@@ -140,6 +265,11 @@ pub struct InstallVerifiedPackage {
     /// The maker of the app on the old laptop, as the old laptop's own copy names it: the helper
     /// checks the package against it itself before installing ([`super::maker`]).
     pub maker: Box<pctwin_maker::facts::WindowsSigner>,
+    /// For a Windows Installer package: its product code, as its manifest names it. The helper
+    /// records it only when its own install made it appear in the system's list (absent before,
+    /// present after, nothing else gone); only then can undo remove it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product_code: Option<ProductCode>,
 }
 
 /// The kinds of package the compiled adapters know. Each adapter builds its own fixed arguments;
@@ -255,6 +385,8 @@ impl Action {
             Action::InstallVerifiedPackage(_) | Action::InstallFromMacAppStore(_) => {
                 Audience::Install
             }
+            // Removing an app PCTwin installed undoes the install role's own work.
+            Action::UninstallWindowsInstallerProduct(_) => Audience::Install,
             Action::ApplyNamedSetting(_) => Audience::Settings,
             Action::CreateRestorePoint(_) => Audience::Recovery,
         }
@@ -276,6 +408,8 @@ impl Action {
                 setting: NamedSetting::Hibernate(_),
             }) => true,
             Action::CreateRestorePoint(_) => true,
+            // Only for products installed for everyone (the helper installs no other kind).
+            Action::UninstallWindowsInstallerProduct(_) => true,
         }
     }
 
@@ -350,6 +484,7 @@ mod tests {
 
     fn install(scope: InstallScope) -> Action {
         Action::InstallVerifiedPackage(InstallVerifiedPackage {
+            product_code: None,
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,
@@ -374,6 +509,171 @@ mod tests {
         let json = serde_json::to_string(&h).unwrap();
         assert_eq!(serde_json::from_str::<Hex32>(&json).unwrap(), h);
         assert!(serde_json::from_str::<Hex32>("\"zz\"").is_err());
+    }
+
+    const CODE: &str = "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}";
+
+    /// The uninstall action's one input: a product code, braced, in hexadecimal, of the fixed
+    /// length and shape; anything else is refused when read, before anything starts.
+    #[test]
+    fn a_product_code_is_a_braced_guid_and_nothing_else() {
+        let good = ProductCode::parse(CODE).unwrap();
+        assert_eq!(good.as_str(), CODE);
+        assert_eq!(good.to_string(), CODE);
+        assert_eq!(format!("{good:?}"), format!("ProductCode({CODE})"));
+        // Small letters are the same code, kept in capitals as Windows writes it.
+        let lower = ProductCode::parse(&CODE.to_ascii_lowercase()).unwrap();
+        assert_eq!(lower, good);
+        assert_eq!(lower.as_str(), CODE);
+        assert!(ProductCode::parse("{00000000-0000-0000-0000-000000000001}").is_some());
+        let long = format!("{CODE}}}");
+        let mut table: Vec<String> = vec![
+            "".into(),
+            "{}".into(),
+            "{00000000-0000-0000-0000-000000000000}".into(),
+            "A1B2C3D4-E5F6-4789-9ABC-DEF012345678".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678".into(),
+            "A1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "(A1B2C3D4-E5F6-4789-9ABC-DEF012345678)".into(),
+            "[A1B2C3D4-E5F6-4789-9ABC-DEF012345678]".into(),
+            "{A1B2C3D4E5F647899ABCDEF012345678}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF0123456789}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567G}".into(),
+            "{A1B2C3D4_E5F6-4789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D-4E5F6-4789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F64-789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F6-47899-ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABCD-EF012345678}".into(),
+            " {A1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678} ".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567 }".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567\0}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF0123456\u{e9}}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678};calc".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678} /i x.msi".into(),
+            "/i {A1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "\"{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}\"".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567&}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567|}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF01234567%}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF0123456\\8}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF0123456/8}".into(),
+            "{-1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "{+1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            // Only one brace wrong.
+            "(A1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678)".into(),
+            "AA1B2C3D4-E5F6-4789-9ABC-DEF012345678}".into(),
+            "{A1B2C3D4-E5F6-4789-9ABC-DEF0123456788".into(),
+            "C:\\Windows\\x.msi".into(),
+            long,
+        ];
+        // Every single byte swapped for each character that is not hexadecimal, at every
+        // place (the braces too), is refused (and a dash where a digit belongs, and a digit
+        // where a dash or a brace belongs).
+        for at in 0..PRODUCT_CODE_LEN {
+            for c in ['g', 'G', ' ', '-', 'x', '{', '}', '0'] {
+                let mut s: Vec<char> = CODE.chars().collect();
+                if s[at] == c || (c == '0' && s[at].is_ascii_hexdigit()) {
+                    continue;
+                }
+                s[at] = c;
+                table.push(s.into_iter().collect());
+            }
+        }
+        for bad in &table {
+            assert!(ProductCode::parse(bad).is_none(), "{bad:?}");
+            let json = serde_json::to_string(bad).unwrap();
+            assert!(
+                serde_json::from_str::<ProductCode>(&json).is_err(),
+                "{bad:?}"
+            );
+        }
+        let json = serde_json::to_string(&good).unwrap();
+        assert_eq!(json, format!("\"{CODE}\""));
+        assert_eq!(serde_json::from_str::<ProductCode>(&json).unwrap(), good);
+    }
+
+    #[test]
+    fn a_version_is_short_and_plain() {
+        for good in [
+            "1",
+            "1.2.3",
+            "24.08.1-beta+2",
+            "1_0",
+            &"9".repeat(MAX_VERSION),
+        ] {
+            assert_eq!(ProductVersion::parse(good).unwrap().as_str(), good);
+        }
+        assert_eq!(ProductVersion::parse(" 1.2 ").unwrap().as_str(), "1.2");
+        for bad in [
+            "",
+            " ",
+            "1 2",
+            "1;2",
+            "1/2",
+            "1\\2",
+            "1\"",
+            &"9".repeat(MAX_VERSION + 1),
+        ] {
+            assert!(ProductVersion::parse(bad).is_none(), "{bad:?}");
+            let json = serde_json::to_string(bad).unwrap();
+            assert!(
+                serde_json::from_str::<ProductVersion>(&json).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// The uninstall action takes a product code and the key of the install that recorded it,
+    /// and nothing else: no path, no switch, no program.
+    #[test]
+    fn the_uninstall_action_takes_only_a_code_and_its_install() {
+        let key = "cd".repeat(32);
+        let good = format!(
+            r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}"}}}}"#
+        );
+        let a: Action = serde_json::from_str(&good).unwrap();
+        assert_eq!(
+            a,
+            Action::UninstallWindowsInstallerProduct(UninstallWindowsInstallerProduct {
+                product_code: ProductCode::parse(CODE).unwrap(),
+                installed_by: Hex32([0xcd; 32]),
+            })
+        );
+        assert_eq!(a.audience(), Audience::Install);
+        assert!(a.needs_admin());
+        for bad in [
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","args":"/i x"}}}}"#
+            ),
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"{key}","path":"C:/x.msi"}}}}"#
+            ),
+            format!(r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}"}}}}"#),
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE} /i x","installed-by":"{key}"}}}}"#
+            ),
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"C:/x.msi","installed-by":"{key}"}}}}"#
+            ),
+            format!(
+                r#"{{"uninstall-windows-installer-product":{{"product-code":"{CODE}","installed-by":"zz"}}}}"#
+            ),
+        ] {
+            assert!(serde_json::from_str::<Action>(&bad).is_err(), "{bad}");
+        }
+        // A product code on an install is optional and, when given, as strict.
+        let with_code = format!(
+            r#"{{"install-verified-package":{{"artifact":1,"sha256":"{}","kind":"msi","scope":"machine","maker":{},"product-code":"not a code"}}}}"#,
+            "ab".repeat(32),
+            serde_json::to_string(&maker()).unwrap()
+        );
+        assert!(serde_json::from_str::<Action>(&with_code).is_err());
+        // An install with none says nothing about it, so its identity is as before.
+        let none = serde_json::to_string(&install(InstallScope::Machine)).unwrap();
+        assert!(!none.contains("product-code"), "{none}");
     }
 
     #[test]
@@ -497,6 +797,7 @@ mod tests {
         assert_eq!(a.identity(), install(InstallScope::Machine).identity());
         assert_ne!(a.identity(), install(InstallScope::User).identity());
         let mut other = InstallVerifiedPackage {
+            product_code: None,
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,

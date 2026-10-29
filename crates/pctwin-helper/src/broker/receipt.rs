@@ -10,8 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::actions::{Hex32, Id};
+use super::actions::{Hex32, Id, InstalledProduct};
 use super::restore::RestorePointResult;
+use super::uninstall::UninstallResult;
 
 /// What really happened.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +20,15 @@ use super::restore::RestorePointResult;
 pub enum Outcome {
     /// Done and observed; whether the laptop must restart to finish it.
     Done { restart_needed: bool },
+    /// A Windows Installer package installed, and the helper saw its product appear in the
+    /// system's list (absent before, present after, at this version): the record undo needs to
+    /// remove it, kept in the helper's own journal.
+    Installed {
+        restart_needed: bool,
+        product: InstalledProduct,
+    },
+    /// How removing an app PCTwin installed ended, when it did not fail.
+    Uninstall(UninstallResult),
     /// A restore point's honest result.
     RestorePoint(RestorePointResult),
     /// Found already in place when an unfinished earlier attempt was checked: not done again.

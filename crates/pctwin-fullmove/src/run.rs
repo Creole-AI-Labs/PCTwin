@@ -39,6 +39,27 @@ pub struct AppResult {
     /// PCTwin installed it here (the laptop's own list shows it), whatever is left to do: undo
     /// lists it for the person to remove if they do not want it.
     pub installed: bool,
+    /// A Windows Installer product this install added, as the helper recorded it and Windows'
+    /// list confirmed: undo may remove it through the helper.
+    pub removable: Option<Box<Removable>>,
+}
+
+/// What undo needs to remove an app PCTwin installed: the product the helper recorded (its
+/// code and version) and the key of that install in the helper's own journal (from its
+/// receipt), which the helper checks before removing anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Removable {
+    pub product: pctwin_helper::broker::actions::InstalledProduct,
+    pub installed_by: pctwin_helper::broker::actions::Hex32,
+}
+
+/// An app undo may remove, by its name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovableApp {
+    pub name: String,
+    pub removable: Removable,
 }
 
 impl AppResult {
@@ -47,6 +68,7 @@ impl AppResult {
             result: ItemResult::because(reason),
             todo: Vec::new(),
             installed: false,
+            removable: None,
         }
     }
 
@@ -68,6 +90,7 @@ impl AppResult {
             result,
             todo,
             installed: true,
+            removable: None,
         }
     }
 }
@@ -136,8 +159,13 @@ pub struct UndoBook {
     pub recipes: Vec<Recipe>,
     /// Each setting's group (the app or part of the system), by its executor key.
     pub labels: BTreeMap<String, String>,
-    /// The apps PCTwin installed, by name (undo leaves them for the person to remove).
+    /// The apps PCTwin installed that undo leaves for the person to remove, by name (installed by
+    /// an installer program, or with nothing recorded to remove them by).
     pub apps: Vec<String>,
+    /// The Windows Installer apps PCTwin installed that undo removes itself, while each is still
+    /// the version installed.
+    #[serde(default)]
+    pub removable: Vec<RemovableApp>,
     /// App data landed (2.5): its app's name and its landing in the journal.
     #[serde(default)]
     pub landed: Vec<(String, u64)>,
@@ -720,7 +748,17 @@ pub fn rebuild(
         apps: apps
             .iter()
             .filter(|(_, a)| a.installed || a.result.status() == ItemStatus::Reinstalled)
+            .filter(|(_, a)| a.removable.is_none())
             .map(|(n, _)| n.clone())
+            .collect(),
+        removable: apps
+            .iter()
+            .filter_map(|(n, a)| {
+                a.removable.as_deref().map(|removable| RemovableApp {
+                    name: n.clone(),
+                    removable: removable.clone(),
+                })
+            })
             .collect(),
         landed: data.effects.clone(),
         home: data.home.clone(),
