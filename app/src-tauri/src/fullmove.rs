@@ -1444,6 +1444,58 @@ mod tests {
     use crate::guard_views::MAX_LINES;
     use pctwin_settings::System;
 
+    /// Task List 2.9: the approval screen carries the plan's own internet needs and room, every
+    /// undo word mapped to the screens' word of the same meaning, and each app's record.
+    #[test]
+    fn the_preview_reaches_the_approval_screen_as_the_plan_says() {
+        use pctwin_fullmove::extras::{SpecialLine, SpecialStep};
+        let plan = FullPlan {
+            special: vec![
+                SpecialLine {
+                    name: "Mail".into(),
+                    step: SpecialStep::SignIn,
+                    files: 3,
+                    secret: false,
+                    ids: vec![],
+                    sites: false,
+                },
+                SpecialLine {
+                    name: "Notes data".into(),
+                    step: SpecialStep::Copy,
+                    files: 2,
+                    secret: false,
+                    ids: vec![],
+                    sites: false,
+                },
+            ],
+            ..FullPlan::default()
+        };
+        let view = plan_view(&plan);
+        assert_eq!(view.internet, plan.internet());
+        assert_eq!(view.internet.sign_ins, 1);
+        let room = plan.room_needed();
+        assert_eq!(view.room.installs, room.installs);
+        assert_eq!(view.room.app_data, room.app_data);
+        assert!(view.room.app_data > 0);
+        let undo: Vec<UndoPromise> = view.changes.iter().map(|c| c.undo).collect();
+        assert_eq!(undo, [UndoPromise::NeedsYouMaker, UndoPromise::CanReverse]);
+        assert_eq!(promise_of(Promise::CanReverse), UndoPromise::CanReverse);
+        assert_eq!(promise_of(Promise::MustKeep), UndoPromise::MustKeep);
+        assert_eq!(
+            promise_of(Promise::RemoveYourself),
+            UndoPromise::RemoveYourself
+        );
+        assert_eq!(
+            promise_of(Promise::RemovesIfPackage),
+            UndoPromise::RemovesIfPackage
+        );
+        assert_eq!(promise_of(Promise::KeepsNewer), UndoPromise::KeepsNewer);
+        assert_eq!(
+            promise_of(Promise::NeedsYouMaker),
+            UndoPromise::NeedsYouMaker
+        );
+    }
+
     /// Gap 1: an app's to-do list reaches the outcome as notes (a restart is the line's own
     /// reason; a registration with nothing in it says nothing).
     /// Undo of apps PCTwin installed reaches the screen in its own words: removed (with a
