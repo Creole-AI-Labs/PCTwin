@@ -176,6 +176,18 @@ pub fn edited(name: &str) -> Drift {
     }
 }
 
+/// The app data lines of `plan` that changed on the old laptop after approval, with
+/// `changed(id)` telling which components the old laptop refused for it (the capture's own check,
+/// [`crate::data::Sink::changed_after_approval`]): each line once. Their app data is not placed
+/// (nothing arrived for them); they are asked about again.
+pub fn data_changed(plan: &FullPlan, changed: impl Fn(&str) -> bool) -> Vec<Drift> {
+    plan.special
+        .iter()
+        .filter(|s| s.ids.iter().any(|id| changed(id)))
+        .map(|s| edited(&s.name))
+        .collect()
+}
+
 impl FullPlan {
     /// Leaves the apps `drift` holds out of the run until a fresh approval
     /// ([`FullPlan::to_install`] skips them; the run ends each needs-action).
@@ -351,5 +363,52 @@ mod tests {
         assert_eq!(place_is(&pics), None);
         assert_eq!(edited("Thesis.svg").why, Why::ProjectEdited);
         assert_eq!(edited("Thesis.svg").steps, [Step::AppData]);
+    }
+
+    /// Fresh-context review F5: what the old laptop refused because it changed after approval
+    /// becomes one line per app, holding its app data; nothing else does.
+    #[test]
+    fn app_data_edited_after_approval_holds_its_line() {
+        use crate::data::{Arrived, Choice, NotCaptured, Sink};
+        use crate::extras::{SpecialLine, SpecialStep};
+        let special = |name: &str, ids: &[&str]| SpecialLine {
+            name: name.into(),
+            step: SpecialStep::Copy,
+            files: 1,
+            secret: false,
+            ids: ids.iter().map(|i| i.to_string()).collect(),
+            sites: false,
+        };
+        let plan = FullPlan {
+            special: vec![
+                special("Mail", &["mail-1", "mail-2"]),
+                special("Notes", &["notes-1"]),
+                special("Photos", &["photos-1"]),
+            ],
+            ..FullPlan::default()
+        };
+        let t = tempfile::tempdir().unwrap();
+        let mut sink = Sink::new(
+            Choice {
+                copy: vec!["mail-1".into(), "mail-2".into(), "notes-1".into()],
+                secrets: vec![],
+            },
+            t.path().to_path_buf(),
+        );
+        let not = |why| Arrived {
+            not_captured: Some(why),
+            ..Arrived::default()
+        };
+        sink.arrived
+            .insert("mail-2".into(), not(NotCaptured::Changing));
+        sink.arrived
+            .insert("notes-1".into(), not(NotCaptured::AppOpen));
+        sink.arrived.insert("photos-1".into(), Arrived::default());
+        assert!(sink.changed_after_approval("mail-2"));
+        assert!(!sink.changed_after_approval("notes-1"));
+        assert!(!sink.changed_after_approval("photos-1"));
+        assert!(!sink.changed_after_approval("mail-1"));
+        let d = data_changed(&plan, |id| sink.changed_after_approval(id));
+        assert_eq!(d, [edited("Mail")]);
     }
 }

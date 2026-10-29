@@ -565,6 +565,15 @@ impl Sink {
         self
     }
 
+    /// Whether the old laptop refused component `id` because it changed after the approval, or
+    /// kept changing while it was read (the capture's own check: `ChangedSinceApproval`,
+    /// `KeptChanging`).
+    pub fn changed_after_approval(&self, id: &str) -> bool {
+        self.arrived
+            .get(id)
+            .is_some_and(|a| a.not_captured == Some(NotCaptured::Changing))
+    }
+
     fn chosen(&self, id: &str) -> bool {
         self.choice.copy.iter().any(|c| c == id) || self.choice.secrets.iter().any(|c| c == id)
     }

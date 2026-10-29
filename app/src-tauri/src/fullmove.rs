@@ -687,7 +687,14 @@ pub fn rebuild_here<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
 ) -> RebuiltView {
-    let drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
+    let mut drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
+    // App data the old laptop refused because it was edited there after the approval: nothing of
+    // it is placed, and the person is asked about it again.
+    if let Some((sink, _)) = &data {
+        drift.extend(pctwin_fullmove::drift::data_changed(plan, |id| {
+            sink.changed_after_approval(id)
+        }));
+    }
     let mut held = plan.clone();
     held.hold(&drift);
     let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone());

@@ -13,9 +13,14 @@
 //! - no: each held app ends skipped-by-user.
 //!
 //! A project edited on the old laptop after approval is refused by the capture's own check
-//! (`ChangedSinceApproval`) and asked about on the old laptop (`move-appdata-open`); a destination
-//! folder that changed is found by `drift::places_changed` (its rule and test are there; the file
-//! transfer does not call it yet).
+//! (`ChangedSinceApproval`): nothing of that app's data is placed here, and the rebuild adds its
+//! line (`drift::data_changed`, `project-edited`, held step `app-data`). Yes leaves it for "Fix
+//! these", which waits for the old laptop; no ends it skipped-by-user.
+//!
+//! Not wired yet: a destination folder moved or replaced after approval. Its rule and test are
+//! `drift::places_now` / `drift::places_changed`, but the file transfer (`pctwin-move`) writes
+//! through the folder it opened before approval and does not check it again, so files are not
+//! held for it and no line is shown.
 
 use pctwin_fullmove::drift::{Drift, Step, Why};
 use pctwin_fullmove::plan::{Kind, Title};
@@ -133,16 +138,29 @@ fn held_apps(drift: &[Drift]) -> Vec<u32> {
     drift.iter().filter_map(|d| d.app).collect()
 }
 
-/// The person said no: each held app ends skipped-by-user; nothing waits any more.
+/// The person said no: each held app, and the app data of each project edited after approval,
+/// ends skipped-by-user; nothing waits any more.
 pub fn decline(k: &mut Kept) {
     let names: Vec<Title> = held_apps(&k.last.drift)
         .iter()
         .filter_map(|at| k.last.plan.apps.get(*at as usize))
         .map(|e| Title::Name(name(&e.app.name)))
         .collect();
+    let data: Vec<Title> = k
+        .last
+        .drift
+        .iter()
+        .filter(|d| d.why == Why::ProjectEdited)
+        .map(|d| Title::Name(name(&d.name)))
+        .collect();
     let skipped = ItemResult::skipped_by_user();
     for l in &mut k.last.lines {
-        if l.kind == Kind::App && names.contains(&l.title) {
+        let held = match l.kind {
+            Kind::App => names.contains(&l.title),
+            Kind::Special => data.contains(&l.title),
+            Kind::Settings => false,
+        };
+        if held {
             l.status = skipped.status();
             l.reason = skipped.reason();
         }
@@ -380,6 +398,43 @@ mod tests {
         assert_eq!(why(Why::ProjectEdited), AfterWhy::ProjectEdited);
         assert_eq!(step(Step::Settings), Recheck::Settings);
         assert_eq!(step(Step::Install), Recheck::Install);
+    }
+
+    /// Fresh-context review F5: app data edited on the old laptop after approval is shown, held
+    /// (nothing of it was placed), and asked about: no ends it skipped-by-user; yes leaves it for
+    /// "Fix these", which waits for the old laptop.
+    #[test]
+    fn app_data_edited_after_approval_is_asked_about_again() {
+        let mut k = kept();
+        k.last.drift = vec![pctwin_fullmove::drift::edited("Mail")];
+        k.last.lines.push(RebuiltLine {
+            kind: Kind::Special,
+            ..line("Mail", ItemStatus::NeedsAction)
+        });
+        let v = view(&k).unwrap();
+        assert_eq!(v.lines[0].why, AfterWhy::ProjectEdited);
+        assert_eq!(v.lines[0].steps, [Recheck::AppData]);
+        let mut no = k.clone();
+        decline(&mut no);
+        assert_eq!(no.last.lines[3].status, ItemStatus::SkippedByUser);
+        assert_eq!(
+            no.last.lines[0].status,
+            ItemStatus::NeedsAction,
+            "apps not held stay"
+        );
+        let mut yes = k.clone();
+        assert!(approve_now(&mut yes, &empty()).is_empty());
+        assert!(view(&yes).is_none());
+        let o = offer(&yes, true);
+        let mail = o
+            .lines
+            .iter()
+            .find(|l| l.title == Title::Name("Mail".into()))
+            .unwrap();
+        assert_eq!(
+            mail.waits_for,
+            [crate::deliver::repair::Prerequisite::OldLaptop]
+        );
     }
 
     /// No: the held apps end skipped-by-user; every other line is kept.
