@@ -43,6 +43,7 @@ import {
   movePrivacyAnswer,
   listenQuickSend,
   qsChooseFolder,
+  qsSaveHere,
   qsFolder,
   qsKeepOriginalDates,
   qsOpenFolder,
@@ -271,6 +272,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsSend();
       await qsReceive();
       await qsChooseFolder();
+      await qsSaveHere();
       await qsFolder().catch(() => undefined);
       await qsOpenFolder();
       await qsKeepOriginalDates().catch(() => undefined);

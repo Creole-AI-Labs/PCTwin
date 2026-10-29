@@ -1455,6 +1455,7 @@ fn calls() -> Value {
             { "name": "quicksend_receive", "args": [] },
             { "name": "quicksend_folder", "args": [] },
             { "name": "quicksend_choose_folder", "args": [] },
+            { "name": "quicksend_save_here", "args": [] },
             { "name": "quicksend_open_folder", "args": [] },
             { "name": "quicksend_keep_original_dates", "args": [] },
             { "name": "quicksend_pause", "args": [] },

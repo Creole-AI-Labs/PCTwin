@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 93 names: the app's ninety commands, listening to and
+/// Exactly what the screens may call, 94 names: the app's ninety-one commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 93] = [
+const SCREENS_MAY_CALL: [&str; 94] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -78,6 +78,7 @@ const SCREENS_MAY_CALL: [&str; 93] = [
     "quicksend_receive",
     "quicksend_folder",
     "quicksend_choose_folder",
+    "quicksend_save_here",
     "quicksend_open_folder",
     "quicksend_keep_original_dates",
     "quicksend_pause",
