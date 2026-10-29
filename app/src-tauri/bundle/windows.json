@@ -3,6 +3,6 @@
     "beforeBuildCommand": "node ../scripts/stage-helpers.mjs release && pnpm build"
   },
   "bundle": {
-    "externalBin": ["binaries/pctwin-helper", "binaries/pctwin-handover"]
+    "externalBin": ["binaries/pctwin-helper", "binaries/pctwin-handover", "binaries/pctwin-parser"]
   }
 }

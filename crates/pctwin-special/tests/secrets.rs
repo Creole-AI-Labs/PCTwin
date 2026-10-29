@@ -64,6 +64,7 @@ fn with_secrets(home: &Path) {
 
 #[test]
 fn secrets_move_only_when_chosen_one_by_one() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     with_secrets(&home);
@@ -114,6 +115,7 @@ fn secrets_move_only_when_chosen_one_by_one() {
 
 #[test]
 fn an_unopenable_secret_cannot_be_chosen() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-055: saved passwords with no key store beside them: kept as found, access unresolved.
     let t = temp();
     let home = home_of(&t);
@@ -133,6 +135,7 @@ fn an_unopenable_secret_cannot_be_chosen() {
 
 #[test]
 fn no_secret_content_reaches_any_record() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     with_secrets(&home);
@@ -167,6 +170,7 @@ impl OwnerOnly for AppOwnerOnly {
 
 #[test]
 fn a_readable_password_export_lives_owner_only_and_is_removed_only_when_safe() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-022.
     assert!(DISCLOSURE.contains("anyone who opens it can read"));
     let t = temp();
@@ -228,3 +232,8 @@ fn a_readable_password_export_lives_owner_only_and_is_removed_only_when_safe() {
     // A name with a folder in it is refused.
     assert!(ExportSlot::prepare(&base, "../x.csv", &AppOwnerOnly).is_err());
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

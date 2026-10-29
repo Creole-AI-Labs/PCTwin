@@ -715,32 +715,34 @@ fn sqlite_one(
         std::fs::create_dir_all(parent)
             .map_err(|e| CaptureError::Unreadable(e.kind().to_string()))?;
     }
-    let not_consistent = |e: rusqlite::Error| CaptureError::NotConsistent(e.to_string());
-    {
-        let from = rusqlite::Connection::open(&src).map_err(not_consistent)?;
-        from.backup(
-            rusqlite::MAIN_DB,
-            &out,
-            None::<fn(rusqlite::backup::Progress)>,
-        )
-        .map_err(not_consistent)?;
+    // The steady copies' bytes, bounded, go to the parser process: there the log is laid over
+    // the pages in memory and SQLite's own quick_check must pass. SQLite never opens another
+    // app's database in this process (adoption change 1).
+    let unreadable = |e: std::io::Error| CaptureError::Unreadable(e.kind().to_string());
+    let journal = joined(snap.path(), &format!("{db}-journal"));
+    if std::fs::metadata(&journal).is_ok_and(|m| m.len() > 0) {
+        // A change was being written when it was copied (a rollback journal): not this copy.
+        return Err(CaptureError::NotConsistent(
+            "a change was being written to it when it was copied".into(),
+        ));
     }
-    {
-        // Opened immutable: the check itself leaves nothing beside the result.
-        let check = rusqlite::Connection::open_with_flags(
-            crate::content::immutable_uri(&out),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )
-        .map_err(not_consistent)?;
-        let verdict: String = check
-            .query_row("PRAGMA quick_check", [], |r| r.get(0))
-            .map_err(not_consistent)?;
-        if verdict != "ok" {
-            let _ = std::fs::remove_file(&out);
-            return Err(CaptureError::NotConsistent(verdict));
+    let wal = joined(snap.path(), &format!("{db}-wal"));
+    let too_large = |e: std::io::Error| {
+        if e.to_string() == "too large" {
+            CaptureError::NotConsistent("too large to check".into())
+        } else {
+            unreadable(e)
         }
-    }
-    let bytes = std::fs::read(&out).map_err(|e| CaptureError::Unreadable(e.kind().to_string()))?;
+    };
+    let db_bytes = crate::guard::read_all(&src, crate::content::MAX_DB).map_err(too_large)?;
+    let log = if std::fs::metadata(&wal).is_ok_and(|m| m.len() > 0) {
+        Some(crate::guard::read_all(&wal, crate::content::MAX_LOG).map_err(too_large)?)
+    } else {
+        None
+    };
+    let bytes = crate::content::snapshot_of(&db_bytes, log.as_deref())
+        .map_err(|e| CaptureError::NotConsistent(e.to_string()))?;
+    std::fs::write(&out, &bytes).map_err(unreadable)?;
     Ok(CapturedFile {
         rel: db.to_string(),
         len: bytes.len() as u64,

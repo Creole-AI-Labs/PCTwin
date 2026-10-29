@@ -22,6 +22,7 @@ fn files_under(p: &Path) -> Vec<PathBuf> {
 /// The child: reads one database's tables, then its facts, and exits normally.
 #[test]
 fn child_reads_a_database() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let Some(db) = std::env::var_os("PCTWIN_TEST_DB") else {
         return;
     };
@@ -33,6 +34,7 @@ fn child_reads_a_database() {
 /// The child: sweeps leftover snapshots.
 #[test]
 fn child_sweeps() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     if std::env::var_os("PCTWIN_TEST_SWEEP").is_none() {
         return;
     }
@@ -55,6 +57,7 @@ fn child(test: &str, var: (&str, &Path), temp: &Path) -> String {
 
 #[test]
 fn reading_a_live_database_leaves_nothing_in_the_temporary_folder() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let base = tempfile::tempdir().unwrap();
     let temp = base.path().join("temp");
     std::fs::create_dir_all(&temp).unwrap();
@@ -87,6 +90,7 @@ fn reading_a_live_database_leaves_nothing_in_the_temporary_folder() {
 
 #[test]
 fn snapshots_a_stopped_pctwin_left_are_swept_and_nothing_else() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let base = tempfile::tempdir().unwrap();
     let temp = base.path().join("temp");
     let left = temp.join(format!(
@@ -106,3 +110,8 @@ fn snapshots_a_stopped_pctwin_left_are_swept_and_nothing_else() {
         "only PCTwin's own snapshots are removed"
     );
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

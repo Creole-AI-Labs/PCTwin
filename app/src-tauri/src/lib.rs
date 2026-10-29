@@ -42,6 +42,39 @@ mod restart;
 mod undo_books;
 mod updates;
 
+/// Other apps' data files (their JSON and databases) are read in parser processes too, one per
+/// folder read at once; each starts only when first asked.
+fn install_content_readers() {
+    static CONTENTS: std::sync::OnceLock<pctwin_parse::Pool> = std::sync::OnceLock::new();
+    pctwin_special::content::install_reader(CONTENTS.get_or_init(|| {
+        pctwin_parse::Pool::beside_this_program(pctwin_special::classify::PLAN_THREADS)
+    }));
+}
+
+/// Where the files a parser process reads come from: each source has its own process, so a file
+/// that took over one process can never answer for files of another.
+#[derive(Clone, Copy)]
+pub(crate) enum Files {
+    /// The apps installed on this laptop (their programs' and installers' signatures).
+    InstalledHere,
+    /// Installers found among the person's files on the old laptop (read on Windows only, where
+    /// an older copy of the system can hold them; elsewhere nothing makes this source yet).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    FoundInstallers,
+}
+
+/// PCTwin's locked-down parser process (adoption change 1) for files from `from`, beside the
+/// app: the insides of untrusted files are read only there.
+pub(crate) fn parser(from: Files) -> &'static pctwin_parse::Parser {
+    static HERE: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    static FOUND: std::sync::OnceLock<pctwin_parse::Parser> = std::sync::OnceLock::new();
+    let slot = match from {
+        Files::InstalledHere => &HERE,
+        Files::FoundInstallers => &FOUND,
+    };
+    slot.get_or_init(pctwin_parse::Parser::beside_this_program)
+}
+
 use serde::Deserialize;
 use tauri::ipc::Invoke;
 use tauri::menu::{Menu, MenuItem};
@@ -310,6 +343,7 @@ fn has_tray<R: Runtime>() -> bool {
 /// the screens more at run time: Tauri's `dynamic-acl` feature is off (Cargo.toml), and lockdown.rs
 /// refuses code that names a capability or the permission store.
 pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+    install_content_readers();
     builder
         .plugin(navigation_guard())
         .plugin(tauri_plugin_opener::init())

@@ -28,6 +28,8 @@ pctwin-journal = { path = "../pctwin-journal" }
 # The maker check of a package, made by the helper itself on its own copy before an elevated
 # install (second review, findings B2 and B3).
 pctwin-maker = { path = "../pctwin-maker" }
+# The maker check reads a package's insides in the locked-down parser process (adoption change 1).
+pctwin-parse = { path = "../pctwin-parse" }
 # The one implementation of the maker check's sealed HelperStaged.
 pctwin-staged-seal = { path = "../pctwin-staged-seal" }
 pctwin-record = { path = "../pctwin-record" }
@@ -62,3 +64,5 @@ pctwin-helper = { path = ".", features = ["test-staging"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
 zeroize = "1.9.0"
+# The tests read packages through the real parser process (built for the test run).
+pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }

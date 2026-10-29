@@ -20,9 +20,10 @@ use crate::facts::{
     Arch, ArchFact, Bytes, Format, FormatFact, Maker, Malware, SameMaker, Sha256, Signature,
     Steady, System, Verdict, compare,
 };
-use crate::msi::{MsiSignature, read_msi};
-use crate::pe::{PeSignature, read_pe};
-use crate::sniff::{HEAD, TAIL, sniff};
+use serde::{Deserialize, Serialize};
+
+use crate::own::{OwnRead, OwnReader, ends};
+use crate::sniff::sniff;
 
 /// What the old laptop's copy and the recipe say the download must be.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,34 +163,6 @@ fn fingerprint(f: &mut File) -> io::Result<Bytes> {
     })
 }
 
-fn ends(f: &mut File, size: u64) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    let mut head = vec![0u8; usize::try_from(size.min(HEAD as u64)).unwrap_or(HEAD)];
-    f.seek(SeekFrom::Start(0))?;
-    f.read_exact(&mut head)?;
-    let tail_len = size.min(TAIL as u64);
-    let mut tail = vec![0u8; usize::try_from(tail_len).unwrap_or(TAIL)];
-    f.seek(SeekFrom::Start(size - tail_len))?;
-    f.read_exact(&mut tail)?;
-    Ok((head, tail))
-}
-
-/// Who signed it, as PCTwin's own reader sees it (Windows files only).
-#[expect(
-    clippy::large_enum_variant,
-    reason = "made once per check; boxing buys nothing"
-)]
-enum OwnRead {
-    NotRead,
-    None,
-    Broken(String),
-    Signed {
-        signer: Result<crate::facts::WindowsSigner, String>,
-        /// None for an MSI: PCTwin's own reader does not work out a package's digest; Windows
-        /// does, reading it by name, so only the helper's own copy counts ([`check_staged`]).
-        digest_matches: Option<bool>,
-    },
-}
-
 /// The administrator helper's own copy of a package: in its administrators-only folder, opened by
 /// the helper and held so nobody can write, rename or delete it while it is checked and
 /// installed. Windows' installer-package checker reads a package by its name, not through the
@@ -202,6 +175,10 @@ pub trait HelperStaged: pctwin_staged_seal::Sealed {
     fn staged_path(&self) -> &Path;
 }
 
+/// Why a file is "not checked" when PCTwin's own reader could not answer.
+pub const NOT_CHECKED_BY_READER: &str =
+    "PCTwin's file checker could not finish reading this file, so it was not checked";
+
 /// Why an installer package's signature is not counted outside the helper's own copy.
 pub const PACKAGE_READ_BY_NAME: &str = "Windows reads an installer package by its name, not the copy PCTwin holds, so its signature is checked only on the administrator helper's own copy";
 
@@ -211,10 +188,11 @@ pub const PACKAGE_READ_BY_NAME: &str = "Windows reads an installer package by it
 pub fn check(
     path: &Path,
     expected: &Expected,
+    reader: &dyn OwnReader,
     system: &dyn SystemChecks,
     limits: &Limits,
 ) -> Result<Verdict, CheckError> {
-    check_at(path, false, expected, system, limits)
+    check_at(path, false, expected, reader, system, limits)
 }
 
 /// Checks the administrator helper's own copy of a package, the only place a Windows Installer
@@ -222,16 +200,18 @@ pub fn check(
 pub fn check_staged(
     staged: &dyn HelperStaged,
     expected: &Expected,
+    reader: &dyn OwnReader,
     system: &dyn SystemChecks,
     limits: &Limits,
 ) -> Result<Verdict, CheckError> {
-    check_at(staged.staged_path(), true, expected, system, limits)
+    check_at(staged.staged_path(), true, expected, reader, system, limits)
 }
 
 fn check_at(
     path: &Path,
     staged: bool,
     expected: &Expected,
+    reader: &dyn OwnReader,
     system: &dyn SystemChecks,
     limits: &Limits,
 ) -> Result<Verdict, CheckError> {
@@ -254,75 +234,91 @@ fn check_at(
     if first.size > limits.max_size {
         return Err(CheckError::TooLarge(first.size));
     }
-    let (head, tail) = ends(&mut file, first.size)?;
-    let sniffed = sniff(&head, &tail);
-    let mut format = sniffed.format;
-    let mut arch = sniffed.arch;
-
-    let mut own = OwnRead::NotRead;
-    if sniffed.compound {
-        if let Ok(m) = read_msi(&file)
-            && m.is_package
-        {
-            format = Format::WindowsInstaller;
-            arch = m.arch;
-            own = match m.signature {
-                MsiSignature::None => OwnRead::None,
-                MsiSignature::Broken(why) => OwnRead::Broken(why),
-                MsiSignature::Signed(signer) => OwnRead::Signed {
-                    signer,
-                    digest_matches: None,
+    // PCTwin's own reading of the insides happens in the parser process (adoption change 1);
+    // its kind by the first bytes is worked out here too, only to say what could not be checked.
+    let read = match reader.installer(&file, first.size) {
+        Ok(read) => read,
+        Err(why) => {
+            let (head, tail) = ends(&mut file, first.size)?;
+            let sniffed = sniff(&head, &tail);
+            let why = format!("{NOT_CHECKED_BY_READER} ({why})");
+            return finish(
+                path,
+                expected,
+                &mut file,
+                &held,
+                first,
+                Facts {
+                    format: sniffed.format,
+                    arch: sniffed.arch,
+                    signature: Signature::NotChecked { why: why.clone() },
+                    same_maker: SameMaker::Unknown { why: why.clone() },
+                    malware: Malware::NotFullyChecked { why },
+                    found_maker: None,
                 },
-            };
+            );
         }
-    } else if format == Format::WindowsProgram {
-        own = match read_pe(&mut file, first.size)? {
-            PeSignature::None => OwnRead::None,
-            PeSignature::Broken(why) => OwnRead::Broken(why),
-            PeSignature::Signed {
-                signer,
-                digest_matches,
-            } => OwnRead::Signed {
-                signer,
-                digest_matches: Some(digest_matches),
-            },
-        };
-    } else if format == Format::FlatpakRef {
-        // A downloaded reference is a pointer only (second review, finding B1): it can name any
-        // remote, address and key, so it is never trusted and never installed. A Flatpak app is
-        // installed by its ID from the old laptop's own remote and key
-        // ([`crate::linux::flatpak_route`]); here the reference is only read for the report.
-        let maker = if first.size > crate::linux::MAX_FLATPAKREF as u64 {
-            Err("the Flatpak reference is too large".to_owned())
-        } else {
-            crate::linux::parse_flatpakref(&head).map(Maker::Linux)
-        };
-        let found = maker.as_ref().ok().cloned();
-        let signature = match &maker {
-            Ok(_) => Signature::NotChecked {
-                why: "a Flatpak reference is only a pointer; PCTwin installs the app by its name \
-                      from the old laptop's own source instead"
-                    .into(),
-            },
-            Err(why) => Signature::Broken { why: why.clone() },
-        };
-        return finish(
-            path,
-            expected,
-            &mut file,
-            &held,
-            first,
-            Facts {
-                format,
-                arch,
-                signature: signature.clone(),
-                same_maker: same_maker(&expected.maker, maker.map_err(|e| e.to_string())),
-                malware: crate::linux::malware_from(&signature),
-                found_maker: found,
-            },
-        );
-    }
+    };
+    let format = read.format;
+    let arch = read.arch;
+    let maker = match read.own {
+        OwnRead::Flatpak(maker) => maker,
+        own => {
+            return check_read(
+                path, staged, expected, system, limits, file, held, first, format, arch, own,
+            );
+        }
+    };
+    // A downloaded reference is a pointer only (second review, finding B1): it can name any
+    // remote, address and key, so it is never trusted and never installed. A Flatpak app is
+    // installed by its ID from the old laptop's own remote and key
+    // ([`crate::linux::flatpak_route`]); here the reference is only read for the report.
+    let maker = maker.map(Maker::Linux);
+    let found = maker.as_ref().ok().cloned();
+    let signature = match &maker {
+        Ok(_) => Signature::NotChecked {
+            why: "a Flatpak reference is only a pointer; PCTwin installs the app by its name \
+                  from the old laptop's own source instead"
+                .into(),
+        },
+        Err(why) => Signature::Broken { why: why.clone() },
+    };
+    finish(
+        path,
+        expected,
+        &mut file,
+        &held,
+        first,
+        Facts {
+            format,
+            arch,
+            signature: signature.clone(),
+            same_maker: same_maker(&expected.maker, maker.map_err(|e| e.to_string())),
+            malware: crate::linux::malware_from(&signature),
+            found_maker: found,
+        },
+    )
+}
 
+/// The rest of the check, once PCTwin's own reader has answered for a file that is not a Flatpak
+/// reference.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the one continuation of check_at, with its state as it stands"
+)]
+fn check_read(
+    path: &Path,
+    staged: bool,
+    expected: &Expected,
+    system: &dyn SystemChecks,
+    limits: &Limits,
+    mut file: File,
+    held: same_file::Handle,
+    first: Bytes,
+    format: Format,
+    arch: Option<Arch>,
+    own: OwnRead,
+) -> Result<Verdict, CheckError> {
     let format_fact = if expected.formats.contains(&format) {
         FormatFact::Matches { found: format }
     } else {
@@ -410,7 +406,7 @@ fn combine_windows(
         None => None,
     };
     match own {
-        OwnRead::NotRead | OwnRead::None => {
+        OwnRead::NotRead | OwnRead::None | OwnRead::Flatpak(_) => {
             let signature = match &sys.signature {
                 Signature::Missing => Signature::Missing,
                 Signature::Trusted if !sys.embedded => Signature::NotTrusted {
@@ -516,8 +512,11 @@ fn finish(
 /// Reads the maker of the old laptop's own copy of a Windows program or installer, by PCTwin's
 /// own reader only (the old laptop is read-only and may be offline). The copy's bytes must be
 /// the bytes signed, or there is no maker to anchor on.
-pub fn windows_maker_of(path: &Path) -> Result<crate::facts::WindowsSigner, String> {
-    match windows_old_copy(path).maker {
+pub fn windows_maker_of(
+    path: &Path,
+    reader: &dyn OwnReader,
+) -> Result<crate::facts::WindowsSigner, String> {
+    match windows_old_copy(path, reader).maker {
         OldMaker::Signed(signer) => Ok(signer),
         OldMaker::Unsigned => Err("the old copy is not signed".into()),
         OldMaker::NotRead(why) => Err(why),
@@ -526,7 +525,8 @@ pub fn windows_maker_of(path: &Path) -> Result<crate::facts::WindowsSigner, Stri
 
 /// Who made the old laptop's own copy of a Windows program or installer package, kept apart:
 /// signed (and by whom), read and carrying no signature, or not readable (with why).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[expect(
     clippy::large_enum_variant,
     reason = "one per app on the old laptop; boxing would only add noise"
@@ -538,7 +538,8 @@ pub enum OldMaker {
 }
 
 /// What PCTwin's own reader finds in the old laptop's copy: its maker and what it is built for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OldCopy {
     pub maker: OldMaker,
     pub arch: Option<Arch>,
@@ -547,12 +548,12 @@ pub struct OldCopy {
 /// Reads the old laptop's own copy of a Windows program or installer package (see
 /// [`windows_maker_of`]), never running it, never asking the system (the old laptop is only
 /// read).
-pub fn windows_old_copy(path: &Path) -> OldCopy {
+pub fn windows_old_copy(path: &Path, reader: &dyn OwnReader) -> OldCopy {
     let not_read = |why: String| OldCopy {
         maker: OldMaker::NotRead(why),
         arch: None,
     };
-    let mut f = match open_held(path) {
+    let f = match open_held(path) {
         Ok(f) => f,
         Err(e) => return not_read(e.to_string()),
     };
@@ -563,48 +564,9 @@ pub fn windows_old_copy(path: &Path) -> OldCopy {
     if size == 0 {
         return not_read("the old copy is empty".into());
     }
-    let (head, tail) = match ends(&mut f, size) {
-        Ok(ends) => ends,
-        Err(e) => return not_read(e.to_string()),
-    };
-    let s = sniff(&head, &tail);
-    if s.compound {
-        let read = match read_msi(&f) {
-            Ok(read) => read,
-            Err(why) => return not_read(why),
-        };
-        let maker = match read.signature {
-            MsiSignature::Signed(Ok(signer)) => OldMaker::Signed(signer),
-            MsiSignature::Signed(Err(why)) | MsiSignature::Broken(why) => OldMaker::NotRead(why),
-            MsiSignature::None => OldMaker::Unsigned,
-        };
-        return OldCopy {
-            maker,
-            arch: read.arch,
-        };
-    }
-    if s.format != Format::WindowsProgram {
-        return not_read("the old copy is not a Windows program".into());
-    }
-    let maker = match read_pe(&mut f, size) {
-        Err(e) => OldMaker::NotRead(e.to_string()),
-        Ok(PeSignature::Signed {
-            signer: Ok(signer),
-            digest_matches: true,
-        }) => OldMaker::Signed(signer),
-        Ok(PeSignature::Signed {
-            signer: Err(why), ..
-        }) => OldMaker::NotRead(why),
-        Ok(PeSignature::Signed { .. }) => {
-            OldMaker::NotRead("the old copy was changed after it was signed".into())
-        }
-        Ok(PeSignature::None) => OldMaker::Unsigned,
-        Ok(PeSignature::Broken(why)) => OldMaker::NotRead(why),
-    };
-    OldCopy {
-        maker,
-        arch: s.arch,
-    }
+    reader
+        .old_copy(&f, size)
+        .unwrap_or_else(|why| not_read(format!("{NOT_CHECKED_BY_READER} ({why})")))
 }
 
 #[cfg(test)]

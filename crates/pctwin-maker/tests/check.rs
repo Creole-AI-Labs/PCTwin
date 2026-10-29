@@ -111,7 +111,7 @@ fn an_unsigned_program_ends_needs_action_bound_to_its_bytes() {
     let bytes = tiny_pe();
     let p = write(&dir, "setup.exe", &bytes);
     let fake = Fake::new(Signature::Missing, false);
-    let v = check(&p, &expected(), &fake, &Limits::default()).unwrap();
+    let v = check(&p, &expected(), &own(), &fake, &Limits::default()).unwrap();
     assert_eq!(v.bytes.size, bytes.len() as u64);
     assert_eq!(v.bytes.sha256, Sha256(H::digest(&bytes).into()));
     assert_eq!(v.steady, Steady::Yes);
@@ -138,7 +138,7 @@ fn a_sign_in_page_saved_as_setup_exe_is_not_checked_further() {
     let dir = tempfile::tempdir().unwrap();
     let p = write(&dir, "setup.exe", b"<!DOCTYPE html><title>Sign in</title>");
     let fake = Fake::new(Signature::Trusted, true);
-    let v = check(&p, &expected(), &fake, &Limits::default()).unwrap();
+    let v = check(&p, &expected(), &own(), &fake, &Limits::default()).unwrap();
     assert_eq!(
         v.format,
         FormatFact::Wrong {
@@ -162,6 +162,7 @@ fn the_wrong_architecture_is_refused() {
     let v = check(
         &p,
         &e,
+        &own(),
         &Fake::new(Signature::Missing, false),
         &Limits::default(),
     )
@@ -182,6 +183,7 @@ fn a_recipe_digest_that_differs_is_refused() {
     let v = check(
         &p,
         &e,
+        &own(),
         &Fake::new(Signature::Missing, false),
         &Limits::default(),
     )
@@ -201,7 +203,14 @@ fn windows_finding_a_signature_pctwin_did_not_is_broken() {
         Signature::NotTrusted { why: "x".into() },
         Signature::Broken { why: "x".into() },
     ] {
-        let v = check(&p, &expected(), &Fake::new(s, true), &Limits::default()).unwrap();
+        let v = check(
+            &p,
+            &expected(),
+            &own(),
+            &Fake::new(s, true),
+            &Limits::default(),
+        )
+        .unwrap();
         assert!(
             matches!(v.signature, Signature::Broken { .. }),
             "{:?}",
@@ -212,6 +221,7 @@ fn windows_finding_a_signature_pctwin_did_not_is_broken() {
     let v = check(
         &p,
         &expected(),
+        &own(),
         &Fake::new(Signature::Trusted, false),
         &Limits::default(),
     )
@@ -220,6 +230,7 @@ fn windows_finding_a_signature_pctwin_did_not_is_broken() {
     let v = check(
         &p,
         &expected(),
+        &own(),
         &Fake::new(
             Signature::NotChecked {
                 why: "no tool".into(),
@@ -245,7 +256,7 @@ fn a_change_during_the_check_is_caught() {
         b[0x300] ^= 1;
         w.set(Some(std::fs::write(path, &b).is_ok()));
     }));
-    let v = check(&p, &expected(), &fake, &Limits::default()).unwrap();
+    let v = check(&p, &expected(), &own(), &fake, &Limits::default()).unwrap();
     if cfg!(windows) {
         // Windows: the held file cannot be written while it is checked.
         assert_eq!(wrote.get(), Some(false));
@@ -274,7 +285,7 @@ fn a_swap_of_the_name_during_the_check_is_caught() {
         }
         s.set(Some(moved));
     }));
-    let v = check(&p, &expected(), &fake, &Limits::default()).unwrap();
+    let v = check(&p, &expected(), &own(), &fake, &Limits::default()).unwrap();
     if cfg!(windows) {
         // Windows: the held file cannot be renamed while it is checked.
         assert_eq!(swapped.get(), Some(false));
@@ -295,6 +306,7 @@ fn files_that_cannot_be_checked_at_all() {
         check(
             Path::new("setup.exe"),
             &expected(),
+            &own(),
             &fake,
             &Limits::default()
         ),
@@ -305,19 +317,20 @@ fn files_that_cannot_be_checked_at_all() {
         ..Limits::default()
     };
     assert!(matches!(
-        check(&p, &expected(), &fake, &small),
+        check(&p, &expected(), &own(), &fake, &small),
         Err(CheckError::TooLarge(0x400))
     ));
     let exact = Limits {
         max_size: 0x400,
         ..Limits::default()
     };
-    assert!(check(&p, &expected(), &fake, &exact).is_ok());
-    assert!(check(dir.path(), &expected(), &fake, &Limits::default()).is_err());
+    assert!(check(&p, &expected(), &own(), &fake, &exact).is_ok());
+    assert!(check(dir.path(), &expected(), &own(), &fake, &Limits::default()).is_err());
     assert!(matches!(
         check(
             &dir.path().join("missing.exe"),
             &expected(),
+            &own(),
             &fake,
             &Limits::default()
         ),
@@ -328,7 +341,7 @@ fn files_that_cannot_be_checked_at_all() {
         let link = dir.path().join("link.exe");
         std::os::unix::fs::symlink(&p, &link).unwrap();
         assert!(matches!(
-            check(&link, &expected(), &fake, &Limits::default()),
+            check(&link, &expected(), &own(), &fake, &Limits::default()),
             Err(CheckError::Link)
         ));
     }
@@ -342,6 +355,7 @@ fn an_empty_file_is_an_unknown_kind() {
     let v = check(
         &p,
         &expected(),
+        &own(),
         &Fake::new(Signature::Missing, false),
         &Limits::default(),
     )
@@ -369,6 +383,7 @@ fn a_compound_file_that_is_not_an_installer_is_the_wrong_kind() {
     let v = check(
         &p,
         &expected(),
+        &own(),
         &Fake::new(Signature::Trusted, true),
         &Limits::default(),
     )
@@ -395,6 +410,7 @@ fn an_unsigned_msi_is_read_as_an_installer() {
     let v = check(
         &p,
         &expected(),
+        &own(),
         &Fake::new(Signature::Missing, false),
         &Limits::default(),
     )
@@ -442,7 +458,7 @@ fn a_flatpak_reference_is_never_installed() {
     let e = flatpak_expected();
     let fake = Fake::new(Signature::Missing, false);
     let p = write(&dir, "app.flatpakref", REF.as_bytes());
-    let v = check(&p, &e, &fake, &Limits::default()).unwrap();
+    let v = check(&p, &e, &own(), &fake, &Limits::default()).unwrap();
     assert_eq!(fake.calls.get(), 0);
     assert_eq!(v.found_maker, Some(flatpak_old()));
     assert!(matches!(v.signature, Signature::NotChecked { .. }), "{v:?}");
@@ -454,7 +470,7 @@ fn a_flatpak_reference_is_never_installed() {
          GPGKey=ZXZpbGtleQ==\nRuntimeRepo=https://evil.example/r.flatpakrepo\n"
     );
     let p = write(&dir, "evil.flatpakref", evil.as_bytes());
-    let v = check(&p, &e, &fake, &Limits::default()).unwrap();
+    let v = check(&p, &e, &own(), &fake, &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::Broken { .. }), "{v:?}");
     assert!(matches!(v.decide(), Decision::NeedsAction { .. }), "{v:?}");
 
@@ -464,7 +480,7 @@ fn a_flatpak_reference_is_never_installed() {
         "other.flatpakref",
         REF.replace("AAECAwQ=", "AAECAwU=").as_bytes(),
     );
-    let v = check(&other, &e, &fake, &Limits::default()).unwrap();
+    let v = check(&other, &e, &own(), &fake, &Limits::default()).unwrap();
     assert!(matches!(v.decide(), Decision::NeedsAction { why } if why.contains(&Why::OtherMaker)));
 
     // No key.
@@ -473,7 +489,7 @@ fn a_flatpak_reference_is_never_installed() {
         "nokey.flatpakref",
         REF.replace("GPGKey=AAECAwQ=\n", "").as_bytes(),
     );
-    let v = check(&nokey, &e, &fake, &Limits::default()).unwrap();
+    let v = check(&nokey, &e, &own(), &fake, &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::Broken { .. }));
     assert!(matches!(v.same_maker, SameMaker::Unknown { .. }));
 
@@ -481,7 +497,7 @@ fn a_flatpak_reference_is_never_installed() {
     let mut big = REF.to_owned();
     big.push_str(&"#".repeat(70 * 1024));
     let big = write(&dir, "big.flatpakref", big.as_bytes());
-    let v = check(&big, &e, &fake, &Limits::default()).unwrap();
+    let v = check(&big, &e, &own(), &fake, &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::Broken { why } if why.contains("too large")));
 }
 
@@ -489,7 +505,9 @@ fn a_flatpak_reference_is_never_installed() {
 /// remote and key; a reference can only say which app is meant, never where from.
 #[test]
 fn a_flatpak_app_is_installed_from_the_old_laptops_own_source() {
-    use pctwin_maker::linux::{flatpak_route, install_call, parse_flatpakref, remote_add_call};
+    use pctwin_maker::linux::{flatpak_route, install_call, remote_add_call};
+    let parse_flatpakref =
+        |b: &[u8]| pctwin_maker::own::raw::flatpakref(pctwin_parse_seal::in_child(), b);
     let t = std::time::Duration::from_secs(60);
     let route = flatpak_route(&flatpak_old(), None).unwrap();
     // A reference naming another remote, address and key changes nothing.
@@ -615,6 +633,7 @@ fn a_flatpak_reference_of_exactly_the_limit_is_read() {
     let v = check(
         &p,
         &e,
+        &own(),
         &Fake::new(Signature::Missing, false),
         &Limits::default(),
     )
@@ -627,10 +646,10 @@ fn a_flatpak_reference_of_exactly_the_limit_is_read() {
 fn the_old_copys_maker_needs_a_signed_windows_file() {
     let dir = tempfile::tempdir().unwrap();
     let page = write(&dir, "app.exe", b"<html>");
-    let e = pctwin_maker::windows_maker_of(&page).unwrap_err();
+    let e = pctwin_maker::windows_maker_of(&page, &own()).unwrap_err();
     assert!(e.contains("not a Windows program"), "{e}");
     let unsigned = write(&dir, "app2.exe", &tiny_pe());
-    let e = pctwin_maker::windows_maker_of(&unsigned).unwrap_err();
+    let e = pctwin_maker::windows_maker_of(&unsigned, &own()).unwrap_err();
     assert!(e.contains("not signed"), "{e}");
     let mut c = cfb::CompoundFile::create(std::io::Cursor::new(Vec::new())).unwrap();
     c.set_storage_clsid(
@@ -640,7 +659,7 @@ fn the_old_copys_maker_needs_a_signed_windows_file() {
     .unwrap();
     c.flush().unwrap();
     let msi = write(&dir, "app.msi", &c.into_inner().into_inner());
-    let e = pctwin_maker::windows_maker_of(&msi).unwrap_err();
+    let e = pctwin_maker::windows_maker_of(&msi, &own()).unwrap_err();
     assert!(e.contains("not signed"), "{e}");
 }
 
@@ -685,4 +704,9 @@ fn only_the_helpers_staging_vouches_for_its_own_copy() {
     }
     found.sort();
     assert_eq!(found, ["pctwin-helper", "pctwin-maker"]);
+}
+
+/// PCTwin's own readers, run in the test's own process (only a parser crate's tests may).
+fn own() -> pctwin_maker::InThisProcess {
+    pctwin_maker::InThisProcess::new(pctwin_parse_seal::in_child())
 }

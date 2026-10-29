@@ -12,13 +12,18 @@
 #                     (os_assoc_is_dangerous added 28 October 2026, fifth review residual of
 #                     finding 1: Windows' own judgement of a file type; approved by the user,
 #                     28 October 2026)
+#                     (os_start_contained, os_administrators_count and os_sandbox_init added 28
+#                     October 2026, the parser process's walls: Windows AppContainer, restricted
+#                     token, job object; macOS Seatbelt; approved by the user, 28 October 2026)
 #
 # Every other crate must say `[lints] workspace = true`, which brings in the workspace's
 # `unsafe_code = "forbid"`. A crate that sets its own unsafe_code, or whose sources contain an
 # allow/expect/warn of unsafe code, fails this check. The two exceptions may set
 # unsafe_code = "deny"; each function on their list must exist exactly once and hold exactly one
 # `expect(unsafe_code)` and exactly one `unsafe`, and no `unsafe` or loosening may appear anywhere
-# else in the crate (an `unsafe fn` or `unsafe impl` outside those bodies fails too).
+# else in the crate (an `unsafe fn` or `unsafe impl` outside those bodies fails too). A listed
+# function may also hold one `unsafe extern` block declaring the foreign functions it calls
+# (28 October 2026, for os_sandbox_init: macOS's sandbox_init has no binding crate).
 #
 # The sources are read as Rust, not line by line: comments, strings and character literals are
 # set aside first, and an attribute counts however it is spread over lines, so
@@ -39,7 +44,7 @@ bad() { echo "UNSAFE FENCE: $*" >&2; fail=1; }
 exception_fns() {
   case "$1" in
     pctwin-lease) echo "fcntl_int" ;;
-    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_native_machine os_net_user_add os_expire_password os_create_dir_with_sddl os_create_profile os_set_process_sddl os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items os_od_create_user os_authorization_holds os_windows_dir os_machine_text os_token_elevated os_session_on_screen os_win_verify_trust os_disk_hotplug os_assoc_is_dangerous" ;;
+    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_native_machine os_net_user_add os_expire_password os_create_dir_with_sddl os_create_profile os_set_process_sddl os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items os_od_create_user os_authorization_holds os_windows_dir os_machine_text os_token_elevated os_session_on_screen os_win_verify_trust os_disk_hotplug os_assoc_is_dangerous os_start_contained os_sandbox_init os_administrators_count" ;;
     *) echo "" ;;
   esac
 }
@@ -104,8 +109,12 @@ scan() {
         pos($o) = $end;
       }
       while ($o =~ /\bunsafe\b/g) {
-        printf "unsafe %s:%d\n", $file, $line->($-[0]);
-        printf "at %s:%d unsafe\n", $file, $-[0];
+        my $at = $-[0];
+        # A block declaring foreign functions (`unsafe extern`), which holds no code: counted
+        # apart, and allowed only inside a listed function, at most one there.
+        my $kind = (substr($o, pos($o)) =~ /\A\s*extern\b/) ? "unsafe-extern" : "unsafe";
+        printf "unsafe %s:%d\n", $file, $line->($at);
+        printf "at %s:%d %s\n", $file, $at, $kind;
       }
       for my $name (split " ", ($ENV{FENCE_FNS} // "")) {
         while ($o =~ /\bfn\s+\Q$name\E\b/g) {
@@ -174,6 +183,8 @@ for toml in crates/*/Cargo.toml app/src-tauri/Cargo.toml; do
       ne=$(printf '%s' "$counts" | grep -cxF "$fn loosen-expect" || true)
       [ "$nu" -eq 1 ] || bad "$dir: fn $fn holds $nu uses of unsafe, exactly 1 is permitted"
       [ "$ne" -eq 1 ] || bad "$dir: fn $fn holds $ne expect(unsafe_code), exactly 1 is permitted"
+      nx=$(printf '%s' "$counts" | grep -cxF "$fn unsafe-extern" || true)
+      [ "$nx" -le 1 ] || bad "$dir: fn $fn holds $nx unsafe extern blocks, at most 1 is permitted"
     done
     continue
   fi

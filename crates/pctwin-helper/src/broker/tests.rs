@@ -1610,7 +1610,7 @@ fn an_install_needs_the_helpers_own_maker_check() {
 #[cfg(windows)]
 #[test]
 fn the_helpers_own_maker_check_of_a_real_package() {
-    use super::maker::{MakerCheck, check_package, laptop_arch};
+    use super::maker::{MakerCheck, check_package_with, laptop_arch};
     // A package built for this laptop's own chip: the check approves only those (an x64 package
     // on an Arm laptop, as on GitHub's Windows Arm runner, is refused for its architecture).
     let chip = laptop_arch().expect("this laptop's chip");
@@ -1622,11 +1622,13 @@ fn the_helpers_own_maker_check_of_a_real_package() {
                 .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("msi")))
                 .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() < 64 * 1024 * 1024))
                 .filter(|p| {
-                    pctwin_maker::windows_old_copy(p)
+                    pctwin_maker::windows_old_copy(p, pctwin_parse::testing::parser())
                         .arch
                         .is_some_and(|a| a.runs_on(chip))
                 })
-                .find(|p| pctwin_maker::windows_maker_of(p).is_ok())
+                .find(|p| {
+                    pctwin_maker::windows_maker_of(p, pctwin_parse::testing::parser()).is_ok()
+                })
         })
     else {
         eprintln!("no signed Windows Installer package for this chip here");
@@ -1645,7 +1647,7 @@ fn the_helpers_own_maker_check_of_a_real_package() {
     ));
     let handle = staging.admit(&mut bytes.as_slice(), digest).unwrap();
     let held = staging.open_verified(handle, digest).unwrap();
-    let maker = pctwin_maker::windows_maker_of(&msi).unwrap();
+    let maker = pctwin_maker::windows_maker_of(&msi, pctwin_parse::testing::parser()).unwrap();
     let action =
         |maker: pctwin_maker::facts::WindowsSigner, sha256: [u8; 32]| InstallVerifiedPackage {
             product_code: None,
@@ -1657,7 +1659,12 @@ fn the_helpers_own_maker_check_of_a_real_package() {
             maker: Box::new(maker),
         };
     let limits = pctwin_maker::Limits::default();
-    let got = check_package(&held, &action(maker.clone(), digest), &limits);
+    let got = check_package_with(
+        &held,
+        &action(maker.clone(), digest),
+        &limits,
+        pctwin_parse::testing::parser(),
+    );
     eprintln!("{}: {got:?} (Defender ready: {ready})", msi.display());
     if ready {
         assert_eq!(got, MakerCheck::Approved);
@@ -1671,14 +1678,24 @@ fn the_helpers_own_maker_check_of_a_real_package() {
     other.issuer_organization = Some("Another CA".into());
     other.subject.organization = Some("Another Ltd".into());
     assert_eq!(
-        check_package(&held, &action(other, digest), &limits),
+        check_package_with(
+            &held,
+            &action(other, digest),
+            &limits,
+            pctwin_parse::testing::parser()
+        ),
         MakerCheck::Refused
     );
     // Other approved bytes than the ones held: refused.
     let mut wrong = digest;
     wrong[0] ^= 1;
     assert_eq!(
-        check_package(&held, &action(maker, wrong), &limits),
+        check_package_with(
+            &held,
+            &action(maker, wrong),
+            &limits,
+            pctwin_parse::testing::parser()
+        ),
         MakerCheck::Refused
     );
 }

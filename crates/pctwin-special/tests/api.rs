@@ -72,6 +72,7 @@ fn effect(step: u32) -> PlannedEffect {
 
 #[test]
 fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let old = t.path().join("old");
     sqlite(
@@ -323,6 +324,7 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
 
 #[test]
 fn undo_keeps_what_the_person_changed_since() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-054.
     let t = temp();
     let old = t.path().join("old");
@@ -430,6 +432,7 @@ impl Holders for CannotTell {
 
 #[test]
 fn a_store_kept_only_as_found_never_lands_where_the_app_opens_it() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let old = t.path().join("old");
     let d = old.join("AppData/Roaming/Store App/db");
@@ -513,3 +516,8 @@ fn a_store_kept_only_as_found_never_lands_where_the_app_opens_it() {
             .is_file()
     );
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

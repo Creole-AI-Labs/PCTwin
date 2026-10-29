@@ -38,6 +38,8 @@ serde_json = "1"
 thiserror = "2.0.21"
 
 [dev-dependencies]
+# The tests read other apps' data files through the real parser process.
+pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }
 # Tests keep journal keys beside their journals, never in the system's key store.
 pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 # Synthetic browser databases for the app data test, and reading them back.

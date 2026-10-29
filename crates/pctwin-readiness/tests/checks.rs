@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use common::*;
 use pctwin_readiness::checks::{
     ChoiceError, Choices, Chosen, Damage, EffectApproval, ExternalEffect, Goal, Label, Missing,
-    NotRun, Outcome, Summary, any_sample, font_families, person_answer, repair_requests, run,
-    summarize,
+    NotRun, Outcome, Summary, any_sample, person_answer, repair_requests, run, summarize,
 };
 use pctwin_readiness::ledger::{Coverage, Observed, Role};
 use pctwin_record::ItemId;
@@ -107,7 +106,7 @@ fn pick(goals: Vec<Goal>) -> Choices {
 }
 
 fn only(choices: &Choices) -> Outcome {
-    let r = run(choices);
+    let r = run(choices, &own());
     assert_eq!(r.len(), 1);
     r[0].outcome.clone()
 }
@@ -121,7 +120,7 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 #[test]
 fn nothing_is_checked_unless_picked() {
     let c = Choices::picked(1, vec![]).unwrap();
-    assert!(run(&c).is_empty());
+    assert!(run(&c, &own()).is_empty());
     let many: Vec<Chosen> = (0..201)
         .map(|_| Chosen {
             item: id("x"),
@@ -154,7 +153,7 @@ fn t27_006_outside_effects_need_their_own_approval_and_are_not_run() {
                 task: "Open the budget".into(),
             },
         ]);
-        let first = &run(&c)[0];
+        let first = &run(&c, &own())[0];
         assert_eq!(
             first.outcome,
             Outcome::NotRun {
@@ -177,7 +176,7 @@ fn t27_006_outside_effects_need_their_own_approval_and_are_not_run() {
         let foreign = EffectApproval::from_person(&other, 0, 1).unwrap();
         assert_eq!(c.approve_effect(foreign), Err(ChoiceError::WrongKind));
         assert_eq!(
-            run(&c)[0].outcome,
+            run(&c, &own())[0].outcome,
             Outcome::NotRun {
                 why: NotRun::NeedsItsOwnApproval
             }
@@ -185,14 +184,14 @@ fn t27_006_outside_effects_need_their_own_approval_and_are_not_run() {
         let ok = EffectApproval::from_person(&c, 0, 1).unwrap();
         c.approve_effect(ok).unwrap();
         assert_eq!(
-            run(&c)[0].outcome,
+            run(&c, &own())[0].outcome,
             Outcome::NotRun {
                 why: NotRun::NotBuiltYet
             }
         );
         // The other check is untouched by that approval.
         assert_eq!(
-            run(&c)[1].outcome,
+            run(&c, &own())[1].outcome,
             Outcome::NotRun {
                 why: NotRun::WaitingForPerson
             }
@@ -245,8 +244,11 @@ fn linked_files_are_looked_up_inside_the_project_only() {
             }
         }
     );
-    assert!(any_sample(&run(&pick(vec![links(vec!["a.txt"; 10_001])]))));
-    assert!(!any_sample(&run(&pick(vec![links(vec!["a.txt"])]))));
+    assert!(any_sample(&run(
+        &pick(vec![links(vec!["a.txt"; 10_001])]),
+        &own()
+    )));
+    assert!(!any_sample(&run(&pick(vec![links(vec!["a.txt"])]), &own())));
 }
 
 /// A font is found by the family name inside the font file, never guessed from the file name.
@@ -255,7 +257,7 @@ fn a_font_is_found_by_its_own_name_table() {
     let dir = tempfile::tempdir().unwrap();
     let f = write(dir.path(), "MyFont-Regular.ttf", &font_bytes("Plain Sans"));
     write(dir.path(), "notes.txt", b"Plain Sans");
-    assert_eq!(font_families(&f), ["Plain Sans"]);
+    assert_eq!(families(&f), ["Plain Sans"]);
     let font = |family: &str| Goal::Font {
         family: family.into(),
         folders: vec![dir.path().to_path_buf()],
@@ -278,11 +280,11 @@ fn a_font_is_found_by_its_own_name_table() {
     );
     // A file with a font's name that is not a font, and a cut-short font, name nothing.
     let junk = write(dir.path(), "junk.otf", b"not a font at all");
-    assert!(font_families(&junk).is_empty());
+    assert!(families(&junk).is_empty());
     let mut cut = font_bytes("Plain Sans");
     cut.truncate(40);
     let cut = write(dir.path(), "cut.ttf", &cut);
-    assert!(font_families(&cut).is_empty());
+    assert!(families(&cut).is_empty());
 }
 
 #[test]
@@ -426,18 +428,21 @@ fn checks_change_nothing() {
         })
         .collect();
     let names_before = std::fs::read_dir(dir.path()).unwrap().count();
-    run(&pick(vec![
-        Goal::ArchiveOpens { file: z.clone() },
-        Goal::DatabaseOpens { file: d.clone() },
-        Goal::Font {
-            family: "Plain Sans".into(),
-            folders: vec![dir.path().to_path_buf()],
-        },
-        Goal::LinkedFiles {
-            root: dir.path().to_path_buf(),
-            links: vec!["a.zip".into(), "missing".into()],
-        },
-    ]));
+    run(
+        &pick(vec![
+            Goal::ArchiveOpens { file: z.clone() },
+            Goal::DatabaseOpens { file: d.clone() },
+            Goal::Font {
+                family: "Plain Sans".into(),
+                folders: vec![dir.path().to_path_buf()],
+            },
+            Goal::LinkedFiles {
+                root: dir.path().to_path_buf(),
+                links: vec!["a.zip".into(), "missing".into()],
+            },
+        ]),
+        &own(),
+    );
     let after: Vec<_> = [&z, &d, &f]
         .iter()
         .map(|p| {
@@ -463,7 +468,7 @@ fn the_person_s_own_check_is_labelled_person_confirmed() {
         },
     ]);
     assert_eq!(
-        run(&c)[0].outcome,
+        run(&c, &own())[0].outcome,
         Outcome::NotRun {
             why: NotRun::WaitingForPerson
         }
@@ -529,7 +534,7 @@ fn t27_007_missing_dependencies_go_to_their_owner() {
         ],
     )
     .unwrap();
-    let results = run(&c);
+    let results = run(&c, &own());
     let req = repair_requests(&c, &results);
     let got: Vec<(ItemId, Role)> = req.iter().map(|r| (r.item, r.to)).collect();
     assert_eq!(
@@ -594,7 +599,7 @@ fn t27_005_ready_only_when_every_picked_check_passed() {
         summarize(&l, std::slice::from_ref(&failed)),
         Summary::FinishedWithTasks
     );
-    let waiting = &run(&c)[0];
+    let waiting = &run(&c, &own())[0];
     assert_eq!(
         summarize(&l, std::slice::from_ref(waiting)),
         Summary::FinishedWithTasks
@@ -674,15 +679,15 @@ fn any_zip64_field_needs_the_locator() {
 #[test]
 fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     use pctwin_catalogue::{Catalogue, test_key};
-    use pctwin_readiness::checks::{FontFileRow, font_with, is_readable_font, shipped_font_files};
+    use pctwin_readiness::checks::{FontFileRow, font_with, shipped_font_files};
     assert!(shipped_font_files().report().is_clean());
     let dir = tempfile::tempdir().unwrap();
     // A real font under a name that says nothing.
     let odd = write(dir.path(), "font-cache.dat", &font_bytes("Odd Name Sans"));
-    assert!(is_readable_font(&odd));
+    assert!(is_font(&odd));
     let folders = vec![dir.path().to_path_buf()];
     assert_eq!(
-        font_with(shipped_font_files(), "Odd Name Sans", &folders),
+        font_with(shipped_font_files(), "Odd Name Sans", &folders, &own()),
         Outcome::MachineChecked {
             coverage: Coverage::Whole
         }
@@ -695,7 +700,7 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     // A folder named like a font is not a font file.
     std::fs::create_dir(dir.path().join("Folder.woff2")).unwrap();
     assert_eq!(
-        font_with(shipped_font_files(), "Brand", &folders),
+        font_with(shipped_font_files(), "Brand", &folders, &own()),
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
                 family: "Brand".into(),
@@ -711,7 +716,8 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
         font_with(
             shipped_font_files(),
             "Brand",
-            &[only_web.path().to_path_buf()]
+            &[only_web.path().to_path_buf()],
+            &own()
         ),
         Outcome::NotRun {
             why: NotRun::CouldNotRead
@@ -736,7 +742,7 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     assert_eq!(rows.rows().len(), 1);
     assert_eq!(rows.report().skipped.len(), 4);
     assert_eq!(
-        font_with(&rows, "Brand", &folders),
+        font_with(&rows, "Brand", &folders, &own()),
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
                 family: "Brand".into(),
@@ -748,7 +754,12 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
     // Nothing at all in the folders: not installed there.
     let empty = tempfile::tempdir().unwrap();
     assert!(matches!(
-        font_with(shipped_font_files(), "Brand", &[empty.path().to_path_buf()]),
+        font_with(
+            shipped_font_files(),
+            "Brand",
+            &[empty.path().to_path_buf()],
+            &own()
+        ),
         Outcome::NeedsAttention {
             coverage: Coverage::Whole,
             ..
@@ -766,7 +777,12 @@ fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
     write(only.path(), "Family.ttf", b"\0\0\0\0garbage");
     write(only.path(), "Family.xyzfont", b"zz");
     assert_eq!(
-        font_with(shipped_font_files(), "Family", &[only.path().to_path_buf()]),
+        font_with(
+            shipped_font_files(),
+            "Family",
+            &[only.path().to_path_buf()],
+            &own()
+        ),
         Outcome::NotRun {
             why: NotRun::CouldNotRead
         }
@@ -777,7 +793,12 @@ fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
     write(two.path(), "Broken.otf", b"OTTO\0\0\0\0\0\0\0\0");
     write(two.path(), "Bad.ttf", b"not a font");
     assert_eq!(
-        font_with(shipped_font_files(), "Family", &[two.path().to_path_buf()]),
+        font_with(
+            shipped_font_files(),
+            "Family",
+            &[two.path().to_path_buf()],
+            &own()
+        ),
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
                 family: "Family".into(),
@@ -789,4 +810,23 @@ fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
             coverage: Coverage::Sample { checked: 1, of: 3 }
         }
     );
+}
+
+/// PCTwin's own readers, run in the test's own process (only a parser crate's tests may).
+fn own() -> pctwin_readiness::checks::InThisProcess {
+    pctwin_readiness::checks::InThisProcess::new(pctwin_parse_seal::in_child())
+}
+
+fn names(path: &std::path::Path) -> pctwin_readiness::checks::FontNames {
+    let mut f = std::fs::File::open(path).unwrap();
+    let size = f.metadata().unwrap().len();
+    pctwin_readiness::checks::font_names(pctwin_parse_seal::in_child(), &mut f, size)
+}
+
+fn families(path: &std::path::Path) -> Vec<String> {
+    names(path).families
+}
+
+fn is_font(path: &std::path::Path) -> bool {
+    names(path).is_font
 }

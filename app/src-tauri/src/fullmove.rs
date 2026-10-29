@@ -429,7 +429,8 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
         .into_iter()
         .map(|p| (p.account_id, Some(p.home)))
         .collect();
-    let installed = pctwin_apps::found::read_here(&people, me);
+    let installed =
+        pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere));
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
         .filter_map(|f| match f {
@@ -735,7 +736,8 @@ pub fn rebuild_here<R: Runtime>(
         pctwin_apps::found::linux::keyring_hash(remote, wide, &key_home)
     };
     #[cfg(all(unix, not(target_os = "macos")))]
-    let list = || pctwin_apps::found::read_here(&people, me);
+    let list =
+        || pctwin_apps::found::read_here(&people, me, crate::parser(crate::Files::InstalledHere));
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut linux = pctwin_fullmove::unix::LinuxInstaller {
         runner: &pctwin_maker::run::SystemRunner,

@@ -295,7 +295,7 @@ jobs:
       - name: Fuzz each target for a minute
         shell: bash
         run: |
-          for t in messages inventory_frames inventory_v2 record paths pairing_messages typed_digits landing_messages settings_parsers; do
+          for t in messages inventory_frames inventory_v2 record paths pairing_messages typed_digits landing_messages settings_parsers parsers parser_wire; do
             echo "== $t"
             cargo +nightly fuzz run "$t" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
           done
@@ -728,15 +728,15 @@ jobs:
           case "$RUNNER_OS" in
             Windows)
               # Tauri puts external binaries beside the app; the installer takes them from there.
-              ls target/release/pctwin-helper.exe target/release/pctwin-handover.exe ;;
+              ls target/release/pctwin-helper.exe target/release/pctwin-handover.exe target/release/pctwin-parser.exe ;;
             macOS)
               app="$(ls -d "$bundle"/macos/*.app)"
-              ls "$app/Contents/MacOS/pctwin-helper" "$app/Contents/MacOS/pctwin-handover"
+              ls "$app/Contents/MacOS/pctwin-helper" "$app/Contents/MacOS/pctwin-handover" "$app/Contents/MacOS/pctwin-parser"
               plutil -lint "$app/Contents/Library/LaunchDaemons/com.creoleailabs.pctwin.helper.plist" ;;
             Linux)
               list="$(dpkg -c "$bundle"/deb/*.deb)"
               # dpkg lists paths with or without a leading "./".
-              for f in usr/lib/pctwin/pctwin-helper usr/lib/pctwin/pctwin-handover \
+              for f in usr/lib/pctwin/pctwin-helper usr/lib/pctwin/pctwin-handover usr/lib/pctwin/pctwin-parser \
                 usr/share/polkit-1/actions/com.creoleailabs.pctwin.helper.policy; do
                 echo "$list" | grep -E " (\./)?$f\$" || { echo "missing: $f" >&2; echo "$list" >&2; exit 1; }
               done ;;
@@ -756,8 +756,8 @@ jobs:
           $p = Start-Process $setup.FullName -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "the installer ended with $($p.ExitCode)" }
           $dir = Join-Path $env:ProgramFiles 'PCTwin'
-          $app = Get-ChildItem $dir -Filter '*.exe' | Where-Object { $_.Name -notmatch '^(pctwin-helper|pctwin-handover|uninstall)' } | Select-Object -First 1
-          foreach ($f in 'pctwin-helper.exe', 'pctwin-handover.exe') {
+          $app = Get-ChildItem $dir -Filter '*.exe' | Where-Object { $_.Name -notmatch '^(pctwin-helper|pctwin-handover|pctwin-parser|uninstall)' } | Select-Object -First 1
+          foreach ($f in 'pctwin-helper.exe', 'pctwin-handover.exe', 'pctwin-parser.exe') {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "not installed: $f" }
           }
           if (-not $app) { throw 'the app was not installed' }
@@ -973,6 +973,7 @@ jobs:
         run: |
           cargo build --locked -p pctwin-helper -p pctwin-labmove
           cargo build --locked -p pctwin-move --bin pctwin-handover
+          cargo build --locked -p pctwin-parse --bin pctwin-parser
       - name: Everyone in one move (Linux and macOS)
         if: runner.os != 'Windows'
         run: bash fixtures/everyone/run.sh "$PWD/target/debug" /tmp/pctwin-everyone

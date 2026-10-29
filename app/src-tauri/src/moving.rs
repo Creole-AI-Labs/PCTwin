@@ -3681,7 +3681,11 @@ fn old_laptop_apps(
         not(windows),
         expect(unused_mut, reason = "installers are linked on Windows only")
     )]
-    let mut apps = pctwin_apps::found::read_here(&people, &census.me);
+    let mut apps = pctwin_apps::found::read_here(
+        &people,
+        &census.me,
+        crate::parser(crate::Files::InstalledHere),
+    );
     #[cfg(windows)]
     {
         let candidates: Vec<(ItemId, std::path::PathBuf)> = record
@@ -3705,11 +3709,9 @@ fn old_laptop_apps(
             })
             .take(pctwin_apps::found::MAX_INSTALLER_FILES)
             .collect();
-        pctwin_apps::found::link_installers(
-            &mut apps,
-            &candidates,
-            &pctwin_maker::windows_old_copy,
-        );
+        pctwin_apps::found::link_installers(&mut apps, &candidates, &|p: &std::path::Path| {
+            pctwin_maker::windows_old_copy(p, crate::parser(crate::Files::FoundInstallers))
+        });
     }
     #[cfg(not(windows))]
     let _ = (record, roots);

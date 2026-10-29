@@ -1,0 +1,67 @@
+[package]
+name = "pctwin-parse"
+description = "The locked-down parser process: PCTwin reads the insides of untrusted files (installers, fonts, archives, databases) only in a separate process, asked with typed requests, bounded in time and bytes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pctwin-parser"
+path = "src/bin/pctwin-parser.rs"
+
+# A stand-in that breaks the rules on purpose (stops, hangs, asks for too much), so the tests
+# prove the app's side treats each as "could not be checked". Never staged or shipped.
+[[bin]]
+name = "pctwin-parser-test-double"
+path = "src/bin/test-double.rs"
+test = false
+doc = false
+
+# The parser's walls (approved by the user, 28 October 2026; src/lockdown.rs).
+[target.'cfg(windows)'.dependencies]
+# Started in an AppContainer, with a restricted token, in a job (the fenced system calls).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+# Its own token, read from inside: whether it really is in the container, with no capabilities.
+rappct = "0.13.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# No file system at all (no rules), after no_new_privs.
+landlock = "0.4"
+# No sockets and no programs started.
+seccompiler = "0.5"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Seatbelt (the fenced sandbox_init).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+
+[features]
+# For other crates' tests: finds (and if needed builds) the real parser program.
+test-support = []
+
+[dependencies]
+# The readers themselves, and the seal that lets only this crate run them in its own process.
+pctwin-maker = { path = "../pctwin-maker" }
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
+pctwin-readiness = { path = "../pctwin-readiness" }
+pctwin-special = { path = "../pctwin-special" }
+# Starting the parser with no console window, as every program PCTwin starts.
+pctwin-types = { path = "../pctwin-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# Its own tests use the test support (the fuzz on the stable compiler).
+pctwin-parse = { path = ".", features = ["test-support"] }
+pctwin-record = { path = "../pctwin-record" }
+proptest = "1"
+# The tests make live databases (with their logs) as apps leave them.
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -30,8 +30,10 @@ pctwin-settings = { path = "../pctwin-settings" }
 # copied raw while live. Bundled SQLite (3.54.1 with 0.41), past the WAL-reset race fixed in
 # 3.51.3 (research notes, 27 October 2026). MIT; SQLite itself is public domain.
 # `hooks`: a long scan is stopped by SQLite itself at its time limit.
-rusqlite = { version = "0.41.0", features = ["bundled", "backup", "hooks"] }
-# Private snapshot folders for reading a live database's tables (already in the tree).
+# `serialize`: the parser process reads a database's copied bytes from memory, read-only.
+rusqlite = { version = "0.41.0", features = ["bundled", "backup", "hooks", "serialize"] }
+# Its readers of files' contents run only in the parser process (adoption change 1).
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 tempfile = "3"
 # Files named by their own SHA-256 (model libraries) are checked against it.
 sha2 = "0.10.9"
@@ -41,6 +43,8 @@ sha2 = "0.10.9"
 libc = "0.2"
 
 [dev-dependencies]
+# The maker check of an export tool reads it through the real parser process.
+pctwin-parse = { path = "../pctwin-parse", features = ["test-support"] }
 # Tests keep journal keys beside their journals, never in the system's key store.
 pctwin-journal = { path = "../pctwin-journal", features = ["test-keys"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }

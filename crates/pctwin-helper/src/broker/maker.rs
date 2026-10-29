@@ -16,6 +16,11 @@
 //! - only "install" for exactly the approved bytes, by the old laptop's maker named in the
 //!   approved plan, lets the install go on.
 //!
+//! - PCTwin's own reading of the package's insides (its signer, its build) happens in the
+//!   locked-down parser process (adoption change 1), started from beside the helper, in Program
+//!   Files, where only administrators can change it ([`parser`]); a parser that cannot start,
+//!   stops or runs out of time leaves the package not checked, so it is refused.
+//!
 //! What this does not prove: the old laptop's maker comes from the plan the app sealed (see
 //! [`super::LaunchSeal`]); the check stops a changed or swapped package and a forged answer, not a
 //! plan that names another maker.
@@ -61,17 +66,51 @@ pub fn expected_of(action: &InstallVerifiedPackage, arch: Arch) -> Expected {
     }
 }
 
+/// The parser process beside the helper, once only administrators can change it: the helper runs
+/// with an administrator's rights, and so does the program it starts.
+pub fn parser() -> Result<&'static pctwin_parse::Parser, String> {
+    static PARSER: std::sync::OnceLock<Result<pctwin_parse::Parser, String>> =
+        std::sync::OnceLock::new();
+    PARSER
+        .get_or_init(|| {
+            let parser = pctwin_parse::Parser::beside_this_program();
+            let program = parser
+                .program()
+                .ok_or("the parser program has no place")?
+                .to_path_buf();
+            pctwin_helper_os::only_administrators_can_change(&program)
+                .map_err(|e| e.to_string())?;
+            Ok(parser)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
 /// The helper's own maker check of `package` for `action`.
 pub fn check_package(
     package: &VerifiedArtifact,
     action: &InstallVerifiedPackage,
     limits: &Limits,
 ) -> MakerCheck {
+    match parser() {
+        Ok(reader) => check_package_with(package, action, limits, reader),
+        Err(_) => MakerCheck::Refused,
+    }
+}
+
+/// [`check_package`] with `reader` as PCTwin's own reader (the parser process).
+pub fn check_package_with(
+    package: &VerifiedArtifact,
+    action: &InstallVerifiedPackage,
+    limits: &Limits,
+    reader: &dyn pctwin_maker::OwnReader,
+) -> MakerCheck {
     let Some(arch) = laptop_arch() else {
         return MakerCheck::Refused;
     };
     let checks = NativeChecks::with_oracle(Box::new(crate::os_probes::OsTrust));
-    let Ok(verdict) = check_staged(package, &expected_of(action, arch), &checks, limits) else {
+    let Ok(verdict) = check_staged(package, &expected_of(action, arch), reader, &checks, limits)
+    else {
         return MakerCheck::Refused;
     };
     match verdict.decide() {

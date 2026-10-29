@@ -5,14 +5,27 @@
 //!   the app, by the bytes inside the base64), values encrypted under a key in a key database
 //!   beside it (the PKCS#11 secret-decoder ring format NSS-based apps use), values shaped like
 //!   credentials, references to other files by their hash or name, and keys that start programs.
-//! - [`sqlite_tables`] and [`db_kind`]: a database's tables and columns, read through SQLite
-//!   opened read-only and `immutable`, so the old laptop's file is never written (not even a
-//!   lock or a shared-memory index); and what kind of store that shape is (a key database,
-//!   sessions and cookies, saved passwords, machine-encrypted values, or ordinary data).
+//! - [`sqlite_tables`] and [`db_kind`]: a database's tables and columns, and what kind of store
+//!   that shape is (a key database, sessions and cookies, saved passwords, machine-encrypted
+//!   values, or ordinary data).
 //!
 //! The values themselves are never logged, kept or returned: only the facts.
+//!
+//! **Read only in the parser process (Phase 2 adoption, change 1).** This crate copies a file's
+//! bytes, bounded ([`MAX_JSON`], [`MAX_DB`], [`MAX_LOG`]), and hands them to PCTwin's
+//! locked-down parser process through the [`ContentReader`] installed once by the program
+//! ([`install_reader`]; `pctwin-parse`'s `Parser`). There, a database's write-ahead log is laid
+//! over its pages in memory ([`apply_log`]: only frames whose checksums hold, up to the last
+//! commit, as SQLite itself does) and SQLite reads the result from memory, read-only: SQLite
+//! never opens the old laptop's file, and nothing is written beside it or in the temporary
+//! folder. With no reader installed, nothing is read and every file is "not checked".
 
 use std::path::Path;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+use pctwin_parse_seal::InChild;
+use serde::{Deserialize, Serialize};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -24,7 +37,8 @@ pub const MAX_JSON: usize = 4 * 1024 * 1024;
 const MAX_NAMES: usize = 10_000;
 
 /// What a JSON file's values show.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonFacts {
     /// A value is a key protected by this laptop's account (DPAPI) or bound to the app.
     pub machine_bound_key: bool,
@@ -60,7 +74,8 @@ pub fn local_path(t: &str) -> bool {
 }
 
 /// Why a file's facts could not be read.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ContentError {
     #[error("too large to read for its contents")]
     TooLarge,
@@ -107,8 +122,8 @@ fn words_of(key: &str) -> Vec<String> {
     out
 }
 
-/// Reads a JSON file's facts.
-pub fn json_facts(bytes: &[u8]) -> Result<JsonFacts, ContentError> {
+/// Reads a JSON file's facts, in the parser process (it takes an [`InChild`]).
+pub fn json_facts(_: InChild, bytes: &[u8]) -> Result<JsonFacts, ContentError> {
     if bytes.len() > MAX_JSON {
         return Err(ContentError::TooLarge);
     }
@@ -258,14 +273,16 @@ fn secret_decoder_ring(b: &[u8]) -> bool {
 }
 
 /// One table and its columns, in lower case.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<String>,
 }
 
 /// The `file:` address that opens `path` read-only and immutable: SQLite then takes no lock and
-/// writes nothing beside it (no journal, no shared-memory index).
+/// writes nothing beside it (no journal, no shared-memory index). Used by the capture's online
+/// backup.
 pub fn immutable_uri(path: &Path) -> String {
     let p = path.to_string_lossy().replace('\\', "/");
     let mut out = String::from("file:");
@@ -290,28 +307,166 @@ pub fn wal_of(path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(p)
 }
 
-/// A database's tables and columns, read without writing anything on the old laptop. With no
-/// log beside it, SQLite reads the file itself, immutable. With a log (recent changes, perhaps
-/// its tables too, that an immutable read would not see), the file and its log are first copied
-/// to a private folder, and the copy is read.
-pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
-    let db = open_read(path)?;
-    Ok(tables_as_named(&db)?
-        .into_iter()
-        .map(|t| Table {
-            name: t.name.to_ascii_lowercase(),
-            columns: t.columns.iter().map(|c| c.to_ascii_lowercase()).collect(),
-        })
-        .collect())
+/// The largest database read for its facts (its bytes are copied to the parser process).
+pub const MAX_DB: u64 = 256 * 1024 * 1024;
+/// The largest write-ahead log read with it.
+pub const MAX_LOG: u64 = 64 * 1024 * 1024;
+
+/// Why a file was not read when no parser process is there to read it.
+pub const NO_READER: &str = "PCTwin's file checker is not available, so it was not checked";
+
+/// What the parser process found in a database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbFacts {
+    /// Its tables and columns, in lower case.
+    pub tables: Vec<Table>,
+    pub kind: DbKind,
+    /// For ordinary data, the full local paths its place-named columns hold.
+    pub paths: Option<LinkedPaths>,
 }
 
-/// The name every private database snapshot folder starts with, in the system's temporary
-/// folder, so ones left by a PCTwin that was stopped mid-read can be found and removed.
+/// PCTwin's reading of a file's contents, in the parser process (`pctwin-parse`'s `Parser`).
+/// The bytes are a bounded copy made here. Err: it could not be checked (why).
+pub trait ContentReader: Sync {
+    fn json(&self, bytes: &[u8]) -> Result<JsonFacts, ContentError>;
+    /// A database and its write-ahead log (if any), read within `time`.
+    fn sqlite(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+        time: Duration,
+    ) -> Result<DbFacts, ContentError>;
+    /// One complete database from a database and its log (the capture's consistent copy), only
+    /// if it passes SQLite's own `quick_check` ([`db_snapshot`]).
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError>;
+    /// Whether a `manifest.json` is a WebExtension's: JSON with a numeric `manifest_version`.
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError>;
+}
+
+static READER: OnceLock<&'static dyn ContentReader> = OnceLock::new();
+
+/// Installs the reader this program reads files' contents through, once (the app at its start,
+/// tests with theirs). False when one was installed already (that one stays).
+pub fn install_reader(reader: &'static dyn ContentReader) -> bool {
+    READER.set(reader).is_ok()
+}
+
+fn reader() -> Result<&'static dyn ContentReader, ContentError> {
+    READER
+        .get()
+        .copied()
+        .ok_or_else(|| ContentError::Damaged(NO_READER.into()))
+}
+
+/// A JSON file's facts from its bytes, read in the parser process.
+pub fn json_facts_of(bytes: &[u8]) -> Result<JsonFacts, ContentError> {
+    if bytes.len() > MAX_JSON {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.json(bytes)
+}
+
+/// The readers, run in this process: only for the parser process and this crate's own tests
+/// (it takes an [`InChild`]).
+#[derive(Debug, Clone, Copy)]
+pub struct InThisProcess(InChild);
+
+impl InThisProcess {
+    pub const fn new(seal: InChild) -> Self {
+        Self(seal)
+    }
+}
+
+/// The readers in this process, for this crate's own tests (the parser process's tests use the
+/// real process).
+#[cfg(test)]
+pub(crate) static IN_TESTS: InThisProcess = InThisProcess::new(pctwin_parse_seal::in_child());
+
+impl ContentReader for InThisProcess {
+    fn json(&self, bytes: &[u8]) -> Result<JsonFacts, ContentError> {
+        json_facts(self.0, bytes)
+    }
+    fn sqlite(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+        time: Duration,
+    ) -> Result<DbFacts, ContentError> {
+        db_facts(self.0, db, log, Instant::now() + time)
+    }
+    fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+        db_snapshot(self.0, db, log)
+    }
+    fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
+        Ok(add_on_manifest(self.0, bytes))
+    }
+}
+
+/// The capture's consistent copy of a database, made in the parser process from the bytes of
+/// its steady snapshot and log ([`ContentReader::snapshot`]).
+pub fn snapshot_of(db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+    reader()?.snapshot(db, log)
+}
+
+/// Whether a `manifest.json`'s bytes are a WebExtension's, read in the parser process.
+pub fn is_add_on_manifest(bytes: &[u8]) -> Result<bool, ContentError> {
+    reader()?.add_on_manifest(bytes)
+}
+
+/// Whether `bytes` are JSON with a numeric `manifest_version` (the WebExtension format), in the
+/// parser process (it takes an [`InChild`]).
+pub fn add_on_manifest(_: InChild, bytes: &[u8]) -> bool {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    if bytes.len() > 1024 * 1024
+        || pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json).is_err()
+    {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|v| v.get("manifest_version").map(serde_json::Value::is_u64))
+        .unwrap_or(false)
+}
+
+/// Copies a database and its non-empty log beside it, bounded, and has the parser read them.
+fn facts_at(path: &Path, until: Instant) -> Result<DbFacts, ContentError> {
+    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
+    let too_large = |e: std::io::Error| {
+        if e.to_string() == "too large" {
+            ContentError::TooLarge
+        } else {
+            damaged(&e)
+        }
+    };
+    let db = crate::guard::read_all(path, MAX_DB).map_err(too_large)?;
+    let wal = wal_of(path);
+    let log = if std::fs::symlink_metadata(&wal).is_ok_and(|m| m.is_file() && m.len() > 0) {
+        Some(crate::guard::read_all(&wal, MAX_LOG).map_err(too_large)?)
+    } else {
+        None
+    };
+    reader()?.sqlite(
+        &db,
+        log.as_deref(),
+        until.saturating_duration_since(Instant::now()),
+    )
+}
+
+/// A database's tables and columns, read without writing anything on the old laptop: its bytes
+/// and its log's are copied and read in the parser process.
+pub fn sqlite_tables(path: &Path) -> Result<Vec<Table>, ContentError> {
+    Ok(facts_at(path, Instant::now() + Duration::from_secs(8))?.tables)
+}
+
+/// The name every private database snapshot folder started with, in the system's temporary
+/// folder (an earlier PCTwin copied a live database there to read it; this one reads it in
+/// memory), so ones left by a PCTwin that was stopped mid-read can be found and removed.
 pub const SNAPSHOT_PREFIX: &str = "pctwin-snapshot-";
 
 /// Removes database snapshot folders an earlier PCTwin left in the temporary folder when it was
-/// stopped mid-read (closed, crashed, laptop shut). One still in use by a running read cannot be
-/// removed on Windows and is left alone. Returns how many were removed.
+/// stopped mid-read (closed, crashed, laptop shut). One still in use cannot be removed on Windows
+/// and is left alone. Returns how many were removed.
 pub fn sweep_snapshots() -> usize {
     let Ok(dir) = std::fs::read_dir(std::env::temp_dir()) else {
         return 0;
@@ -330,86 +485,189 @@ pub fn sweep_snapshots() -> usize {
     removed
 }
 
-/// A database opened for reading without writing anything beside it (see [`sqlite_tables`]),
-/// with the private snapshot folder it may need. Dropping it closes the connection first, then
-/// removes the folder: in the other order Windows cannot remove a file SQLite still holds, and
-/// the closing connection would fold its log into a copy left behind in the temporary folder
-/// (sixth review, finding 1).
-struct ReadDb {
-    db: Option<rusqlite::Connection>,
-    snapshot: Option<tempfile::TempDir>,
+/// SQLite's write-ahead log: its magic numbers (the last bit says the checksums' byte order).
+const WAL_MAGIC_LE: u32 = 0x377f_0682;
+const WAL_MAGIC_BE: u32 = 0x377f_0683;
+const WAL_HEADER: usize = 32;
+/// The only log format version SQLite writes (3.7.0).
+const WAL_VERSION: u32 = 3_007_000;
+const FRAME_HEADER: usize = 24;
+
+fn be32(b: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
 }
 
-impl std::ops::Deref for ReadDb {
-    type Target = rusqlite::Connection;
-    fn deref(&self) -> &rusqlite::Connection {
-        self.db.as_ref().expect("open until dropped")
-    }
-}
-
-impl std::ops::DerefMut for ReadDb {
-    fn deref_mut(&mut self) -> &mut rusqlite::Connection {
-        self.db.as_mut().expect("open until dropped")
-    }
-}
-
-impl Drop for ReadDb {
-    fn drop(&mut self) {
-        if let Some(db) = self.db.take() {
-            // A connection that will not close is dropped, which closes it all the same.
-            let _ = db.close();
-        }
-        if let Some(dir) = self.snapshot.take() {
-            let path = dir.path().to_owned();
-            if dir.close().is_err() {
-                // One more try once anything still closing has let go.
-                let _ = std::fs::remove_dir_all(&path);
+/// SQLite's log checksum (sqlite.org/fileformat2.html, section 4.1), continued from `s`.
+fn wal_checksum(big_endian: bool, s: (u32, u32), data: &[u8]) -> (u32, u32) {
+    let (mut s0, mut s1) = s;
+    for w in data.as_chunks::<8>().0 {
+        let word = |b: &[u8]| {
+            let a = [b[0], b[1], b[2], b[3]];
+            if big_endian {
+                u32::from_be_bytes(a)
+            } else {
+                u32::from_le_bytes(a)
             }
-        }
+        };
+        s0 = s0.wrapping_add(word(&w[..4])).wrapping_add(s1);
+        s1 = s1.wrapping_add(word(&w[4..])).wrapping_add(s0);
     }
+    (s0, s1)
 }
 
-/// Opens a database for reading without writing anything beside it (see [`sqlite_tables`] and
-/// [`ReadDb`]).
-fn open_read(path: &Path) -> Result<ReadDb, ContentError> {
-    use rusqlite::OpenFlags;
-    let wal = wal_of(path);
-    let has_log = std::fs::symlink_metadata(&wal).is_ok_and(|m| m.is_file() && m.len() > 0);
-    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
-    if has_log {
-        let dir = tempfile::Builder::new()
-            .prefix(SNAPSHOT_PREFIX)
-            .tempdir()
-            .map_err(|e| damaged(&e))?;
-        let copy = dir.path().join("db");
-        // From here the folder is removed on every way out, the copies with it.
-        let mut read = ReadDb {
-            db: None,
-            snapshot: Some(dir),
-        };
-        std::fs::copy(path, &copy).map_err(|e| damaged(&e))?;
-        std::fs::copy(&wal, wal_of(&copy)).map_err(|e| damaged(&e))?;
-        read.db = Some(
-            rusqlite::Connection::open_with_flags(
-                &copy,
-                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )
-            .map_err(|e| damaged(&e))?,
-        );
-        Ok(read)
-    } else {
-        let db = rusqlite::Connection::open_with_flags(
-            immutable_uri(path),
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-                | OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| damaged(&e))?;
-        Ok(ReadDb {
-            db: Some(db),
-            snapshot: None,
-        })
+/// Lays the committed frames of a write-ahead log over a database's pages, as SQLite reads them:
+/// only frames whose salts match the log's header and whose running checksum holds, up to the
+/// last frame that ends a transaction; anything after it (an unfinished write) is left out. A
+/// log whose header is not sound is no log (SQLite ignores it too), and so is any log beside an
+/// empty database (SQLite opens an empty database as empty and drops its log). A frame naming a
+/// page past [`MAX_DB`] makes the database too large to read; nothing is grown for it.
+pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), ContentError> {
+    if log.len() < WAL_HEADER || db.is_empty() {
+        return Ok(());
     }
+    let big_endian = match be32(log, 0) {
+        WAL_MAGIC_BE => true,
+        WAL_MAGIC_LE => false,
+        _ => return Ok(()),
+    };
+    if be32(log, 4) != WAL_VERSION {
+        return Ok(());
+    }
+    let page = be32(log, 8) as usize;
+    if !(512..=65_536).contains(&page) || !page.is_power_of_two() {
+        return Ok(());
+    }
+    // The most pages a database PCTwin reads may have.
+    let most_pages = (MAX_DB / page as u64) as usize;
+    let salts = (be32(log, 16), be32(log, 20));
+    let mut sum = wal_checksum(big_endian, (0, 0), &log[..24]);
+    if sum != (be32(log, 24), be32(log, 28)) {
+        return Ok(());
+    }
+    if db.len() >= 100 {
+        let db_page = match u16::from_be_bytes([db[16], db[17]]) {
+            1 => 65_536,
+            p => usize::from(p),
+        };
+        if db_page != page {
+            return Err(ContentError::Damaged(
+                "its log is for pages of another size".into(),
+            ));
+        }
+    }
+    let mut pending: Vec<(usize, usize)> = Vec::new();
+    let mut at = WAL_HEADER;
+    while let Some(frame) = at
+        .checked_add(FRAME_HEADER + page)
+        .and_then(|end| log.get(at..end))
+    {
+        let (number, commit) = (be32(frame, 0) as usize, be32(frame, 4) as usize);
+        if (be32(frame, 8), be32(frame, 12)) != salts || number == 0 {
+            break;
+        }
+        if number > most_pages || commit > most_pages {
+            return Err(ContentError::TooLarge);
+        }
+        sum = wal_checksum(big_endian, sum, &frame[..8]);
+        sum = wal_checksum(big_endian, sum, &frame[FRAME_HEADER..]);
+        if sum != (be32(frame, 16), be32(frame, 20)) {
+            break;
+        }
+        pending.push((number, at + FRAME_HEADER));
+        if commit != 0 {
+            // Both at most `most_pages`, so neither product passes MAX_DB.
+            let end = commit * page;
+            for (number, from) in pending.drain(..) {
+                let start = (number - 1) * page;
+                if start + page > db.len() {
+                    db.resize(start + page, 0);
+                }
+                db[start..start + page].copy_from_slice(&log[from..from + page]);
+            }
+            db.resize(end, 0);
+        }
+        at += FRAME_HEADER + page;
+    }
+    Ok(())
+}
+
+/// The database's pages with its log laid over, ready for SQLite to read from memory (legacy
+/// mode: the log is in already), or why not.
+fn image_of(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+    if db.len() as u64 > MAX_DB || log.is_some_and(|l| l.len() as u64 > MAX_LOG) {
+        return Err(ContentError::TooLarge);
+    }
+    let mut image = db.to_vec();
+    if let Some(log) = log {
+        apply_log(seal, &mut image, log)?;
+    }
+    if image.len() >= 100 {
+        if &image[..16] != b"SQLite format 3\0" {
+            return Err(ContentError::Damaged("file is not a database".into()));
+        }
+        image[18] = 1;
+        image[19] = 1;
+    } else if !image.is_empty() {
+        return Err(ContentError::Damaged("file is not a database".into()));
+    }
+    Ok(image)
+}
+
+/// SQLite reading `image` from memory, read-only.
+fn memory_db(image: &[u8]) -> Result<rusqlite::Connection, ContentError> {
+    let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
+    let mut c = rusqlite::Connection::open_in_memory().map_err(|e| damaged(&e))?;
+    if !image.is_empty() {
+        c.deserialize_read_exact(rusqlite::MAIN_DB, image, image.len(), true)
+            .map_err(|e| damaged(&e))?;
+    }
+    Ok(c)
+}
+
+/// One complete database from a database's bytes and its log's: the log's committed changes
+/// laid over its pages, kept only if SQLite's own `quick_check` says "ok". In the parser process
+/// (it takes an [`InChild`]).
+pub fn db_snapshot(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+    let image = image_of(seal, db, log)?;
+    let c = memory_db(&image)?;
+    let verdict: String = c
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|e| ContentError::Damaged(e.to_string()))?;
+    if verdict != "ok" {
+        return Err(ContentError::Damaged(verdict));
+    }
+    drop(c);
+    Ok(image)
+}
+
+/// A database's facts from its bytes (and its log's), read by SQLite from memory, read-only, in
+/// the parser process (it takes an [`InChild`]); a scan of linked paths stops at `until`.
+pub fn db_facts(
+    seal: InChild,
+    db: &[u8],
+    log: Option<&[u8]>,
+    until: Instant,
+) -> Result<DbFacts, ContentError> {
+    let image = image_of(seal, db, log)?;
+    let mut c = memory_db(&image)?;
+    let tables: Vec<Table> = tables_as_named(&c)?
+        .into_iter()
+        .map(|t| Table {
+            name: t.name.to_ascii_lowercase(),
+            columns: t.columns.iter().map(|c| c.to_ascii_lowercase()).collect(),
+        })
+        .collect();
+    let kind = db_kind(&tables);
+    let paths = if kind == DbKind::Ordinary {
+        Some(paths_in(&mut c, until)?)
+    } else {
+        None
+    };
+    Ok(DbFacts {
+        tables,
+        kind,
+        paths,
+    })
 }
 
 /// The tables and columns as the database names them.
@@ -448,50 +706,25 @@ fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-/// The full local paths a database's text values name (files it links to), read without
-/// writing anything on the old laptop; bounded in values read and paths kept.
-///
-/// SQLite itself stops the scan at `until` (a progress handler): the paths found by then are
-/// returned with `false` (not every value was read).
-pub fn sqlite_paths(
-    path: &Path,
-    until: std::time::Instant,
-) -> Result<(Vec<String>, bool), ContentError> {
-    let mut db = open_read(path)?;
-    paths_in(&mut db, until)
-}
-
 /// The full local paths a database names, and whether every value was read.
 pub type LinkedPaths = (Vec<String>, bool);
 
-/// A database's kind and, for ordinary data, the full local paths its place-named columns hold
-/// (see [`sqlite_paths`]), from one opening of it.
+/// A database's kind and, for ordinary data, the full local paths its place-named columns hold,
+/// from one reading of it in the parser process. The scan of linked paths stops at `until`: the
+/// paths found by then come with `false` (not every value was read).
 pub fn sqlite_facts(
     path: &Path,
-    until: std::time::Instant,
+    until: Instant,
 ) -> Result<(DbKind, Option<LinkedPaths>), ContentError> {
-    let mut db = open_read(path)?;
-    let tables: Vec<Table> = tables_as_named(&db)?
-        .into_iter()
-        .map(|t| Table {
-            name: t.name.to_ascii_lowercase(),
-            columns: t.columns.iter().map(|c| c.to_ascii_lowercase()).collect(),
-        })
-        .collect();
-    let kind = db_kind(&tables);
-    let paths = if kind == DbKind::Ordinary {
-        Some(paths_in(&mut db, until)?)
-    } else {
-        None
-    };
-    Ok((kind, paths))
+    let facts = facts_at(path, until)?;
+    Ok((facts.kind, facts.paths))
 }
 
 fn paths_in(
     db: &mut rusqlite::Connection,
-    until: std::time::Instant,
+    until: Instant,
 ) -> Result<(Vec<String>, bool), ContentError> {
-    db.progress_handler(10_000, Some(move || std::time::Instant::now() >= until))
+    db.progress_handler(10_000, Some(move || Instant::now() >= until))
         .map_err(|e| ContentError::Damaged(e.to_string()))?;
     let interrupted = |e: &rusqlite::Error| {
         matches!(e, rusqlite::Error::SqliteFailure(f, _)
@@ -548,7 +781,8 @@ fn place_column(name: &str) -> bool {
 }
 
 /// What kind of store a database is, by its tables' shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum DbKind {
     /// A key database that decrypts values stored beside it.
     KeyDatabase,
@@ -620,22 +854,29 @@ mod tests {
             r#"{{"a":{{"k":"{dpapi}"}},"list":[{{"u":"{s}","p":"{s}"}}],"other":"plain words"}}"#,
             s = sdr()
         );
-        let f = json_facts(doc.as_bytes()).unwrap();
+        let f = json_facts(pctwin_parse_seal::in_child(), doc.as_bytes()).unwrap();
         assert!(f.machine_bound_key);
         assert_eq!(f.key_db_encrypted, 2);
         assert!(!f.credential_values && !f.starts_programs);
-        let f = json_facts(format!(r#"["{appb}"]"#).as_bytes()).unwrap();
+        let f = json_facts(
+            pctwin_parse_seal::in_child(),
+            format!(r#"["{appb}"]"#).as_bytes(),
+        )
+        .unwrap();
         assert!(f.machine_bound_key);
         // Base64 of anything else is not either.
         let plain = STANDARD.encode(b"just some ordinary bytes here");
-        let f = json_facts(format!(r#"["{plain}"]"#).as_bytes()).unwrap();
+        let f = json_facts(
+            pctwin_parse_seal::in_child(),
+            format!(r#"["{plain}"]"#).as_bytes(),
+        )
+        .unwrap();
         assert!(!f.machine_bound_key && f.key_db_encrypted == 0);
     }
 
     #[test]
     fn credentials_commands_and_references_are_found() {
-        let f = json_facts(
-            br#"{"token":"ghp_0123456789abcdefABCDEF0123456789abcd",
+        let f = json_facts(pctwin_parse_seal::in_child(), br#"{"token":"ghp_0123456789abcdefABCDEF0123456789abcd",
                 "servers":{"x":{"command":"npx","args":["-y","tool"]}},
                 "layers":[{"digest":"sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}],
                 "weight_map":{"w":"model-00001-of-00002.safetensors"},
@@ -646,9 +887,13 @@ mod tests {
         assert!(f.starts_programs);
         assert_eq!(f.digests, vec!["a".repeat(64)]);
         assert_eq!(f.file_names, vec!["model-00001-of-00002.safetensors"]);
-        let f = json_facts(br#"{"preCommandHook":"x"}"#).unwrap();
+        let f = json_facts(pctwin_parse_seal::in_child(), br#"{"preCommandHook":"x"}"#).unwrap();
         assert!(f.starts_programs, "camelCase words are split");
-        let f = json_facts(br#"{"commander":"x","title":"echo | grep"}"#).unwrap();
+        let f = json_facts(
+            pctwin_parse_seal::in_child(),
+            br#"{"commander":"x","title":"echo | grep"}"#,
+        )
+        .unwrap();
         assert!(
             !f.starts_programs,
             "a word containing a run word is not one"
@@ -658,15 +903,15 @@ mod tests {
     #[test]
     fn json_reading_is_bounded() {
         assert_eq!(
-            json_facts(&vec![b' '; MAX_JSON + 1]).unwrap_err(),
+            json_facts(pctwin_parse_seal::in_child(), &vec![b' '; MAX_JSON + 1]).unwrap_err(),
             ContentError::TooLarge
         );
         let deep = "[".repeat(10_000);
         assert!(matches!(
-            json_facts(deep.as_bytes()),
+            json_facts(pctwin_parse_seal::in_child(), deep.as_bytes()),
             Err(ContentError::Damaged(_))
         ));
-        assert!(json_facts(b"\xef\xbb\xbf{}").is_ok());
+        assert!(json_facts(pctwin_parse_seal::in_child(), b"\xef\xbb\xbf{}").is_ok());
     }
 
     #[test]
@@ -736,6 +981,7 @@ mod tests {
 
     #[test]
     fn a_databases_tables_are_read_without_touching_it() {
+        install_reader(&IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("synthetic db.sqlite");
         {

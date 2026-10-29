@@ -294,6 +294,7 @@ fn t27_030_the_crate_has_no_way_to_send() {
             "pctwin-journal",
             "pctwin-orchestrate",
             "pctwin-record",
+            "pctwin-parse-seal",
             "pctwin-types",
             "serde",
             "serde_json",
@@ -352,7 +353,7 @@ fn the_report_lists_checks_and_other_people_only_when_there_are_some() {
         }],
     )
     .unwrap();
-    let r = run(&c);
+    let r = run(&c, &own());
     let p = share_preview(
         &l,
         Summary::FinishedWithTasks,
@@ -370,4 +371,9 @@ fn the_report_lists_checks_and_other_people_only_when_there_are_some() {
         "{}",
         p.text
     );
+}
+
+/// PCTwin's own readers, run in the test's own process (only a parser crate's tests may).
+fn own() -> pctwin_readiness::checks::InThisProcess {
+    pctwin_readiness::checks::InThisProcess::new(pctwin_parse_seal::in_child())
 }

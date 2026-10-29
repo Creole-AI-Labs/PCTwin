@@ -45,6 +45,7 @@ fn sql_text(p: &Path) -> String {
 
 #[test]
 fn a_catalog_whose_originals_are_elsewhere_or_gone_says_so() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     let t = temp();
     let home = home_of(&t);
     let app = home.join("AppData/Roaming/Photo Thing");
@@ -103,6 +104,7 @@ fn a_catalog_whose_originals_are_elsewhere_or_gone_says_so() {
 
 #[test]
 fn a_scene_file_whose_media_is_gone_says_so() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     // T25-044: a profile or scene that moved without its media.
     let t = temp();
     let home = home_of(&t);
@@ -132,6 +134,7 @@ fn a_scene_file_whose_media_is_gone_says_so() {
 
 #[test]
 fn only_full_local_paths_count() {
+    pctwin_special::content::install_reader(&OWN_READERS);
     for yes in [
         r"C:\Users\a\b.jpg",
         "D:/x/y",
@@ -153,3 +156,8 @@ fn only_full_local_paths_count() {
         assert!(!local_path(no), "{no}");
     }
 }
+
+/// PCTwin's readers of files' contents, run in the test's own process (only a parser crate's
+/// tests may).
+static OWN_READERS: pctwin_special::content::InThisProcess =
+    pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());

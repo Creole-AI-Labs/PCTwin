@@ -1,0 +1,14 @@
+[package]
+name = "pctwin-parse-seal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The seal on PCTwin's file parsers: only the crates cargo deny lets depend on this one (the parser process and the parsers' own crates, for their tests) can call a parser in their own process."
+
+[lints]
+workspace = true
+
+[dependencies]

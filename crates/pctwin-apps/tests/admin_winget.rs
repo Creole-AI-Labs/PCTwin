@@ -70,7 +70,9 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
         notes: vec![],
     };
     assert!(confirms(&manifest, &app).is_some());
-    let pctwin_maker::OldMaker::Signed(signer) = pctwin_maker::windows_old_copy(&msi).maker else {
+    let pctwin_maker::OldMaker::Signed(signer) =
+        pctwin_maker::windows_old_copy(&msi, pctwin_parse::testing::parser()).maker
+    else {
         panic!("the package is signed");
     };
     let packages = work.path().join("packages");
@@ -96,7 +98,18 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
         "not installed yet"
     );
     let held = staging.open_verified(handle, sha).unwrap();
-    assert_eq!(adapters.check_maker(&held, &action), MakerCheck::Approved);
+    // The helper's own maker check, reading the package in the real parser process (the
+    // installed helper starts the parser beside it in Program Files; this test's build is not
+    // there, so it hands the check its parser).
+    assert_eq!(
+        pctwin_helper::broker::maker::check_package_with(
+            &held,
+            &action,
+            &pctwin_maker::Limits::default(),
+            pctwin_parse::testing::parser(),
+        ),
+        MakerCheck::Approved
+    );
     let effect = adapters.install(&held, &action, &Revoker::default());
     drop(held);
     println!("install: {effect:?}");

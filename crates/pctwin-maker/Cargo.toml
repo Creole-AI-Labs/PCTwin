@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 # HelperStaged is sealed: only the helper (and this crate) may depend on the seal (deny.toml).
 pctwin-staged-seal = { path = "../pctwin-staged-seal" }
+# Its own readers run only in the parser process (adoption change 1): the seal says who may.
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 pctwin-types = { path = "../pctwin-types" }
 authenticode = { version = "0.6.0", features = ["std"] }
 base64 = "0.22.1"
@@ -42,6 +44,7 @@ wmi = "0.18.4"
 pctwin-helper-os = { path = "../pctwin-helper-os" }
 
 [dev-dependencies]
+pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 authenticode = { version = "0.6.0", features = ["std", "object"] }
 object = { version = "0.39", default-features = false, features = ["read_core", "pe", "std"] }
 tempfile = "3"

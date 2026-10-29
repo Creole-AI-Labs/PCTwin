@@ -478,3 +478,52 @@ fn os_authorization_holds(form: &[u8; 32], right: &std::ffi::CStr) -> Result<boo
     };
     r
 }
+
+/// The parser process's Seatbelt profile: nothing at all but what it already holds (its two
+/// pipes), ending itself and reading its own process facts. No file, no network, no program.
+pub const PARSER_PROFILE: &str = "(version 1)\n(deny default)\n(allow process-info* (target self))\n(allow signal (target self))\n(allow sysctl-read)\n";
+
+/// Walls this process in with `profile` (Seatbelt, `sandbox_init`; Apple marks it deprecated but
+/// still honours it, as Chromium relies on). Once in, it cannot be undone. Added 28 October 2026
+/// for the parser's walls; approved by the user, 28 October 2026.
+fn os_sandbox_init(profile: &std::ffi::CStr) -> Result<(), String> {
+    // SAFETY: `profile` is a NUL-terminated string that lives for the call; flags 0 means it is
+    // the profile's text. The error text the system may give is copied, then freed once. The two
+    // functions are declared here as libsandbox (part of libSystem) defines them.
+    #[expect(
+        unsafe_code,
+        reason = "sandbox_init has no safe binding: declared and called here only"
+    )]
+    let r = unsafe {
+        unsafe extern "C" {
+            fn sandbox_init(
+                profile: *const std::ffi::c_char,
+                flags: u64,
+                errorbuf: *mut *mut std::ffi::c_char,
+            ) -> std::ffi::c_int;
+            fn sandbox_free_error(errorbuf: *mut std::ffi::c_char);
+        }
+        let mut error: *mut std::ffi::c_char = std::ptr::null_mut();
+        if sandbox_init(profile.as_ptr(), 0, &mut error) == 0 {
+            Ok(())
+        } else {
+            let why = if error.is_null() {
+                "the profile was refused".to_owned()
+            } else {
+                let why = std::ffi::CStr::from_ptr(error)
+                    .to_string_lossy()
+                    .into_owned();
+                sandbox_free_error(error);
+                why
+            };
+            Err(why)
+        }
+    };
+    r
+}
+
+/// Walls the parser process in with [`PARSER_PROFILE`].
+pub fn sandbox_parser() -> Result<(), String> {
+    let profile = std::ffi::CString::new(PARSER_PROFILE).map_err(|e| e.to_string())?;
+    os_sandbox_init(&profile)
+}

@@ -1,4 +1,4 @@
-// Builds the helper programs the app ships with (pctwin-helper, pctwin-handover) and stages them
+// Builds the helper programs the app ships with (pctwin-helper, pctwin-handover, pctwin-parser) and stages them
 // where the installer settings (app/src-tauri/bundle/*.json) take them from:
 //   app/src-tauri/binaries/<name>-<target triple>[.exe]   Tauri's external binaries (Windows, Mac):
 //                                                          installed beside the app
@@ -16,7 +16,7 @@ const mode = process.argv[2] ?? "release";
 if (mode !== "debug" && mode !== "release") throw new Error(`debug or release, not ${mode}`);
 
 const cargo = (args) => execFileSync("cargo", args, { cwd: root, stdio: "inherit" });
-const build = ["build", "--locked", "-p", "pctwin-helper", "-p", "pctwin-move", "--bin", "pctwin-helper", "--bin", "pctwin-handover"];
+const build = ["build", "--locked", "-p", "pctwin-helper", "-p", "pctwin-move", "-p", "pctwin-parse", "--bin", "pctwin-helper", "--bin", "pctwin-handover", "--bin", "pctwin-parser"];
 cargo(mode === "release" ? [...build, "--release"] : build);
 
 const host = execFileSync("rustc", ["-vV"], { encoding: "utf8" }).match(/^host: (\S+)$/m)?.[1];
@@ -25,7 +25,7 @@ const target = process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_D
 const exe = process.platform === "win32" ? ".exe" : "";
 const out = join(root, "app", "src-tauri", "binaries");
 mkdirSync(join(out, "plain"), { recursive: true });
-for (const name of ["pctwin-helper", "pctwin-handover"]) {
+for (const name of ["pctwin-helper", "pctwin-handover", "pctwin-parser"]) {
   const built = join(target, mode, name + exe);
   copyFileSync(built, join(out, `${name}-${host}${exe}`));
   copyFileSync(built, join(out, "plain", name + exe));

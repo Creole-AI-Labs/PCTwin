@@ -38,6 +38,8 @@ pctwin-doctor = { path = "../../crates/pctwin-doctor" }
 # Phase 2.1: the apps on the old laptop, with who made each.
 pctwin-apps = { path = "../../crates/pctwin-apps" }
 pctwin-maker = { path = "../../crates/pctwin-maker" }
+# The parser process the maker check reads installers through (adoption change 1).
+pctwin-parse = { path = "../../crates/pctwin-parse" }
 pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-helper = { path = "../../crates/pctwin-helper" }
 pctwin-helper-os = { path = "../../crates/pctwin-helper-os" }

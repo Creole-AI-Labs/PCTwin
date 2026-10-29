@@ -228,14 +228,8 @@ fn is_add_on(dir: &Path) -> bool {
     let Ok(bytes) = whole(&m, 1024 * 1024) else {
         return false;
     };
-    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
-    if pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json).is_err() {
-        return false;
-    }
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|v| v.get("manifest_version").map(serde_json::Value::is_u64))
-        .unwrap_or(false)
+    // Read in the parser process; one it could not read is not an add-on.
+    content::is_add_on_manifest(&bytes).unwrap_or(false)
 }
 
 fn is_cache_folder(name: &str, path: &Path) -> bool {
@@ -849,7 +843,7 @@ fn classify_within(
                 Err(OUT_OF_TIME.to_string())
             } else {
                 whole(&f.path, content::MAX_JSON as u64)
-                    .and_then(|bytes| content::json_facts(&bytes).map_err(|e| e.to_string()))
+                    .and_then(|bytes| content::json_facts_of(&bytes).map_err(|e| e.to_string()))
             };
             (f.rel.clone(), facts)
         })
@@ -1570,6 +1564,7 @@ mod tests {
 
     #[test]
     fn a_gguf_header_says_which_part_it_is() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         assert_eq!(gguf_split_in(&split(1, 3)), Some((1, 3)));
         assert_eq!(gguf_split_in(&gguf(&[kv("general.flag", 7, &[1])])), None);
         let mut cut = split(1, 3);
@@ -1593,6 +1588,7 @@ mod tests {
 
     #[test]
     fn near_random_needs_enough_bytes_and_spread() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         assert!(!near_random(&noise(1023)));
         assert!(near_random(&noise(1024)));
         assert!(!near_random(&vec![0u8; 4096]));
@@ -1605,6 +1601,7 @@ mod tests {
 
     #[test]
     fn every_skip_says_something_of_its_own() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let all = [
             Skip::Cache,
             Skip::Rebuilt,
@@ -1623,6 +1620,7 @@ mod tests {
 
     #[test]
     fn an_add_on_manifest_is_read_only_up_to_its_limit() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let m = dir.path().join("manifest.json");
         let body = br#"{"manifest_version": 3}"#;
@@ -1649,6 +1647,7 @@ mod tests {
 
     #[test]
     fn credentials_are_looked_for_through_the_whole_file_whatever_its_size() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("settings.ini");
         let far_off = || std::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -1675,6 +1674,7 @@ mod tests {
 
     #[test]
     fn logs_are_told_by_their_lines_never_by_their_name() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let log = b"2026-10-28 03:01:02 INFO started\n2026-10-28 03:01:03 WARN slow\n[2026/10/28 03:01:04] done\n12:00:01 tick\n12:00:02 tick\npartial line";
         assert!(log_shaped(log));
         assert!(!log_shaped(b"[General]\nname=x\nother=y\nmore=z\n"));
@@ -1692,6 +1692,7 @@ mod tests {
 
     #[test]
     fn a_gguf_split_is_found_past_a_large_vocabulary() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         // A vocabulary of 200 000 short strings (about 2.4 MB) before the split facts.
         let mut arr = 8u32.to_le_bytes().to_vec();
         arr.extend_from_slice(&200_000u64.to_le_bytes());
@@ -1724,6 +1725,7 @@ mod tests {
 
     #[test]
     fn the_walk_stops_at_its_limits_and_says_so() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("App");
         let deep = app.join("a/b/c");
@@ -1762,6 +1764,7 @@ mod tests {
 
     #[test]
     fn a_folder_with_a_cache_tag_is_a_cache_whatever_its_name() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("App");
         std::fs::create_dir_all(app.join("store")).unwrap();
@@ -1791,6 +1794,7 @@ mod tests {
 
     #[test]
     fn a_gguf_header_is_read_through_every_value_type() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let s = |t: &str| {
             let mut b = (t.len() as u64).to_le_bytes().to_vec();
             b.extend_from_slice(t.as_bytes());
@@ -1872,6 +1876,7 @@ mod tests {
 
     #[test]
     fn linked_paths_are_checked_within_a_budget() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let there = dir.path().join("a.jpg");
         std::fs::write(&there, b"x").unwrap();
@@ -1897,6 +1902,7 @@ mod tests {
 
     #[test]
     fn past_its_time_a_folder_is_reported_not_fully_checked_never_read() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("App");
         std::fs::create_dir_all(app.join("sub")).unwrap();
@@ -1971,6 +1977,7 @@ mod tests {
 
     #[test]
     fn folders_are_taken_newest_first_and_none_past_the_deadline_is_read() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let dir = tempfile::tempdir().unwrap();
         let old = dir.path().join("Old");
         std::fs::create_dir_all(&old).unwrap();
@@ -2009,6 +2016,7 @@ mod tests {
 
     #[test]
     fn hash_names_are_recognised() {
+        crate::content::install_reader(&crate::content::IN_TESTS);
         let h = "A".repeat(64);
         assert_eq!(hash_name(&h), Some("a".repeat(64)));
         assert_eq!(hash_name(&format!("sha256-{h}")), Some("a".repeat(64)));

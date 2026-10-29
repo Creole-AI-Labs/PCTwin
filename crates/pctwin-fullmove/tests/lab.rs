@@ -352,6 +352,7 @@ fn get(a: &mut SettingsAdapter, key: &str, name: &str) -> Option<RegValue> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_edit() {
+    pctwin_parse::testing::install_readers();
     let old = tempfile::tempdir().unwrap();
     let new = tempfile::tempdir().unwrap();
     let jdir = tempfile::tempdir().unwrap();

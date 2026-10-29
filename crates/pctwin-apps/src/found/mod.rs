@@ -222,17 +222,23 @@ pub fn link_installers(
 }
 
 /// Every app on this laptop, by its system's own rule (see the module notes). `people` are
-/// everyone on the laptop (account ID and home folder), `me` the person PCTwin runs as.
-pub fn read_here(people: &[(String, Option<std::path::PathBuf>)], me: &str) -> AppList {
+/// everyone on the laptop (account ID and home folder), `me` the person PCTwin runs as;
+/// `reader` (the parser process) reads installers' signatures.
+pub fn read_here(
+    people: &[(String, Option<std::path::PathBuf>)],
+    me: &str,
+    reader: &dyn pctwin_maker::OwnReader,
+) -> AppList {
     let runner = pctwin_maker::run::SystemRunner;
     #[cfg(windows)]
     {
         let ids: Vec<String> = people.iter().map(|(id, _)| id.clone()).collect();
-        windows::read_windows_apps(&ids, me, &runner)
+        windows::read_windows_apps(&ids, me, &runner, reader)
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = me;
+        // Mac apps' makers are read by the system's own tools, not by PCTwin's reader.
+        let _ = (me, reader);
         let mut places = vec![(
             std::path::PathBuf::from("/Applications"),
             Owner::Shared,
@@ -253,6 +259,7 @@ pub fn read_here(people: &[(String, Option<std::path::PathBuf>)], me: &str) -> A
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let _ = reader;
         let home = people
             .iter()
             .find(|(id, _)| id == me)
