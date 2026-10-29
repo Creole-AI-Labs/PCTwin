@@ -1977,6 +1977,7 @@ work-state-you-said-no = 您说它不能用
 work-state-outside-project = 文件夹之外的链接：未查看
 work-state-could-not-read = 无法读取
 work-state-not-supported = PCTwin 还不能检查这类文件
+work-state-partly-checked = 并非所有内容都已查看
 work-problem-not-chosen = 没有选择文件。
 work-problem-too-many = 同时检查的项目太多。请先删除一些。
 work-problem-no-such-check = 该检查已不存在。

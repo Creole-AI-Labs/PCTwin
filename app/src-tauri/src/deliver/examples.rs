@@ -88,6 +88,17 @@ pub fn work_checks() -> Vec<WorkChecks> {
                     StillNeedsAttention,
                     NotSupported,
                 ),
+                WorkCheck {
+                    checked: 10_000,
+                    of: 10_250,
+                    ..check(
+                        12,
+                        LinkedFiles,
+                        "Big map.svg",
+                        StillNeedsAttention,
+                        PartlyChecked,
+                    )
+                },
             ],
             more: 0,
         },

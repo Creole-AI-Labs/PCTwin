@@ -247,6 +247,56 @@ fn linked_files_are_looked_up_inside_the_project_only() {
     );
     assert!(any_sample(&run(&pick(vec![links(vec!["a.txt"; 10_001])]))));
     assert!(!any_sample(&run(&pick(vec![links(vec!["a.txt"])]))));
+    // Fresh-context review F3: a machine check of only part is never labelled machine-checked.
+    assert_eq!(
+        only(&pick(vec![links(vec!["a.txt"; 10_001])])).label(),
+        Label::StillNeedsAttention
+    );
+    assert_eq!(
+        only(&pick(vec![links(vec!["a.txt"])])).label(),
+        Label::MachineChecked
+    );
+}
+
+/// Fresh-context review F3: a link (or junction) whose target is gone is a missing file; one
+/// whose target is there is found.
+#[test]
+fn a_link_whose_target_is_gone_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "real.txt", b"x");
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(
+        dir.path().join("gone.txt"),
+        dir.path().join("dangling.txt"),
+    )
+    .and_then(|()| {
+        std::os::windows::fs::symlink_file(dir.path().join("real.txt"), dir.path().join("good.txt"))
+    });
+    #[cfg(unix)]
+    let made =
+        std::os::unix::fs::symlink(dir.path().join("gone.txt"), dir.path().join("dangling.txt"))
+            .and_then(|()| {
+                std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("good.txt"))
+            });
+    if let Err(e) = made {
+        // Windows without Developer Mode cannot make links: say so, never pass silently.
+        eprintln!("SKIPPED: this account cannot make links here ({e})");
+        assert!(cfg!(windows), "links can always be made on this system");
+        return;
+    }
+    let links = Goal::LinkedFiles {
+        root: dir.path().to_path_buf(),
+        links: vec![PathBuf::from("good.txt"), PathBuf::from("dangling.txt")],
+    };
+    assert_eq!(
+        only(&pick(vec![links])),
+        Outcome::NeedsAttention {
+            missing: vec![Missing::LinkedFile {
+                name: "dangling.txt".into()
+            }],
+            coverage: Coverage::Whole
+        }
+    );
 }
 
 /// A font is found by the family name inside the font file, never guessed from the file name.

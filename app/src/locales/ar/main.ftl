@@ -2540,6 +2540,7 @@ work-state-you-said-no = قلت إنه لم ينجح
 work-state-outside-project = روابط خارج مجلده: لم تُفحص
 work-state-could-not-read = تعذّرت قراءته
 work-state-not-supported = لا يستطيع PCTwin فحص هذا النوع من الملفات بعد
+work-state-partly-checked = لم يُفحص كل شيء
 work-problem-not-chosen = لم يُختر أي ملف.
 work-problem-too-many = فحوص كثيرة في وقت واحد. أزل بعضها أولًا.
 work-problem-no-such-check = هذا الفحص لم يعد موجودًا.

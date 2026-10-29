@@ -2221,6 +2221,7 @@ work-state-you-said-no = आपने कहा कि यह काम नह�
 work-state-outside-project = इसके फ़ोल्डर के बाहर के लिंक: देखे नहीं गए
 work-state-could-not-read = पढ़ा नहीं जा सका
 work-state-not-supported = PCTwin अभी इस तरह की फ़ाइल नहीं जाँच सकता
+work-state-partly-checked = सब कुछ नहीं देखा गया
 work-problem-not-chosen = कोई फ़ाइल नहीं चुनी गई।
 work-problem-too-many = एक साथ बहुत ज़्यादा जाँचें। पहले कुछ हटाएँ।
 work-problem-no-such-check = वह जाँच अब नहीं है।

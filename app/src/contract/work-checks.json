@@ -156,6 +156,18 @@
         "of": 0,
         "state": "not-supported",
         "what": "linked-files"
+      },
+      {
+        "checked": 10000,
+        "index": 12,
+        "label": "still-needs-attention",
+        "missing": [],
+        "missingMore": 0,
+        "name": "Big map.svg",
+        "notChecked": [],
+        "of": 10250,
+        "state": "partly-checked",
+        "what": "linked-files"
       }
     ],
     "generation": 7,

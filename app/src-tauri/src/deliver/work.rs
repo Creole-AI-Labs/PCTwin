@@ -88,6 +88,9 @@ pctwin_types::listed_enum! {
         CouldNotRead,
         /// PCTwin cannot check this kind of file yet: found, not yet supported.
         NotSupported,
+        /// What it looked at is there, but not everything was looked at (a file longer than
+        /// PCTwin reads, more linked files or fonts than one check takes): still needs attention.
+        PartlyChecked,
     }
 }
 
@@ -163,8 +166,39 @@ struct Entry {
     state: Option<WorkState>,
     /// Linked files outside the project's folder: counted, never looked up.
     outside: u64,
+    /// The file was longer than PCTwin reads: only its start was looked at.
+    #[serde(default)]
+    partly_read: bool,
+    /// Linked files the file names past the most one check takes: counted, never looked up.
+    #[serde(default)]
+    links_left: u64,
+    /// Fonts the file names that got no check of their own (past the most one file lists, or
+    /// past the most checks one person keeps).
+    #[serde(default)]
+    fonts_left: u64,
     /// The latest result.
     outcome: Option<Outcome>,
+}
+
+impl Entry {
+    fn new(what: WorkWhat, name: String, goal: Option<Goal>, state: Option<WorkState>) -> Self {
+        Self {
+            what,
+            name,
+            goal,
+            state,
+            outside: 0,
+            partly_read: false,
+            links_left: 0,
+            fonts_left: 0,
+            outcome: None,
+        }
+    }
+
+    /// Something it should have looked at was not looked at.
+    fn partly(&self) -> bool {
+        self.partly_read || self.links_left > 0 || self.fonts_left > 0
+    }
 }
 
 /// The person's checks, in the order added.
@@ -211,32 +245,31 @@ impl Work {
     /// Adds a font check.
     pub fn add_font(&mut self, family: &str, folders: Vec<PathBuf>) -> Result<(), WorkProblem> {
         let family = name_ok(family).ok_or(WorkProblem::BadName)?;
-        self.push(vec![Entry {
-            what: WorkWhat::Font,
-            name: family.clone(),
-            goal: Some(Goal::Font { family, folders }),
-            state: None,
-            outside: 0,
-            outcome: None,
-        }])
+        self.push(vec![Entry::new(
+            WorkWhat::Font,
+            family.clone(),
+            Some(Goal::Font { family, folders }),
+            None,
+        )])
     }
 
     /// Adds a task the person checks themselves.
     pub fn add_task(&mut self, task: &str) -> Result<(), WorkProblem> {
         let task = name_ok(task).ok_or(WorkProblem::BadName)?;
-        self.push(vec![Entry {
-            what: WorkWhat::Task,
-            name: task.clone(),
-            goal: Some(Goal::PersonCheck { task }),
-            state: None,
-            outside: 0,
-            outcome: None,
-        }])
+        self.push(vec![Entry::new(
+            WorkWhat::Task,
+            task.clone(),
+            Some(Goal::PersonCheck { task }),
+            None,
+        )])
     }
 
     /// Adds the checks a file needs, told by its content first (`projects::look`): an archive or
     /// a database opens; a project's linked files are there, and each font it names. A file
-    /// PCTwin cannot check is kept as "not supported", never passed as fine.
+    /// PCTwin cannot check is kept as "not supported", never passed as fine. What it names past
+    /// the limits (a file longer than PCTwin reads, more links or fonts than it takes, fonts past
+    /// the most checks one person keeps) is counted on the project's own check, which then still
+    /// needs attention.
     pub fn add_file(
         &mut self,
         path: &Path,
@@ -247,13 +280,8 @@ impl Work {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
-        let file = |what, goal: Option<Goal>, state| Entry {
-            what,
-            name: crate::guard_views::name(&shown),
-            goal,
-            state,
-            outside: 0,
-            outcome: None,
+        let file = |what, goal: Option<Goal>, state| {
+            Entry::new(what, crate::guard_views::name(&shown), goal, state)
         };
         let entries = match projects::look(path, rows) {
             Found::Archive => vec![file(
@@ -281,9 +309,15 @@ impl Work {
                 Some(WorkState::CouldNotRead),
             )],
             Found::Project(needs) => {
+                // Room for the project's own check, then for as many of its fonts as fit.
+                self.room(1)?;
+                let fit = needs.fonts.len().min(MAX_CHECKS - self.entries.len() - 1);
                 let root = path.parent().map(Path::to_path_buf).unwrap_or_default();
                 let mut out = vec![Entry {
                     outside: needs.outside,
+                    partly_read: needs.partly_read,
+                    links_left: needs.more_links,
+                    fonts_left: (needs.fonts.len() - fit) as u64 + needs.more_fonts,
                     ..file(
                         WorkWhat::LinkedFiles,
                         Some(Goal::LinkedFiles {
@@ -293,18 +327,16 @@ impl Work {
                         None,
                     )
                 }];
-                for family in needs.fonts {
-                    out.push(Entry {
-                        what: WorkWhat::Font,
-                        name: crate::guard_views::name(&family),
-                        goal: Some(Goal::Font {
+                for family in needs.fonts.into_iter().take(fit) {
+                    out.push(Entry::new(
+                        WorkWhat::Font,
+                        crate::guard_views::name(&family),
+                        Some(Goal::Font {
                             family,
                             folders: font_folders.to_vec(),
                         }),
-                        state: None,
-                        outside: 0,
-                        outcome: None,
-                    });
+                        None,
+                    ));
                 }
                 out
             }
@@ -412,15 +444,25 @@ impl Work {
     }
 }
 
-fn coverage(c: &Coverage) -> (u64, u64) {
-    match *c {
-        Coverage::Whole => (1, 1),
+/// How much of `e` was looked at, by `c`: `checked` of `of`, counting what was never looked up
+/// (links outside the project, links past the limit).
+fn coverage(e: &Entry, c: &Coverage) -> (u64, u64) {
+    let (checked, of) = match *c {
+        Coverage::Whole => {
+            let n = match &e.goal {
+                Some(Goal::LinkedFiles { links, .. }) => links.len() as u64,
+                _ => 1,
+            };
+            (n, n)
+        }
         Coverage::Sample { checked, of } => (checked, of),
-    }
+    };
+    (checked, of + e.outside + e.links_left)
 }
 
 /// One entry as the screens show it. Every result carries its label; a check that did not run,
-/// or that skipped links outside its project, still needs attention.
+/// that skipped links outside its project, or that did not look at everything (a sample, a file
+/// read only in part, links or fonts past the limits) still needs attention.
 fn line(index: u32, e: &Entry) -> WorkCheck {
     let base = WorkCheck {
         index,
@@ -437,32 +479,30 @@ fn line(index: u32, e: &Entry) -> WorkCheck {
     let Some(outcome) = &e.outcome else {
         return base;
     };
-    let whole = |c: &Coverage| {
-        let (checked, of) = coverage(c);
-        (checked, of)
-    };
     match outcome {
-        Outcome::MachineChecked { coverage } => {
-            let (checked, of) = whole(coverage);
-            let outside = e.outside > 0;
+        Outcome::MachineChecked { coverage: c } => {
+            let (checked, of) = coverage(e, c);
+            let state = if e.outside > 0 {
+                WorkState::OutsideProject
+            } else if e.partly() || !c.is_whole() {
+                WorkState::PartlyChecked
+            } else {
+                WorkState::AllThere
+            };
             WorkCheck {
-                label: if outside {
-                    WorkLabel::StillNeedsAttention
-                } else {
+                label: if state == WorkState::AllThere {
                     WorkLabel::MachineChecked
-                },
-                state: if outside {
-                    WorkState::OutsideProject
                 } else {
-                    WorkState::AllThere
+                    WorkLabel::StillNeedsAttention
                 },
+                state,
                 checked,
-                of: of + e.outside,
+                of,
                 ..base
             }
         }
-        Outcome::PersonConfirmed { coverage } => {
-            let (checked, of) = whole(coverage);
+        Outcome::PersonConfirmed { coverage: c } => {
+            let (checked, of) = coverage(e, c);
             WorkCheck {
                 label: WorkLabel::PersonConfirmed,
                 state: WorkState::AllThere,
@@ -471,8 +511,11 @@ fn line(index: u32, e: &Entry) -> WorkCheck {
                 ..base
             }
         }
-        Outcome::NeedsAttention { missing, coverage } => {
-            let (checked, of) = whole(coverage);
+        Outcome::NeedsAttention {
+            missing,
+            coverage: c,
+        } => {
+            let (checked, of) = coverage(e, c);
             let mut names = Vec::new();
             let mut not_checked = Vec::new();
             let mut state = WorkState::Missing;
@@ -501,7 +544,7 @@ fn line(index: u32, e: &Entry) -> WorkCheck {
                 missing_more,
                 not_checked,
                 checked,
-                of: of + e.outside,
+                of,
                 ..base
             }
         }
@@ -822,6 +865,85 @@ mod tests {
         let c = &w.view().checks[0];
         assert_eq!(c.what, WorkWhat::Database);
         assert_ne!(c.state, WorkState::NotRunYet);
+    }
+
+    /// Fresh-context review F3: a file read only in part, links past the most one check takes,
+    /// and fonts past the limits are carried into the project's check, which then still needs
+    /// attention ("not everything was looked at"), never "machine-checked"; the counts say so.
+    #[test]
+    fn what_was_not_looked_at_keeps_a_check_needing_attention() {
+        use WorkLabel::*;
+        use WorkState::*;
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("project");
+        put(&p.join("a.png"), b"png");
+        let rows = projects::shipped();
+        // Longer than PCTwin reads: the link it found is there, but the rest was not read.
+        let mut long = br#"<svg><image href="a.png"/>"#.to_vec();
+        long.resize(projects::MAX_PROJECT_BYTES as usize + 10, b' ');
+        long.extend_from_slice(b"</svg>");
+        put(&p.join("Long.svg"), &long);
+        let mut w = Work::default();
+        w.add_file(&p.join("Long.svg"), rows, &[]).unwrap();
+        w.run();
+        let c = &w.view().checks[0];
+        assert_eq!((c.label, c.state), (StillNeedsAttention, PartlyChecked));
+        assert_eq!((c.checked, c.of), (1, 1));
+        // More links than one check takes: the ones past it are counted, never looked up.
+        let mut many = String::from("<svg>");
+        for i in 0..projects::MAX_PROJECT_LINKS + 3 {
+            many.push_str(&format!("<image href=\"none/{i}.png\"/>"));
+        }
+        many.push_str("</svg>");
+        put(&p.join("Many.svg"), many.as_bytes());
+        let mut w = Work::default();
+        w.add_file(&p.join("Many.svg"), rows, &[]).unwrap();
+        w.run();
+        let c = &w.view().checks[0];
+        assert_eq!((c.label, c.state), (StillNeedsAttention, Missing));
+        assert_eq!(c.of, c.checked + 3);
+        // Fonts past what one person keeps: the project's own check fits, the fonts that do not
+        // are counted on it.
+        let mut fonts = String::from(r#"<svg><image href="a.png"/>"#);
+        for i in 0..MAX_CHECKS + 4 {
+            fonts.push_str(&format!("<text font-family=\"Family{i}\">x</text>"));
+        }
+        fonts.push_str("</svg>");
+        put(&p.join("Fonts.svg"), fonts.as_bytes());
+        let mut w = Work::default();
+        w.add_file(&p.join("Fonts.svg"), rows, &[]).unwrap();
+        assert_eq!(w.entries.len(), MAX_CHECKS);
+        assert_eq!(w.entries[0].fonts_left, 1 + 4);
+        w.run();
+        let c = &w.view().checks[0];
+        assert_eq!((c.label, c.state), (StillNeedsAttention, PartlyChecked));
+        // A list with no room left for the project's own check refuses it.
+        assert_eq!(
+            w.add_file(&p.join("Fonts.svg"), rows, &[]),
+            Err(WorkProblem::TooMany)
+        );
+        // A whole check of everything is machine-checked.
+        put(&p.join("Fine.svg"), br#"<svg><image href="a.png"/></svg>"#);
+        let mut w = Work::default();
+        w.add_file(&p.join("Fine.svg"), rows, &[]).unwrap();
+        w.run();
+        let c = &w.view().checks[0];
+        assert_eq!((c.label, c.state), (MachineChecked, AllThere));
+        // A sample is never machine-checked, even with nothing else left out.
+        let e = Entry {
+            outcome: Some(Outcome::MachineChecked {
+                coverage: Coverage::Sample { checked: 3, of: 9 },
+            }),
+            ..Entry::new(WorkWhat::LinkedFiles, "x".into(), None, None)
+        };
+        let c = line(0, &e);
+        assert_eq!(
+            (c.label, c.state, c.checked, c.of),
+            (StillNeedsAttention, PartlyChecked, 3, 9)
+        );
+        // A list saved before these counts existed still loads.
+        let old = r#"{"generation":1,"entries":[{"what":"task","name":"t","goal":null,"state":null,"outside":0,"outcome":null}]}"#;
+        assert_eq!(serde_json::from_str::<Work>(old).unwrap().entries.len(), 1);
     }
 
     #[test]

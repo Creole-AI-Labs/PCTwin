@@ -2290,6 +2290,7 @@ work-state-you-said-no = Dijiste que no funcionó
 work-state-outside-project = Enlaces fuera de su carpeta: no revisados
 work-state-could-not-read = No se pudo leer
 work-state-not-supported = PCTwin aún no puede comprobar este tipo de archivo
+work-state-partly-checked = No se revisó todo
 work-problem-not-chosen = No se eligió ningún archivo.
 work-problem-too-many = Demasiadas comprobaciones a la vez. Quita algunas primero.
 work-problem-no-such-check = Esa comprobación ya no está.

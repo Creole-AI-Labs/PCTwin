@@ -47,7 +47,7 @@ commands and events with their argument names.
 
 - `WorkCheck.what`: `linked-files`, `font`, `archive`, `database`, `task`.
 - `WorkCheck.label`: `machine-checked`, `person-confirmed`, `still-needs-attention` (always shown).
-- `WorkCheck.state`: `not-run-yet`, `all-there`, `missing`, `damaged`, `not-there`, `waiting-for-you`, `you-said-no`, `outside-project`, `could-not-read`, `not-supported`.
+- `WorkCheck.state`: `not-run-yet`, `all-there`, `missing`, `damaged`, `not-there`, `waiting-for-you`, `you-said-no`, `outside-project`, `could-not-read`, `not-supported`, `partly-checked` (what it looked at is there, but not everything was looked at: a file longer than PCTwin reads, or more linked files or fonts than one check takes; always with `still-needs-attention`).
 - `WorkProblem`: `not-chosen`, `too-many`, `no-such-check`, `stale`, `bad-name`, `wrong-kind`, `failed`.
 - `RepairLine.waitsFor`: `old-laptop`, `internet`, `administrator`, `installer-tool`, `space`, `close-app` (empty: it can be tried now).
 - `RepairProblem`: `nothing-to-repair`, `stale`, `busy`, `failed`.

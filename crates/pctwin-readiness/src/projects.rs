@@ -121,6 +121,8 @@ pub struct Needs {
     pub more_links: u64,
     /// Font families it names.
     pub fonts: Vec<String>,
+    /// Other font families it names past [`MAX_PROJECT_FONTS`], counted (each once).
+    pub more_fonts: u64,
     /// Only the first [`MAX_PROJECT_BYTES`] were read.
     pub partly_read: bool,
 }
@@ -200,12 +202,15 @@ pub fn look(path: &Path, rows: &Catalogue<ProjectRow>) -> Found {
             needs.more_links += 1;
         }
     }
+    let mut past = std::collections::HashSet::new();
     for f in fonts {
-        if needs.fonts.len() >= MAX_PROJECT_FONTS {
-            break;
+        if needs.fonts.iter().any(|h| h.eq_ignore_ascii_case(&f)) {
+            continue;
         }
-        if !needs.fonts.iter().any(|h| h.eq_ignore_ascii_case(&f)) {
+        if needs.fonts.len() < MAX_PROJECT_FONTS {
             needs.fonts.push(f);
+        } else if past.insert(f.to_ascii_lowercase()) {
+            needs.more_fonts += 1;
         }
     }
     Found::Project(needs)
@@ -410,7 +415,31 @@ mod tests {
         );
         assert_eq!(n.outside, 2, "../ and a drive are counted, never looked up");
         assert_eq!(n.fonts, ["Inter", "Arial"]);
+        assert_eq!(n.more_fonts, 0);
         assert!(!n.partly_read);
+    }
+
+    /// Fresh-context review F3: fonts past the limit are counted (each once), never dropped
+    /// silently.
+    #[test]
+    fn fonts_past_the_limit_are_counted() {
+        let t = tempfile::tempdir().unwrap();
+        let svg = t.path().join("Many.svg");
+        let mut text = String::from("<svg>");
+        for i in 0..MAX_PROJECT_FONTS + 5 {
+            text.push_str(&format!("<text font-family=\"Family{i}\">x</text>"));
+        }
+        // The same names again, in another case: not counted twice.
+        for i in 0..MAX_PROJECT_FONTS + 5 {
+            text.push_str(&format!("<text font-family=\"FAMILY{i}\">x</text>"));
+        }
+        text.push_str("</svg>");
+        put(&svg, text.as_bytes());
+        let Found::Project(n) = look(&svg, shipped()) else {
+            panic!("an SVG is a project");
+        };
+        assert_eq!(n.fonts.len(), MAX_PROJECT_FONTS);
+        assert_eq!(n.more_fonts, 5);
     }
 
     #[test]

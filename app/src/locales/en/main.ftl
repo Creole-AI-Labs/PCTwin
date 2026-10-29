@@ -2099,6 +2099,7 @@ work-state-you-said-no = You said it did not work
 work-state-outside-project = Links outside its folder: not looked at
 work-state-could-not-read = Could not be read
 work-state-not-supported = PCTwin cannot check this kind of file yet
+work-state-partly-checked = Not everything was looked at
 work-problem-not-chosen = No file was chosen.
 work-problem-too-many = Too many checks at once. Remove some first.
 work-problem-no-such-check = That check is no longer there.

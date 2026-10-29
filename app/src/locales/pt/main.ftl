@@ -2294,6 +2294,7 @@ work-state-you-said-no = Disse que não funcionou
 work-state-outside-project = Ligações fora da pasta: não verificadas
 work-state-could-not-read = Não foi possível ler
 work-state-not-supported = O PCTwin ainda não consegue verificar este tipo de ficheiro
+work-state-partly-checked = Nem tudo foi verificado
 work-problem-not-chosen = Nenhum ficheiro escolhido.
 work-problem-too-many = Demasiadas verificações de uma vez. Remova algumas primeiro.
 work-problem-no-such-check = Essa verificação já não existe.
