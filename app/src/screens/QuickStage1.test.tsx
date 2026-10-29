@@ -362,7 +362,7 @@ describe("a remembered laptop sends files", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: (n) => plain(n) === plain(text("qs-known-in-next", { label: "Ada's laptop" })) }));
     fireEvent.click(button(text("qs-where-save")));
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("known_save_incoming", { nextTime: true });
+      expect(tauri.invoke).toHaveBeenCalledWith("known_save_incoming", { prompt: incoming.prompt, nextTime: true });
     });
     send("quicksend-progress", { phase: "copying", filesDone: 0, filesTotal: 1, bytesDone: 0, bytesTotal: 2_400_000, current: null, failed: 0, speed: null, minutesLeft: null });
     expect(heading()).toBe(text("qs-receiving-title"));

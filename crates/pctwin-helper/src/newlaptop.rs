@@ -94,6 +94,43 @@ fn handover_program() -> Result<PathBuf, Refusal> {
     Ok(program)
 }
 
+/// Where the hand-over's change journal goes. On Windows the hand-over runs with an
+/// administrator's rights, so never in the held folder, which the mover could write (a link put
+/// at the journal's name there would make an administrator create a file wherever it led): in
+/// the helper's own administrators-only folder, one journal per person. On Mac and Linux the
+/// hand-over runs as the person, writing with their rights only, so in their own held folder.
+fn journal_place(account_id: &str, folder: &Path) -> Result<PathBuf, Refusal> {
+    #[cfg(windows)]
+    {
+        let _ = folder;
+        let admin = pctwin_helper_os::admin_only_folder("handover")
+            .map_err(|e| logged(Refusal::Unreadable, "the hand-over journal's folder", &e))?;
+        Ok(journal_in(&admin, account_id))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = account_id;
+        Ok(folder.join("handover.journal"))
+    }
+}
+
+/// The hand-over journal of `account_id` inside `admin` (a folder only administrators can
+/// change): a name made only of the account's letters, digits and dashes, so it never leads out.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn journal_in(admin: &Path, account_id: &str) -> PathBuf {
+    let safe: String = account_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    admin.join(format!("handover-{safe}.journal"))
+}
+
 /// The real system: the holding area, people's homes, and the hand-over program.
 pub struct System {
     pub mover: Account,
@@ -155,7 +192,7 @@ impl NewLaptop for System {
             .arg("--account")
             .arg(&account_id)
             .arg("--journal")
-            .arg(folder.join("handover.journal"));
+            .arg(journal_place(&account_id, folder)?);
         for (label, into) in places() {
             command.arg("--into").arg(format!("{label}={into}"));
         }
@@ -244,6 +281,23 @@ fn tally(stdout: &[u8], ended_well: bool) -> Result<Counted, Refusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hand-over journal is never in the held folder on Windows (the mover could plant a link
+    /// at its name there): it is in the administrators-only folder, under a name that cannot lead
+    /// out of it, one per person.
+    #[test]
+    fn the_hand_over_journal_is_kept_where_only_administrators_write() {
+        let admin = Path::new("C:/Program Files/PCTwin/handover");
+        let p = journal_in(admin, "S-1-5-21-1000-2000-3000-1001");
+        assert_eq!(p.parent(), Some(admin));
+        assert_eq!(
+            p.file_name().unwrap(),
+            "handover-S-1-5-21-1000-2000-3000-1001.journal"
+        );
+        let sneaky = journal_in(admin, "../../Windows/x");
+        assert_eq!(sneaky.parent(), Some(admin), "never leads out");
+        assert_ne!(journal_in(admin, "1001"), journal_in(admin, "1002"));
+    }
 
     #[test]
     fn a_hand_over_that_failed_is_a_failure() {

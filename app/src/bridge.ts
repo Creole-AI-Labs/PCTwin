@@ -1068,7 +1068,9 @@ export const qsReceive = () => run("quicksend_receive");
 /** The folder the next receive saves into, held from now: the one chosen this session, or Downloads. */
 export const qsFolder = () => ask("quicksend_folder", parseQsFolder);
 /** Change: a folder from the system's picker, used from now on this session ({ none } when none was chosen). */
-export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
+/** Choose another folder: remembered for the session, and held for question `prompt` when one is open (the where-to-save page). */
+export const qsChooseFolder = (prompt: number | null = null) =>
+  ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)), { prompt });
 /** Save: what arrived goes into the folder shown now (Downloads, or the one chosen); nothing is saved before this. */
 /** Save, on question `prompt` (from the incoming event): a late click never answers the next offer. */
 export const qsSaveHere = (prompt: number) => run("quicksend_save_here", { prompt });
@@ -1246,16 +1248,17 @@ export function parseKnownConnection(value: unknown): KnownConnection | null {
   return { id: f.id, label: f.label, madeAt: f.madeAt, lastUsed: f.lastUsed, expiresAt: f.expiresAt, device: f.device, folder, nextFolder };
 }
 
-export type KnownIncoming = { connection: string; label: string; files: OfferedFile[]; bytes: number; folder: QsFolder | null };
+/** `prompt`: the question's number, which Save, Decline and Choose another folder name. */
+export type KnownIncoming = { connection: string; label: string; files: OfferedFile[]; bytes: number; folder: QsFolder | null; prompt: number };
 
 /** Files from a remembered laptop, waiting for Save or Decline. */
 export function parseKnownIncoming(value: unknown): KnownIncoming | null {
-  const f = exactly(value, ["connection", "label", "files", "bytes", "folder"]);
-  if (!f || typeof f.connection !== "string" || typeof f.label !== "string" || !isCount(f.bytes)) return null;
+  const f = exactly(value, ["connection", "label", "files", "bytes", "folder", "prompt"]);
+  if (!f || typeof f.connection !== "string" || typeof f.label !== "string" || !isCount(f.bytes) || !isCount(f.prompt)) return null;
   const files = listOf(f.files, parseOffered);
   const folder = f.folder === null ? null : parseQsFolder(f.folder);
   if (!files || (f.folder !== null && folder === null)) return null;
-  return { connection: f.connection, label: f.label, files, bytes: f.bytes, folder };
+  return { connection: f.connection, label: f.label, files, bytes: f.bytes, folder, prompt: f.prompt };
 }
 
 export type KnownDelivered = { connection: string; label: string; folder: string; lines: Receipt["lines"]; tell: boolean };
@@ -1345,8 +1348,9 @@ export const knownRenewFolder = (id: string) => ask("known_renew_folder", knownL
 export const knownNextFolder = (id: string) => ask("known_next_folder", knownList, { id });
 export const knownClearNextFolder = (id: string) => ask("known_clear_next_folder", knownList, { id });
 /** Save files from a remembered laptop into the folder held now; `nextTime`: remember that folder for it. */
-export const knownSaveIncoming = (nextTime: boolean) => run("known_save_incoming", { nextTime });
-export const knownDeclineIncoming = () => run("known_decline_incoming");
+/** Save or Decline name the question they answer (`prompt` from the incoming event). */
+export const knownSaveIncoming = (prompt: number, nextTime: boolean) => run("known_save_incoming", { prompt, nextTime });
+export const knownDeclineIncoming = (prompt: number) => run("known_decline_incoming", { prompt });
 /** Sends the offer made on the pick page to a remembered laptop nearby, now. */
 export const knownSend = (id: string) => run("known_send", { id });
 /** Approve this delivery only: the offer made on the pick page, for these connections, for `days` days. */

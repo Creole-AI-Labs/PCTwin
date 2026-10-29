@@ -199,7 +199,7 @@ export default function KnownReceiveHost({
           onNextTime={setNextTime}
           onChoose={() => {
             setProblem(null);
-            qsChooseFolder().then(
+            qsChooseFolder(incoming.prompt).then(
               (chosen) => {
                 if (!("none" in chosen)) setFolder(chosen);
               },
@@ -209,14 +209,14 @@ export default function KnownReceiveHost({
             );
           }}
           onDecline={() => {
-            void knownDeclineIncoming().catch(() => undefined);
+            void knownDeclineIncoming(incoming.prompt).catch(() => undefined);
             onHome();
           }}
           onSave={() => {
             setProblem(null);
             saved.current = true;
             setView({ kind: "progress", progress: STARTING });
-            knownSaveIncoming(nextTime).catch((error: unknown) => {
+            knownSaveIncoming(incoming.prompt, nextTime).catch((error: unknown) => {
               saved.current = false;
               setProblem(toQsRefusal(error));
               setView({ kind: "ask" });

@@ -14,7 +14,8 @@
       "name": "Downloads",
       "path": "C:\\Users\\Ada\\Downloads"
     },
-    "label": "Ada's laptop"
+    "label": "Ada's laptop",
+    "prompt": 4
   },
   {
     "bytes": 2400000,
@@ -27,6 +28,7 @@
       }
     ],
     "folder": null,
-    "label": "Ada's laptop"
+    "label": "Ada's laptop",
+    "prompt": 5
   }
 ]
