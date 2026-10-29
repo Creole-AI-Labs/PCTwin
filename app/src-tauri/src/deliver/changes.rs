@@ -542,6 +542,38 @@ mod tests {
         );
         assert_eq!(r, Err(RepairProblem::Stale));
         assert!(store.with(|k| k.is_none()));
+        // Replaced by newer results while it installed (re-check of 2.9): nothing merged into them.
+        store.with(|k| *k = Some(kept()));
+        let r = reapprove(
+            &store,
+            gate,
+            G,
+            true,
+            true,
+            |_| empty(),
+            |_, _, _| {
+                store.with(|k| {
+                    *k = Some(Kept {
+                        generation: G + 1,
+                        ..kept()
+                    })
+                });
+                Ok((
+                    vec![line("Writer", ItemStatus::Reinstalled)],
+                    Some("u".into()),
+                ))
+            },
+        );
+        assert_eq!(r, Err(RepairProblem::Stale));
+        store.with(|k| {
+            let k = k.as_ref().unwrap();
+            assert_eq!(k.generation, G + 1);
+            assert_eq!(
+                k.last.lines[0].status,
+                ItemStatus::NeedsAction,
+                "left as it was"
+            );
+        });
         // Busy: refused before anything is looked at.
         store.with(|k| *k = Some(kept()));
         let undo = gate.hold(BusyWith::Undoing);

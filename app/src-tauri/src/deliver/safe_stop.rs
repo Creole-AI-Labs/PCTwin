@@ -70,10 +70,6 @@ pub const LOCK_FILE: &str = "safe-stop.lock";
 /// (windows/hooks.nsh names it too).
 pub const CLOSING_FILE: &str = "safe-stop-closing";
 
-/// How long a first step waits for an installer that is closing PCTwin before it starts anyway
-/// (an installer that stopped part way may leave its file behind, but no longer holds it open).
-const CLOSING_WAIT: Duration = Duration::from_secs(60);
-
 /// How long a step tries again to take its file while the installer is looking at it.
 const PROBE_WAIT: Duration = Duration::from_secs(3);
 
@@ -247,16 +243,16 @@ impl SafeStop {
 
     /// Starts a step of kind `what`. While an update is being installed, or the installer is
     /// closing PCTwin, it waits first (PCTwin is about to close; an update that failed lets it
-    /// start).
+    /// start). It never starts without its file while an installer holds its own open (re-check
+    /// of 2.9): a file left behind by an installer that stopped is not held, so it never waits.
     pub fn hold(&'static self, what: BusyWith) -> Hold {
-        let closing_until = Instant::now() + CLOSING_WAIT;
         let mut inner = self.lock();
         loop {
             if inner.updating {
                 inner = self.changed.wait(inner).unwrap_or_else(|e| e.into_inner());
                 continue;
             }
-            if Self::take_file(&mut inner) || Instant::now() >= closing_until {
+            if Self::take_file(&mut inner) {
                 return self.start(&mut inner, what);
             }
             inner = self

@@ -188,6 +188,19 @@ pub fn data_changed(plan: &FullPlan, changed: impl Fn(&str) -> bool) -> Vec<Drif
         .collect()
 }
 
+/// Every piece of app data on a line where any piece was edited after the approval (`changed`):
+/// none of that line is placed, so the line is whole or not there at all.
+pub fn data_held(
+    plan: &FullPlan,
+    changed: impl Fn(&str) -> bool,
+) -> std::collections::BTreeSet<String> {
+    plan.special
+        .iter()
+        .filter(|s| s.ids.iter().any(|id| changed(id)))
+        .flat_map(|s| s.ids.iter().cloned())
+        .collect()
+}
+
 impl FullPlan {
     /// Leaves the apps `drift` holds out of the run until a fresh approval
     /// ([`FullPlan::to_install`] skips them; the run ends each needs-action).
@@ -410,5 +423,8 @@ mod tests {
         assert!(!sink.changed_after_approval("mail-1"));
         let d = data_changed(&plan, |id| sink.changed_after_approval(id));
         assert_eq!(d, [edited("Mail")]);
+        // The piece that did not change is held with it: the line is placed whole or not at all.
+        let held = data_held(&plan, |id| sink.changed_after_approval(id));
+        assert_eq!(held, ["mail-1".to_string(), "mail-2".to_string()].into());
     }
 }

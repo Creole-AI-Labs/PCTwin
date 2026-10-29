@@ -820,8 +820,14 @@ pub struct Landed {
 }
 
 /// Lands every component that arrived whole, secrets first; anything chosen that did not arrive
-/// whole ends needs-action, never landed.
-pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -> Vec<Landed> {
+/// whole ends needs-action, never landed. A component in `held` (its app's data was edited on the
+/// old laptop after the approval) is not landed either: it waits for the person's answer.
+pub fn land_all(
+    sink: &Sink,
+    n: &Landing<'_>,
+    apps: &BTreeMap<String, String>,
+    held: &std::collections::BTreeSet<String>,
+) -> Vec<Landed> {
     let rec = n.journal.imports(n.key);
     let stop = Stop::new();
     let made = MadeFolders::default();
@@ -860,6 +866,13 @@ pub fn land_all(sink: &Sink, n: &Landing<'_>, apps: &BTreeMap<String, String>) -
             words: words.into(),
             why: Some(why),
         };
+        if held.contains(id) {
+            out.push(needs(
+                "it was changed on the old laptop after you approved; PCTwin asks you again",
+                DataWhy::Changing,
+            ));
+            continue;
+        }
         let Some(a) = sink.arrived.get(id) else {
             out.push(if sink.lost {
                 needs(

@@ -697,6 +697,9 @@ pub fn rebuild_here<R: Runtime>(
     }
     let mut held = plan.clone();
     held.hold(&drift);
+    // Kept until the results are remembered (re-check of 2.9): an undo waiting for the gate then
+    // spends them after, never before, so they are never put back once spent.
+    let _keeping = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Rebuilding);
     let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone());
     crate::deliver::repair::remember(
         app,
@@ -753,7 +756,19 @@ pub fn rebuild_full<R: Runtime>(
     // imports journal; whatever did not arrive whole ends needs-action.
     let data_done = match data {
         Some((sink, picked)) => {
-            land_data(sink, picked, journal, &state.keys.capture, scope, &actor)
+            // An app's data is placed whole or not at all: any piece edited after the approval
+            // holds every piece of that line (re-check of 2.9).
+            let edited =
+                pctwin_fullmove::drift::data_held(plan, |id| sink.changed_after_approval(id));
+            land_data(
+                sink,
+                picked,
+                &edited,
+                journal,
+                &state.keys.capture,
+                scope,
+                &actor,
+            )
         }
         None => pctwin_fullmove::run::DataDone::default(),
     };
@@ -1007,6 +1022,7 @@ fn home_here() -> Option<std::path::PathBuf> {
 fn land_data(
     sink: &pctwin_fullmove::data::Sink,
     picked: Vec<u32>,
+    edited: &std::collections::BTreeSet<String>,
     journal: &Journal,
     key: &pctwin_grant::CaptureKey,
     scope: Scope,
@@ -1042,6 +1058,7 @@ fn land_data(
             system: pctwin_special::roots::System::here(),
         },
         &names,
+        edited,
     );
     done.landed = landed.iter().map(|l| (l.id.clone(), l.result)).collect();
     done.why = landed

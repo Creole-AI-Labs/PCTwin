@@ -554,8 +554,11 @@ impl Moving {
         lock(&self.run).as_ref().is_some_and(|r| !r.finished)
     }
 
-    /// Starts a run, unless one is going.
+    /// Starts a run, unless one is going. The gate is waited for before the run is locked
+    /// (re-check of 2.9, 29 October 2026): an update being installed checks the run while it
+    /// keeps steps from starting, so waiting for the gate with the run locked could hang both.
     fn begin(&self) -> Result<(Live, Arc<AtomicBool>), MoveProblem> {
+        let hold = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Moving);
         let mut run = lock(&self.run);
         if run.as_ref().is_some_and(|r| !r.finished) {
             return Err(MoveProblem::Busy);
@@ -577,9 +580,7 @@ impl Moving {
             new_name: None,
             report: Vec::new(),
             finished: false,
-            hold: Some(crate::deliver::safe_stop::hold(
-                crate::deliver::safe_stop::BusyWith::Moving,
-            )),
+            hold: Some(hold),
         });
         Ok((live, scan_stop))
     }
