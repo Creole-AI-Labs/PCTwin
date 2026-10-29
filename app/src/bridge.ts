@@ -1216,7 +1216,7 @@ export const catchupArm = (id: string | null, purpose: CatchupPurpose) => run("c
 export const catchupApprove = (id: string | null, digest: string, choices: ChoiceIn[]) => run("catchup_approve", { id, digest, choices });
 export const handoverPreview = (id: string | null, action: HandoverAction) => ask("handover_preview", parseHandoverView, { id, action });
 /** The separate, irreversible confirmation of exactly the preview with `digest`. */
-export const handoverConfirm = (id: string | null, action: HandoverAction, digest: string) => ask("handover_confirm", parseHandoverStarted, { id, action, digest });
+export const handoverConfirm = (id: string | null, action: HandoverAction, digest: string, ticket: string) => ask("handover_confirm", parseHandoverStarted, { id, action, digest, ticket });
 /** What the person says happened after the system's own route: their word, never a certificate. */
 export const handoverResult = (id: string | null, action: HandoverAction, says: PersonSays) => ask("handover_result", parseHandoverRecorded, { id, action, says });
 export const doctorRun = (role: DoctorRole) => ask("doctor_run", parseDoctorView, { role });

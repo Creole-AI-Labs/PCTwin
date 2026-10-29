@@ -589,7 +589,7 @@ impl Moving {
     /// A catch-up (2.7) approved by the person on its own screen: the plan waiting now is
     /// answered, with nothing of its groups left out (the items are chosen by ID instead).
     pub(crate) fn answer_catch_up(&self, key: &PlanKey, yes: bool) -> Result<(), MoveProblem> {
-        self.answer(key, yes, &[], &[], &[])
+        self.answer(key, yes, &[], &[], (&[], false))
     }
 
     fn with_run<T>(&self, f: impl FnOnce(&mut Run) -> T) -> Result<T, MoveProblem> {

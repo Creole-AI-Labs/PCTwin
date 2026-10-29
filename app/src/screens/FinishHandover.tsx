@@ -1,6 +1,6 @@
 import { useLocalization } from "@fluent/react";
 import { useState } from "react";
-import { handoverConfirm, handoverPreview, handoverResult, toFinishProblem } from "../bridge";
+import { catchupArm, handoverConfirm, handoverPreview, handoverResult, toFinishProblem } from "../bridge";
 import { Banner, Button, Checkbox, Row, RowList, Section, Select } from "../components/kit";
 import { PERSON_SAYS, type FinishProblem, type HandoverAction, type HandoverRecorded, type HandoverStarted, type HandoverView, type PersonSays, type Route } from "../finish";
 import { FinishPage, Loaded, Name, ProblemNotice, useHas, useLoad, whenText } from "./FinishParts";
@@ -104,6 +104,44 @@ function RouteSteps({ route }: { route: Route }) {
   );
 }
 
+/** The old laptop was not checked in the last 15 minutes: check it again, then look at the preview again. */
+function CheckOldAgain({ id, onLookAgain }: { id: string | null; onLookAgain: () => void }) {
+  const { l10n } = useLocalization();
+  const [armed, setArmed] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="fin-actions">
+      {armed ? (
+        <>
+          <p role="status">{l10n.getString("finish-handover-check-armed")}</p>
+          <Button variant="primary" onClick={onLookAgain}>
+            {l10n.getString("finish-handover-look-again")}
+          </Button>
+        </>
+      ) : (
+        <>
+          {failed && <p role="status">{l10n.getString("finish-problem-failed")}</p>}
+          <Button
+            variant="primary"
+            onClick={() => {
+              catchupArm(id, "check").then(
+                () => {
+                  setArmed(true);
+                },
+                () => {
+                  setFailed(true);
+                },
+              );
+            }}
+          >
+            {l10n.getString("finish-handover-check-old")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Preview({ id, action, onBack, onList, onContinue }: { id: string | null; action: HandoverAction; onBack: () => void; onList: () => void; onContinue: (r: Ready) => void }) {
   const { l10n } = useLocalization();
   const { state, reload } = useLoad(() => handoverPreview(id, action));
@@ -119,6 +157,7 @@ function Preview({ id, action, onBack, onList, onContinue }: { id: string | null
                 </Banner>
               </div>
               {view.open > 0 && <p>{l10n.getString("finish-handover-refused-open", { count: view.open.toLocaleString() })}</p>}
+              {view.why === "old-laptop-not-checked" && <CheckOldAgain id={id} onLookAgain={reload} />}
               <div className="fin-actions">
                 <Button variant="secondary" onClick={onList}>
                   {l10n.getString("finish-handover-to-list")}
@@ -218,15 +257,16 @@ function Confirm({ id, ready, onBack, onStarted }: { id: string | null; ready: R
           disabled={!ticked || busy}
           onClick={() => {
             setBusy(true);
-            handoverConfirm(id, ready.action, ready.digest).then(
+            handoverConfirm(id, ready.action, ready.digest, ready.ticket).then(
               onStarted,
               (error: unknown) => {
                 setBusy(false);
                 setTicked(false);
                 const p = toFinishProblem(error);
                 setProblem(p);
-                // A changed preview is looked at again, and the person confirms again.
-                if (p.kind === "changed") onBack();
+                // A changed preview, or a confirmation the engine no longer takes (too soon, too late,
+                // or already used), is looked at again: a fresh preview, and the person confirms again.
+                if (p.kind === "changed" || p.kind === "not-allowed") onBack();
               },
             );
           }}

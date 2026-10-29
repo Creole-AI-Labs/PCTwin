@@ -188,7 +188,7 @@ describe("the engine's names (contract/shell/finish-calls.json, written by the e
     catchup_arm: (a) => catchupArm(a.id as string, a.purpose as "check"),
     catchup_approve: (a) => catchupApprove(a.id as string, a.digest as string, a.choices as { id: string; choice: "keep-both" }[]),
     handover_preview: (a) => handoverPreview(a.id as string, a.action as "remove-my-account"),
-    handover_confirm: (a) => handoverConfirm(a.id as string, a.action as "erase-old-laptop", a.digest as string),
+    handover_confirm: (a) => handoverConfirm(a.id as string, a.action as "erase-old-laptop", a.digest as string, a.ticket as string),
     handover_result: (a) => handoverResult(a.id as string, a.action as "erase-old-laptop", a.says as "cannot-tell"),
     doctor_run: (a) => doctorRun(a.role as "new"),
     setup_checklist: (a) => setupChecklist(a.id as string),

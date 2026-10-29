@@ -343,7 +343,8 @@ describe("Hand the old laptop on (R08 to R10)", () => {
     await user.click(box);
     expect(go.disabled).toBe(false);
     await user.click(go);
-    expect(api.handoverConfirm).toHaveBeenCalledWith("1792627200000-0", "erase-old-laptop", ready.kind === "ready" ? ready.digest : "");
+    // The digest and the preview's own ticket go back exactly as received.
+    expect(api.handoverConfirm).toHaveBeenCalledWith("1792627200000-0", "erase-old-laptop", ready.kind === "ready" ? ready.digest : "", ready.kind === "ready" ? ready.ticket : "");
     // The system's own route, then what the person saw: recorded as their word, never a certificate.
     await heading(text("finish-started-title"));
     expect(screen.getByText(text("finish-started-undo-closed"))).toBeTruthy();
@@ -362,6 +363,21 @@ describe("Hand the old laptop on (R08 to R10)", () => {
     expect(await screen.findByText(new RegExp(text("finish-refused-list-not-clear")))).toBeTruthy();
     expect(screen.getByText(plain(text("finish-handover-refused-open", { count: 2 })))).toBeTruthy();
     expect(screen.queryByRole("button", { name: text("finish-handover-continue") })).toBeNull();
+    await accessible();
+  });
+
+  it("when the old laptop was not checked lately: says so, offers to check it again, then looks again", async () => {
+    api.handoverPreview.mockResolvedValue({ kind: "refused", action: "remove-my-account", why: "old-laptop-not-checked", open: 0 });
+    api.catchupArm.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    await toPreview(user, "remove");
+    expect(await screen.findByText(new RegExp(text("finish-refused-old-laptop-not-checked")))).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: text("finish-handover-check-old") }));
+    expect(api.catchupArm).toHaveBeenCalledWith("1792627200000-0", "check");
+    expect(await screen.findByText(text("finish-handover-check-armed"))).toBeTruthy();
+    const calls = api.handoverPreview.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: text("finish-handover-look-again") }));
+    expect(api.handoverPreview.mock.calls.length).toBe(calls + 1);
     await accessible();
   });
 

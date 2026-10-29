@@ -356,19 +356,20 @@ function parseRoute(v: unknown): Route | null {
 }
 
 export type HandoverView =
-  | { kind: "ready"; action: HandoverAction; digest: string; removes: string[]; keeps: string[]; notes: HandoverNote[]; route: Route }
+  /** `ticket`: this preview's own mark, sent back exactly with the confirmation (the engine takes it once, between 2 seconds and 10 minutes after the preview). */
+  | { kind: "ready"; action: HandoverAction; digest: string; ticket: string; removes: string[]; keeps: string[]; notes: HandoverNote[]; route: Route }
   | { kind: "refused"; action: HandoverAction; why: RefusalKey; open: number };
 
 export function parseHandoverView(v: unknown): HandoverView | null {
   const kind = typeof v === "object" && v !== null ? (v as Fields).kind : undefined;
   if (kind === "ready") {
-    const f = exactly(v, ["kind", "action", "digest", "removes", "keeps", "notes", "route"]);
-    if (!f || !oneOf(f.action, HANDOVER_ACTIONS) || !isHex(f.digest)) return null;
+    const f = exactly(v, ["kind", "action", "digest", "ticket", "removes", "keeps", "notes", "route"]);
+    if (!f || !oneOf(f.action, HANDOVER_ACTIONS) || !isHex(f.digest) || !(isHex(f.ticket) && f.ticket.length === 32)) return null;
     const removes = names(f.removes);
     const keeps = names(f.keeps);
     const notes = listOf(f.notes, (x) => (oneOf(x, HANDOVER_NOTES) ? x : null));
     const route = parseRoute(f.route);
-    return removes && keeps && notes && route ? { kind, action: f.action, digest: f.digest, removes, keeps, notes, route } : null;
+    return removes && keeps && notes && route ? { kind, action: f.action, digest: f.digest, ticket: f.ticket, removes, keeps, notes, route } : null;
   }
   if (kind === "refused") {
     const f = exactly(v, ["kind", "action", "why", "open"]);
