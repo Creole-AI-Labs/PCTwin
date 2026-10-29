@@ -26,6 +26,7 @@ pub mod greeting;
 pub mod handover;
 pub mod held_journal;
 pub mod landing;
+pub mod local;
 pub mod people;
 pub mod reconnect;
 pub mod report;
