@@ -264,7 +264,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}", approve: "Approve reading the files of {names}." });
       await moveChoosePlace("pictures").catch(() => undefined);
       await moveUsualPlace("pictures");
-      await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"], [2]);
+      await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"], [2], [0], true);
       await movePause();
       await moveResume();
       await moveStop();
