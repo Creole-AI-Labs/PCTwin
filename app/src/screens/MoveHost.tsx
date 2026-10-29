@@ -651,6 +651,7 @@ export default function MoveHost({
     case "outcome":
       return (
         <Outcome
+          old={old}
           outcome={view.outcome}
           onReport={() => {
             const outcome = view.outcome;

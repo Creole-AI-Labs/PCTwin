@@ -1147,6 +1147,8 @@ cancel-keep = Seguir trasladando
 outcome-eyebrow = Resultado del traslado
 outcome-title = Te damos la bienvenida a tu nuevo portátil.
 outcome-body = Esto es lo que pasó con todo lo que aprobaste.
+outcome-title-old = Tus cosas ya están en tu nuevo portátil.
+outcome-body-old = Esto es lo que pasó con todo lo que enviaste. Este portátil sigue como estaba.
 outcome-files-title = Archivos seleccionados
 outcome-status-partial = Hecho en parte
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

@@ -1259,6 +1259,8 @@ cancel-keep = متابعة النقل
 outcome-eyebrow = نتائج النقل
 outcome-title = مرحبًا بك في حاسوبك المحمول التالي.
 outcome-body = هذا ما حدث لكل ما وافقت عليه.
+outcome-title-old = أغراضك الآن على حاسوبك المحمول الجديد.
+outcome-body-old = هذا ما حدث لكل ما أرسلته. يبقى هذا الحاسوب كما كان.
 outcome-files-title = الملفات المحددة
 outcome-status-partial = تم جزئيًا
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

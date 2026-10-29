@@ -21,7 +21,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * documents) that the plan held, with how many arrived copied and checked, counted the way the
  * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
-export default function Outcome({ outcome, onReport, onHome, onUndo }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void }) {
+export default function Outcome({ outcome, onReport, onHome, onUndo, old = false }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void; /** This is the old laptop: it sent, it is not where the person arrives. */ old?: boolean }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   // A move that ended early on its own (something went wrong between the laptops) never says the person stopped it.
@@ -29,7 +29,9 @@ export default function Outcome({ outcome, onReport, onHome, onUndo }: { outcome
     ? ["outcome-broke-title", "outcome-broke-body"]
     : stopped
       ? ["outcome-stopped-title", "outcome-stopped-body"]
-      : ["outcome-title", "outcome-body"];
+      : old
+        ? ["outcome-title-old", "outcome-body-old"]
+        : ["outcome-title", "outcome-body"];
   const needsAction = byStatus["needs-action"];
   const done = DONE.reduce((n, s) => n + byStatus[s], 0);
   // Everything the person approved: what ended some way (less what they left out themselves), plus what never started.

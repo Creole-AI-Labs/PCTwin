@@ -999,6 +999,8 @@ cancel-keep = Keep moving
 outcome-eyebrow = Move results
 outcome-title = Welcome to your next laptop.
 outcome-body = Here is what happened to everything you approved.
+outcome-title-old = Your things are on your new laptop.
+outcome-body-old = Here is what happened to everything you sent. This laptop stays as it was.
 outcome-files-title = Selected files
 outcome-status-partial = Partly done
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

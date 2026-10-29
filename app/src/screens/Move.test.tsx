@@ -325,6 +325,13 @@ describe("the move, once paired", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("move_resume");
   });
 
+  it("the old laptop's results say the things are on the new laptop, never welcome it", async () => {
+    await host(true);
+    send("move-progress", runningQuiet);
+    send("move-finished", outcomes[0]);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-title-old"));
+  });
+
   it("ends with the outcome, then the report the engine gives", async () => {
     replies.move_report = () => reportItems;
     const { onHome } = await host(false);

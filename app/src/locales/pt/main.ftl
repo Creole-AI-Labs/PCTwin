@@ -1151,6 +1151,8 @@ cancel-keep = Continuar a mudança
 outcome-eyebrow = Resultado da mudança
 outcome-title = Boas-vindas ao seu próximo notebook.
 outcome-body = Veja o que aconteceu com tudo o que você aprovou.
+outcome-title-old = Suas coisas estão no seu novo notebook.
+outcome-body-old = Veja o que aconteceu com tudo o que você enviou. Este notebook continua como estava.
 outcome-files-title = Arquivos selecionados
 outcome-status-partial = Feito em parte
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

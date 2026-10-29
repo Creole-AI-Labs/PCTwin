@@ -935,6 +935,8 @@ cancel-keep = 继续迁移
 outcome-eyebrow = 迁移结果
 outcome-title = 欢迎使用你的新笔记本电脑。
 outcome-body = 以下是你同意的每项内容的结果。
+outcome-title-old = 你的东西已在新笔记本电脑上。
+outcome-body-old = 以下是你发送的每项内容的结果。这台笔记本电脑保持原样。
 outcome-files-title = 已选文件
 outcome-status-partial = 部分完成
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

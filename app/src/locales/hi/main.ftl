@@ -1124,6 +1124,8 @@ cancel-keep = स्थानांतरण जारी रखें
 outcome-eyebrow = स्थानांतरण के नतीजे
 outcome-title = आपके अगले लैपटॉप पर आपका स्वागत है।
 outcome-body = आपने जो कुछ मंज़ूर किया था, उसके साथ क्या हुआ, यहाँ देखें।
+outcome-title-old = आपकी चीज़ें आपके नए लैपटॉप पर हैं।
+outcome-body-old = आपने जो कुछ भेजा, उसके साथ क्या हुआ, यहाँ देखें। यह लैपटॉप जैसा था वैसा ही है।
 outcome-files-title = चुनी गई फ़ाइलें
 outcome-status-partial = कुछ हिस्सा पूरा
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

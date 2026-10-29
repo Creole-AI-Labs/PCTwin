@@ -1156,6 +1156,8 @@ cancel-keep = Continuer le transfert
 outcome-eyebrow = Résultats du transfert
 outcome-title = Bienvenue sur votre nouvel ordinateur portable.
 outcome-body = Voici ce qui est arrivé à tout ce que vous avez approuvé.
+outcome-title-old = Vos affaires sont sur votre nouvel ordinateur portable.
+outcome-body-old = Voici ce qui est arrivé à tout ce que vous avez envoyé. Cet ordinateur reste tel qu'il était.
 outcome-files-title = Fichiers sélectionnés
 outcome-status-partial = Fait en partie
 # Added 23 October 2026: the after-move check on R01, counted the way the scan counts.

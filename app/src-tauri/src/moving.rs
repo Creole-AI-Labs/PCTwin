@@ -1473,20 +1473,32 @@ pub struct LandedPlace {
 
 /// Where the person's things landed: each shown place that holds at least one item now on this
 /// laptop (copied, reinstalled or converted).
-fn landed_places(shown: &BTreeMap<String, String>, report: &[ReportItem]) -> Vec<LandedPlace> {
+fn landed_places(
+    shown: &BTreeMap<String, String>,
+    received: &Received,
+    mover: &str,
+    landing: impl Fn(&Item) -> Option<LandingPlace>,
+) -> Vec<LandedPlace> {
+    // By where each of the mover's arrived files was placed (its destination's label), not by
+    // its path: a report's path is inside its place, never the folder itself (found in the
+    // two-copy test, 29 October 2026, when no place was ever named).
+    let items: HashMap<ItemId, &Item> = received.record.items.iter().map(|i| (i.id, i)).collect();
+    let used: std::collections::BTreeSet<String> = received
+        .files
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.outcome,
+                Some(ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_))
+            )
+        })
+        .filter_map(|f| items.get(&f.item))
+        .filter(|i| shown_to_mover(i, mover))
+        .filter_map(|i| landing(i).map(|p| p.destination))
+        .collect();
     shown
         .iter()
-        .filter(|(_, folder)| {
-            report.iter().any(|i| {
-                matches!(
-                    i.status,
-                    ItemStatus::Copied | ItemStatus::Reinstalled | ItemStatus::Converted
-                ) && i
-                    .destination
-                    .as_deref()
-                    .is_some_and(|d| d.starts_with(folder.as_str()))
-            })
-        })
+        .filter(|(label, _)| used.contains(label.as_str()))
         .map(|(label, folder)| LandedPlace {
             name: group_name(label),
             folder: folder.clone(),
@@ -2812,7 +2824,9 @@ async fn run_new<R: Runtime>(
     let not_handed = steps.finish_others();
     let received = received?;
     let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
-    outcome.landed = landed_places(&steps.shown, &report);
+    outcome.landed = landed_places(&steps.shown, &received, &steps.rules.mover, |i| {
+        steps.rules.landing(i)
+    });
     outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
     // The full move, once every file is in: apps, settings and special categories, each with its
     // result. A move that was stopped or broke off changes nothing more.
@@ -3632,6 +3646,40 @@ mod tests {
                 .collect(),
             ended,
         }
+    }
+
+    /// The results name each place the mover's files arrived in, by where they were placed (the
+    /// report's paths are inside the place, never the folder itself), and no place nothing went to.
+    #[test]
+    fn the_results_name_where_the_files_landed() {
+        let docs = item(person("1000"), FolderRole::Documents, &["Lab", "a.txt"], 4);
+        let pics = item(person("1000"), FolderRole::Pictures, &["b.jpg"], 3);
+        let r = received(
+            vec![
+                (
+                    docs.clone(),
+                    Some(finished("Lab/a.txt", CheckedFrom::Drive)),
+                ),
+                (pics.clone(), None),
+            ],
+            Ended::Finished,
+        );
+        let shown: BTreeMap<String, String> = [
+            (
+                "documents".to_string(),
+                "C:/Users/ada/Documents".to_string(),
+            ),
+            ("pictures".to_string(), "C:/Users/ada/Pictures".to_string()),
+        ]
+        .into();
+        let landed = landed_places(&shown, &r, "1000", |i| {
+            Some(LandingPlace::new(role_label(i.place.role), ""))
+        });
+        assert_eq!(
+            landed.iter().map(|l| l.folder.as_str()).collect::<Vec<_>>(),
+            ["C:/Users/ada/Documents"],
+            "Pictures got nothing, so it is not named"
+        );
     }
 
     /// A folder that moves as one whole (here a Photos Library) has its own line: moved only when
