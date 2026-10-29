@@ -10,10 +10,9 @@ use common::*;
 use pctwin_readiness::checks::Summary;
 use pctwin_readiness::goodbye::{Checklist, Inputs, OldLaptop};
 use pctwin_readiness::kit::{KIT_FILE, Kit, KitError, README_FILE, date};
+use pctwin_readiness::ledger::Standing;
 use pctwin_readiness::ledger::{Observed, Role};
-use pctwin_readiness::report::{
-    Disclosure, FEEDBACK_WORDS, NOT_A_CERTIFICATE, scrub, share_preview,
-};
+use pctwin_readiness::report::{Disclosure, Leak, check_text, scrub, share_preview};
 use pctwin_record::{Inclusion, ItemKind};
 use pctwin_types::{ItemResult, Reason};
 
@@ -169,7 +168,7 @@ fn dates_are_written_plainly() {
 
 /// T27-025: the shared report holds no private names, account IDs or codes unless the person
 /// selects them; even selected names lose what looks like a secret; another person's things are
-/// never named.
+/// never named. Text the screens make from it is refused if it holds anything kept out.
 #[test]
 fn t27_025_the_share_preview_strips_private_things_unless_selected() {
     let (_, l, c) = moved();
@@ -182,6 +181,7 @@ fn t27_025_the_share_preview_strips_private_things_unless_selected() {
         sid,
         Disclosure::default(),
     );
+    let json = serde_json::to_string(&p).unwrap();
     for private in [
         "Taxes",
         "ada@example.com",
@@ -190,15 +190,42 @@ fn t27_025_the_share_preview_strips_private_things_unless_selected() {
         "bea",
         sid,
     ] {
-        assert!(!p.text.contains(private), "{private} in:\n{}", p.text);
+        assert!(!json.contains(private), "{private} in:\n{json}");
     }
-    assert!(p.text.contains("- a file: failed (unreadable)"));
-    assert!(
-        p.text
-            .contains("- an app or setting: needs action (manual-install)")
-    );
-    assert!(p.text.contains("other people's items not finished: 1"));
+    assert!(p.lines.iter().all(|l| l.name.is_none()));
+    assert_eq!(p.lines.len(), 3);
+    assert!(p.lines.iter().any(|l| !l.is_app
+        && l.standing == Standing::Failed
+        && l.reason == Some(Reason::Unreadable)));
+    assert!(p.lines.iter().any(|l| l.is_app
+        && l.standing == Standing::NeedsAction
+        && l.reason == Some(Reason::ManualInstall)));
+    assert_eq!(p.others_not_finished, 1);
+    assert_eq!(p.account_id, None);
     assert_eq!((p.withheld.names, p.withheld.account_ids), (3, 1));
+
+    // Text holding a name kept out, by its whole path or its last part, in any case, is refused.
+    assert_eq!(
+        check_text(&p, "Not finished: Taxes 2025 ada@example.com.pdf"),
+        Err(Leak::KeptOut)
+    );
+    assert_eq!(check_text(&p, "SECRET PROJECT EDITOR"), Err(Leak::KeptOut));
+    assert_eq!(
+        check_text(&p, "a file of bea-diary.txt"),
+        Err(Leak::KeptOut)
+    );
+    assert_eq!(
+        check_text(&p, &format!("account {sid}")),
+        Err(Leak::KeptOut)
+    );
+    assert_eq!(
+        check_text(&p, "see https://example.com"),
+        Err(Leak::SecretLike)
+    );
+    assert_eq!(
+        check_text(&p, "1 file failed: it could not be read."),
+        Ok(())
+    );
 
     let all = Disclosure {
         file_names: true,
@@ -206,22 +233,72 @@ fn t27_025_the_share_preview_strips_private_things_unless_selected() {
         account_id: true,
     };
     let p = share_preview(&l, Summary::FinishedWithTasks, &[], Some(&c), sid, all);
-    assert!(p.text.contains("Taxes 2025 [removed]"), "{}", p.text);
-    assert!(p.text.contains("notes [removed]"));
-    assert!(p.text.contains("Secret Project Editor"));
-    assert!(p.text.contains(sid));
+    let names: Vec<&str> = p.lines.iter().filter_map(|l| l.name.as_deref()).collect();
+    assert!(names.contains(&"Taxes 2025 [removed]"), "{names:?}");
+    assert!(names.contains(&"notes [removed]"));
+    assert!(names.contains(&"Secret Project Editor"));
+    assert_eq!(p.account_id.as_deref(), Some(sid));
+    let json = serde_json::to_string(&p).unwrap();
     for never in ["ada@example.com", "ghp_", "bea-diary"] {
-        assert!(!p.text.contains(never));
+        assert!(!json.contains(never));
     }
     assert_eq!(p.withheld.secrets, 2);
+    // Chosen names may be in the text; another person's never.
+    assert_eq!(
+        check_text(
+            &p,
+            &format!("Secret Project Editor needs you. Account {sid}.")
+        ),
+        Ok(())
+    );
+    assert_eq!(check_text(&p, "bea-diary.txt"), Err(Leak::KeptOut));
     // Only file names, not app names.
     let files_only = Disclosure {
         file_names: true,
         ..Disclosure::default()
     };
     let p = share_preview(&l, Summary::FinishedWithTasks, &[], None, sid, files_only);
-    assert!(!p.text.contains("Secret Project"));
-    assert!(p.text.contains("Taxes 2025"));
+    let names: Vec<&str> = p.lines.iter().filter_map(|l| l.name.as_deref()).collect();
+    assert!(!names.iter().any(|n| n.contains("Secret Project")));
+    assert!(names.iter().any(|n| n.contains("Taxes 2025")));
+    assert_eq!(check_text(&p, "Secret Project Editor"), Err(Leak::KeptOut));
+    // A kept-out name inside a longer word is not that name.
+    assert_eq!(check_text(&p, "Secret Project Editors club"), Ok(()));
+}
+
+/// The digest binds a save to exactly the report shown.
+#[test]
+fn the_report_digest_changes_with_what_is_disclosed() {
+    let (_, l, c) = moved();
+    let a = share_preview(
+        &l,
+        Summary::FinishedWithTasks,
+        &[],
+        Some(&c),
+        "1000",
+        Disclosure::default(),
+    );
+    let b = share_preview(
+        &l,
+        Summary::FinishedWithTasks,
+        &[],
+        Some(&c),
+        "1000",
+        Disclosure {
+            app_names: true,
+            ..Disclosure::default()
+        },
+    );
+    assert_ne!(a.digest(), b.digest());
+    let again = share_preview(
+        &l,
+        Summary::FinishedWithTasks,
+        &[],
+        Some(&c),
+        "1000",
+        Disclosure::default(),
+    );
+    assert_eq!(a.digest(), again.digest());
 }
 
 #[test]
@@ -247,23 +324,6 @@ fn scrub_removes_addresses_and_codes_only() {
     // Folder and name parts are judged apart: two short parts are not one long code.
     assert_eq!(scrub("Photos2024/Summer-trip").1, 0);
     assert_eq!(scrub("report2024.final-version").1, 0);
-}
-
-/// T27-026: the report is never a certificate. T27-028: feedback needs no account.
-#[test]
-fn t27_026_028_the_report_is_not_a_certificate_and_feedback_needs_no_account() {
-    let (_, l, _) = moved();
-    let p = share_preview(
-        &l,
-        Summary::FinishedWithTasks,
-        &[],
-        None,
-        "1000",
-        Disclosure::default(),
-    );
-    assert!(p.text.ends_with(&format!("{NOT_A_CERTIFICATE}\n")));
-    assert!(FEEDBACK_WORDS.contains("You do not need an account"));
-    assert!(FEEDBACK_WORDS.contains("Nothing is sent until you choose Send"));
 }
 
 /// T27-030: nothing is sent automatically. The crate cannot reach the network: its dependencies
@@ -339,8 +399,8 @@ fn the_report_lists_checks_and_other_people_only_when_there_are_some() {
         "1000",
         Disclosure::default(),
     );
-    assert!(!p.text.contains("other people"));
-    assert!(!p.text.contains("Checks you picked"));
+    assert_eq!(p.others_not_finished, 0);
+    assert!(p.checks.is_empty());
     let c = Choices::picked(
         l.generation(),
         vec![Chosen {
@@ -361,13 +421,8 @@ fn the_report_lists_checks_and_other_people_only_when_there_are_some() {
         "1000",
         Disclosure::default(),
     );
-    assert!(
-        p.text.contains(
-            "Checks you picked:
-- check 1: still-needs-attention
-"
-        ),
-        "{}",
-        p.text
+    assert_eq!(
+        p.checks,
+        [pctwin_readiness::checks::Label::StillNeedsAttention]
     );
 }

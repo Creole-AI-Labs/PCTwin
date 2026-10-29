@@ -226,8 +226,13 @@ fn t27_002_a_sample_is_labelled_as_a_sample() {
     assert_eq!(Coverage::sample(10_000, 10_000), Ok(Coverage::Whole));
     let s = Coverage::sample(12, 10_000).unwrap();
     assert!(!s.is_whole());
-    assert_eq!(s.words(), "checked 12 of 10000");
-    assert_eq!(Coverage::Whole.words(), "checked all");
+    assert_eq!(
+        s,
+        Coverage::Sample {
+            checked: 12,
+            of: 10_000
+        }
+    );
     assert!(Coverage::sample(0, 5).is_err());
     assert!(Coverage::sample(6, 5).is_err());
     // A sample stays a sample through the ledger.
@@ -254,14 +259,9 @@ fn t27_003_an_unsearched_place_is_never_claimed() {
     assert!(l.found_everything());
     l.not_searched("USB drive \"Backup\"");
     assert!(!l.found_everything());
-    let words = l.source_only_words();
-    assert!(
-        words.contains("1 item is only on the old laptop"),
-        "{words}"
-    );
-    assert!(words.contains("in the places PCTwin looked: Documents"));
-    assert!(words.contains("PCTwin did not look in: USB drive \"Backup\""));
-    assert!(!words.to_lowercase().contains("everything"));
+    assert_eq!(l.only_on_old_laptop().len(), 1);
+    assert!(l.search().searched.contains("Documents"));
+    assert!(l.search().not_searched.contains("USB drive \"Backup\""));
     // Searched later: no longer listed as unsearched.
     l.searched("USB drive \"Backup\"");
     assert!(l.found_everything());
@@ -319,8 +319,7 @@ fn t27_027_accepted_loss_is_never_success() {
         T0 + 20,
     )
     .unwrap();
-    let (words, digest) = l.loss_warning(a.id).unwrap();
-    assert!(words.contains("not on the new laptop"), "{words}");
+    let digest = l.loss_warning(a.id).unwrap();
     // Agreeing to some other warning, or to one for a finished item, is refused.
     assert!(l.accept_loss(a.id, [0; 32], T0 + 30).is_err());
     assert!(l.loss_warning(done.id).is_none());

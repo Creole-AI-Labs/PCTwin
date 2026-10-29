@@ -32,7 +32,7 @@ use crate::ledger::{EvidenceKind, Ledger, MoveId, Selection};
 use crate::store;
 
 /// The saved list's format.
-pub const CHECKLIST_FORMAT: u32 = 1;
+pub const CHECKLIST_FORMAT: u32 = 2;
 /// The keep-until date PCTwin suggests: this long after the list is made.
 pub const SUGGESTED_KEEP: u64 = 30 * 24 * 60 * 60;
 
@@ -73,8 +73,23 @@ pub struct Exception {
     pub items: Vec<ItemId>,
     pub places: Vec<String>,
     pub steps: Vec<String>,
-    pub words: String,
+    /// For a special-category step, what it asks (the screens put it in words).
+    pub what: Option<StepWhat>,
     pub resolution: Resolution,
+}
+
+/// What a special-category step (2.5) asks of the person. A key: the screens hold the words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StepWhat {
+    /// Sign in to it again on the new laptop.
+    SignInAgain,
+    /// Link it again (to a phone, a security key) on the new laptop.
+    Relink,
+    /// Make its export on the old laptop first.
+    ExportFirst,
+    /// Look at it yourself: PCTwin could not tell what kind of data it is.
+    LookAtIt,
 }
 
 impl Exception {
@@ -83,18 +98,18 @@ impl Exception {
         items: Vec<ItemId>,
         places: Vec<String>,
         steps: Vec<String>,
-        words: String,
+        what: Option<StepWhat>,
     ) -> Self {
         let mut h = blake3::Hasher::new();
-        h.update(b"pctwin/v1/goodbye-exception\0");
-        h.update(&serde_json::to_vec(&(kind, &items, &places, &steps)).expect("serialises"));
+        h.update(b"pctwin/v2/goodbye-exception\0");
+        h.update(&serde_json::to_vec(&(kind, &items, &places, &steps, what)).expect("serialises"));
         Self {
             id: *h.finalize().as_bytes(),
             kind,
             items,
             places,
             steps,
-            words,
+            what,
             resolution: Resolution::Open,
         }
     }
@@ -152,8 +167,8 @@ pub struct SpecialStep {
     pub place: String,
     /// The component it is about (its identity, as text), so two steps never merge.
     pub component: String,
-    /// What to do, in plain words.
-    pub words: String,
+    /// What it asks.
+    pub what: StepWhat,
 }
 
 /// Why a change to the list was refused.
@@ -186,17 +201,7 @@ pub struct Checklist {
     pub suggested_keep_until: u64,
     pub keep_until: Option<u64>,
     pub undo_open: bool,
-    /// Where PCTwin looked and did not look, in words.
-    pub searched_words: String,
     pub exceptions: Vec<Exception>,
-}
-
-fn plural(n: usize, one: &str, many: &str) -> String {
-    if n == 1 {
-        format!("1 {one}")
-    } else {
-        format!("{n} {many}")
-    }
 }
 
 impl Checklist {
@@ -217,18 +222,12 @@ impl Checklist {
                 .filter(|id| !l.settled(*id)),
         );
         if !only.is_empty() {
-            let n = only.len();
             ex.push(Exception::new(
                 ExceptionKind::OnlyOnOldLaptop,
                 only.into_iter().collect(),
                 vec![],
                 vec![],
-                format!(
-                    "{} only on the old laptop. Move {}, or choose to leave {} behind.",
-                    plural(n, "item is", "items are"),
-                    if n == 1 { "it" } else { "them" },
-                    if n == 1 { "it" } else { "them" },
-                ),
+                None,
             ));
         }
 
@@ -251,12 +250,7 @@ impl Checklist {
                 keys.clone(),
                 vec![],
                 vec![],
-                format!(
-                    "{} a key or recovery code that PCTwin has not checked on the new laptop. \
-                     Check you can open {} here before you wipe the old laptop.",
-                    plural(keys.len(), "item needs", "items need"),
-                    if keys.len() == 1 { "it" } else { "them" },
-                ),
+                None,
             ));
         }
 
@@ -277,12 +271,7 @@ impl Checklist {
                 tied.clone(),
                 vec![],
                 vec![],
-                format!(
-                    "{} tied to the old laptop (such as passkeys, authenticator apps or Windows \
-                     Hello). Set {} up again on the new laptop before you wipe the old one.",
-                    plural(tied.len(), "thing is", "things are"),
-                    if tied.len() == 1 { "it" } else { "them" },
-                ),
+                None,
             ));
         }
 
@@ -307,18 +296,12 @@ impl Checklist {
                 .map(|(id, _)| *id),
         );
         if !first.is_empty() {
-            let n = first.len();
             ex.push(Exception::new(
                 ExceptionKind::DoFirstOnOldLaptop,
                 first.into_iter().collect(),
                 vec![],
                 vec![],
-                format!(
-                    "{} a step on the old laptop first, such as signing out or freeing a \
-                     licence. Do it while the old laptop still works: PCTwin does not do this \
-                     for you.",
-                    plural(n, "app needs", "apps need"),
-                ),
+                None,
             ));
         }
 
@@ -333,10 +316,7 @@ impl Checklist {
                 vec![],
                 vec![],
                 steps.clone(),
-                format!(
-                    "{} of the move did not finish. Try again before you wipe the old laptop.",
-                    plural(steps.len(), "step", "steps"),
-                ),
+                None,
             ));
         }
 
@@ -346,7 +326,7 @@ impl Checklist {
                 vec![],
                 vec![s.place.clone()],
                 vec![s.component.clone()],
-                s.words.clone(),
+                Some(s.what),
             ));
         }
 
@@ -357,10 +337,7 @@ impl Checklist {
                 vec![],
                 not_searched.clone(),
                 vec![],
-                format!(
-                    "PCTwin did not look in: {}. Check there yourself.",
-                    not_searched.join(", ")
-                ),
+                None,
             ));
         }
 
@@ -372,9 +349,7 @@ impl Checklist {
                     vec![],
                     vec![],
                     vec![],
-                    "The old laptop is not connected, so PCTwin cannot check it again. Connect \
-                     it before you wipe it or give it away."
-                        .to_string(),
+                    None,
                 ));
                 None
             }
@@ -398,19 +373,19 @@ impl Checklist {
             suggested_keep_until: now + SUGGESTED_KEEP,
             keep_until: previous.and_then(|p| p.keep_until).filter(|t| *t >= now),
             undo_open: i.undo_open,
-            searched_words: l.source_only_words(),
             exceptions: ex,
         }
     }
 
-    /// The digest binding an answer to exactly the exception and words shown, for this list.
+    /// The digest binding an answer to exactly the exception shown, for this list: its ID (which
+    /// names its kind, items, places, steps and what it asks) and the plan generation. The screens'
+    /// words are made from exactly these, so nothing else is shown.
     pub fn shown(&self, id: &[u8; 32]) -> Option<[u8; 32]> {
         let e = self.exceptions.iter().find(|e| &e.id == id)?;
         let mut h = blake3::Hasher::new();
-        h.update(b"pctwin/v1/goodbye-shown\0");
+        h.update(b"pctwin/v2/goodbye-shown\0");
         h.update(&e.id);
         h.update(&self.generation.to_le_bytes());
-        h.update(e.words.as_bytes());
         Some(*h.finalize().as_bytes())
     }
 

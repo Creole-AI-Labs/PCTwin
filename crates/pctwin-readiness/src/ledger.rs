@@ -112,14 +112,6 @@ impl Coverage {
             Coverage::Sample { checked, of } => checked > 0 && checked < of,
         }
     }
-
-    /// The plain words ("checked 12 of 10000").
-    pub fn words(&self) -> String {
-        match self {
-            Coverage::Whole => "checked all".to_string(),
-            Coverage::Sample { checked, of } => format!("checked {checked} of {of}"),
-        }
-    }
 }
 
 /// What one observation showed (plan 2.7 section 3). Each says what it means and no more.
@@ -730,25 +722,20 @@ impl Ledger {
         t
     }
 
-    /// The warning for losing an item that is not on the new laptop, and the digest that binds an
-    /// agreement to exactly these words for this item and plan.
-    pub fn loss_warning(&self, item: ItemId) -> Option<(String, [u8; 32])> {
+    /// The digest that binds the person's agreement to lose an item that is not on the new laptop
+    /// to exactly the warning shown: this item, by its ID and its name as shown, in this plan. The
+    /// screens put the warning in words (`None`: the item is done, or not in the move).
+    pub fn loss_warning(&self, item: ItemId) -> Option<[u8; 32]> {
         let line = self.lines.get(&item)?;
         if matches!(standing_of(line), Standing::Done(_)) {
             return None;
         }
-        let words = format!(
-            "\u{201c}{}\u{201d} is not on the new laptop. If you wipe or give away the old \
-             laptop, it will be gone. PCTwin will record that you chose to leave it behind, not \
-             that it moved.",
-            line.label
-        );
         let mut h = blake3::Hasher::new();
-        h.update(b"pctwin/v1/loss-warning\0");
+        h.update(b"pctwin/v2/loss-warning\0");
         h.update(item.to_hex().as_bytes());
         h.update(&self.generation.to_le_bytes());
-        h.update(words.as_bytes());
-        Some((words, *h.finalize().as_bytes()))
+        h.update(line.label.as_bytes());
+        Some(*h.finalize().as_bytes())
     }
 
     /// The person accepts losing an item, after the exact warning `shown` (T27-027). The item's
@@ -759,7 +746,7 @@ impl Ledger {
         shown: [u8; 32],
         at: u64,
     ) -> Result<(), LedgerError> {
-        let (_, digest) = match self.loss_warning(item) {
+        let digest = match self.loss_warning(item) {
             Some(w) => w,
             None if self.lines.contains_key(&item) => return Err(LedgerError::AlreadyDone),
             None => return Err(LedgerError::UnknownItem),
@@ -808,34 +795,6 @@ impl Ledger {
             .filter(|(_, l)| l.mine && only_old(l))
             .map(|(id, _)| *id)
             .collect()
-    }
-
-    /// The plain words for what is only on the old laptop, with where PCTwin looked and where it
-    /// did not (T27-003).
-    pub fn source_only_words(&self) -> String {
-        let n = self.only_on_old_laptop().len();
-        let what = if n == 1 {
-            "1 item is".to_string()
-        } else {
-            format!("{n} items are")
-        };
-        let list = |s: &BTreeSet<String>| s.iter().cloned().collect::<Vec<_>>().join(", ");
-        let mut words = if self.search.searched.is_empty() {
-            format!("{what} only on the old laptop. PCTwin has not looked through it yet.")
-        } else {
-            format!(
-                "{what} only on the old laptop, in the places PCTwin looked: {}.",
-                list(&self.search.searched)
-            )
-        };
-        if !self.search.not_searched.is_empty() {
-            words.push_str(&format!(
-                " PCTwin did not look in: {}. Check there yourself before you wipe or give away \
-                 the old laptop.",
-                list(&self.search.not_searched)
-            ));
-        }
-        words
     }
 
     /// Moves the ledger to the next plan `record` of the same old laptop (final changes): new
