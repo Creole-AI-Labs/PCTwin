@@ -557,9 +557,16 @@ fn plans() -> Vec<PlanView> {
             runs_at_sign_in: 1,
         },
         rebuild: None,
+        space: None,
     };
     let full = PlanView {
         rebuild: Some(rebuild_plan()),
+        // Too small a laptop: what PCTwin proposes to leave on the old one.
+        space: Some(crate::moving::SpaceView {
+            files: 1204,
+            bytes: 18_400_000_000,
+            still_short_bytes: 0,
+        }),
         ..files_only.clone()
     };
     vec![files_only, full]
@@ -1063,6 +1070,25 @@ fn families() -> Vec<(&'static str, Value)> {
                 can_move_others: true,
             }]),
         ),
+        (
+            "rescue-drives",
+            json([vec![
+                crate::moving::RescueDriveView {
+                    id: "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10".into(),
+                    name: r"Old laptop drive (E:\)".into(),
+                    file_system: "NTFS".into(),
+                    total_bytes: 256_000_000_000,
+                    looks_like_a_laptop: true,
+                },
+                crate::moving::RescueDriveView {
+                    id: "9a8b7c6d-1111-2222-3333-444455556666".into(),
+                    name: r"Photos stick (F:\)".into(),
+                    file_system: "exFAT".into(),
+                    total_bytes: 64_000_000_000,
+                    looks_like_a_laptop: false,
+                },
+            ]]),
+        ),
         ("guard-snapshot", json(crate::guard_examples::snapshots())),
         ("guard-refused", json(crate::guard_examples::refusals())),
         ("guard-answer", json(crate::guard_examples::answers())),
@@ -1263,7 +1289,9 @@ fn calls() -> Value {
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
-            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]]] },
+            { "name": "rescue_drives", "args": [] },
+            { "name": "rescue_begin", "args": [["id", "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10"], ["fallback", { "music": "From your old laptop/Music" }]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },

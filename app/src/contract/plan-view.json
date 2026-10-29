@@ -266,6 +266,11 @@
       "restorePoint": false,
       "specialNotMoved": 7
     },
-    "revision": 2
+    "revision": 2,
+    "space": {
+      "bytes": 18400000000,
+      "files": 1204,
+      "stillShortBytes": 0
+    }
   }
 ]

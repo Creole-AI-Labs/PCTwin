@@ -400,6 +400,20 @@ export interface PlanView {
   first?: FolderRole[];
   /** The full move: every app, setting and special category, with what undo can do for each. */
   rebuild?: RebuildPlan;
+  /** The new laptop is too small: what PCTwin proposes leaving on the old laptop (2.6). */
+  space?: SpaceProposal;
+}
+
+/**
+ * What PCTwin proposes leaving on the old laptop when the plan does not fit this one: the files
+ * used longest ago, never the ones that move first, only as much as is short. Nothing changes
+ * unless the person accepts it with the approval.
+ */
+export interface SpaceProposal {
+  files: number;
+  bytes: number;
+  /** What would still be short with them left behind (0: then it fits). */
+  stillShortBytes: number;
 }
 
 /** The groups that move first and are still in the plan (one the person left out moves nothing). */

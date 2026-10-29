@@ -380,7 +380,7 @@ export type PlanKey = { revision: number; fingerprint: string };
  * other key must be there. The contract test reads this to know which keys may be missing.
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
-  "plan-view": ["rebuild"],
+  "plan-view": ["rebuild", "space"],
   "move-outcome": ["rebuilt", "landed"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
   "report-item": ["destination", "reason", "evidence", "note", "kind", "bytes"],
@@ -512,6 +512,11 @@ export function parsePlanView(value: unknown): PlanView | null {
     const rebuild = parseRebuildPlan(f.rebuild);
     if (!rebuild) return null;
     plan.rebuild = rebuild;
+  }
+  if ("space" in f) {
+    const s = exactly(f.space, ["files", "bytes", "stillShortBytes"]);
+    if (!s || !isCount(s.files) || !isCount(s.bytes) || !isCount(s.stillShortBytes) || s.files === 0) return null;
+    plan.space = { files: s.files, bytes: s.bytes, stillShortBytes: s.stillShortBytes };
   }
   return plan;
 }
@@ -680,6 +685,21 @@ export function parseReportItem(value: unknown): ReportItem | null {
 /** `approve`: the words of a Mac's administrator window, with {names} filled in there with the people ticked. */
 export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[], approve: string) => run("move_begin", { fallback, others, approve });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
+
+/** R13 Rescue a laptop: a drive connected to this laptop that a rescue can read (2.6). */
+export type RescueDrive = { id: string; name: string; fileSystem: string; totalBytes: number; looksLikeALaptop: boolean };
+
+export function parseRescueDrive(value: unknown): RescueDrive | null {
+  const f = exactly(value, ["id", "name", "fileSystem", "totalBytes", "looksLikeALaptop"]);
+  if (!f || typeof f.id !== "string" || f.id === "" || typeof f.name !== "string" || typeof f.fileSystem !== "string") return null;
+  if (typeof f.totalBytes !== "number" || !Number.isSafeInteger(f.totalBytes) || f.totalBytes < 0 || typeof f.looksLikeALaptop !== "boolean") return null;
+  return { id: f.id, name: f.name, fileSystem: f.fileSystem, totalBytes: f.totalBytes, looksLikeALaptop: f.looksLikeALaptop };
+}
+
+/** The drives a rescue could read now. */
+export const rescueDrives = () => ask("rescue_drives", (v) => listOf(v, parseRescueDrive));
+/** Starts a rescue from drive `id` (one rescueDrives gave): the move's own events follow, as on a new laptop. */
+export const rescueBegin = (id: string, fallback: Partial<Record<FolderRole, string>>) => run("rescue_begin", { id, fallback });
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
 /** What came of choosing another place for a group of folders (M05). */
 export type PlaceAnswer = { kind: "chosen"; path: string; freeBytes: number | null } | { kind: "not-chosen" | "no-safe-name" | "cannot-open" | "locked" };
@@ -701,7 +721,9 @@ export const moveChoosePlace = (role: FolderRole) => ask("move_choose_place", pa
 export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { role });
 /** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
 /** `secrets`: the secret lines of app data the person ticked, one by one (none unless ticked). */
-export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = []) => run("move_approve", { plan, approve, leftOut, secrets, updates });
+/** `leaveBehind`: the person accepted the plan's space proposal (leave those files on the old laptop). */
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = [], leaveBehind = false) =>
+  run("move_approve", { plan, approve, leftOut, secrets, updates, leaveBehind });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");

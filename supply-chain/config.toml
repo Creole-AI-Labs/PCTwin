@@ -1016,6 +1016,11 @@ criteria = "safe-to-deploy"
 version = "1.2.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.msi]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+notes = "Not reviewed yet: new in Phase 2 (uninstall on undo). Safe Rust; the elevated helper reads only the ProductCode from the Property table of its own held, hash-pinned, size-limited installer package, and records nothing unless it equals the manifest's. Its compound-file reader, cfb, is already exempted. MIT."
+
 [[exemptions.muda]]
 version = "0.20.0"
 criteria = "safe-to-deploy"

@@ -68,7 +68,7 @@ pctwin-session = { path = "../../crates/pctwin-session" }
 # `listed_enum!`: the views the screens are sent, declared with the list of their variants.
 pctwin-transfer = { path = "../../crates/pctwin-transfer" }
 pctwin-types = { path = "../../crates/pctwin-types" }
-tokio = { version = "1.53.2", features = ["rt", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["macros", "rt", "sync", "time"] }
 # Opens PCTwin at sign-in while a move is under way, so a restart never loses it (src/restart.rs).
 tauri-plugin-autostart = "2.7.0"
 

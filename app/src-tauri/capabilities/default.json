@@ -19,6 +19,8 @@
     "allow-pairing-new-search",
     "allow-pairing-new-connect",
     "allow-move-begin",
+    "allow-rescue-drives",
+    "allow-rescue-begin",
     "allow-move-approve",
     "allow-move-place-people",
     "allow-move-choose-place",

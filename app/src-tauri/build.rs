@@ -17,6 +17,8 @@ const COMMANDS: &[&str] = &[
     "pairing_new_search",
     "pairing_new_connect",
     "move_begin",
+    "rescue_drives",
+    "rescue_begin",
     "move_approve",
     "move_place_people",
     "move_choose_place",
