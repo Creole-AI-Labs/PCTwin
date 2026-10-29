@@ -1485,6 +1485,103 @@ pub fn folder_access_list(path: &std::path::Path) -> Result<String, Error> {
     os_access_list(f.as_handle()).map_err(|c| os_err("GetSecurityInfo", c))
 }
 
+/// Each program holding a file: its process id and its name as Windows shows it (UTF-16).
+type RmHolder = (u32, Vec<u16>);
+
+/// Windows Restart Manager's own list of the running programs that have any of `files` open
+/// (each a NUL-terminated UTF-16 full path): each program's id and the name Windows shows for it.
+/// The session is started, the files registered, the list read (asked again, at most twice, when
+/// more programs appeared meanwhile) and the session ended, all in one call; nothing is closed or
+/// restarted. Needs no administrator: the person's own programs are listed. Added 29 October 2026
+/// for the 2.5 decision on files live while their app is open (the person is asked to close only
+/// the app holding a file, by its name).
+fn os_rm_holders(files: &[Vec<u16>]) -> Result<Vec<RmHolder>, (&'static str, u32)> {
+    use windows::Win32::Foundation::ERROR_MORE_DATA;
+    use windows::Win32::System::RestartManager::{
+        CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmEndSession, RmGetList, RmRegisterResources,
+        RmStartSession,
+    };
+    assert!(files.iter().all(|f| f.ends_with(&[0])), "NUL-terminated");
+    let names: Vec<PCWSTR> = files.iter().map(|f| PCWSTR(f.as_ptr())).collect();
+    let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+    let mut session = 0u32;
+    let mut infos: Vec<RM_PROCESS_INFO> = Vec::new();
+    // SAFETY: `key` has room for the session key and its NUL, as RmStartSession requires; every
+    // name in `names` points into `files`, which outlives the call and is only read; RmGetList is
+    // given `infos`' own length as its room, and a null list only when that length is zero; the
+    // session is always ended before the block ends, whatever failed. No pointer is kept.
+    #[expect(unsafe_code, reason = "Restart Manager has no safe binding")]
+    let got = unsafe {
+        let started = RmStartSession(&mut session, None, PWSTR(key.as_mut_ptr()));
+        if started != ERROR_SUCCESS {
+            Err(("RmStartSession", started.0))
+        } else {
+            let listed = 'list: {
+                let registered = RmRegisterResources(session, Some(&names), None, None);
+                if registered != ERROR_SUCCESS {
+                    break 'list Err(("RmRegisterResources", registered.0));
+                }
+                for _ in 0..3 {
+                    let mut needed = 0u32;
+                    let mut count = u32::try_from(infos.len()).unwrap_or(0);
+                    let mut reasons = 0u32;
+                    let room = if infos.is_empty() {
+                        None
+                    } else {
+                        Some(infos.as_mut_ptr())
+                    };
+                    let r = RmGetList(session, &mut needed, &mut count, room, &mut reasons);
+                    if r == ERROR_SUCCESS {
+                        infos.truncate(count as usize);
+                        break 'list Ok(());
+                    }
+                    if r != ERROR_MORE_DATA {
+                        break 'list Err(("RmGetList", r.0));
+                    }
+                    infos = vec![RM_PROCESS_INFO::default(); needed as usize + 4];
+                }
+                Err(("RmGetList", ERROR_MORE_DATA.0))
+            };
+            let _ = RmEndSession(session);
+            listed
+        }
+    };
+    got?;
+    Ok(infos
+        .iter()
+        .map(|i| (i.Process.dwProcessId, i.strAppName.to_vec()))
+        .collect())
+}
+
+/// The names Windows shows for the programs, other than PCTwin itself, that have any of `files`
+/// open (Restart Manager; [`os_rm_holders`]), each once, in the order Windows gives them. A name
+/// Windows leaves empty is not listed. Holding a file open is not the same as writing to it: a
+/// caller that needs to know whether a file is being written asks that first (a share-mode open)
+/// and asks this only for the names.
+pub fn file_holders(files: &[std::path::PathBuf]) -> Result<Vec<String>, Error> {
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    let wide_names: Vec<Vec<u16>> = files.iter().map(|f| wide(f.as_os_str())).collect();
+    let got = os_rm_holders(&wide_names).map_err(|(call, code)| Error::Os {
+        call,
+        code: i64::from(code),
+    })?;
+    let me = std::process::id();
+    let mut names: Vec<String> = Vec::new();
+    for (pid, raw) in got {
+        if pid == me {
+            continue;
+        }
+        let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+        let name = String::from_utf16_lossy(&raw[..end]).trim().to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Ok(names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1559,5 +1656,38 @@ mod tests {
         ] {
             assert!(PipeName::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn restart_manager_names_the_program_holding_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let free = dir.path().join("free.db");
+        std::fs::write(&free, b"x").unwrap();
+        // Nobody holds it: nobody is named (PCTwin's own process is never listed).
+        assert_eq!(
+            super::file_holders(std::slice::from_ref(&free)).unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(super::file_holders(&[]).unwrap(), Vec::<String>::new());
+        // A child program holds it open: Windows names it.
+        let held = dir.path().join("held.db");
+        std::fs::write(&held, b"x").unwrap();
+        // A program writing into it for half a minute (its output goes there).
+        let mut child = std::process::Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::fs::File::create(&held).unwrap())
+            .spawn()
+            .unwrap();
+        let mut named = Vec::new();
+        for _ in 0..50 {
+            named = super::file_holders(std::slice::from_ref(&held)).unwrap();
+            if !named.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(!named.is_empty(), "the holder is named");
     }
 }
