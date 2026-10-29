@@ -50,6 +50,7 @@ import {
   qsLaunchFiles,
   knownConnections,
   knownRemember,
+  suggestReplacement,
   knownForget,
   knownRename,
   knownAllowFolder,
@@ -275,10 +276,10 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsResume();
       await qsStop();
       await qsSendNote("Wi-Fi: Home");
-      await qsOpenLink();
+      await qsOpenLink("ffeeddccbbaa99887766554433221100");
       await qsLaunchFiles();
       await knownConnections();
-      await knownRemember("Ada's laptop");
+      await knownRemember("Ada's laptop", "0011223344556677");
       await knownForget("0011223344556677");
       await knownRename("0011223344556677", "Ada (work)");
       await knownAllowFolder("0011223344556677");
@@ -356,5 +357,18 @@ describe("a rescue's drives (2.6)", () => {
     const missing: Record<string, unknown> = { ...good };
     delete missing.looksLikeALaptop;
     expect(parseRescueDrive(missing)).toBeNull();
+  });
+});
+
+describe("remembering a laptop paired again", () => {
+  it("suggests the earlier connection with the name typed, and nothing else", () => {
+    const connections = [
+      { id: "0011223344556677", label: "Ada's laptop", lastUsed: 2 },
+      { id: "8899aabbccddeeff", label: "Kitchen laptop", lastUsed: 1 },
+    ];
+    expect(suggestReplacement(connections, "  ada's LAPTOP ")?.id).toBe("0011223344556677");
+    expect(suggestReplacement(connections, "Ada")).toBeNull();
+    expect(suggestReplacement(connections, "   ")).toBeNull();
+    expect(suggestReplacement([], "Ada's laptop")).toBeNull();
   });
 });

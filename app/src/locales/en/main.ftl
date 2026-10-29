@@ -2112,3 +2112,10 @@ qs-waiting-files =
 qs-waiting-newer = A newer version exists. Review it again.
 qs-waiting-on = Sends only while your laptop is on.
 qs-waiting-cancel = Cancel and delete the copy
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = PCTwin cannot tell if this is the same laptop.
+qs-remember-replaces = Connected these two before? Choose the earlier connection, and it is forgotten.
+qs-remember-replaces-suggested = This may be { $label } again. Replace it?
+qs-remember-replace = Replace
+qs-remember-keep-both = No, keep both

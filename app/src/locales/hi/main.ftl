@@ -2234,3 +2234,10 @@ qs-waiting-files =
 qs-waiting-newer = नया संस्करण मौजूद है। इसे फिर से देखें।
 qs-waiting-on = यह लैपटॉप चालू रहने तक ही भेजता है।
 qs-waiting-cancel = रद्द करें और कॉपी हटाएँ
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = PCTwin यह नहीं बता सकता कि यह वही लैपटॉप है या नहीं।
+qs-remember-replaces = क्या आपने इस लैपटॉप को पहले जोड़ा था? इसे चुनें, और पुराना कनेक्शन भुला दिया जाएगा।
+qs-remember-replaces-suggested = यह फिर से { $label } हो सकता है। क्या इसे बदलें?
+qs-remember-replace = बदलें
+qs-remember-keep-both = नहीं, दोनों रखें

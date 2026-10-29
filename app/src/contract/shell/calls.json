@@ -394,7 +394,12 @@
       "name": "quicksend_send_note"
     },
     {
-      "args": [],
+      "args": [
+        [
+          "id",
+          "ffeeddccbbaa99887766554433221100"
+        ]
+      ],
       "name": "quicksend_open_link"
     },
     {
@@ -410,6 +415,10 @@
         [
           "label",
           "Ada's laptop"
+        ],
+        [
+          "replaces",
+          "0011223344556677"
         ]
       ],
       "name": "known_remember"

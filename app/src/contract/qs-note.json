@@ -2,12 +2,14 @@
   {
     "from": null,
     "host": null,
+    "id": "00112233445566778899aabbccddeeff",
     "kind": "text",
     "text": "Wi-Fi: Home\nPassword: blue-river-42"
   },
   {
     "from": "Ada's laptop",
     "host": "example.org",
+    "id": "ffeeddccbbaa99887766554433221100",
     "kind": "link",
     "text": "https://example.org/menu"
   }

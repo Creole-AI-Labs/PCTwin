@@ -2561,3 +2561,10 @@ qs-waiting-files =
 qs-waiting-newer = توجد نسخة أحدث. راجعها مرة أخرى.
 qs-waiting-on = لا يُرسل إلا وهذا الجهاز يعمل.
 qs-waiting-cancel = إلغاء وحذف النسخة
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = لا يستطيع PCTwin معرفة ما إذا كان هذا هو الجهاز نفسه.
+qs-remember-replaces = هل سبق أن وصلت هذا الجهاز؟ اختره، وسيُنسى الاتصال القديم.
+qs-remember-replaces-suggested = قد يكون هذا { $label } مرة أخرى. هل تريد استبداله؟
+qs-remember-replace = استبدال
+qs-remember-keep-both = لا، احتفظ بالاثنين

@@ -2309,3 +2309,10 @@ qs-waiting-files =
 qs-waiting-newer = Existe uma versão mais nova. Revise de novo.
 qs-waiting-on = Só envia enquanto este notebook está ligado.
 qs-waiting-cancel = Cancelar e apagar a cópia
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = O PCTwin não consegue saber se é o mesmo notebook.
+qs-remember-replaces = Você já conectou este notebook antes? Escolha-o e a conexão antiga será esquecida.
+qs-remember-replaces-suggested = Pode ser { $label } de novo. Substituir?
+qs-remember-replace = Substituir
+qs-remember-keep-both = Não, manter as duas

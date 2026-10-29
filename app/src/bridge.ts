@@ -1112,15 +1112,18 @@ function isTextOrNull(v: unknown): v is string | null {
   return v === null || typeof v === "string";
 }
 
-/** A note or link that arrived: shown as text with Copy; a link has its site, and opens only by the person (Open). */
-export type QsNote = { text: string; kind: "text" | "link"; host: string | null; from: string | null };
+/**
+ * A note or link that arrived: shown as text with Copy; a link has its site, and opens only by the person (Open, which
+ * names this note's `id`: a later note never takes its place under the cursor).
+ */
+export type QsNote = { id: string; text: string; kind: "text" | "link"; host: string | null; from: string | null };
 
 export function parseQsNote(value: unknown): QsNote | null {
-  const f = exactly(value, ["text", "kind", "host", "from"]);
-  if (!f || typeof f.text !== "string" || !oneOf(f.kind, ["text", "link"] as const) || !isTextOrNull(f.host) || !isTextOrNull(f.from)) return null;
+  const f = exactly(value, ["id", "text", "kind", "host", "from"]);
+  if (!f || typeof f.id !== "string" || typeof f.text !== "string" || !oneOf(f.kind, ["text", "link"] as const) || !isTextOrNull(f.host) || !isTextOrNull(f.from)) return null;
   // A link always names its site; plain text never does.
   if ((f.kind === "link") !== (typeof f.host === "string")) return null;
-  return { text: f.text, kind: f.kind, host: f.host, from: f.from };
+  return { id: f.id, text: f.text, kind: f.kind, host: f.host, from: f.from };
 }
 
 /** The other laptop took the note (it arrived and passed its checks; never that it was read). */
@@ -1129,20 +1132,44 @@ export function parseQsNoteSent(value: unknown): { taken: true } | null {
   return f && f.taken === true ? { taken: true } : null;
 }
 
-/** "Remember this connection" may be offered; `fallbackStore`: the keys would be kept in a file (Linux), said plainly. */
-export function parseQsRemember(value: unknown): { fallbackStore: boolean } | null {
-  const f = exactly(value, ["fallbackStore"]);
-  return f && typeof f.fallbackStore === "boolean" ? { fallbackStore: f.fallbackStore } : null;
+/** A connection already remembered, that a new one may replace. */
+export type RememberChoice = { id: string; label: string; lastUsed: number };
+
+/**
+ * "Remember this connection" may be offered; `fallbackStore`: the keys would be kept in a file (Linux), said plainly.
+ * `connections`: those already remembered, newest use first. Pairing the same laptop again makes fresh keys, so only
+ * the person can say which one this replaces ([`suggestReplacement`]).
+ */
+export type QsRemember = { fallbackStore: boolean; connections: RememberChoice[] };
+
+export function parseQsRemember(value: unknown): QsRemember | null {
+  const f = exactly(value, ["fallbackStore", "connections"]);
+  if (!f || typeof f.fallbackStore !== "boolean") return null;
+  const connections = listOf(f.connections, (v) => {
+    const c = exactly(v, ["id", "label", "lastUsed"]);
+    return c && typeof c.id === "string" && typeof c.label === "string" && isCount(c.lastUsed) ? { id: c.id, label: c.label, lastUsed: c.lastUsed } : null;
+  });
+  return connections ? { fallbackStore: f.fallbackStore, connections } : null;
+}
+
+/** The remembered connection to suggest replacing: the one with the name the person typed (case and spaces aside). */
+export function suggestReplacement(connections: RememberChoice[], typed: string): RememberChoice | null {
+  const name = typed.trim().toLowerCase();
+  if (name === "") return null;
+  return connections.find((c) => c.label.trim().toLowerCase() === name) ?? null;
 }
 
 export type KnownGrant = { name: string; path: string; endsAt: number; ended: boolean };
+export const KNOWN_DEVICES = ["same", "restored", "cannot-tell"] as const;
+export type KnownDevice = (typeof KNOWN_DEVICES)[number];
 export type KnownConnection = {
   id: string;
   label: string;
   madeAt: number;
   lastUsed: number;
   expiresAt: number;
-  sameDevice: boolean;
+  /** `same`: the same laptop as before; `restored`: restored or copied (connect again); `cannot-tell`: said plainly, never "same device". */
+  device: KnownDevice;
   folder: KnownGrant | null;
   nextFolder: { name: string; path: string } | null;
 };
@@ -1161,14 +1188,14 @@ function parseNamedFolder(value: unknown): { name: string; path: string } | null
 
 /** A remembered connection: "the same device as before", never a proven person. */
 export function parseKnownConnection(value: unknown): KnownConnection | null {
-  const f = exactly(value, ["id", "label", "madeAt", "lastUsed", "expiresAt", "sameDevice", "folder", "nextFolder"]);
-  if (!f || typeof f.id !== "string" || typeof f.label !== "string" || typeof f.sameDevice !== "boolean") return null;
+  const f = exactly(value, ["id", "label", "madeAt", "lastUsed", "expiresAt", "device", "folder", "nextFolder"]);
+  if (!f || typeof f.id !== "string" || typeof f.label !== "string" || !oneOf(f.device, KNOWN_DEVICES)) return null;
   if (!isCount(f.madeAt) || !isCount(f.lastUsed) || !isCount(f.expiresAt)) return null;
   const folder = f.folder === null ? null : parseKnownGrant(f.folder);
   if (f.folder !== null && folder === null) return null;
   const nextFolder = f.nextFolder === null ? null : parseNamedFolder(f.nextFolder);
   if (f.nextFolder !== null && nextFolder === null) return null;
-  return { id: f.id, label: f.label, madeAt: f.madeAt, lastUsed: f.lastUsed, expiresAt: f.expiresAt, sameDevice: f.sameDevice, folder, nextFolder };
+  return { id: f.id, label: f.label, madeAt: f.madeAt, lastUsed: f.lastUsed, expiresAt: f.expiresAt, device: f.device, folder, nextFolder };
 }
 
 export type KnownIncoming = { connection: string; label: string; files: OfferedFile[]; bytes: number; folder: QsFolder | null };
@@ -1249,13 +1276,16 @@ const waitingList = (v: unknown) => listOf(v, parseWaitingSend);
 
 /** Sends a note or link over the paired link; `quicksend-note-sent` says it was taken. */
 export const qsSendNote = (text: string) => run("quicksend_send_note", { text });
-/** Open, on a received link: the system's browser opens it (the screens never name the address). */
-export const qsOpenLink = () => run("quicksend_open_link");
+/** Open, on a received link: the system's browser opens the note shown as `id`, once (the screens never name the address). */
+export const qsOpenLink = (id: string) => run("quicksend_open_link", { id });
 /** Files the system handed PCTwin to send (Send to, a file manager entry, the Mac open action): the whole chosen list. */
 export const qsLaunchFiles = () => ask("quicksend_launch_files", (v) => listOf(v, parsePicked));
 export const knownConnections = () => ask("known_list", knownList);
-/** Remember this connection, by the name the person gives it, from the last six-digit exchange. */
-export const knownRemember = (label: string) => ask("known_remember", knownList, { label });
+/**
+ * Remember this connection, by the name the person gives it, from the last six-digit exchange. `replaces`: the
+ * connection the person says this laptop was before, forgotten first (its key, permissions and waiting deliveries).
+ */
+export const knownRemember = (label: string, replaces: string | null = null) => ask("known_remember", knownList, { label, replaces });
 /** Forget: its key and every permission deleted, its waiting deliveries and transfers ended. */
 export const knownForget = (id: string) => ask("known_forget", knownList, { id });
 export const knownRename = (id: string, label: string) => ask("known_rename", knownList, { id, label });
@@ -1281,7 +1311,7 @@ export const waitingCancel = (id: string) => ask("waiting_cancel", waitingList, 
 export type KnownEvent =
   | { kind: "note"; note: QsNote }
   | { kind: "note-sent" }
-  | { kind: "remember"; fallbackStore: boolean }
+  | { kind: "remember"; fallbackStore: boolean; connections: RememberChoice[] }
   | { kind: "launch"; items: PickedItem[] }
   | { kind: "incoming"; incoming: KnownIncoming }
   | { kind: "delivered"; delivered: KnownDelivered }
@@ -1298,7 +1328,7 @@ export async function listenKnown(handler: (event: KnownEvent) => void): Promise
   const all = await Promise.all([
     on("quicksend-note", parseQsNote, (note) => ({ kind: "note", note })),
     on("quicksend-note-sent", parseQsNoteSent, () => ({ kind: "note-sent" })),
-    on("quicksend-remember", parseQsRemember, (r) => ({ kind: "remember", fallbackStore: r.fallbackStore })),
+    on("quicksend-remember", parseQsRemember, (r) => ({ kind: "remember", fallbackStore: r.fallbackStore, connections: r.connections })),
     on("quicksend-launch", (v) => listOf(v, parsePicked), (items) => ({ kind: "launch", items })),
     on("known-incoming", parseKnownIncoming, (incoming) => ({ kind: "incoming", incoming })),
     on("known-delivered", parseKnownDelivered, (delivered) => ({ kind: "delivered", delivered })),

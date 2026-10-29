@@ -902,12 +902,14 @@ fn qs_notes() -> Vec<crate::quicksend::NoteView> {
     use crate::quicksend::NoteView;
     vec![
         NoteView {
+            id: "00112233445566778899aabbccddeeff".into(),
             text: "Wi-Fi: Home\nPassword: blue-river-42".into(),
             kind: "text",
             host: None,
             from: None,
         },
         NoteView {
+            id: "ffeeddccbbaa99887766554433221100".into(),
             text: "https://example.org/menu".into(),
             kind: "link",
             host: Some("example.org".into()),
@@ -925,7 +927,7 @@ fn known_connections() -> Vec<crate::remembered::ConnectionView> {
             made_at: 1_790_000_000,
             last_used: 1_792_000_000,
             expires_at: 1_799_776_000,
-            same_device: true,
+            device: pctwin_known::Device::Same,
             folder: Some(GrantView {
                 name: "From Ada".into(),
                 path: r"C:\Users\Bo\Documents\From Ada".into(),
@@ -943,7 +945,17 @@ fn known_connections() -> Vec<crate::remembered::ConnectionView> {
             made_at: 1_780_000_000,
             last_used: 1_780_000_000,
             expires_at: 1_787_776_000,
-            same_device: false,
+            device: pctwin_known::Device::Restored,
+            folder: None,
+            next_folder: None,
+        },
+        ConnectionView {
+            id: "1122334455667788".into(),
+            label: "Old desktop".into(),
+            made_at: 1_785_000_000,
+            last_used: 1_791_000_000,
+            expires_at: 1_798_776_000,
+            device: pctwin_known::Device::CannotTell,
             folder: None,
             next_folder: None,
         },
@@ -1175,9 +1187,22 @@ fn families() -> Vec<(&'static str, Value)> {
             json([
                 crate::remembered::RememberView {
                     fallback_store: false,
+                    connections: vec![
+                        crate::remembered::RememberChoice {
+                            id: "0011223344556677".into(),
+                            label: "Ada's laptop".into(),
+                            last_used: 1_792_000_000,
+                        },
+                        crate::remembered::RememberChoice {
+                            id: "8899aabbccddeeff".into(),
+                            label: "Kitchen laptop".into(),
+                            last_used: 1_780_000_000,
+                        },
+                    ],
                 },
                 crate::remembered::RememberView {
                     fallback_store: true,
+                    connections: Vec::new(),
                 },
             ]),
         ),
@@ -1508,10 +1533,10 @@ fn calls() -> Value {
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },
             { "name": "quicksend_send_note", "args": [["text", "Wi-Fi: Home"]] },
-            { "name": "quicksend_open_link", "args": [] },
+            { "name": "quicksend_open_link", "args": [["id", "ffeeddccbbaa99887766554433221100"]] },
             { "name": "quicksend_launch_files", "args": [] },
             { "name": "known_list", "args": [] },
-            { "name": "known_remember", "args": [["label", "Ada's laptop"]] },
+            { "name": "known_remember", "args": [["label", "Ada's laptop"], ["replaces", "0011223344556677"]] },
             { "name": "known_forget", "args": [["id", "0011223344556677"]] },
             { "name": "known_rename", "args": [["id", "0011223344556677"], ["label", "Ada (work)"]] },
             { "name": "known_allow_folder", "args": [["id", "0011223344556677"]] },

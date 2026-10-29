@@ -2314,3 +2314,10 @@ qs-waiting-files =
 qs-waiting-newer = Une version plus récente existe. Vérifiez-la à nouveau.
 qs-waiting-on = L'envoi ne se fait que lorsque cet ordinateur est allumé.
 qs-waiting-cancel = Annuler et supprimer la copie
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = PCTwin ne peut pas savoir s’il s’agit du même ordinateur.
+qs-remember-replaces = Avez-vous déjà connecté cet ordinateur ? Choisissez-le et l’ancienne connexion sera oubliée.
+qs-remember-replaces-suggested = C’est peut-être encore { $label }. Le remplacer ?
+qs-remember-replace = Remplacer
+qs-remember-keep-both = Non, garder les deux

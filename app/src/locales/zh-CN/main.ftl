@@ -1988,3 +1988,10 @@ qs-waiting-files =
 qs-waiting-newer = 有更新的版本。请重新查看。
 qs-waiting-on = 只有在这台电脑开机时才会发送。
 qs-waiting-cancel = 取消并删除副本
+
+# Quick Send stage 1 fixes
+qs-known-cannot-tell = PCTwin 无法判断这是否是同一台电脑。
+qs-remember-replaces = 你以前连接过这台电脑吗？选择它，旧的连接就会被忘记。
+qs-remember-replaces-suggested = 这可能又是 { $label }。要替换它吗？
+qs-remember-replace = 替换
+qs-remember-keep-both = 不，两个都保留

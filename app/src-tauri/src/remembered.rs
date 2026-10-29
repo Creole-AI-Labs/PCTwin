@@ -4,8 +4,10 @@
 //!
 //! - After an exchange over the six-digit pairing, the two laptops have swapped public keys
 //!   ([`swap_keys`]); the screens may offer "Remember this connection" ([`known_remember`]).
-//! - While any connection is remembered, a quiet service listens for remembered laptops (Noise
-//!   KK, local network only) and announces one changing token per connection, never a name.
+//! - While PCTwin is open and at least one connection is remembered, a quiet service listens for
+//!   remembered laptops (Noise KK, local network only, a bounded number of handshakes at once and
+//!   per address) and announces one changing token per connection, never a name; with nothing
+//!   remembered nothing listens and nothing is announced.
 //! - Files from a remembered laptop are asked about every time (permission 2), unless permission
 //!   3 lets them into its folder: then they land in a PCTwin-named folder inside it, within its
 //!   caps, and the person is told on the first one after a quiet spell.
@@ -19,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pctwin_known::{Book, BookError, FolderProblem, GrantProblem, KnownFolder, NextFolder};
+use pctwin_known::{Book, BookError, Device, FolderProblem, KnownFolder, NextFolder};
 use pctwin_link::known::{KnownListener, Remembered as RememberedKeys, connect_known};
 use pctwin_link::{Link, LinkConfig};
 use pctwin_move::Live;
@@ -43,6 +45,8 @@ pub const WAITING_EVENT: &str = "waiting-changed";
 
 /// How often the service looks for recipients of waiting sends, and tidies.
 const ROUND: Duration = Duration::from_secs(60);
+/// The longest Cancel waits for a delivery of that send to stop before deleting it.
+const STOP_WAIT: Duration = Duration::from_secs(30);
 /// How long one look for a remembered laptop nearby lasts.
 const LOOK: Duration = Duration::from_secs(3);
 
@@ -137,6 +141,7 @@ fn waiting_refusal(e: &WaitingError) -> QsRefusal {
         WaitingError::Quick(pctwin_quicksend::QuickError::TooMany { .. }) => {
             QsRefusal::TooManyFiles
         }
+        WaitingError::Store => QsRefusal::StoreUnavailable,
         _ => QsRefusal::Failed,
     }
 }
@@ -169,8 +174,13 @@ pub struct RememberedState {
     /// The sessions running with each connection, so Forget can end them.
     sessions: Mutex<BTreeMap<String, Vec<(u64, Live)>>>,
     next_session: std::sync::atomic::AtomicU64,
+    /// Deliveries of waiting sends running now, by waiting send: so Cancel can stop one, and
+    /// knows when it has stopped, before deleting the copy.
+    delivering: Mutex<BTreeMap<String, (Live, tokio::sync::watch::Receiver<bool>)>>,
     /// The service is running.
     serving: std::sync::atomic::AtomicBool,
+    /// Wakes the service before its next round (a connection remembered or forgotten).
+    wake: tokio::sync::Notify,
 }
 
 pub type AppRemembered = Arc<RememberedState>;
@@ -186,6 +196,7 @@ fn dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 fn waiting_store<R: Runtime>(app: &AppHandle<R>) -> Result<WaitingStore, QsRefusal> {
     Ok(WaitingStore::new(
         &dir(app).ok_or(QsRefusal::Failed)?.join("waiting"),
+        Arc::new(pctwin_known::SystemStore),
     ))
 }
 
@@ -208,11 +219,24 @@ pub(crate) async fn swap_keys(
 }
 
 /// "Remember this connection" offered after a six-digit exchange: whether the keys would be kept
-/// in the weaker file fallback (Linux), said plainly.
+/// in the weaker file fallback (Linux), said plainly, and the connections already remembered,
+/// newest use first: pairing the same laptop again makes fresh keys, so only the person can say
+/// which one this replaces (the screens suggest the one with the name they type, see
+/// [`known_remember`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RememberView {
     pub fallback_store: bool,
+    pub connections: Vec<RememberChoice>,
+}
+
+/// A connection the new one may replace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RememberChoice {
+    pub id: String,
+    pub label: String,
+    pub last_used: u64,
 }
 
 impl RememberedState {
@@ -244,12 +268,57 @@ impl RememberedState {
     ) {
         let Some(pending) = pending else { return };
         *lock(&self.pending) = Some(pending);
+        let connections = self
+            .list(app)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| RememberChoice {
+                id: c.id,
+                label: c.label,
+                last_used: c.last_used,
+            })
+            .collect();
         let _ = app.emit(
             crate::quicksend::REMEMBER_EVENT,
             RememberView {
                 fallback_store: pctwin_known::SystemStore::is_fallback(),
+                connections,
             },
         );
+    }
+
+    /// Ends everything running with connection `id`, which is no longer remembered (forgotten,
+    /// replaced, or expired): its sessions stop (their part files removed by them), a question
+    /// it asked is declined, its pending note goes, and its waiting deliveries end.
+    fn end_connection<R: Runtime>(&self, app: &AppHandle<R>, id: &str) {
+        self.stop_sessions(id);
+        {
+            let mut asking = lock(&self.asking);
+            if asking.as_ref().is_some_and(|a| a.connection == id)
+                && let Some(a) = asking.take()
+            {
+                let _ = a.answer.send(Answer::Decline);
+            }
+        }
+        let qs = app.state::<AppQuickSend>();
+        crate::quicksend::drop_notes_from(&qs, id);
+        if let Ok(store) = waiting_store(app) {
+            store.forget_recipient(id);
+        }
+    }
+
+    /// Stops every session registered with connection `id`.
+    fn stop_sessions(&self, id: &str) {
+        if let Some(lives) = lock(&self.sessions).remove(id) {
+            for (_, l) in lives {
+                l.control.stop();
+            }
+        }
+    }
+
+    /// Whether connection `id` is still remembered.
+    fn remembered<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> bool {
+        self.with_book(app, |b| Ok(b.has(id))).unwrap_or(false)
     }
 
     fn list<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Vec<ConnectionView>, QsRefusal> {
@@ -258,6 +327,9 @@ impl RememberedState {
             .map(|l| l.into_iter().map(view).collect())
     }
 
+    /// Registers a session with `connection` so Forget can stop it. Registered before anything is
+    /// read from the other laptop; the caller then checks the connection is still remembered
+    /// (Forget may have run just before).
     fn started(&self, connection: &str, live: &Live) -> u64 {
         let n = self
             .next_session
@@ -303,8 +375,10 @@ pub struct ConnectionView {
     pub made_at: u64,
     pub last_used: u64,
     pub expires_at: u64,
-    /// False on a restored backup or a copied drive: pair again.
-    pub same_device: bool,
+    /// `same`: the same laptop as when it was remembered; `restored`: a restored backup or a
+    /// copied drive (pair again); `cannot-tell`: the hardware cannot tell laptops apart, said
+    /// plainly ("PCTwin cannot tell if this is the same laptop"), never "same device".
+    pub device: Device,
     /// Permission 3, when given.
     pub folder: Option<GrantView>,
     /// "Folder for next time", when chosen.
@@ -326,7 +400,7 @@ fn view(c: pctwin_known::ConnectionInfo) -> ConnectionView {
         made_at: c.made_at,
         last_used: c.last_used,
         expires_at: c.expires_at,
-        same_device: c.same_device,
+        device: c.device,
         folder: c.grant.map(|g| {
             let (name, path) = folder_name(&g.folder);
             GrantView {
@@ -441,16 +515,31 @@ pub fn known_list<R: Runtime>(
 }
 
 /// Remember this connection (permission 1), named `label` by the person, from the keys swapped
-/// in the last six-digit exchange. The service starts if it was not running.
+/// in the last six-digit exchange. Pairing the same laptop again makes fresh keys, so the
+/// person says which earlier connection this `replaces` (the screens suggest the one with the
+/// same name): that one is forgotten first (its keys, permission 3, its waiting deliveries and
+/// anything running with it), so a lost or copied laptop keeps nothing. The service starts if it
+/// was not running.
 #[tauri::command]
 pub fn known_remember<R: Runtime>(
     app: AppHandle<R>,
     st: State<'_, AppRemembered>,
     label: String,
+    replaces: Option<String>,
 ) -> Result<Vec<ConnectionView>, QsRefusal> {
     let pending = lock(&st.pending).take().ok_or(QsRefusal::NotWaiting)?;
     let t = now();
-    st.with_book(&app, |b| b.remember(pending, &label, t))?;
+    let kept = st.with_book(&app, |b| {
+        b.remember(pending, &label, t, replaces.as_deref())
+    });
+    if let Some(old) = &replaces
+        && !st.remembered(&app, old)
+    {
+        st.end_connection(&app, old);
+        let _ = app.emit(WAITING_EVENT, waiting_views(&app, &st).unwrap_or_default());
+    }
+    kept?;
+    st.wake.notify_one();
     start_service(&app);
     st.list(&app)
 }
@@ -465,22 +554,8 @@ pub fn known_forget<R: Runtime>(
     id: String,
 ) -> Result<Vec<ConnectionView>, QsRefusal> {
     st.with_book(&app, |b| b.forget(&id))?;
-    if let Some(lives) = lock(&st.sessions).remove(&id) {
-        for (_, l) in lives {
-            l.control.stop();
-        }
-    }
-    {
-        let mut asking = lock(&st.asking);
-        if asking.as_ref().is_some_and(|a| a.connection == id)
-            && let Some(a) = asking.take()
-        {
-            let _ = a.answer.send(Answer::Decline);
-        }
-    }
-    if let Ok(store) = waiting_store(&app) {
-        store.forget_recipient(&id);
-    }
+    st.end_connection(&app, &id);
+    st.wake.notify_one();
     let _ = app.emit(WAITING_EVENT, waiting_views(&app, &st).unwrap_or_default());
     st.list(&app)
 }
@@ -605,19 +680,33 @@ pub async fn known_send<R: Runtime>(
 ) -> Result<(), QsRefusal> {
     let offer = lock(&qs.offer).take().ok_or(QsRefusal::NotWaiting)?;
     let peer = st.with_book(&app, |b| b.peer_public(&id))?;
-    let mut link = match connect_to(&app, &st, &id, &peer).await {
+    let state = st.inner().clone();
+    let live = Live::default();
+    let session = state.started(&id, &live);
+    let found = nearby(&app, &st, &id).await;
+    let link = match found {
+        Ok(found) => connect_found(&app, &st, &id, &peer, found).await,
+        Err(e) => Err(e),
+    };
+    // Forgotten meanwhile: nothing is sent.
+    let link = link.and_then(|l| {
+        if st.remembered(&app, &id) && !live.control.stopped() {
+            Ok(l)
+        } else {
+            Err(QsRefusal::NotFound)
+        }
+    });
+    let mut link = match link {
         Ok(link) => link,
         Err(e) => {
+            state.ended(&id, session);
             *lock(&qs.offer) = Some(offer);
             return Err(e);
         }
     };
-    let state = st.inner().clone();
-    let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     crate::quicksend::tick(app.clone(), live.clone(), done.clone());
-    let session = state.started(&id, &live);
     let runtime = tokio::runtime::Handle::current();
     let spawned = std::thread::Builder::new()
         .name("pctwin-knownsend".into())
@@ -700,56 +789,83 @@ pub fn waiting_renew<R: Runtime>(
     waiting_views(&app, &st)
 }
 
-/// Cancels a waiting send: its protected copy is deleted.
+/// Cancels a waiting send: it is marked cancelled first (nothing more is delivered), a delivery
+/// of it running now is stopped and waited for, then its key and protected copy are deleted.
 #[tauri::command]
-pub fn waiting_cancel<R: Runtime>(
+pub async fn waiting_cancel<R: Runtime>(
     app: AppHandle<R>,
     st: State<'_, AppRemembered>,
     id: String,
 ) -> Result<Vec<WaitingView>, QsRefusal> {
-    waiting_store(&app)?
-        .cancel(&id)
-        .map_err(|e| waiting_refusal(&e))?;
+    let store = waiting_store(&app)?;
+    store.mark_cancelled(&id).map_err(|e| waiting_refusal(&e))?;
+    let running = lock(&st.delivering).get(&id).cloned();
+    if let Some((live, mut done)) = running {
+        live.control.stop();
+        let _ = tokio::time::timeout(STOP_WAIT, done.wait_for(|d| *d)).await;
+    }
+    store.cancel(&id).map_err(|e| waiting_refusal(&e))?;
     waiting_views(&app, &st)
 }
 
 /* ---------- The service ---------- */
 
-/// Finds the remembered laptop of connection `id` nearby by its changing token, and opens a
-/// known-keys session with it, to the key `peer` only.
-async fn connect_to<R: Runtime>(
+/// Where the remembered laptop of connection `id` is nearby, by its changing token: the token
+/// and each address it was seen at (nothing else seen on the network is kept).
+async fn nearby<R: Runtime>(
     app: &AppHandle<R>,
     st: &RememberedState,
     id: &str,
-    peer: &[u8; 32],
-) -> Result<Link, QsRefusal> {
+) -> Result<Vec<([u8; 8], std::net::SocketAddr)>, QsRefusal> {
     let t = now();
     let tokens = st.with_book(app, |b| b.peer_tokens(id, t))?;
-    let found = tauri::async_runtime::spawn_blocking(|| {
+    let wanted = tokens.clone();
+    let found = tauri::async_runtime::spawn_blocking(move || {
         pctwin_discovery::Discovery::new()
-            .and_then(|d| d.browse_known(LOOK))
+            .and_then(|d| d.browse_known(&wanted, LOOK))
             .unwrap_or_default()
     })
     .await
     .map_err(|_| QsRefusal::Failed)?;
-    for f in found.into_iter().filter(|f| tokens.contains(&f.token)) {
-        for addr in f.addrs {
-            let keys = st.with_book(app, |b| b.keys_for(id))?;
-            if let Ok(link) =
-                connect_known(addr, &f.token, &keys, peer, LinkConfig::default()).await
-            {
-                let _ = st.with_book(app, |b| b.touch(id, now()));
-                return Ok(link);
-            }
+    let at: Vec<([u8; 8], std::net::SocketAddr)> = found
+        .into_iter()
+        .filter(|f| tokens.contains(&f.token))
+        .flat_map(|f| f.addrs.into_iter().map(move |a| (f.token, a)))
+        .collect();
+    if at.is_empty() {
+        return Err(QsRefusal::NotNearby);
+    }
+    Ok(at)
+}
+
+/// Opens a known-keys session with the laptop of connection `id` at one of `found`, to the key
+/// `peer` only.
+async fn connect_found<R: Runtime>(
+    app: &AppHandle<R>,
+    st: &RememberedState,
+    id: &str,
+    peer: &[u8; 32],
+    found: Vec<([u8; 8], std::net::SocketAddr)>,
+) -> Result<Link, QsRefusal> {
+    for (token, addr) in found {
+        let keys = st.with_book(app, |b| b.keys_for(id))?;
+        if let Ok(link) = connect_known(addr, &token, &keys, peer, LinkConfig::default()).await {
+            let _ = st.with_book(app, |b| b.touch(id, now()));
+            return Ok(link);
         }
     }
     Err(QsRefusal::NotNearby)
 }
 
-/// At start: the service runs only when something is remembered or waiting.
+/// At start: the service runs only when something is remembered or waiting (it listens and
+/// announces only while a connection is remembered).
 pub fn start_if_needed<R: Runtime>(app: &AppHandle<R>) {
     let Some(d) = dir(app) else { return };
-    let remembered = d.join("connections.json").exists();
+    let st = app.state::<AppRemembered>().inner().clone();
+    let remembered = d.join("connections.json").exists()
+        && st
+            .with_book(app, |b| Ok(!b.list(now()).is_empty()))
+            .unwrap_or(false);
     let waiting = std::fs::read_dir(d.join("waiting")).is_ok_and(|mut e| e.next().is_some());
     if remembered || waiting {
         start_service(app);
@@ -785,68 +901,116 @@ pub fn start_service<R: Runtime>(app: &AppHandle<R>) {
     let _ = started;
 }
 
-/// The service: answers remembered laptops, announces one token per connection (each its own
-/// announcement, replaced when the tokens change), and runs a round every [`ROUND`].
+/// Listening and announcing, while any connection is remembered.
+struct Listening {
+    listener: std::rc::Rc<KnownListener>,
+    accept: tokio::task::JoinHandle<()>,
+    announced: Vec<([u8; 8], pctwin_discovery::Announcement)>,
+}
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        // The announcements say goodbye as they drop; the accept loop and the listener end.
+        self.accept.abort();
+    }
+}
+
+/// The service: a round every [`ROUND`] (or sooner when woken), then listening and announcing
+/// set to match the book: with no connection remembered (or none whose keys can be used) nothing
+/// listens and nothing is announced; otherwise one listener (its arrivals bounded) and one
+/// announcement per connection, replaced when the tokens change.
 async fn serve<R: Runtime>(app: AppHandle<R>, st: AppRemembered) {
+    let discovery = pctwin_discovery::Discovery::new().ok();
+    let mut listening: Option<Listening> = None;
+    loop {
+        round(&app, &st).await;
+        let tokens: Vec<[u8; 8]> = st
+            .with_book(&app, |b| Ok(b.announced(now())))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+        if tokens.is_empty() {
+            listening = None;
+        } else {
+            if listening.is_none() {
+                listening = listen(&app, &st).await;
+            }
+            if let Some(l) = listening.as_mut() {
+                announce(discovery.as_ref(), l, tokens);
+            }
+        }
+        tokio::select! {
+            () = tokio::time::sleep(ROUND) => {}
+            () = st.wake.notified() => {}
+        }
+    }
+}
+
+/// Starts listening for remembered laptops, each arrival on its own task.
+async fn listen<R: Runtime>(app: &AppHandle<R>, st: &AppRemembered) -> Option<Listening> {
     let any = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-    let Ok(listener) = KnownListener::bind(&[any], LinkConfig::default()).await else {
-        st.serving
-            .store(false, std::sync::atomic::Ordering::Release);
-        return;
-    };
-    let listener = std::rc::Rc::new(listener);
+    let listener = std::rc::Rc::new(
+        KnownListener::bind(&[any], LinkConfig::default())
+            .await
+            .ok()?,
+    );
     let accept = {
         let (app, st, listener) = (app.clone(), st.clone(), listener.clone());
-        async move {
-            while let Ok(arrival) = listener.accept().await {
+        tokio::task::spawn_local(async move {
+            loop {
+                let arrival = listener.accept().await;
                 let (app, st) = (app.clone(), st.clone());
                 tokio::task::spawn_local(async move {
                     arrived(&app, &st, arrival).await;
                 });
             }
-        }
+        })
     };
-    let rounds = async move {
-        let discovery = pctwin_discovery::Discovery::new().ok();
-        let mut announced: Vec<([u8; 8], pctwin_discovery::Announcement)> = Vec::new();
-        loop {
-            round(&app, &st).await;
-            let tokens: Vec<[u8; 8]> = st
-                .with_book(&app, |b| Ok(b.announced(now())))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(_, t)| t)
-                .collect();
-            let same = tokens.len() == announced.len()
-                && tokens.iter().all(|t| announced.iter().any(|(a, _)| a == t));
-            if !same {
-                // Goodbye for the old tokens, then the new ones.
-                announced.clear();
-                if let (Some(d), Ok(port)) = (&discovery, listener.port()) {
-                    for t in tokens {
-                        if let Ok(a) = d.announce_known(&t, port, &[]) {
-                            announced.push((t, a));
-                        }
-                    }
-                }
-            }
-            tokio::time::sleep(ROUND).await;
-        }
-    };
-    tokio::join!(accept, rounds);
+    Some(Listening {
+        listener,
+        accept,
+        announced: Vec::new(),
+    })
 }
 
-/// One round: tidies (expired connections, waiting sends past their deadline) and delivers each
-/// waiting send to each recipient still waiting that is nearby.
+/// Announces `tokens`, replacing what was announced when they changed.
+fn announce(
+    discovery: Option<&pctwin_discovery::Discovery>,
+    l: &mut Listening,
+    tokens: Vec<[u8; 8]>,
+) {
+    let same = tokens.len() == l.announced.len()
+        && tokens
+            .iter()
+            .all(|t| l.announced.iter().any(|(a, _)| a == t));
+    if same {
+        return;
+    }
+    // Goodbye for the old tokens, then the new ones.
+    l.announced.clear();
+    if let (Some(d), Ok(port)) = (discovery, l.listener.port()) {
+        for t in tokens {
+            if let Ok(a) = d.announce_known(&t, port, &[]) {
+                l.announced.push((t, a));
+            }
+        }
+    }
+}
+
+/// One round: tidies (expired connections, waiting sends past their deadline or cancelled) and
+/// delivers each waiting send to each recipient still waiting that is nearby: the recipient is
+/// found first, then the copy is checked through (every byte, on a thread that may wait) just
+/// before it is sent.
 async fn round<R: Runtime>(app: &AppHandle<R>, st: &RememberedState) {
     let t = now();
     let expired = st.with_book(app, |b| b.expire(t)).unwrap_or_default();
+    for id in &expired {
+        st.end_connection(app, id);
+    }
     let Ok(store) = waiting_store(app) else {
         return;
     };
-    for id in &expired {
-        store.forget_recipient(id);
-    }
     let swept = store.sweep(t);
     if !expired.is_empty() {
         let _ = app.emit(CHANGED_EVENT, st.list(app).unwrap_or_default());
@@ -858,23 +1022,9 @@ async fn round<R: Runtime>(app: &AppHandle<R>, st: &RememberedState) {
             .iter()
             .filter(|r| r.delivery == Delivery::Waiting)
         {
-            let Ok((_, key)) = store.offer_for(&w.id, &r.connection, t) else {
-                continue;
-            };
-            // Bound to the key approved: a connection paired again since has another.
-            if st.with_book(app, |b| b.peer_public(&r.connection)).ok() != Some(key) {
-                continue;
+            if deliver_one(app, st, &w.id, &r.connection, &r.key).await {
+                changed = true;
             }
-            let Ok(mut link) = connect_to(app, st, &r.connection, &key).await else {
-                continue;
-            };
-            let live = Live::default();
-            let session = st.started(&r.connection, &live);
-            let _ = store
-                .deliver(&w.id, &r.connection, &mut link, &live, now())
-                .await;
-            st.ended(&r.connection, session);
-            changed = true;
         }
     }
     if changed {
@@ -882,8 +1032,89 @@ async fn round<R: Runtime>(app: &AppHandle<R>, st: &RememberedState) {
     }
 }
 
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// One delivery of waiting send `id` to `connection`, approved for the key `key` (hex). `true`
+/// when a session ran.
+async fn deliver_one<R: Runtime>(
+    app: &AppHandle<R>,
+    st: &RememberedState,
+    id: &str,
+    connection: &str,
+    key: &str,
+) -> bool {
+    let Ok(store) = waiting_store(app) else {
+        return false;
+    };
+    if !store.due(id, connection, now()) {
+        return false;
+    }
+    // Bound to the key approved: a connection paired again since has another.
+    let Ok(peer) = st.with_book(app, |b| b.peer_public(connection)) else {
+        return false;
+    };
+    if hex(&peer) != key {
+        return false;
+    }
+    let live = Live::default();
+    let session = st.started(connection, &live);
+    let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+    lock(&st.delivering).insert(id.to_string(), (live.clone(), done_rx));
+    let ran = deliver_found(app, st, &store, id, connection, &peer, &live).await;
+    lock(&st.delivering).remove(id);
+    let _ = done_tx.send(true);
+    st.ended(connection, session);
+    ran
+}
+
+async fn deliver_found<R: Runtime>(
+    app: &AppHandle<R>,
+    st: &RememberedState,
+    store: &WaitingStore,
+    id: &str,
+    connection: &str,
+    peer: &[u8; 32],
+    live: &Live,
+) -> bool {
+    let Ok(found) = nearby(app, st, connection).await else {
+        return false;
+    };
+    // Checked through just before sending, on a thread that may wait.
+    let Ok(checking) = waiting_store(app) else {
+        return false;
+    };
+    let (wid, who, t) = (id.to_string(), connection.to_string(), now());
+    let offer = tauri::async_runtime::spawn_blocking(move || checking.offer_for(&wid, &who, t))
+        .await
+        .ok()
+        .and_then(Result::ok);
+    let Some((offer, approved)) = offer else {
+        return false;
+    };
+    if approved != *peer || live.control.stopped() {
+        return false;
+    }
+    let Ok(mut link) = connect_found(app, st, connection, peer, found).await else {
+        return false;
+    };
+    // Forgotten, or the send cancelled, meanwhile: nothing is sent.
+    if !st.remembered(app, connection)
+        || live.control.stopped()
+        || !store.due(id, connection, now())
+    {
+        return false;
+    }
+    let _ = store
+        .deliver(id, connection, offer, &mut link, live, now())
+        .await;
+    true
+}
+
 /// A remembered laptop connected: the handshake with the keys its token names, then what it
-/// sends.
+/// sends. The session is registered (so Forget stops it) before anything is read from the other
+/// laptop, and the connection is checked to be still remembered before and after.
 async fn arrived<R: Runtime>(
     app: &AppHandle<R>,
     st: &AppRemembered,
@@ -907,24 +1138,54 @@ async fn arrived<R: Runtime>(
         })
         .await;
     let Ok((id, mut link)) = shook else { return };
-    let _ = st.with_book(app, |b| b.touch(&id, now()));
-    let label = st.with_book(app, |b| b.label(&id)).unwrap_or_default();
+    let live = Live::default();
+    let session = st.started(&id, &live);
+    if st.remembered(app, &id) {
+        let _ = st.with_book(app, |b| b.touch(&id, now()));
+        serve_arrival(app, st, &id, &mut link, &live).await;
+    }
+    st.ended(&id, session);
+}
+
+async fn serve_arrival<R: Runtime>(
+    app: &AppHandle<R>,
+    st: &AppRemembered,
+    id: &str,
+    link: &mut Link,
+    live: &Live,
+) {
+    let label = st.with_book(app, |b| b.label(id)).unwrap_or_default();
     let qs = app.state::<AppQuickSend>().inner().clone();
-    let got = pctwin_quicksend::receive(&mut link).await;
+    let Some(got) = receive_or_stop(link, live).await else {
+        return;
+    };
+    // Forget may have run while the offer was read.
+    if !st.remembered(app, id) || live.control.stopped() {
+        return;
+    }
     match got {
         Ok(pctwin_quicksend::Arrival::Note(note)) => {
-            crate::quicksend::show_note(app, &qs, note, Some(shown_safely(&label)));
+            crate::quicksend::show_note(app, &qs, note, Some(shown_safely(&label)), id);
         }
         Ok(pctwin_quicksend::Arrival::Files(incoming)) => {
-            let live = Live::default();
-            let session = st.started(&id, &live);
-            let ended = receive_files(app, st, &qs, &id, &label, incoming, &mut link, &live).await;
-            st.ended(&id, session);
+            let ended = receive_files(app, st, &qs, id, &label, incoming, link, live).await;
             if let Err(e) = ended {
                 let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
             }
         }
         Err(_) => {}
+    }
+}
+
+/// What the other laptop sends first, unless the session is stopped (Forget) before it is read.
+async fn receive_or_stop(
+    ch: &mut impl pctwin_transfer::Channel,
+    live: &Live,
+) -> Option<Result<pctwin_quicksend::Arrival, pctwin_quicksend::QuickError>> {
+    tokio::select! {
+        biased;
+        () = live.control.wait_stopped() => None,
+        got = pctwin_quicksend::receive(ch) => Some(got),
     }
 }
 
@@ -1006,40 +1267,37 @@ async fn receive_files<R: Runtime>(
     let files = incoming.files();
     let bytes = incoming.total_bytes();
     let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-    // Permission 3: into its folder, within its caps; rechecked now.
-    match st.with_book(app, |b| Ok(b.admit(id, bytes, now()))) {
-        Ok(Ok(admitted)) => {
-            if let Ok(dest) = delivery_folder(&admitted.folder) {
-                let (journal, me) = journal(app)?;
-                let reopen = delivery_folder(&admitted.folder).ok();
-                let r = incoming
-                    .accept_into(link, dest, None, &journal, &me, live)
-                    .await?;
-                if live.control.stopped()
-                    && let Some(d) = reopen
-                {
-                    let base = admitted
-                        .folder
-                        .path
-                        .join(pctwin_known::book::DELIVERY_FOLDER);
-                    remove_part_files(&d, &base, &paths);
-                }
-                let (folder, _) = folder_name(&admitted.folder.path);
-                let _ = app.emit(
-                    DELIVERED_EVENT,
-                    KnownDeliveredView {
-                        connection: id.to_string(),
-                        label: shown_safely(label),
-                        folder,
-                        lines: receipt_view("receiver", &r, live.control.stopped()).lines,
-                        tell: admitted.tell,
-                    },
-                );
-                return Ok(());
-            }
-            // The folder is not usable now: ask the person instead.
+    // Permission 3: into its folder, within its caps, the folder rechecked now; counted only
+    // when the folder could be used (otherwise the person is asked, and nothing is counted).
+    if let Ok(Ok((admitted, dest))) =
+        st.with_book(app, |b| Ok(b.admit_with(id, bytes, now(), delivery_folder)))
+    {
+        let (journal, me) = journal(app)?;
+        let reopen = delivery_folder(&admitted.folder).ok();
+        let r = incoming
+            .accept_into(link, dest, None, &journal, &me, live)
+            .await?;
+        if live.control.stopped()
+            && let Some(d) = reopen
+        {
+            let base = admitted
+                .folder
+                .path
+                .join(pctwin_known::book::DELIVERY_FOLDER);
+            remove_part_files(&d, &base, &paths);
         }
-        Ok(Err(GrantProblem::None | GrantProblem::Expired | GrantProblem::OverCap)) | Err(_) => {}
+        let (folder, _) = folder_name(&admitted.folder.path);
+        let _ = app.emit(
+            DELIVERED_EVENT,
+            KnownDeliveredView {
+                connection: id.to_string(),
+                label: shown_safely(label),
+                folder,
+                lines: receipt_view("receiver", &r, live.control.stopped()).lines,
+                tell: admitted.tell,
+            },
+        );
+        return Ok(());
     }
     // Permission 2: asked every time.
     let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
@@ -1059,25 +1317,13 @@ async fn receive_files<R: Runtime>(
     if busy {
         return incoming.decline(link).await;
     }
-    let next = st
+    // The folder for next time, held through the same check as every destination.
+    let folder: Option<FolderView> = st
         .with_book(app, |b| b.next_folder(id))
         .ok()
         .flatten()
-        .and_then(|NextFolder(f)| f.reopen().ok().map(|d| (f, d)));
-    let folder = next.map(|(f, dest)| {
-        let (name, path) = folder_name(&f.path);
-        let view = FolderView {
-            name,
-            path,
-            free_bytes: dest.available_bytes(),
-        };
-        *lock(&qs.folder) = Some(crate::quicksend::Held {
-            path: f.path.clone(),
-            identity: f.identity,
-            dest,
-        });
-        view
-    });
+        .and_then(|NextFolder(f)| crate::quicksend::held_folder(qs, &f.path, Some(f.identity)))
+        .map(|(view, _)| view);
     let _ = app.emit(
         INCOMING_EVENT,
         KnownIncomingView {
@@ -1218,6 +1464,39 @@ mod tests {
         );
     }
 
+    /// Forget stops a session registered before anything was read: an offer still on its way is
+    /// never read (a session in its offer stage cannot slip past Forget).
+    #[tokio::test]
+    async fn forget_stops_a_session_still_waiting_for_its_offer() {
+        struct Silent;
+        impl pctwin_transfer::Channel for Silent {
+            async fn send(&mut self, _: &[u8]) -> Result<(), pctwin_transfer::ChannelError> {
+                Ok(())
+            }
+            async fn recv(&mut self) -> Result<Vec<u8>, pctwin_transfer::ChannelError> {
+                std::future::pending().await
+            }
+        }
+        let st = RememberedState::default();
+        let live = Live::default();
+        let session = st.started("ada", &live);
+        let mut ch = Silent;
+        let reading = receive_or_stop(&mut ch, &live);
+        let forget = async {
+            tokio::task::yield_now().await;
+            st.stop_sessions("ada");
+        };
+        let (got, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(reading, forget)
+        })
+        .await
+        .expect("Forget ends the wait");
+        assert!(got.is_none(), "nothing read after Forget");
+        assert!(live.control.stopped());
+        st.ended("ada", session);
+        assert!(lock(&st.sessions).get("ada").is_none());
+    }
+
     #[test]
     fn a_connection_shows_its_folders_by_name_and_proves_nothing_about_a_person() {
         let v = view(pctwin_known::ConnectionInfo {
@@ -1226,12 +1505,16 @@ mod tests {
             made_at: 1,
             last_used: 2,
             expires_at: 3,
-            same_device: false,
+            device: Device::CannotTell,
             grant: None,
             next_folder: Some(PathBuf::from("/home/ada/Inbox")),
         });
         assert_eq!(v.label, "Ada[U+202E]kcab");
-        assert!(!v.same_device);
+        assert_eq!(v.device, Device::CannotTell);
+        assert_eq!(
+            serde_json::to_value(v.device).unwrap(),
+            serde_json::json!("cannot-tell")
+        );
         assert_eq!(v.next_folder.unwrap().name, "Inbox");
     }
 }
