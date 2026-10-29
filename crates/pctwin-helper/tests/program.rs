@@ -43,7 +43,12 @@ fn the_program_serves_one_session_from_the_mover_and_ends() {
             "a helper without administrator rights ran"
         );
         let why = String::from_utf8_lossy(&out.stderr);
-        assert!(why.contains("the lock's folder"), "{why}");
+        // Refused at the administrators-only folder, or at its lock when the folder is already
+        // there (PCTwin installed on this laptop): either way, for want of administrator rights.
+        assert!(
+            why.contains("the lock's folder") || why.contains("the lock: Access is denied"),
+            "{why}"
+        );
         return;
     }
     // The pipe exists once the program has made it.
