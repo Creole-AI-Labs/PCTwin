@@ -300,6 +300,13 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         links: 4,
         prompt: false,
         restore_point: false,
+        // Two apps downloaded, one with its own installer from the old laptop, on a connection
+        // that may charge for data (2.6 wiring).
+        downloads: crate::fullmove::DownloadsView {
+            apps: 2,
+            with_old_installer: 1,
+            connection: crate::fullmove::Connection::MayCharge,
+        },
     }
 }
 
@@ -1343,7 +1350,7 @@ fn calls() -> Value {
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
             { "name": "rescue_drives", "args": [] },
             { "name": "rescue_begin", "args": [["id", "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10"], ["fallback", { "music": "From your old laptop/Music" }]] },
-            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true], ["ownFolder", "From Bea's laptop"]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]], ["secrets", [2]], ["updates", [0]], ["leaveBehind", true], ["ownFolder", "From Bea's laptop"], ["waitFreeWifi", true], ["reuseInstallers", true]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },

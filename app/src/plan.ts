@@ -407,7 +407,7 @@ export interface PlanView {
    * so the plan offers "Put <laptop>'s things in their own folder" (on unless turned off); the
    * folder's name goes with the approval (`moveApprove`'s `ownFolder`).
    */
-  ownFolderOffered?: true;
+  ownFolderOffered?: boolean;
 }
 
 /**

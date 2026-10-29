@@ -143,6 +143,43 @@ pub struct AppEntry {
     pub plan: AppPlan,
 }
 
+/// What the apps the plan installs need from the internet, before the person approves (Task List
+/// 2.7): how many are downloaded, and how many of those have their own installer from the old
+/// laptop in the move (reused, when the person chooses that, instead of downloaded).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Downloads {
+    pub apps: u64,
+    pub with_old_installer: u64,
+}
+
+impl FullPlan {
+    /// See [`Downloads`].
+    pub fn downloads(&self) -> Downloads {
+        downloads_of(&self.apps)
+    }
+}
+
+/// See [`Downloads`]: only apps PCTwin installs itself from a package it downloads.
+pub fn downloads_of(apps: &[AppEntry]) -> Downloads {
+    {
+        let mut d = Downloads::default();
+        for e in apps {
+            if e.plan.disposition != Disposition::Install || e.winget().is_none() {
+                continue;
+            }
+            d.apps += 1;
+            if e.plan
+                .routes
+                .iter()
+                .any(|r| matches!(r, Route::OldInstaller { .. }))
+            {
+                d.with_old_installer += 1;
+            }
+        }
+        d
+    }
+}
+
 impl AppEntry {
     /// The first route PCTwin itself installs from (a winget package), if any.
     pub fn winget(&self) -> Option<&str> {

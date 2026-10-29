@@ -13,6 +13,21 @@
 //! 4. **what is really there**: Windows' own list is read again; the app must be there, at the
 //!    person's version or newer, with nothing else slipped in, for `reinstalled`.
 //!
+//! Two choices the person makes on the plan (Task List 2.7 and 2.6 wiring, 29 October 2026):
+//!
+//! - **Reuse installers found on the old laptop** ([`WingetInstaller::reusing`]): an app whose
+//!   own installer came with the move (the old laptop found it in the person's folders, signed by
+//!   the app's maker) is installed from that copy instead of being downloaded, only when it is a
+//!   Windows Installer package by its name and its bytes (the one quiet recipe PCTwin trusts for a
+//!   file it did not download). The helper gets exactly what it gets for a download: the bytes'
+//!   SHA-256 as the transfer verified them and the old laptop's maker, and it copies the bytes into
+//!   its own folder, checks the hash and the maker's signature itself, and installs. Anything else
+//!   is downloaded as before.
+//! - **Wait for free Wi-Fi** ([`WingetInstaller::waiting`]): before the first download, while the
+//!   connection may charge for data (or the system cannot say), the installs wait for a free one,
+//!   up to a bound; past it, the apps that needed a download end needs-action (the person installs
+//!   them later), never downloaded on a connection that may charge.
+//!
 //! Anything that does not hold ends needs-action or failed with its reason, never "reinstalled".
 //! The helper itself sits behind [`Helper`] and Windows' list behind [`Machine`], so the chain is
 //! proven up to the helper's boundary without installing anything (tests/install.rs).
@@ -23,8 +38,8 @@ use std::path::{Path, PathBuf};
 
 use pctwin_apps::after::{self, Installed, Opened};
 use pctwin_apps::found::windows::RawEntry;
-use pctwin_apps::routes::WingetBy;
 use pctwin_apps::routes::winget::{self, Manifest};
+use pctwin_apps::routes::{Route, WingetBy};
 use pctwin_helper::Acted;
 use pctwin_helper::broker::actions::{
     Action, ApprovedPlan, CreateRestorePoint, Hex16, Hex32, Id, PlannedOperation,
@@ -40,6 +55,74 @@ use sha2::Digest;
 
 use crate::plan::AppEntry;
 use crate::run::{AppResult, Installer, Removable};
+
+/// Waiting for a connection that does not charge for data before downloading (see the module's
+/// words). Once it has waited its whole bound, it does not wait again in this move.
+pub struct WaitFree {
+    cost: Box<dyn Fn() -> pctwin_apps::fetch::NetworkCost>,
+    sleep: Box<dyn Fn(std::time::Duration)>,
+    every: std::time::Duration,
+    at_most: std::time::Duration,
+    gave_up: std::cell::Cell<bool>,
+}
+
+/// How often the connection is looked at again while waiting, and how long PCTwin waits at most.
+pub const WAIT_FREE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+pub const WAIT_FREE_AT_MOST: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+impl WaitFree {
+    /// `cost`: the connection now; `sleep`: waits that long (the system's own sleep, or a test's).
+    pub fn new(
+        cost: Box<dyn Fn() -> pctwin_apps::fetch::NetworkCost>,
+        sleep: Box<dyn Fn(std::time::Duration)>,
+        every: std::time::Duration,
+        at_most: std::time::Duration,
+    ) -> Self {
+        Self {
+            cost,
+            sleep,
+            every,
+            at_most,
+            gave_up: std::cell::Cell::new(false),
+        }
+    }
+
+    /// Whether downloading may go ahead: the connection is free now, or becomes free within the
+    /// bound. `false` once the bound has passed.
+    fn until_free(&self) -> bool {
+        use pctwin_apps::fetch::NetworkCost;
+        if self.gave_up.get() {
+            return false;
+        }
+        let mut waited = std::time::Duration::ZERO;
+        loop {
+            if (self.cost)() == NetworkCost::Unmetered {
+                return true;
+            }
+            if waited >= self.at_most {
+                self.gave_up.set(true);
+                return false;
+            }
+            (self.sleep)(self.every);
+            waited += self.every;
+        }
+    }
+}
+
+/// Whether `path` is a Windows Installer package by its name and its first bytes (a compound file).
+fn is_msi(path: &Path) -> bool {
+    const COMPOUND: [u8; 8] = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+    let named = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("msi"));
+    let mut head = [0u8; 8];
+    named
+        && std::fs::File::open(path)
+            .and_then(|mut f| f.read_exact(&mut head))
+            .is_ok()
+        && head == COMPOUND
+}
 
 /// The most winget searches at once.
 const SEARCHES_AT_ONCE: usize = 3;
@@ -231,6 +314,11 @@ pub struct WingetInstaller<'a> {
     /// The move these installs belong to (its scope): with none, the helper records no product,
     /// and undo lists every app for the person.
     for_move: Option<[u8; 16]>,
+    /// The installers found on the old laptop that came with the move, by item, where they are
+    /// on this laptop now (only when the person chose to reuse them).
+    old_installers: HashMap<pctwin_record::ItemId, PathBuf>,
+    /// Waiting for free Wi-Fi before any download, when the person chose it.
+    wait_free: Option<WaitFree>,
 }
 
 const RESTORE_ID: &str = "restore-point";
@@ -257,7 +345,49 @@ impl<'a> WingetInstaller<'a> {
             down: None,
             plan: None,
             for_move: None,
+            old_installers: HashMap::new(),
+            wait_free: None,
         }
+    }
+
+    /// Reuse installers found on the old laptop: `landed` says where each one that came with the
+    /// move is on this laptop now (see the module's words).
+    pub fn reusing(mut self, landed: HashMap<pctwin_record::ItemId, PathBuf>) -> Self {
+        self.old_installers = landed;
+        self
+    }
+
+    /// Wait for free Wi-Fi before downloading (see the module's words).
+    pub fn waiting(mut self, wait: WaitFree) -> Self {
+        self.wait_free = Some(wait);
+        self
+    }
+
+    /// The installer found on the old laptop for `e`, when the person chose to reuse it and it is
+    /// one PCTwin installs from a copy: a Windows Installer package, by name and bytes.
+    fn reuse(&self, at: usize, e: &AppEntry) -> Option<Prepared> {
+        let file = e.plan.routes.iter().find_map(|r| match r {
+            Route::OldInstaller { item } => self.old_installers.get(item).filter(|p| is_msi(p)),
+            _ => None,
+        })?;
+        let kind = pctwin_apps::install::kind_of("msi", None).ok()?;
+        let (sha, size) = sha256_of(file).ok()?;
+        let op = pctwin_apps::install::operation(
+            &format!("install.{at}"),
+            at as u64,
+            sha,
+            kind,
+            &e.app,
+            None,
+            self.for_move,
+        )
+        .ok()?;
+        Some(Prepared {
+            at,
+            op,
+            file: file.clone(),
+            size,
+        })
     }
 
     /// The installs are for move `scope`: a Windows Installer app the helper records can then
@@ -269,7 +399,15 @@ impl<'a> WingetInstaller<'a> {
 
     /// Downloads and checks `app`'s package (`at`: its place in the list).
     fn prepare(&mut self, at: usize, e: &AppEntry) -> Result<Prepared, AppResult> {
+        // The old laptop's own installer, when chosen and fit: nothing is downloaded.
+        if let Some(p) = self.reuse(at, e) {
+            return Ok(p);
+        }
         let id = e.winget().ok_or_else(manual)?;
+        // Never downloaded on a connection that may charge, when the person chose to wait.
+        if self.wait_free.as_ref().is_some_and(|w| !w.until_free()) {
+            return Err(manual());
+        }
         let folder = self.work.join(at.to_string());
         std::fs::create_dir_all(&folder).map_err(|_| manual())?;
         let call =

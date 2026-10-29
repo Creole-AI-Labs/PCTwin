@@ -297,6 +297,9 @@ struct Run {
     /// The new laptop: the folder the person chose for this old laptop's things ("From Bea's
     /// laptop"), when the plan offered one (several old laptops into one, 2.6).
     own_folder: Option<String>,
+    /// The new laptop: "Wait for free Wi-Fi" and "Reuse installers found on the old laptop".
+    wait_free_wifi: bool,
+    reuse_installers: bool,
     /// The old laptop: where the person's answer about apps to close goes.
     close: Option<std::sync::mpsc::Sender<bool>>,
     /// The new laptop: the folders the person sent to a place they chose (M05), each opened
@@ -704,6 +707,8 @@ impl Moving {
             updates: Vec::new(),
             leave_behind: false,
             own_folder: None,
+            wait_free_wifi: false,
+            reuse_installers: false,
             close: None,
             left_out: std::collections::BTreeSet::new(),
             chosen: BTreeMap::new(),
@@ -889,6 +894,23 @@ impl Moving {
 
     fn own_folder(&self) -> Option<String> {
         lock(&self.run).as_ref().and_then(|r| r.own_folder.clone())
+    }
+
+    /// The person's choices for the installs, as they approved (wait for free Wi-Fi, reuse the
+    /// old laptop's installers).
+    fn install_choices(&self) -> (bool, bool) {
+        lock(&self.run)
+            .as_ref()
+            .map(|r| (r.wait_free_wifi, r.reuse_installers))
+            .unwrap_or_default()
+    }
+
+    /// Sets the install choices that go with the approval.
+    fn choose_installs(&self, wait_free_wifi: bool, reuse_installers: bool) {
+        if let Some(r) = lock(&self.run).as_mut() {
+            r.wait_free_wifi = wait_free_wifi;
+            r.reuse_installers = reuse_installers;
+        }
     }
 
     fn updates(&self) -> Vec<u32> {
@@ -2791,6 +2813,9 @@ async fn run_old<R: Runtime>(
     })
     .await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
+    // Files an earlier move made local and did not put back (it stopped part way) go back online
+    // only first: the old laptop ends as it was.
+    crate::keep_local::put_back_left(app);
     // The full move: the signed-in person's app data (2.5) is looked at beside the files, read
     // only, with its own time budget.
     let special = pctwin_scan::list_people()
@@ -2982,14 +3007,30 @@ async fn run_old<R: Runtime>(
             crate::keep_local::match_files(&record, &kept_ids, &mover, &folders, &path_of);
         crate::keep_local::leave_unmatched(&mut record, &unmatched);
         let consents = crate::keep_local::consents(&choice.keep_local, &mover, &home, &folders);
-        (!files.is_empty()).then(|| {
-            Arc::new(crate::keep_local::opener(
-                Arc::clone(&opener),
-                consents,
-                files,
-                &folders,
-            ))
-        })
+        // The list of files this move may make local, written and flushed before the first
+        // comes down; without it, none comes down (they stay stored online only).
+        let roots: Vec<std::path::PathBuf> = folders.iter().map(|f| f.root.clone()).collect();
+        let made = crate::keep_local::list_path(app)
+            .filter(|_| !files.is_empty())
+            .and_then(|l| {
+                pctwin_orchestrate::local_copy_send::KeptList::create(
+                    Box::new(crate::keep_local::FileList(l)),
+                    &files,
+                    &roots,
+                )
+                .ok()
+            });
+        match made {
+            Some(made) => Some(Arc::new(
+                crate::keep_local::opener(Arc::clone(&opener), consents, files, &folders)
+                    .recorded(made),
+            )),
+            None => {
+                let ids: Vec<ItemId> = files.iter().map(|f| f.wanted.item).collect();
+                crate::keep_local::leave_unmatched(&mut record, &ids);
+                None
+            }
+        }
     };
     #[cfg(not(windows))]
     let keep_opener: Option<Arc<pctwin_orchestrate::local_copy_send::KeepOpener>> = {
@@ -3326,8 +3367,21 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         // Counted on their own lines: the files' counts stay the files'.
         let data = steps.sink.take();
         let picked = std::mem::take(&mut steps.picked);
-        let files =
-            pctwin_fullmove::run::files_landed(&full, landed_here(&received, &steps.rules, &table));
+        let landed = landed_here(&received, &steps.rules, &table);
+        // The old laptop's installers that came, by item, where they are now: reused only when
+        // the person chose that (and then only after the same checks as a download).
+        let (wait_free_wifi, reuse_installers) = steps.moving.install_choices();
+        let wanted: std::collections::HashSet<ItemId> = full
+            .apps
+            .iter()
+            .flat_map(|a| a.app.installers.iter().copied())
+            .collect();
+        let old_installers = landed
+            .iter()
+            .filter(|(i, _)| wanted.contains(&i.id))
+            .map(|(i, p)| (i.id, p.clone()))
+            .collect();
+        let files = pctwin_fullmove::run::files_landed(&full, landed);
         outcome.rebuilt = Some(crate::fullmove::rebuild_here(
             app,
             &full,
@@ -3335,6 +3389,11 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             &me,
             data.as_ref().map(|s| (s, picked)),
             files,
+            crate::fullmove::InstallChoices {
+                wait_free_wifi,
+                reuse_installers,
+                old_installers,
+            },
         ));
     }
     Ok(Ran {
@@ -3846,7 +3905,14 @@ pub fn move_approve(
     updates: Option<Vec<u32>>,
     leave_behind: Option<bool>,
     own_folder: Option<String>,
+    wait_free_wifi: Option<bool>,
+    reuse_installers: Option<bool>,
 ) -> Result<(), MoveProblem> {
+    // Set before the answer is given, so the move reads them with it.
+    moving.choose_installs(
+        wait_free_wifi.unwrap_or(false),
+        reuse_installers.unwrap_or(false),
+    );
     let secrets = secrets.unwrap_or_default();
     let updates = updates.unwrap_or_default();
     moving.answer(

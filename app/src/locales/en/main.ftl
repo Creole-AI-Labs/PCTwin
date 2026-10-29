@@ -2089,3 +2089,16 @@ plan-own-folder = Put the things from { $laptop } in their own folder
 plan-own-folder-help = This laptop already has things from another old laptop. A folder for each laptop keeps them apart.
 plan-own-folder-name = From { $laptop }
 plan-own-folder-name-unnamed = From the other laptop
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 app is downloaded from the internet to install it on this laptop.
+       *[other] { $count } apps are downloaded from the internet to install them on this laptop.
+    }
+plan-wait-free-wifi = Wait for free Wi-Fi before downloading
+plan-wait-free-wifi-help = This connection may charge for data. With this on, PCTwin waits up to 20 minutes for a free one. Apps it could not download are listed for you to install later.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Use the installer found on the old laptop for 1 app, instead of downloading it
+       *[other] Use the installers found on the old laptop for { $count } apps, instead of downloading them
+    }
+plan-reuse-installers-help = Each one is checked first, the same way as a download: it must be signed by the app's own maker.

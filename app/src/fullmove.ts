@@ -66,7 +66,24 @@ export type RebuildPlan = {
   links: number;
   prompt: boolean;
   restorePoint: boolean;
+  /**
+   * The apps PCTwin downloads to install, how many of them have their own installer from the old
+   * laptop in the move, and the connection now (`DownloadsView`). The plan offers "Wait for free
+   * Wi-Fi" when anything is downloaded and "Reuse installers found on the old laptop" when an
+   * installer came; the answers go with the approval (`moveApprove`).
+   */
+  downloads: Downloads;
 };
+
+export type Downloads = { apps: number; withOldInstaller: number; connection: "free" | "may-charge" | "not-known" };
+
+function parseDownloads(v: unknown): Downloads | null {
+  const f = exactly(v, ["apps", "withOldInstaller", "connection"]);
+  if (!f || !isCount(f.apps) || !isCount(f.withOldInstaller) || f.withOldInstaller > f.apps) return null;
+  return f.connection === "free" || f.connection === "may-charge" || f.connection === "not-known"
+    ? { apps: f.apps, withOldInstaller: f.withOldInstaller, connection: f.connection }
+    : null;
+}
 
 export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[] };
 
@@ -187,14 +204,15 @@ function parseChange(v: unknown): ChangeView | null {
 
 /** The plan section (`RebuildPlanView`). */
 export function parseRebuildPlan(v: unknown): RebuildPlan | null {
-  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint"]);
+  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint", "downloads"]);
   if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || !isCount(f.links) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
   const changes = listOf(f.changes, parseChange);
   const notMoved = listOf(f.notMoved, (x) => {
     const n = exactly(x, ["group", "count"]);
     return n && oneOf(n.group, NOT_MOVED_GROUPS) && isCount(n.count) ? { group: n.group, count: n.count } : null;
   });
-  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint } : null;
+  const downloads = parseDownloads(f.downloads);
+  return changes && notMoved && downloads ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint, downloads } : null;
 }
 
 function parseLine(v: unknown): RebuiltLine | null {

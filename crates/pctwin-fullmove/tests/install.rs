@@ -632,3 +632,210 @@ fn nothing_is_kept_for_undo_unless_the_helper_and_the_list_agree() {
     );
     assert_eq!(r.results[0].removable, None);
 }
+
+/// The person's two choices on the plan (2.7, wired 29 October 2026): reuse the old laptop's own
+/// installer, and wait for free Wi-Fi before downloading.
+mod choices {
+    use super::*;
+    use pctwin_apps::fetch::NetworkCost;
+    use pctwin_fullmove::install::WaitFree;
+    use pctwin_fullmove::plan::downloads_of;
+    use pctwin_record::ItemId;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    const COMPOUND: [u8; 8] = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+    fn old_item() -> ItemId {
+        ItemId::from_hex(&"5a".repeat(16)).unwrap()
+    }
+
+    fn with_old(mut e: AppEntry) -> AppEntry {
+        e.plan.routes.push(Route::OldInstaller { item: old_item() });
+        e
+    }
+
+    fn winget() -> FakeWinget {
+        FakeWinget {
+            manifest: manifest(CODE, Some(sha(INSTALLER))),
+            bytes: INSTALLER.to_vec(),
+            calls: Default::default(),
+        }
+    }
+
+    fn downloaded(w: &FakeWinget) -> bool {
+        w.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.first().is_some_and(|a| a == "download"))
+    }
+
+    fn run_with(
+        winget: &FakeWinget,
+        helper: &mut FakeHelper,
+        apps: Vec<AppEntry>,
+        set: impl FnOnce(WingetInstaller<'_>) -> WingetInstaller<'_>,
+    ) -> Vec<pctwin_fullmove::run::AppResult> {
+        let work = tempfile::tempdir().unwrap();
+        let machine = FakeMachine(helper.shows.clone());
+        let mut n = 0u8;
+        let mut nonce = || {
+            n += 1;
+            Some([n; 16])
+        };
+        let refs: Vec<&AppEntry> = apps.iter().collect();
+        let chain = WingetInstaller::new(
+            PathBuf::from(r"C:\winget.exe"),
+            "x64",
+            work.path().join("downloads"),
+            winget,
+            helper,
+            &machine,
+            &mut nonce,
+        )
+        .for_move(MOVE);
+        set(chain).install(&refs, &mut || {})
+    }
+
+    fn old_file(dir: &std::path::Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_old_laptops_own_package_is_installed_with_the_same_checks_and_nothing_downloaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = COMPOUND.to_vec();
+        bytes.extend_from_slice(b"the old laptop's own Lab Writer package");
+        let file = old_file(dir.path(), "LabWriter.msi", &bytes);
+        let w = winget();
+        let mut helper = FakeHelper::default();
+        let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
+            c.reusing(HashMap::from([(old_item(), file.clone())]))
+        });
+        assert_eq!(
+            results[0].result.status(),
+            ItemStatus::Reinstalled,
+            "{results:?}"
+        );
+        assert!(!downloaded(&w), "nothing was downloaded");
+        // The helper got exactly these bytes, by their hash, under the old laptop's maker.
+        assert_eq!(helper.staged.len(), 1);
+        assert_eq!(helper.staged[0].1, Hex32(sha(&bytes)));
+        assert_eq!(helper.staged[0].2, bytes);
+        let Action::InstallVerifiedPackage(pkg) = &helper.started[0].operations[1].action else {
+            panic!("an install");
+        };
+        assert_eq!(pkg.sha256, Hex32(sha(&bytes)));
+    }
+
+    #[test]
+    fn an_old_installer_is_downloaded_instead_unless_chosen_and_a_windows_installer_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut msi = COMPOUND.to_vec();
+        msi.extend_from_slice(b"package");
+        for (name, bytes, chosen) in [
+            ("LabWriter.msi", msi.clone(), false),
+            ("LabWriter.exe", msi.clone(), true),
+            (
+                "LabWriter.msi",
+                b"MZ a program, named as a package".to_vec(),
+                true,
+            ),
+        ] {
+            let file = old_file(dir.path(), name, &bytes);
+            let w = winget();
+            let mut helper = FakeHelper::default();
+            let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
+                if chosen {
+                    c.reusing(HashMap::from([(old_item(), file.clone())]))
+                } else {
+                    c
+                }
+            });
+            assert!(downloaded(&w), "{name} chosen={chosen}");
+            assert_eq!(helper.staged[0].2, INSTALLER, "{name}");
+            assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
+        }
+    }
+
+    fn costs(seq: Vec<NetworkCost>) -> (WaitFree, std::rc::Rc<RefCell<Vec<Duration>>>) {
+        let slept = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let s = slept.clone();
+        let seq = RefCell::new(seq.into_iter());
+        let last = std::cell::Cell::new(NetworkCost::Metered);
+        let w = WaitFree::new(
+            Box::new(move || {
+                if let Some(c) = seq.borrow_mut().next() {
+                    last.set(c);
+                }
+                last.get()
+            }),
+            Box::new(move |d| s.borrow_mut().push(d)),
+            Duration::from_secs(30),
+            Duration::from_secs(90),
+        );
+        (w, slept)
+    }
+
+    #[test]
+    fn downloads_wait_for_free_wi_fi_then_go_ahead() {
+        let (wait, slept) = costs(vec![
+            NetworkCost::Metered,
+            NetworkCost::Unknown,
+            NetworkCost::Unmetered,
+        ]);
+        let w = winget();
+        let mut helper = FakeHelper::default();
+        let results = run_with(&w, &mut helper, vec![entry(app())], |c| c.waiting(wait));
+        assert_eq!(slept.borrow().len(), 2, "waited twice");
+        assert!(downloaded(&w));
+        assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
+    }
+
+    #[test]
+    fn with_no_free_wi_fi_in_time_nothing_is_downloaded_and_the_apps_need_the_person() {
+        let (wait, slept) = costs(vec![NetworkCost::Metered]);
+        let w = winget();
+        let mut helper = FakeHelper::default();
+        let results = run_with(&w, &mut helper, vec![entry(app()), entry(app())], |c| {
+            c.waiting(wait)
+        });
+        assert!(!downloaded(&w), "never on a connection that may charge");
+        for r in &results {
+            assert_eq!(r.result, ItemResult::because(Reason::ManualInstall));
+        }
+        // Waited its bound once, never again for the second app.
+        assert_eq!(slept.borrow().len(), 3);
+    }
+
+    #[test]
+    fn the_old_laptops_installer_needs_no_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = COMPOUND.to_vec();
+        bytes.extend_from_slice(b"package");
+        let file = old_file(dir.path(), "LabWriter.msi", &bytes);
+        let (wait, slept) = costs(vec![NetworkCost::Metered]);
+        let w = winget();
+        let mut helper = FakeHelper::default();
+        let results = run_with(&w, &mut helper, vec![with_old(entry(app()))], |c| {
+            c.reusing(HashMap::from([(old_item(), file.clone())]))
+                .waiting(wait)
+        });
+        assert!(slept.borrow().is_empty());
+        assert_eq!(results[0].result.status(), ItemStatus::Reinstalled);
+    }
+
+    #[test]
+    fn the_plan_counts_the_downloads_and_the_old_installers() {
+        let mut manual = entry(app());
+        manual.plan.routes.clear();
+        let mut not_installed = with_old(entry(app()));
+        not_installed.plan.disposition = Disposition::NeedsAction;
+        let d = downloads_of(&[entry(app()), with_old(entry(app())), manual, not_installed]);
+        assert_eq!(d.apps, 2);
+        assert_eq!(d.with_old_installer, 1);
+    }
+}

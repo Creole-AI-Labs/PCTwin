@@ -2284,3 +2284,18 @@ plan-own-folder = Poner las cosas de { $laptop } en su propia carpeta
 plan-own-folder-help = Este portátil ya tiene cosas de otro portátil antiguo. Una carpeta para cada portátil las mantiene separadas.
 plan-own-folder-name = De { $laptop }
 plan-own-folder-name-unnamed = Del otro portátil
+plan-downloads =
+    { NUMBER($count) ->
+        [one] Se descarga 1 aplicación de internet para instalarla en este portátil.
+        [many] Se descargan { $count } de aplicaciones de internet para instalarlas en este portátil.
+       *[other] Se descargan { $count } aplicaciones de internet para instalarlas en este portátil.
+    }
+plan-wait-free-wifi = Esperar a una Wi-Fi gratuita antes de descargar
+plan-wait-free-wifi-help = Esta conexión puede cobrar por los datos. Con esto activado, PCTwin espera hasta 20 minutos a una gratuita. Las aplicaciones que no pueda descargar aparecen en la lista para que las instales más tarde.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Usar el instalador encontrado en el portátil antiguo para 1 aplicación, en lugar de descargarla
+        [many] Usar los instaladores encontrados en el portátil antiguo para { $count } de aplicaciones, en lugar de descargarlas
+       *[other] Usar los instaladores encontrados en el portátil antiguo para { $count } aplicaciones, en lugar de descargarlas
+    }
+plan-reuse-installers-help = Cada uno se comprueba primero, igual que una descarga: debe estar firmado por el propio fabricante de la aplicación.

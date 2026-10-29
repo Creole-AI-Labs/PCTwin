@@ -1963,3 +1963,14 @@ plan-own-folder = 把来自 { $laptop } 的东西放进单独的文件夹
 plan-own-folder-help = 这台电脑上已经有另一台旧电脑的东西。每台电脑一个文件夹，可以让它们分开。
 plan-own-folder-name = 来自 { $laptop }
 plan-own-folder-name-unnamed = 来自另一台电脑
+plan-downloads =
+    { NUMBER($count) ->
+       *[other] 将从网上下载 { $count } 个应用，安装到这台电脑上。
+    }
+plan-wait-free-wifi = 等到有免费 Wi-Fi 时再下载
+plan-wait-free-wifi-help = 这个网络可能按流量收费。打开此项后，PCTwin 最多等待 20 分钟，直到有免费网络。没能下载的应用会列出来，方便你以后安装。
+plan-reuse-installers =
+    { NUMBER($count) ->
+       *[other] 为 { $count } 个应用使用在旧电脑上找到的安装程序，而不是下载
+    }
+plan-reuse-installers-help = 每一个都会先检查，和下载的一样：它必须由该应用自己的开发者签名。

@@ -2293,3 +2293,18 @@ plan-own-folder = Mettre les affaires de { $laptop } dans leur propre dossier
 plan-own-folder-help = Cet ordinateur a déjà des affaires d’un autre ancien ordinateur. Un dossier par ordinateur les garde séparées.
 plan-own-folder-name = De { $laptop }
 plan-own-folder-name-unnamed = De l’autre ordinateur
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 appli est téléchargée depuis internet pour être installée sur cet ordinateur.
+        [many] { $count } d’applis sont téléchargées depuis internet pour être installées sur cet ordinateur.
+       *[other] { $count } applis sont téléchargées depuis internet pour être installées sur cet ordinateur.
+    }
+plan-wait-free-wifi = Attendre un Wi-Fi gratuit avant de télécharger
+plan-wait-free-wifi-help = Cette connexion peut facturer les données. Avec cette option, PCTwin attend jusqu’à 20 minutes une connexion gratuite. Les applis qu’il n’a pas pu télécharger sont listées pour que vous les installiez plus tard.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Utiliser le programme d’installation trouvé sur l’ancien ordinateur pour 1 appli, au lieu de la télécharger
+        [many] Utiliser les programmes d’installation trouvés sur l’ancien ordinateur pour { $count } d’applis, au lieu de les télécharger
+       *[other] Utiliser les programmes d’installation trouvés sur l’ancien ordinateur pour { $count } applis, au lieu de les télécharger
+    }
+plan-reuse-installers-help = Chacun est d’abord vérifié, comme un téléchargement : il doit être signé par l’éditeur de l’appli.

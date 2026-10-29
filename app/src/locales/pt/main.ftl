@@ -2288,3 +2288,18 @@ plan-own-folder = Colocar as coisas de { $laptop } numa pasta só delas
 plan-own-folder-help = Este notebook já tem coisas de outro notebook antigo. Uma pasta para cada notebook as mantém separadas.
 plan-own-folder-name = De { $laptop }
 plan-own-folder-name-unnamed = Do outro notebook
+plan-downloads =
+    { NUMBER($count) ->
+        [one] 1 app é baixado da internet para ser instalado neste notebook.
+        [many] { $count } de apps são baixados da internet para serem instalados neste notebook.
+       *[other] { $count } apps são baixados da internet para serem instalados neste notebook.
+    }
+plan-wait-free-wifi = Esperar um Wi-Fi gratuito antes de baixar
+plan-wait-free-wifi-help = Esta conexão pode cobrar pelos dados. Com isto ligado, o PCTwin espera até 20 minutos por uma gratuita. Os apps que não puder baixar aparecem na lista para você instalar depois.
+plan-reuse-installers =
+    { NUMBER($count) ->
+        [one] Usar o instalador encontrado no notebook antigo para 1 app, em vez de baixá-lo
+        [many] Usar os instaladores encontrados no notebook antigo para { $count } de apps, em vez de baixá-los
+       *[other] Usar os instaladores encontrados no notebook antigo para { $count } apps, em vez de baixá-los
+    }
+plan-reuse-installers-help = Cada um é verificado primeiro, do mesmo jeito que um download: ele precisa ser assinado pelo próprio fabricante do app.

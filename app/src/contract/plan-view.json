@@ -251,6 +251,11 @@
           "update": null
         }
       ],
+      "downloads": {
+        "apps": 2,
+        "connection": "may-charge",
+        "withOldInstaller": 1
+      },
       "links": 4,
       "more": 0,
       "notMoved": [

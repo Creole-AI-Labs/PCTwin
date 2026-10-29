@@ -221,6 +221,47 @@ pub struct RebuildPlanView {
     pub prompt: bool,
     /// A Windows restore point is asked for before the first change.
     pub restore_point: bool,
+    /// What the apps PCTwin installs need from the internet, with the two choices the plan offers
+    /// for it ("Wait for free Wi-Fi", "Reuse installers found on the old laptop").
+    pub downloads: DownloadsView,
+}
+
+/// The connection right now, as the system says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Connection {
+    Free,
+    MayCharge,
+    NotKnown,
+}
+
+/// The apps PCTwin downloads to install, and how many of them have their own installer from the
+/// old laptop in the move; and the connection now. The plan offers "Wait for free Wi-Fi" when
+/// anything is downloaded, and "Reuse installers found on the old laptop" when an installer came.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadsView {
+    pub apps: u64,
+    pub with_old_installer: u64,
+    pub connection: Connection,
+}
+
+/// The connection now.
+pub fn connection_now() -> Connection {
+    match pctwin_apps::fetch::network_cost() {
+        pctwin_apps::fetch::NetworkCost::Unmetered => Connection::Free,
+        pctwin_apps::fetch::NetworkCost::Metered => Connection::MayCharge,
+        pctwin_apps::fetch::NetworkCost::Unknown => Connection::NotKnown,
+    }
+}
+
+/// What the person chose on the plan for the installs, and where the old laptop's installers are
+/// on this laptop now (used only when they chose to reuse them).
+#[derive(Debug, Clone, Default)]
+pub struct InstallChoices {
+    pub wait_free_wifi: bool,
+    pub reuse_installers: bool,
+    pub old_installers: std::collections::HashMap<pctwin_record::ItemId, std::path::PathBuf>,
 }
 
 fn action_of(a: Action) -> ChangeAction {
@@ -411,6 +452,14 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         links: plan.links,
         prompt: asks,
         restore_point: asks && cfg!(windows),
+        downloads: {
+            let d = plan.downloads();
+            DownloadsView {
+                apps: d.apps,
+                with_old_installer: d.with_old_installer,
+                connection: connection_now(),
+            }
+        },
     }
 }
 
@@ -681,6 +730,7 @@ pub fn rebuild_here<R: Runtime>(
     me: &str,
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
+    choices: InstallChoices,
 ) -> RebuiltView {
     let state = app.state::<AppFullMove>();
     let (Ok(laptop), Ok(scope)) = (LaptopId::generate(), Scope::for_a_move()) else {
@@ -740,19 +790,40 @@ pub fn rebuild_here<R: Runtime>(
         std::env::temp_dir().join(format!("pctwin-installs-{tag}"))
     };
     #[cfg(windows)]
-    let mut chain = winget_here().map(|winget| {
-        pctwin_fullmove::install::WingetInstaller::new(
-            winget,
-            winget_arch(),
-            work,
-            &pctwin_maker::run::SystemRunner,
-            &mut helper,
-            &machine,
-            &mut nonce,
-        )
-        // The move these installs belong to: only its own undo can remove what it installs.
-        .for_move(scope.0)
-    });
+    let mut chain = winget_here()
+        .map(|winget| {
+            pctwin_fullmove::install::WingetInstaller::new(
+                winget,
+                winget_arch(),
+                work,
+                &pctwin_maker::run::SystemRunner,
+                &mut helper,
+                &machine,
+                &mut nonce,
+            )
+            // The move these installs belong to: only its own undo can remove what it installs.
+            .for_move(scope.0)
+            // The person's choices on the plan.
+            .reusing(if choices.reuse_installers {
+                choices.old_installers.clone()
+            } else {
+                Default::default()
+            })
+        })
+        .map(|chain| {
+            if choices.wait_free_wifi {
+                chain.waiting(pctwin_fullmove::install::WaitFree::new(
+                    Box::new(pctwin_apps::fetch::network_cost),
+                    Box::new(std::thread::sleep),
+                    pctwin_fullmove::install::WAIT_FREE_EVERY,
+                    pctwin_fullmove::install::WAIT_FREE_AT_MOST,
+                ))
+            } else {
+                chain
+            }
+        });
+    #[cfg(not(windows))]
+    let _ = &choices;
     #[cfg(windows)]
     let installer: &mut dyn Installer = match chain.as_mut() {
         Some(c) => c,

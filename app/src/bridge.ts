@@ -739,8 +739,9 @@ export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { ro
 /** `secrets`: the secret lines of app data the person ticked, one by one (none unless ticked). */
 /** `leaveBehind`: the person accepted the plan's space proposal (leave those files on the old laptop). */
 /** `ownFolder`: when the plan offered it (`ownFolderOffered`) and the person kept it on, the folder for this old laptop's things in their language ("From Bea's laptop"); one plain folder name. */
-export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = [], leaveBehind = false, ownFolder: string | null = null) =>
-  run("move_approve", { plan, approve, leftOut, secrets, updates, leaveBehind, ownFolder });
+/** `waitFreeWifi`, `reuseInstallers`: the plan's two install choices ("Wait for free Wi-Fi", "Reuse installers found on the old laptop"). */
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = [], secrets: number[] = [], updates: number[] = [], leaveBehind = false, ownFolder: string | null = null, waitFreeWifi = false, reuseInstallers = false) =>
+  run("move_approve", { plan, approve, leftOut, secrets, updates, leaveBehind, ownFolder, waitFreeWifi, reuseInstallers });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");
