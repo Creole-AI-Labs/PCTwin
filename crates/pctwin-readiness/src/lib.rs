@@ -19,6 +19,8 @@
 //! - [`handover`]: three separate requests (PCTwin's temporary files, the mover's account,
 //!   erasing the old laptop), each through one gate: exact device, undo closed for good, the list
 //!   clear and current, no other writer, and a fresh confirmation. None is run here.
+//! - [`projects`]: what a file the person works with needs: told by its content first, then a
+//!   generic reader the `project-files` catalogue names (its linked files and fonts).
 //! - [`kit`]: the offline recovery kit, readable with no account, saying exactly what it holds.
 //! - [`report`]: the shareable report, private things left out unless chosen; nothing is sent.
 //!
@@ -33,6 +35,7 @@ pub mod goodbye;
 pub mod handover;
 pub mod kit;
 pub mod ledger;
+pub mod projects;
 pub mod repair;
 pub mod report;
 mod store;
