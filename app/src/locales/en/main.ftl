@@ -2055,3 +2055,39 @@ accept-needs = Something needs you first. See the details.
 accept-not-now = Not now
 accept-details = See the details
 accept-accept = Accept
+
+# 2.8 screens
+report-group-apps = Apps
+report-group-settings = Settings
+report-group-special = App data and other things
+report-group-people = Other people moved
+report-count-apps = { $count ->
+        [one] 1 app
+       *[other] { $count } apps
+    }
+report-count-settings = { $count ->
+        [one] 1 group of settings
+       *[other] { $count } groups of settings
+    }
+report-count-special = { $count ->
+        [one] 1 thing
+       *[other] { $count } things
+    }
+report-count-people = { $count ->
+        [one] 1 person
+       *[other] { $count } people
+    }
+report-beyond-done = All done and checked
+report-beyond-some = { $done } of { $total } done and checked
+report-beyond-left = { $count ->
+        [one] 1 left out, as you chose
+       *[other] { $count } left out, as you chose
+    }
+report-beyond-more = { $count ->
+        [one] And 1 more app, setting or other thing that this list does not show.
+       *[other] And { $count } more apps, settings or other things that this list does not show.
+    }
+report-here = { $count ->
+        [one] 1 app was already on this laptop. PCTwin left it as it is.
+       *[other] { $count } apps were already on this laptop. PCTwin left them as they are.
+    }

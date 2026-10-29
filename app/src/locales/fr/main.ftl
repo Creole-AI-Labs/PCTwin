@@ -2255,3 +2255,46 @@ accept-needs = Quelque chose demande votre attention d'abord. Voyez les détails
 accept-not-now = Pas maintenant
 accept-details = Voir les détails
 accept-accept = Accepter
+
+# 2.8 screens
+report-group-apps = Applications
+report-group-settings = Réglages
+report-group-special = Données d’applications et autres choses
+report-group-people = Autres personnes déplacées
+report-count-apps = { $count ->
+        [one] { $count } appli
+        [many] { $count } d’applis
+       *[other] { $count } applis
+    }
+report-count-settings = { $count ->
+        [one] { $count } groupe de réglages
+        [many] { $count } de groupes de réglages
+       *[other] { $count } groupes de réglages
+    }
+report-count-special = { $count ->
+        [one] { $count } élément
+        [many] { $count } d’éléments
+       *[other] { $count } éléments
+    }
+report-count-people = { $count ->
+        [one] { $count } personne
+        [many] { $count } de personnes
+       *[other] { $count } personnes
+    }
+report-beyond-done = Tout est fait et vérifié
+report-beyond-some = { $done } sur { $total } faits et vérifiés
+report-beyond-left = { $count ->
+        [one] { $count } laissé de côté, comme vous l’avez choisi
+        [many] { $count } laissés de côté, comme vous l’avez choisi
+       *[other] { $count } laissés de côté, comme vous l’avez choisi
+    }
+report-beyond-more = { $count ->
+        [one] Et { $count } autre application, réglage ou élément que cette liste ne montre pas.
+        [many] Et { $count } autres applications, réglages ou éléments que cette liste ne montre pas.
+       *[other] Et { $count } autres applications, réglages ou éléments que cette liste ne montre pas.
+    }
+report-here = { $count ->
+        [one] { $count } application était déjà sur cet ordinateur. PCTwin l’a laissée telle quelle.
+        [many] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
+       *[other] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
+    }

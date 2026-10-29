@@ -19,7 +19,7 @@ import { Name } from "./GuardParts";
 import { PlanBox } from "./PlanParts";
 import { Heading } from "./ProgressParts";
 
-function TitleText({ title }: { title: Title }) {
+export function TitleText({ title }: { title: Title }) {
   const { l10n } = useLocalization();
   return title.kind === "name" ? <Name>{title.value}</Name> : <>{l10n.getString(title.value)}</>;
 }
@@ -199,7 +199,7 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
   }
 }
 
-function lineDetail(l: RebuiltLine, l10n: L10n): string {
+export function lineDetail(l: RebuiltLine, l10n: L10n): string {
   const parts: string[] = [];
   if (l.kind === "settings") parts.push(l10n.getString("fullmove-settings-count", { count: l.count }));
   // App data that says why it needs the person says that instead of the general reason.

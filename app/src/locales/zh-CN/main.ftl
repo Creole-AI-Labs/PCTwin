@@ -1933,3 +1933,32 @@ accept-needs = 有一项需要你先处理。请查看详情。
 accept-not-now = 暂不
 accept-details = 查看详情
 accept-accept = 接受
+
+# 2.8 screens
+report-group-apps = 应用
+report-group-settings = 设置
+report-group-special = 应用数据和其他内容
+report-group-people = 一起迁移的其他人
+report-count-apps = { $count ->
+       *[other] { $count } 个应用
+    }
+report-count-settings = { $count ->
+       *[other] { $count } 组设置
+    }
+report-count-special = { $count ->
+       *[other] { $count } 项
+    }
+report-count-people = { $count ->
+       *[other] { $count } 人
+    }
+report-beyond-done = 全部完成并已检查
+report-beyond-some = { $total } 项中的 { $done } 项已完成并检查
+report-beyond-left = { $count ->
+       *[other] 按你的选择，{ $count } 项未包含
+    }
+report-beyond-more = { $count ->
+       *[other] 还有 { $count } 个应用、设置或其他内容未在此列表中显示。
+    }
+report-here = { $count ->
+       *[other] { $count } 个应用原本就在这台电脑上。PCTwin 保持了原样。
+    }

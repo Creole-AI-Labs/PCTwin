@@ -700,7 +700,7 @@ export default function MoveHost({
         />
       );
     case "report":
-      return <Report items={view.items} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
+      return <Report items={view.items} rebuilt={view.outcome.rebuilt} people={view.outcome.people} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
     case "reconnecting":
       return (
         <>

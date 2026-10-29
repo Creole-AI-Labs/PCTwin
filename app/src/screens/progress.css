@@ -542,3 +542,6 @@
 .rp-music { background: var(--colour-kind-music); }
 .rp-documents { background: var(--colour-kind-documents); }
 .rp-other { background: var(--colour-kind-other); }
+/* Apps, settings, app data and people have no size on the bar: an outline, not a colour. */
+.rp-beyond { border: 2px solid var(--colour-muted); }
+.rp-here { margin: var(--space-3) 0 var(--space-2); }

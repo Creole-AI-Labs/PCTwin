@@ -2496,3 +2496,67 @@ accept-needs = هناك ما يحتاج إليك أولًا. اطّلع على �
 accept-not-now = ليس الآن
 accept-details = عرض التفاصيل
 accept-accept = قبول
+
+# 2.8 screens
+report-group-apps = التطبيقات
+report-group-settings = الإعدادات
+report-group-special = بيانات التطبيقات وأشياء أخرى
+report-group-people = أشخاص آخرون نُقلت أشياؤهم
+report-count-apps = { $count ->
+        [zero] لا تطبيقات
+        [one] تطبيق واحد
+        [two] تطبيقان
+        [few] { $count } تطبيقات
+        [many] { $count } تطبيقًا
+       *[other] { $count } تطبيق
+    }
+report-count-settings = { $count ->
+        [zero] لا مجموعات إعدادات
+        [one] مجموعة إعدادات واحدة
+        [two] مجموعتا إعدادات
+        [few] { $count } مجموعات إعدادات
+        [many] { $count } مجموعة إعدادات
+       *[other] { $count } مجموعة إعدادات
+    }
+report-count-special = { $count ->
+        [zero] لا شيء
+        [one] شيء واحد
+        [two] شيئان
+        [few] { $count } أشياء
+        [many] { $count } شيئًا
+       *[other] { $count } شيء
+    }
+report-count-people = { $count ->
+        [zero] لا أحد
+        [one] شخص واحد
+        [two] شخصان
+        [few] { $count } أشخاص
+        [many] { $count } شخصًا
+       *[other] { $count } شخص
+    }
+report-beyond-done = اكتمل كل شيء وتم التحقق منه
+report-beyond-some = اكتمل { $done } من { $total } وتم التحقق منها
+report-beyond-left = { $count ->
+        [zero] لم يُترك شيء
+        [one] تُرك واحد، كما اخترت
+        [two] تُرك اثنان، كما اخترت
+        [few] تُركت { $count }، كما اخترت
+        [many] تُرك { $count }، كما اخترت
+       *[other] تُرك { $count }، كما اخترت
+    }
+report-beyond-more = { $count ->
+        [zero] لا شيء آخر خارج هذه القائمة.
+        [one] وشيء واحد آخر من التطبيقات أو الإعدادات لا تعرضه هذه القائمة.
+        [two] وشيئان آخران من التطبيقات أو الإعدادات لا تعرضهما هذه القائمة.
+        [few] و{ $count } أشياء أخرى من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
+        [many] و{ $count } شيئًا آخر من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
+       *[other] و{ $count } شيء آخر من التطبيقات أو الإعدادات لا تعرضها هذه القائمة.
+    }
+report-here = { $count ->
+        [zero] لم يكن أي تطبيق موجودًا على هذا الحاسوب.
+        [one] كان تطبيق واحد موجودًا على هذا الحاسوب. تركه PCTwin كما هو.
+        [two] كان تطبيقان موجودين على هذا الحاسوب. تركهما PCTwin كما هما.
+        [few] كانت { $count } تطبيقات موجودة على هذا الحاسوب. تركها PCTwin كما هي.
+        [many] كان { $count } تطبيقًا موجودًا على هذا الحاسوب. تركها PCTwin كما هي.
+       *[other] كان { $count } تطبيق موجودًا على هذا الحاسوب. تركها PCTwin كما هي.
+    }

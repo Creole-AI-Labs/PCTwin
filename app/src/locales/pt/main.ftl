@@ -2250,3 +2250,46 @@ accept-needs = Algo precisa de você primeiro. Veja os detalhes.
 accept-not-now = Agora não
 accept-details = Ver os detalhes
 accept-accept = Aceitar
+
+# 2.8 screens
+report-group-apps = Apps
+report-group-settings = Configurações
+report-group-special = Dados de apps e outras coisas
+report-group-people = Outras pessoas transferidas
+report-count-apps = { $count ->
+        [one] { $count } app
+        [many] { $count } apps
+       *[other] { $count } apps
+    }
+report-count-settings = { $count ->
+        [one] { $count } grupo de configurações
+        [many] { $count } grupos de configurações
+       *[other] { $count } grupos de configurações
+    }
+report-count-special = { $count ->
+        [one] { $count } item
+        [many] { $count } itens
+       *[other] { $count } itens
+    }
+report-count-people = { $count ->
+        [one] { $count } pessoa
+        [many] { $count } pessoas
+       *[other] { $count } pessoas
+    }
+report-beyond-done = Tudo feito e verificado
+report-beyond-some = { $done } de { $total } feitos e verificados
+report-beyond-left = { $count ->
+        [one] { $count } deixado de fora, como você escolheu
+        [many] { $count } deixados de fora, como você escolheu
+       *[other] { $count } deixados de fora, como você escolheu
+    }
+report-beyond-more = { $count ->
+        [one] E mais { $count } app, configuração ou outra coisa que esta lista não mostra.
+        [many] E mais { $count } apps, configurações ou outras coisas que esta lista não mostra.
+       *[other] E mais { $count } apps, configurações ou outras coisas que esta lista não mostra.
+    }
+report-here = { $count ->
+        [one] { $count } app já estava neste notebook. O PCTwin o deixou como estava.
+        [many] { $count } apps já estavam neste notebook. O PCTwin os deixou como estavam.
+       *[other] { $count } apps já estavam neste notebook. O PCTwin os deixou como estavam.
+    }

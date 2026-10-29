@@ -2177,3 +2177,39 @@ accept-needs = पहले किसी चीज़ पर आपका ध्
 accept-not-now = अभी नहीं
 accept-details = विवरण देखें
 accept-accept = स्वीकार करें
+
+# 2.8 screens
+report-group-apps = ऐप
+report-group-settings = सेटिंग्स
+report-group-special = ऐप डेटा और दूसरी चीज़ें
+report-group-people = साथ में ले जाए गए दूसरे लोग
+report-count-apps = { $count ->
+        [one] { $count } ऐप
+       *[other] { $count } ऐप
+    }
+report-count-settings = { $count ->
+        [one] सेटिंग्स का { $count } समूह
+       *[other] सेटिंग्स के { $count } समूह
+    }
+report-count-special = { $count ->
+        [one] { $count } चीज़
+       *[other] { $count } चीज़ें
+    }
+report-count-people = { $count ->
+        [one] { $count } व्यक्ति
+       *[other] { $count } लोग
+    }
+report-beyond-done = सब पूरा हुआ और जाँच लिया गया
+report-beyond-some = { $total } में से { $done } पूरे हुए और जाँच लिए गए
+report-beyond-left = { $count ->
+        [one] { $count } छोड़ा गया, जैसा आपने चुना
+       *[other] { $count } छोड़े गए, जैसा आपने चुना
+    }
+report-beyond-more = { $count ->
+        [one] और { $count } ऐप, सेटिंग या दूसरी चीज़ जो यह सूची नहीं दिखाती।
+       *[other] और { $count } ऐप, सेटिंग्स या दूसरी चीज़ें जो यह सूची नहीं दिखाती।
+    }
+report-here = { $count ->
+        [one] { $count } ऐप इस लैपटॉप पर पहले से था। PCTwin ने उसे वैसा ही छोड़ दिया।
+       *[other] { $count } ऐप इस लैपटॉप पर पहले से थे। PCTwin ने उन्हें वैसा ही छोड़ दिया।
+    }
