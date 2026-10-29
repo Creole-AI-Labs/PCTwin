@@ -2091,3 +2091,8 @@ report-here = { $count ->
         [one] 1 app was already on this laptop. PCTwin left it as it is.
        *[other] { $count } apps were already on this laptop. PCTwin left them as they are.
     }
+progress-ready-title = Ready to use now
+progress-ready-body = { $count ->
+        [one] { $groups } is copied and checked. You can open it on this laptop while the rest comes.
+       *[other] { $groups } are copied and checked. You can open them on this laptop while the rest comes.
+    }

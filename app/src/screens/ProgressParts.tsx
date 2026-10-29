@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Banner, Badge, ProgressBar, ProgressValue, ResultChip, Row, RowList } from "../components/kit";
 import { ArrowForward, Check, Info, Laptop, Lock } from "../icons";
 import { labelText } from "../pairing";
-import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Range, type Reason } from "../move";
+import { formatBytes, formatSpeed, groupState, listText, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Range, type Reason } from "../move";
 import "./progress.css";
 import { shownName } from "../names";
 
@@ -128,6 +128,32 @@ export function GroupRows({ groups }: { groups: MoveGroup[] }) {
         return <Row key={g.id} title={<GroupLabel name={g.name} />} detail={notes.length > 0 ? notes.join(" ") : undefined} end={<GroupBadge state={groupState(g.counts)} />} />;
       })}
     </RowList>
+  );
+}
+
+/**
+ * X03 Use your new laptop: the groups already copied and checked, named, while the rest still
+ * comes. A milestone, not the end: shown only while something is still waiting, copying or being
+ * checked, and only groups with every item copied and checked (none needing the person) count.
+ */
+export function ReadyNow({ groups }: { groups: MoveGroup[] }) {
+  const { l10n } = useLocalization();
+  const ready = groups.filter((g) => groupState(g.counts) === "copied");
+  const coming = groups.some((g) => {
+    const s = groupState(g.counts);
+    return s === "waiting" || s === "copying" || s === "checking";
+  });
+  if (ready.length === 0 || !coming) return null;
+  const names = ready.map((g) => (g.name.kind === "role" ? l10n.getString(`plan-role-${g.name.role}`) : shownName(g.name.name)));
+  const list = listText(names);
+  return (
+    <section className="mv-ready" aria-labelledby="mv-ready-title">
+      <h2 id="mv-ready-title" className="mv-ready-title">
+        <Check className="mv-icon" />
+        {l10n.getString("progress-ready-title")}
+      </h2>
+      <p dir="auto">{l10n.getString("progress-ready-body", { groups: list, count: ready.length })}</p>
+    </section>
   );
 }
 

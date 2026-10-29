@@ -1962,3 +1962,7 @@ report-beyond-more = { $count ->
 report-here = { $count ->
        *[other] { $count } 个应用原本就在这台电脑上。PCTwin 保持了原样。
     }
+progress-ready-title = 现在就能用
+progress-ready-body = { $count ->
+       *[other] { $groups } 已复制并检查。其余内容传输期间，你可以在这台电脑上打开它们。
+    }

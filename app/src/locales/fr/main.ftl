@@ -2298,3 +2298,9 @@ report-here = { $count ->
         [many] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
        *[other] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
     }
+progress-ready-title = Prêt à utiliser
+progress-ready-body = { $count ->
+        [one] { $groups } est copié et vérifié. Vous pouvez l’ouvrir sur cet ordinateur pendant que le reste arrive.
+        [many] { $groups } sont copiés et vérifiés. Vous pouvez les ouvrir sur cet ordinateur pendant que le reste arrive.
+       *[other] { $groups } sont copiés et vérifiés. Vous pouvez les ouvrir sur cet ordinateur pendant que le reste arrive.
+    }

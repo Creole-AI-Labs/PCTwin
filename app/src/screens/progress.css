@@ -545,3 +545,23 @@
 /* Apps, settings, app data and people have no size on the bar: an outline, not a colour. */
 .rp-beyond { border: 2px solid var(--colour-muted); }
 .rp-here { margin: var(--space-3) 0 var(--space-2); }
+
+/* X03 Use your new laptop: what is ready now, in words (the tick is never the only sign). */
+.mv-ready {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: 12px;
+  background: var(--colour-soft);
+}
+.mv-ready-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-body);
+}
+.mv-ready p {
+  margin: 0;
+  font-size: var(--type-supporting);
+}

@@ -3,20 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
 import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
-import { pageLocale } from "../move";
+import { listText } from "../move";
 import FrameFooter from "./FrameFooter";
 import { RebuildPlanSection } from "./FullMoveParts";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
 
-type ListFormatter = new (locale: string, options: { type: "conjunction" }) => { format: (items: string[]) => string };
-
-/** Names as a list in the page's language ("Desktop and Documents"); commas where the system has no list format. */
-function listText(names: string[]): string {
-  const ListFormat = (Intl as unknown as { ListFormat?: ListFormatter }).ListFormat;
-  return ListFormat ? new ListFormat(pageLocale(), { type: "conjunction" }).format(names) : names.join(", ");
-}
 
 /**
  * What the new laptop found before anything moves, each said plainly: whether it fits, about how

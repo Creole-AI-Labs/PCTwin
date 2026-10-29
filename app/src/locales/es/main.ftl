@@ -2289,3 +2289,9 @@ report-here = { $count ->
         [many] { $count } apps ya estaban en esta laptop. PCTwin las dejó como estaban.
        *[other] { $count } apps ya estaban en esta laptop. PCTwin las dejó como estaban.
     }
+progress-ready-title = Listo para usar ya
+progress-ready-body = { $count ->
+        [one] { $groups } ya está copiado y comprobado. Puedes abrirlo en esta laptop mientras llega el resto.
+        [many] { $groups } ya están copiados y comprobados. Puedes abrirlos en esta laptop mientras llega el resto.
+       *[other] { $groups } ya están copiados y comprobados. Puedes abrirlos en esta laptop mientras llega el resto.
+    }
