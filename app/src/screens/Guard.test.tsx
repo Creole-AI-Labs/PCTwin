@@ -457,6 +457,11 @@ describe("focus and announcements (T28-018, T28-020)", () => {
     const engine = fakeEngine(ready(g.localWorking));
     render(wrap(<GuardHost bridge={engine.bridge} />));
     const pause = await screen.findByRole("button", { name: text("guard-pause") });
+    // The new page first puts focus on its heading, a moment after it appears: let that settle
+    // before the person moves it, or the page's own first focus races the test (it failed in CI).
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: text("guard-local-title") }));
+    });
     pause.focus();
     engine.push({ ...g.localWorking, version: g.localWorking.version + 1, progress: { done: 6_000_000_000, total: 12_400_000_000, unit: "bytes" } });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: text("guard-pause") }));
