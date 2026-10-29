@@ -546,9 +546,10 @@ impl Discovery {
     /// Announces one remembered connection's current token (Security Design Part T), with the
     /// port this laptop listens on for remembered connections, until the returned
     /// [`Announcement`] is dropped. Nothing else is announced: no label, no name. Each token is
-    /// its own announcement under its own random names, so the tokens of one laptop's
-    /// connections are not grouped together. Announce only on the chosen connection's addresses
-    /// `ips` (an empty list: the system's).
+    /// its own announcement under its own random names, but all of one laptop's announcements
+    /// carry the same addresses and port, so anyone on the network can group them by where they
+    /// come from (and count them); the tokens say nothing about who the connections are.
+    /// Announce only on `ips` (an empty list: the system's).
     pub fn announce_known(
         &self,
         token: &[u8; KNOWN_TOKEN_LEN],
@@ -574,13 +575,19 @@ impl Discovery {
         })
     }
 
-    /// Looks for remembered connections' tokens for `wait`: each token seen, and where to
-    /// connect (local-network addresses only). Whether a token is one this laptop knows is for
-    /// the caller to work out; a stranger's tokens mean nothing to it.
-    pub fn browse_known(&self, wait: Duration) -> Result<Vec<FoundKnown>, DiscoveryError> {
+    /// Looks for the `wanted` tokens (the remembered laptops this laptop is looking for) for
+    /// the whole of `wait`: each one seen, and where to connect (local-network addresses only).
+    /// Every other announcement is passed over, however many there are, so a crowded network or
+    /// a flood of fake announcements never ends the look early; a token copied by someone else
+    /// keeps at most [`MAX_NAMES_PER_TOKEN`] announcements, each with its addresses once.
+    pub fn browse_known(
+        &self,
+        wanted: &[[u8; KNOWN_TOKEN_LEN]],
+        wait: Duration,
+    ) -> Result<Vec<FoundKnown>, DiscoveryError> {
         let events = self.daemon.browse(KNOWN_SERVICE_TYPE)?;
         let deadline = Instant::now() + wait;
-        let mut seen: HashMap<String, FoundKnown> = HashMap::new();
+        let mut seen = KnownSeen::new(wanted);
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -588,28 +595,15 @@ impl Discovery {
             }
             match events.recv_timeout(left) {
                 Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let name = info.get_fullname().to_string();
-                    match read_known(&info) {
-                        Some(found) => {
-                            seen.insert(name, found);
-                        }
-                        None => {
-                            seen.remove(&name);
-                        }
-                    }
+                    seen.resolved(info.get_fullname(), read_known(&info));
                 }
-                Ok(ServiceEvent::ServiceRemoved(_, name)) => {
-                    seen.remove(&name);
-                }
+                Ok(ServiceEvent::ServiceRemoved(_, name)) => seen.removed(&name),
                 Ok(_) => {}
                 Err(_) => break,
             }
-            if seen.len() > MAX_KNOWN_SEEN {
-                break;
-            }
         }
         let _ = self.daemon.stop_browse(KNOWN_SERVICE_TYPE);
-        Ok(seen.into_values().collect())
+        Ok(seen.found())
     }
 
     /// Looks for old laptops for `wait`, and returns what was found.
@@ -678,8 +672,87 @@ impl Nearby {
 pub const KNOWN_SERVICE_TYPE: &str = "_pctwin-k._tcp.local.";
 /// Bytes in a remembered connection's token.
 pub const KNOWN_TOKEN_LEN: usize = 8;
-/// Most announcements one look keeps (a crowded network cannot fill memory).
-const MAX_KNOWN_SEEN: usize = 512;
+/// Most announcements one look keeps for one wanted token (someone else can copy a token seen on
+/// the network and announce it with their own addresses).
+pub const MAX_NAMES_PER_TOKEN: usize = 8;
+/// Most addresses one announcement may give.
+const MAX_ADDRS_PER_NAME: usize = 8;
+
+/// What one look for remembered laptops has seen: only the wanted tokens, each from at most
+/// [`MAX_NAMES_PER_TOKEN`] announcements (by name), so memory stays small whatever is announced.
+#[derive(Debug, Default)]
+struct KnownSeen {
+    wanted: Vec<[u8; KNOWN_TOKEN_LEN]>,
+    /// Announcement name to its token and addresses, in the order first seen.
+    names: Vec<(String, [u8; KNOWN_TOKEN_LEN], Vec<SocketAddr>)>,
+}
+
+impl KnownSeen {
+    fn new(wanted: &[[u8; KNOWN_TOKEN_LEN]]) -> Self {
+        Self {
+            wanted: wanted.to_vec(),
+            names: Vec::new(),
+        }
+    }
+
+    /// The announcement `name` resolved to `found` (`None`: not in PCTwin's form).
+    fn resolved(&mut self, name: &str, found: Option<FoundKnown>) {
+        let at = self.names.iter().position(|(n, _, _)| n == name);
+        let Some(found) = found.filter(|f| self.wanted.contains(&f.token)) else {
+            // Junk, or a token nobody here wants: passed over (and any earlier form removed).
+            if let Some(at) = at {
+                self.names.remove(at);
+            }
+            return;
+        };
+        let mut addrs: Vec<SocketAddr> = Vec::new();
+        for a in found.addrs {
+            if !addrs.contains(&a) && addrs.len() < MAX_ADDRS_PER_NAME {
+                addrs.push(a);
+            }
+        }
+        match at {
+            Some(at) => self.names[at] = (name.to_string(), found.token, addrs),
+            None => {
+                let held = self
+                    .names
+                    .iter()
+                    .filter(|(_, t, _)| *t == found.token)
+                    .count();
+                if held < MAX_NAMES_PER_TOKEN {
+                    self.names.push((name.to_string(), found.token, addrs));
+                }
+            }
+        }
+    }
+
+    fn removed(&mut self, name: &str) {
+        self.names.retain(|(n, _, _)| n != name);
+    }
+
+    /// Each wanted token seen, with every address it was seen at, each once.
+    fn found(self) -> Vec<FoundKnown> {
+        let mut out: Vec<FoundKnown> = Vec::new();
+        for (_, token, addrs) in self.names {
+            let at = match out.iter().position(|f| f.token == token) {
+                Some(at) => at,
+                None => {
+                    out.push(FoundKnown {
+                        token,
+                        addrs: Vec::new(),
+                    });
+                    out.len() - 1
+                }
+            };
+            for a in addrs {
+                if !out[at].addrs.contains(&a) {
+                    out[at].addrs.push(a);
+                }
+            }
+        }
+        out
+    }
+}
 
 /// A remembered connection's token seen nearby.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -823,6 +896,55 @@ mod tests {
         let mut p: Vec<u16> = found.iter().map(|f| f.addrs[0].port()).collect();
         p.sort_unstable();
         p
+    }
+
+    fn found(token: u8, addrs: &[&str]) -> Option<FoundKnown> {
+        Some(FoundKnown {
+            token: [token; KNOWN_TOKEN_LEN],
+            addrs: addrs.iter().map(|a| a.parse().unwrap()).collect(),
+        })
+    }
+
+    /// Thousands of fake or unwanted announcements never end the look or crowd out the one
+    /// wanted; a copied token keeps a bounded number of announcements, each address once.
+    #[test]
+    fn a_look_passes_over_junk_and_keeps_only_what_it_wants() {
+        let mut seen = KnownSeen::new(&[[7; KNOWN_TOKEN_LEN]]);
+        for n in 0..5000u32 {
+            seen.resolved(
+                &format!("junk-{n}"),
+                found((n % 7) as u8, &["10.0.0.9:4000"]),
+            );
+            seen.resolved(&format!("bad-{n}"), None);
+        }
+        assert!(seen.names.is_empty());
+        seen.resolved("real", found(7, &["192.168.1.5:5000", "192.168.1.5:5000"]));
+        for n in 0..100 {
+            seen.resolved(
+                &format!("copy-{n}"),
+                found(7, &["10.0.0.66:5000", "10.0.0.66:5000"]),
+            );
+        }
+        assert_eq!(seen.names.len(), MAX_NAMES_PER_TOKEN);
+        // The real one, seen again, keeps its place.
+        seen.resolved("real", found(7, &["192.168.1.5:5000"]));
+        let out = seen.found();
+        assert_eq!(out.len(), 1);
+        let want: Vec<SocketAddr> = vec![
+            "192.168.1.5:5000".parse().unwrap(),
+            "10.0.0.66:5000".parse().unwrap(),
+        ];
+        assert_eq!(out[0].addrs, want);
+    }
+
+    #[test]
+    fn a_wanted_announcement_that_goes_or_turns_to_junk_is_dropped() {
+        let mut seen = KnownSeen::new(&[[7; KNOWN_TOKEN_LEN]]);
+        seen.resolved("a", found(7, &["192.168.1.5:5000"]));
+        seen.resolved("b", found(7, &["192.168.1.6:5000"]));
+        seen.removed("a");
+        seen.resolved("b", None);
+        assert!(seen.found().is_empty());
     }
 
     #[test]

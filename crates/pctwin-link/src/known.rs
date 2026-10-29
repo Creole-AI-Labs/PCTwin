@@ -14,10 +14,16 @@
 //! - Each step has [`pctwin_pairing::known::KNOWN_TIMEOUT`]; a device that stays silent is
 //!   closed. The caller runs each [`KnownArrival::handshake`] on its own task, so a slow device
 //!   never holds up the next.
+//! - Anyone on the network can connect, so arrivals are bounded ([`ArrivalGate`]): at most
+//!   [`MAX_HANDSHAKES`] handshakes at once, and at most [`PER_ADDRESS`] arrivals from one address
+//!   in each [`RATE_WINDOW`]; the rest are closed unread. An accept that fails (out of handles,
+//!   say) is tried again after a pause that grows, so the listener never stops.
 
+use std::collections::HashMap;
 use std::io;
-use std::net::SocketAddr;
-use std::time::Duration;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use pctwin_pairing::known::{KNOWN_TIMEOUT, StaticKeys, accept_known, open_known};
 use tokio::net::{TcpListener, TcpStream};
@@ -33,6 +39,120 @@ pub const HINT_LEN: usize = 8;
 const KIND_KNOWN_HELLO: u8 = 14;
 /// Largest known-keys handshake frame.
 const MAX_KNOWN_FRAME: usize = pctwin_pairing::MAX_MESSAGE_LEN + HINT_LEN;
+
+/// Most handshakes with remembered laptops running at once.
+pub const MAX_HANDSHAKES: usize = 16;
+/// Most arrivals one address may start in each [`RATE_WINDOW`].
+pub const PER_ADDRESS: u32 = 12;
+/// The window [`PER_ADDRESS`] counts over.
+pub const RATE_WINDOW: Duration = Duration::from_secs(60);
+/// Most addresses the gate keeps counts for; a full table refuses new addresses until it ages.
+const MAX_ADDRESSES: usize = 4096;
+/// The first and the longest pause after an accept that failed.
+const FIRST_PAUSE: Duration = Duration::from_millis(50);
+const LONGEST_PAUSE: Duration = Duration::from_secs(2);
+
+/// Which arrivals may start a handshake: a cap on handshakes at once and a rate per address.
+#[derive(Clone)]
+pub struct ArrivalGate {
+    state: Arc<Mutex<GateState>>,
+    most: usize,
+    per_address: u32,
+}
+
+struct GateState {
+    running: usize,
+    /// Per address: when its window began, and arrivals in it.
+    seen: HashMap<IpAddr, (Instant, u32)>,
+}
+
+/// A place in the gate, held while one handshake runs.
+pub struct GateTicket {
+    state: Arc<Mutex<GateState>>,
+}
+
+impl Drop for GateTicket {
+    fn drop(&mut self) {
+        let mut s = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.running = s.running.saturating_sub(1);
+    }
+}
+
+impl std::fmt::Debug for ArrivalGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArrivalGate(..)")
+    }
+}
+
+impl Default for ArrivalGate {
+    fn default() -> Self {
+        Self::new(MAX_HANDSHAKES, PER_ADDRESS)
+    }
+}
+
+impl ArrivalGate {
+    /// At most `most` handshakes at once, and `per_address` arrivals per address per window.
+    pub fn new(most: usize, per_address: u32) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(GateState {
+                running: 0,
+                seen: HashMap::new(),
+            })),
+            most,
+            per_address,
+        }
+    }
+
+    /// A place for an arrival from `ip` at `now`, or `None` (too many at once, or too many from
+    /// that address lately).
+    pub fn enter(&self, ip: IpAddr, now: Instant) -> Option<GateTicket> {
+        let mut s = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if s.running >= self.most {
+            return None;
+        }
+        if !s.seen.contains_key(&ip) && s.seen.len() >= MAX_ADDRESSES {
+            s.seen
+                .retain(|_, (start, _)| now.saturating_duration_since(*start) < RATE_WINDOW);
+            if s.seen.len() >= MAX_ADDRESSES {
+                return None;
+            }
+        }
+        let (start, count) = s.seen.entry(ip).or_insert((now, 0));
+        if now.saturating_duration_since(*start) >= RATE_WINDOW {
+            *start = now;
+            *count = 0;
+        }
+        if *count >= self.per_address {
+            return None;
+        }
+        *count += 1;
+        s.running += 1;
+        Some(GateTicket {
+            state: self.state.clone(),
+        })
+    }
+
+    /// Handshakes running now.
+    pub fn running(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .running
+    }
+}
+
+/// The pause before trying an accept again after `failures` failures in a row.
+pub fn accept_pause(failures: u32) -> Duration {
+    FIRST_PAUSE
+        .saturating_mul(2u32.saturating_pow(failures.saturating_sub(1).min(16)))
+        .min(LONGEST_PAUSE)
+}
 
 /// What the answering laptop needs for a connection it remembers.
 pub struct Remembered<C> {
@@ -81,6 +201,7 @@ pub async fn connect_known(
 pub struct KnownListener {
     listeners: Vec<TcpListener>,
     config: LinkConfig,
+    gate: ArrivalGate,
 }
 
 impl std::fmt::Debug for KnownListener {
@@ -94,6 +215,8 @@ pub struct KnownArrival {
     stream: TcpStream,
     peer: SocketAddr,
     config: LinkConfig,
+    /// Its place in the gate, given back when the handshake ends.
+    _ticket: GateTicket,
 }
 
 impl std::fmt::Debug for KnownArrival {
@@ -119,7 +242,17 @@ impl KnownListener {
             at.set_port(port);
             listeners.push(TcpListener::bind(at).await?);
         }
-        Ok(Self { listeners, config })
+        Ok(Self {
+            listeners,
+            config,
+            gate: ArrivalGate::default(),
+        })
+    }
+
+    /// With `gate` deciding which arrivals may start a handshake.
+    pub fn with_gate(mut self, gate: ArrivalGate) -> Self {
+        self.gate = gate;
+        self
     }
 
     /// The port to announce.
@@ -127,25 +260,43 @@ impl KnownListener {
         Ok(self.listeners[0].local_addr()?.port())
     }
 
-    /// The next device with a local-network address; others are closed unread.
-    pub async fn accept(&self) -> io::Result<KnownArrival> {
+    /// The next device with a local-network address that the gate lets in; others are closed
+    /// unread. An accept that fails is tried again after a pause, so this never gives up.
+    pub async fn accept(&self) -> KnownArrival {
+        let mut failures = 0u32;
         loop {
-            let (stream, peer) = match self.listeners.as_slice() {
-                [only] => only.accept().await?,
+            let accepted = match self.listeners.as_slice() {
+                [only] => only.accept().await,
                 [first, second, ..] => tokio::select! {
-                    a = first.accept() => a?,
-                    b = second.accept() => b?,
+                    a = first.accept() => a,
+                    b = second.accept() => b,
                 },
                 [] => std::future::pending().await,
             };
-            if is_local_peer(peer.ip()) {
-                keep_alive(&stream);
-                return Ok(KnownArrival {
-                    stream,
-                    peer,
-                    config: self.config,
-                });
+            let (stream, peer) = match accepted {
+                Ok(a) => {
+                    failures = 0;
+                    a
+                }
+                Err(_) => {
+                    failures = failures.saturating_add(1);
+                    tokio::time::sleep(accept_pause(failures)).await;
+                    continue;
+                }
+            };
+            if !is_local_peer(peer.ip()) {
+                continue;
             }
+            let Some(ticket) = self.gate.enter(peer.ip(), Instant::now()) else {
+                continue;
+            };
+            keep_alive(&stream);
+            return KnownArrival {
+                stream,
+                peer,
+                config: self.config,
+                _ticket: ticket,
+            };
         }
     }
 }
