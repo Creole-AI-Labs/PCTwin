@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tokio::sync::oneshot;
 
-use crate::pairing::{AppPairing, LabelView, PairedWith};
+use crate::pairing::{AppPairing, LabelView};
 
 /// What the move is at (scanning, waiting for the other laptop, moving).
 pub const STAGE_EVENT: &str = "move-stage";
@@ -199,12 +199,12 @@ fn about_here(
 /// Both laptops, the moment the move starts and before anything is looked for: each says what
 /// it is, they agree the protocol and the new laptop measures the link; both screens show it
 /// (C06, C07). PCTwin versions that cannot move together are shown too, naming the one to update.
-async fn greet<'l, R: Runtime>(
+async fn greet<'l, R: Runtime, C: pctwin_transfer::Channel>(
     app: &AppHandle<R>,
-    link: &'l mut pctwin_link::Link,
+    link: &'l mut C,
     side: pctwin_move::greeting::Side,
     other: Option<LabelView>,
-) -> Result<pctwin_move::greeting::Greeted<'l, pctwin_link::Link>, TransferError> {
+) -> Result<pctwin_move::greeting::Greeted<'l, C>, TransferError> {
     let own = crate::laptop_name::kept(app);
     let mine = about_here(app.package_info().version.to_string(), own.as_ref());
     let mine_name = own.as_ref().map(LabelView::from);
@@ -2691,8 +2691,11 @@ enum ThisSide {
     /// The old laptop, with the other people the mover ticked (M06).
     Old {
         others: Others,
+        link: pctwin_link::Link,
     },
-    New(Box<NewSide>),
+    New(Box<NewSide>, pctwin_link::Link),
+    /// This laptop, taking a dead laptop's things from its drive connected here (2.6).
+    Rescue(Box<NewSide>, Box<RescueSource>),
 }
 
 /// What the new laptop needs before it can take a move: its places approved, the rules, the
@@ -2792,6 +2795,36 @@ async fn run_new<R: Runtime>(
     names: Arc<Mutex<HashMap<ItemId, String>>>,
     other: Option<LabelView>,
 ) -> Result<Ran, MoveError> {
+    let watch = link.watch().ok();
+    // The pairing's keys, for the way back after a drop once the plan is approved.
+    let mut redial =
+        pctwin_move::resume::NetRedial::new(&mut link, pctwin_link::LinkConfig::default());
+    receive_here(
+        app,
+        moving,
+        (&mut link, watch),
+        live,
+        setup,
+        names,
+        other,
+        &mut redial,
+    )
+    .await
+}
+
+/// The new laptop's side over `link` (with a watch on it while the person decides, when it is a
+/// network link): greet, show the plan, wait for the approval, receive, then the full move.
+#[allow(clippy::too_many_arguments)]
+async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::resume::Redial>(
+    app: &AppHandle<R>,
+    moving: AppMoving,
+    (link, watch): (&mut C, Option<pctwin_link::LinkWatch>),
+    live: &Live,
+    setup: NewSide,
+    names: Arc<Mutex<HashMap<ItemId, String>>>,
+    other: Option<LabelView>,
+    redial: &mut D,
+) -> Result<Ran, MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let NewSide {
         mut table,
@@ -2814,7 +2847,7 @@ async fn run_new<R: Runtime>(
     let held_places = pctwin_move::held_journal::HeldPlaces::default();
     let ledger = pctwin_move::held_journal::SplitLedger::new(&journal, held_places.clone());
     let mut steps = AppSteps {
-        watch: link.watch().ok(),
+        watch,
         app: app.clone(),
         moving,
         me: me.clone(),
@@ -2833,12 +2866,9 @@ async fn run_new<R: Runtime>(
         sink: None,
         picked: Vec::new(),
     };
-    // The pairing's keys, for the way back after a drop once the plan is approved.
-    let mut redial =
-        pctwin_move::resume::NetRedial::new(&mut link, pctwin_link::LinkConfig::default());
     // A stop ends the greeting at once.
     let mut link = pctwin_move::or_stop(&live.control, async {
-        Ok(greet(app, &mut link, pctwin_move::greeting::Side::New, other).await?)
+        Ok(greet(app, link, pctwin_move::greeting::Side::New, other).await?)
     })
     .await?;
     let here = pctwin_move::Here {
@@ -2852,7 +2882,7 @@ async fn run_new<R: Runtime>(
         &mut table,
         here,
         live,
-        &mut redial,
+        redial,
     )
     .await;
     // Whatever became of the move, the helper's session ends; those placed get their things at
@@ -2899,6 +2929,117 @@ async fn run_new<R: Runtime>(
         report,
         link_lost: received.ended == Ended::LinkLost,
     })
+}
+
+/// A dead laptop's drive connected to this laptop (2.6 rescue), found again by its identity from
+/// the system's own list, never by a path from the screens.
+pub struct RescueSource {
+    pub root: std::path::PathBuf,
+    pub identity: pctwin_orchestrate::rescue::DriveIdentity,
+    /// The drive's name, as the system shows it: the old laptop's name on every screen.
+    pub name: String,
+}
+
+/// Reads a rescued drive's files through the rescue's own handles, never through a path.
+struct RescueOpener(pctwin_orchestrate::rescue::RescueScan);
+
+impl pctwin_transfer::Opener for RescueOpener {
+    fn open(&self, path: &std::path::Path) -> std::io::Result<Box<dyn pctwin_transfer::Source>> {
+        Ok(Box::new(self.0.open(path)?))
+    }
+}
+
+/// The person whose things are the most on the drive: the mover; anyone else on it is placed as
+/// another person, as in any move.
+fn rescued_mover(record: &Record) -> Option<String> {
+    let mut bytes: BTreeMap<&str, u64> = BTreeMap::new();
+    for item in &record.items {
+        if let pctwin_record::Owner::Person { account_id } = &item.owner {
+            *bytes.entry(account_id).or_default() += item.size_bytes;
+        }
+    }
+    bytes
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(a.0)))
+        .map(|(id, _)| id.to_string())
+}
+
+/// A rescue: the drive is read only, into an ordinary plan, and moved here through the normal
+/// move (plan, approval, safety gate, journal), both sides in this app. Apps and settings are
+/// not read from a drive (said on the plan: nothing of them comes).
+async fn run_rescue<R: Runtime>(
+    app: &AppHandle<R>,
+    moving: AppMoving,
+    live: &Live,
+    setup: NewSide,
+    names: Arc<Mutex<HashMap<ItemId, String>>>,
+    drive: RescueSource,
+) -> Result<Ran, MoveError> {
+    let _ = app.emit(STAGE_EVENT, Stage::Waiting);
+    let (root, identity) = (drive.root.clone(), drive.identity.clone());
+    let scan = tauri::async_runtime::spawn_blocking(move || {
+        pctwin_orchestrate::rescue::scan_rescued_drive(
+            &root,
+            &identity,
+            pctwin_scan::system_reader().as_mut(),
+        )
+    })
+    .await
+    .map_err(|_| TransferError::Protocol("the drive's scan stopped".into()))?
+    .map_err(|e| TransferError::Protocol(e.to_string()))?;
+    let record = scan.record.clone();
+    let mover = rescued_mover(&record)
+        .ok_or_else(|| TransferError::Protocol("nobody's things were found on the drive".into()))?;
+    let label = pctwin_discovery::Label::named(&drive.name).ok();
+    let shown_label = label.as_ref().map(LabelView::from);
+    let (mut old_end, mut new_end) = pctwin_move::local::pair();
+    let version = app.package_info().version.to_string();
+    let extras = pctwin_fullmove::extras::Extras::empty(pctwin_fullmove::extras::this_system());
+    let extras = extras.encode();
+    // The drive's side: quiet (the screens follow this laptop's side), ended with it.
+    let quiet = Live {
+        control: live.control.clone(),
+        ..Live::default()
+    };
+    let opener: Arc<dyn pctwin_transfer::Opener> = Arc::new(RescueOpener(scan.clone()));
+    let drive_side = async {
+        let mine = about_here(version, label.as_ref());
+        let mut greeted =
+            pctwin_move::greeting::greet(&mut old_end, &mine, pctwin_move::greeting::Side::Old)
+                .await
+                .map_err(|n| MoveError::from(n.error))?;
+        let who = pctwin_move::Who {
+            mover: &mover,
+            people: &[],
+            extras: &extras,
+        };
+        pctwin_move::send_by_rules(
+            &mut greeted,
+            &record,
+            &who,
+            |item| scan.source_of(item),
+            &quiet,
+            opener,
+            &mut pctwin_move::resume::NoComeback,
+            None,
+        )
+        .await
+    };
+    // No way back is needed: both sides are in this app.
+    let mut no_redial = pctwin_move::resume::NoRedial;
+    let this_side = receive_here(
+        app,
+        moving,
+        (&mut new_end, None),
+        live,
+        setup,
+        names,
+        shown_label,
+        &mut no_redial,
+    );
+    // This laptop's side says how the move went; the drive's side only ends with it.
+    let (_sent, ran) = tokio::join!(drive_side, this_side);
+    ran
 }
 
 /// The mover's own files on this laptop now, each with the full path where it is stored (copied
@@ -2964,16 +3105,13 @@ fn people_outcome(
 fn spawn_run<R: Runtime>(
     app: AppHandle<R>,
     moving: AppMoving,
-    link: pctwin_link::Link,
-    paired: PairedWith,
+    old_label: Option<LabelView>,
     side: ThisSide,
     live: Live,
     scan_stop: Arc<AtomicBool>,
 ) -> Result<(), MoveProblem> {
     let runtime = tokio::runtime::Handle::current();
-    let laptops = Laptops {
-        old: paired.label.as_ref().map(LabelView::from),
-    };
+    let laptops = Laptops { old: old_label };
     let label = laptops.old.clone();
     let names = Arc::new(Mutex::new(HashMap::new()));
     let done = Arc::new(AtomicBool::new(false));
@@ -3000,13 +3138,16 @@ fn spawn_run<R: Runtime>(
             sleepy.store(_awake.held().is_err(), Ordering::Release);
             let ran = runtime.block_on(async {
                 match side {
-                    ThisSide::New(setup) => {
+                    ThisSide::New(setup, link) => {
                         let other = label.clone();
                         run_new(&app, moving.clone(), link, &live, *setup, names, other).await
                     }
-                    ThisSide::Old { others } => {
+                    ThisSide::Old { others, link } => {
                         let other = label.clone();
                         run_old(&app, &moving, link, &live, &scan_stop, others, other).await
+                    }
+                    ThisSide::Rescue(setup, drive) => {
+                        run_rescue(&app, moving.clone(), &live, *setup, names, *drive).await
                     }
                 }
             });
@@ -3110,10 +3251,10 @@ pub async fn move_begin<R: Runtime>(
     };
     // The new laptop has no one to tick: its people come from the old laptop.
     let side = if paired.old {
-        ThisSide::Old { others }
+        ThisSide::Old { others, link }
     } else {
         match new_places(fallback) {
-            Ok(setup) => ThisSide::New(Box::new(setup)),
+            Ok(setup) => ThisSide::New(Box::new(setup), link),
             Err(p) => {
                 moving.finish(Vec::new());
                 return Err(p);
@@ -3121,7 +3262,148 @@ pub async fn move_begin<R: Runtime>(
         }
     };
     let moving = Arc::clone(&moving);
-    spawn_run(app, moving, link, paired, side, live, scan_stop)
+    let label = paired.label.as_ref().map(LabelView::from);
+    spawn_run(app, moving, label, side, live, scan_stop)
+}
+
+/// A drive connected to this laptop that a rescue can read (2.6): another laptop's drive in a
+/// USB enclosure, or any drive that is not the one this laptop runs from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RescueDriveView {
+    /// The drive's own ID, which [`rescue_begin`] takes back (never a path).
+    pub id: String,
+    /// The drive's name as the system shows it.
+    pub name: String,
+    pub file_system: String,
+    pub total_bytes: u64,
+    /// It holds a folder of people's homes (`Users` on Windows, `Users` or `home` elsewhere): a
+    /// laptop's drive, likely the one to rescue.
+    pub looks_like_a_laptop: bool,
+}
+
+/// The drives a rescue could read now, each with its identity, and where it is mounted.
+fn rescue_drives_here() -> Vec<(RescueDriveView, RescueSource)> {
+    let system = std::env::var_os("SystemDrive").map(std::path::PathBuf::from);
+    pctwin_scan::volumes_this_laptop()
+        .into_iter()
+        .filter(|v| {
+            // Never the drive this laptop runs from: that is not a dead laptop's.
+            !v.is_system && system.as_ref().is_none_or(|s| !v.mount.starts_with(s))
+        })
+        .filter_map(|v| {
+            let identity = drive_identity(&v.mount)?;
+            let looks = ["Users", "home"].iter().any(|n| v.mount.join(n).is_dir());
+            let name = if v.name.trim().is_empty() {
+                v.mount.display().to_string()
+            } else {
+                format!("{} ({})", v.name.trim(), v.mount.display())
+            };
+            let view = RescueDriveView {
+                id: identity.volume_id.clone(),
+                name: name.clone(),
+                file_system: identity.file_system.clone(),
+                total_bytes: identity.total_bytes,
+                looks_like_a_laptop: looks,
+            };
+            Some((
+                view,
+                RescueSource {
+                    root: v.mount.clone(),
+                    identity,
+                    name,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// A drive's identity from the system's own list of volumes (Windows: `Win32_Volume`; Linux:
+/// `findmnt`). `None` when the system does not say, and then the drive is not offered.
+fn drive_identity(mount: &std::path::Path) -> Option<pctwin_orchestrate::rescue::DriveIdentity> {
+    #[cfg(windows)]
+    {
+        // The mount as Win32_Volume names it: "E:\" written with doubled backslashes in WQL.
+        let name = mount.display().to_string().replace('\\', "\\\\");
+        let script = format!(
+            "$v = Get-CimInstance Win32_Volume -Filter \"Name='{name}'\"; \
+             if ($v) {{ \"$($v.DeviceID)`t$($v.SerialNumber)`t$($v.FileSystem)`t$($v.Capacity)\" }}"
+        );
+        let out = pctwin_types::process::quiet("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .ok()?;
+        pctwin_orchestrate::rescue::identity_from_win32_volume(&String::from_utf8_lossy(
+            &out.stdout,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let out = pctwin_types::process::quiet("findmnt")
+            .args(["-n", "-b", "-o", "UUID,FSTYPE,SIZE"])
+            .arg(mount)
+            .output()
+            .ok()?;
+        pctwin_orchestrate::rescue::identity_from_findmnt(&String::from_utf8_lossy(&out.stdout))
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = mount;
+        None
+    }
+}
+
+/// R13 Rescue a laptop: the drives connected now that a rescue could read.
+#[tauri::command]
+pub async fn rescue_drives() -> Vec<RescueDriveView> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rescue_drives_here().into_iter().map(|(v, _)| v).collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Starts a rescue from the drive `id` (one [`rescue_drives`] offered): found again here by its
+/// identity, read only, and moved into this laptop's own folders through the normal move.
+#[tauri::command]
+pub async fn rescue_begin<R: Runtime>(
+    app: AppHandle<R>,
+    moving: State<'_, AppMoving>,
+    id: String,
+    fallback: BTreeMap<FolderRole, String>,
+) -> Result<(), MoveProblem> {
+    check_fallback(&fallback)?;
+    let found = tauri::async_runtime::spawn_blocking(move || {
+        rescue_drives_here()
+            .into_iter()
+            .find(|(v, _)| v.id == id)
+            .map(|(_, d)| d)
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or(MoveProblem::Failed)?;
+    let (live, scan_stop) = moving.begin()?;
+    let setup = match new_places(fallback) {
+        Ok(setup) => setup,
+        Err(p) => {
+            moving.finish(Vec::new());
+            return Err(p);
+        }
+    };
+    let label = pctwin_discovery::Label::named(&found.name)
+        .ok()
+        .as_ref()
+        .map(LabelView::from);
+    let moving = Arc::clone(&moving);
+    spawn_run(
+        app,
+        moving,
+        label,
+        ThisSide::Rescue(Box::new(setup), Box::new(found)),
+        live,
+        scan_stop,
+    )
 }
 
 /// The person's answer to the plan on screen (M23), for exactly that revision, with the folders
@@ -3690,6 +3972,25 @@ mod tests {
                 .collect(),
             ended,
         }
+    }
+
+    /// A rescued drive's mover is the person with the most on it; nobody's things, no mover.
+    #[test]
+    fn a_rescued_drives_mover_is_the_person_with_the_most_on_it() {
+        let mut record = Record::new(laptop());
+        assert_eq!(rescued_mover(&record), None);
+        record.items = vec![
+            item(person("ada"), FolderRole::Documents, &["a.txt"], 10),
+            item(person("bea"), FolderRole::Documents, &["b.txt"], 7),
+            item(person("bea"), FolderRole::Pictures, &["c.jpg"], 7),
+            item(
+                pctwin_record::Owner::Shared,
+                FolderRole::Other,
+                &["big.bin"],
+                99,
+            ),
+        ];
+        assert_eq!(rescued_mover(&record).as_deref(), Some("bea"));
     }
 
     /// The results name each place the mover's files arrived in, by where they were placed (the

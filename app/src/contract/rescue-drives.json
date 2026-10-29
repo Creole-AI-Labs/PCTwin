@@ -1,0 +1,18 @@
+[
+  [
+    {
+      "fileSystem": "NTFS",
+      "id": "2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10",
+      "looksLikeALaptop": true,
+      "name": "Old laptop drive (E:\\)",
+      "totalBytes": 256000000000
+    },
+    {
+      "fileSystem": "exFAT",
+      "id": "9a8b7c6d-1111-2222-3333-444455556666",
+      "looksLikeALaptop": false,
+      "name": "Photos stick (F:\\)",
+      "totalBytes": 64000000000
+    }
+  ]
+]

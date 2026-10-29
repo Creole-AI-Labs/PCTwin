@@ -241,6 +241,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         pairing::pairing_new_search,
         pairing::pairing_new_connect,
         moving::move_begin,
+        moving::rescue_drives,
+        moving::rescue_begin,
         moving::move_approve,
         moving::move_place_people,
         moving::move_choose_place,
