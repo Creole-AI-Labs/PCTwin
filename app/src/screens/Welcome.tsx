@@ -49,6 +49,7 @@ export default function Welcome({
   onWaiting,
   update,
   onUpdate,
+  onSafeStop,
 }: {
   onStart: () => void;
   onSoon: (which: Soon) => void;
@@ -60,6 +61,8 @@ export default function Welcome({
   onWaiting?: () => void;
   update?: UpdateState;
   onUpdate?: () => void;
+  /** The update was refused because PCTwin is busy: opens what it is waiting for. */
+  onSafeStop?: () => void;
 }) {
   const resuming = unfinished === true && onResume !== undefined;
   const updating = !resuming && update !== undefined && onUpdate !== undefined;
@@ -98,6 +101,11 @@ export default function Welcome({
           {update.state === "ready" && (
             <Localized id="home-update-action">
               <button type="button" className="home-update-button" onClick={onUpdate} />
+            </Localized>
+          )}
+          {update.state === "busy" && onSafeStop && (
+            <Localized id="safe-stop-see">
+              <button type="button" className="home-update-button" onClick={onSafeStop} />
             </Localized>
           )}
         </div>

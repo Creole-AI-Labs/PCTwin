@@ -14,11 +14,12 @@ import { Loading } from "./FinishParts";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 
-export default function SafeStop({ onBack }: { onBack: () => void }) {
+export default function SafeStop({ onBack, shown }: { onBack: () => void; /** A fixed view, for the screens gallery: nothing is asked of the engine. */ shown?: SafeStopView }) {
   const { l10n } = useLocalization();
-  const [view, setView] = useState<SafeStopView | null>(null);
+  const [view, setView] = useState<SafeStopView | null>(shown ?? null);
   const [failed, setFailed] = useState(false);
   const look = useCallback(() => {
+    if (shown) return;
     safeStop().then(
       (next) => {
         setFailed(false);
@@ -28,9 +29,10 @@ export default function SafeStop({ onBack }: { onBack: () => void }) {
         setFailed(true);
       },
     );
-  }, []);
+  }, [shown]);
   useEffect(look, [look]);
   useEffect(() => {
+    if (shown) return;
     let off: (() => void) | undefined;
     let gone = false;
     void listenSafeStop((next) => {
@@ -45,7 +47,7 @@ export default function SafeStop({ onBack }: { onBack: () => void }) {
       gone = true;
       off?.();
     };
-  }, [look]);
+  }, [look, shown]);
   return (
     <>
       <TopStrip onBack={onBack} labelId="safe-stop-strip" />

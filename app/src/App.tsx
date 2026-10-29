@@ -14,6 +14,7 @@ import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
 import HelpHome from "./screens/HelpHome";
+import SafeStop from "./screens/SafeStop";
 import MoveHost from "./screens/MoveHost";
 import RescuePick from "./screens/RescuePick";
 import PickUp from "./screens/PickUp";
@@ -62,6 +63,8 @@ type Screen =
   | { id: "note-in"; note: QsNote }
   // My PCTwin history (F08), from Home; Back returns there.
   | { id: "history" }
+  // What an update is waiting for (safe stop), from the update offer on Home.
+  | { id: "safe-stop" }
   // Help (S01), from the footer; Back returns to where it was opened.
   | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
@@ -323,6 +326,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 unfinished={unfinished > 0}
                 onResume={() => { setScreen({ id: "pickup", unfinished }); }}
                 update={update}
+                onSafeStop={() => { setScreen({ id: "safe-stop" }); }}
                 onUpdate={() => {
                   if (!update) return;
                   setUpdate({ ...update, state: "installing" });
@@ -382,7 +386,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 }}
               />
             )}
-            {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
+            {screen.id === "safe-stop" && <SafeStop onBack={() => { setScreen({ id: "welcome" }); }} />}
+            {screen.id === "history" && <HistoryHost onStart={startMove} onPair={() => { setScreen({ id: "pair", role: "new" }); }} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "qs" && (
               <QuickHost
                 key={`${screen.mode}-${screen.session ?? ""}`}

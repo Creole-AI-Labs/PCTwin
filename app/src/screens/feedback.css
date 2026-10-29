@@ -1,0 +1,54 @@
+/* Help, then Feedback (R12) */
+.fb-form {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.kit-field textarea.fb-words {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-block-size: 96px;
+  padding: 10px 12px;
+  border: 1px solid #b9c4d8;
+  border-radius: 10px;
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  font: inherit;
+  font-size: var(--type-small);
+  font-weight: 400;
+  resize: vertical;
+}
+
+.fb-preview {
+  margin-block: var(--space-4) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+}
+
+.fb-preview h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-supporting);
+}
+
+.fb-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fb-actions {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Four choices stay inside a narrow window: they stack under the label and wrap */
+.fb-form .kit-setting {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.fb-form .kit-segmented {
+  flex-wrap: wrap;
+}
