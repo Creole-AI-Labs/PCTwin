@@ -31,7 +31,7 @@ use pctwin_catalogue::Catalogue;
 use pctwin_gate::Destination;
 use pctwin_grant::{CaptureGrant, Now, PlanSeal, RootRef, SecretGrant};
 use pctwin_journal::{Imports, PlannedEffect, Recorder, UndoRight};
-use pctwin_readiness::goodbye::{ExceptionKind, SpecialStep};
+use pctwin_readiness::goodbye::{ExceptionKind, SpecialStep, StepWhat};
 use pctwin_recipe::SettingsRoot;
 use pctwin_record::{FoundApp, Owner};
 use pctwin_types::ItemResult;
@@ -582,18 +582,22 @@ pub fn before_wipe(
             continue;
         }
         let c = &p.component;
-        let kind = match c.custody {
-            Custody::MachineBound | Custody::ServiceHeld if !c.preserve => {
-                ExceptionKind::TiedToOldLaptop
+        // What it asks is a key: the screens say it in the person's language.
+        let (kind, what) = match c.custody {
+            Custody::MachineBound if !c.preserve => {
+                (ExceptionKind::TiedToOldLaptop, StepWhat::Relink)
             }
-            Custody::NeedsExport => ExceptionKind::DoFirstOnOldLaptop,
-            _ => ExceptionKind::OnlyOnOldLaptop,
+            Custody::ServiceHeld if !c.preserve => {
+                (ExceptionKind::TiedToOldLaptop, StepWhat::SignInAgain)
+            }
+            Custody::NeedsExport => (ExceptionKind::DoFirstOnOldLaptop, StepWhat::ExportFirst),
+            _ => (ExceptionKind::OnlyOnOldLaptop, StepWhat::LookAtIt),
         };
         out.push(SpecialStep {
             kind,
             place: p.app.clone(),
             component: c.id.0.iter().map(|b| format!("{b:02x}")).collect(),
-            words: format!("{}: {}", p.app, p.why),
+            what,
         });
     }
     for n in &plan.not_moved {
@@ -602,7 +606,7 @@ pub fn before_wipe(
                 kind: ExceptionKind::NotSearched,
                 place: format!("{}/{}", n.app, n.rel),
                 component: String::new(),
-                words: format!("{} in {}: {}", n.rel, n.app, n.why),
+                what: StepWhat::LookAtIt,
             });
         }
     }

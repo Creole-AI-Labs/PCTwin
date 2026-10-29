@@ -1495,7 +1495,7 @@ mod finish_examples {
                     _ => ResolutionView::AcceptedLoss { at: 1_792_627_300 },
                 },
                 can_accept: *key != ExceptionKey::OldLaptopNotReachable,
-                can_mark_done: key.person_can_do(),
+                can_mark_done: key.special() || n % 2 == 1,
                 shown: format!("{:064x}", 0xabc + n),
             })
             .collect()
@@ -1554,7 +1554,7 @@ mod finish_examples {
 
     fn route() -> RouteView {
         RouteView {
-            system: SystemKey::Windows,
+            system: Some(SystemKey::Windows),
             route: "windows-reset-clean-drive".into(),
             steps: vec![
                 "windows-open-recovery".into(),
@@ -1586,12 +1586,14 @@ mod finish_examples {
     fn started() -> Vec<HandoverStarted> {
         SystemKey::ALL
             .iter()
+            .map(|s| Some(*s))
+            .chain([None])
             .map(|s| HandoverStarted {
                 action: HandoverAction::EraseOldLaptop,
                 undo_closed: true,
-                opened: *s != SystemKey::Linux,
+                opened: false,
                 route: RouteView {
-                    system: *s,
+                    system: s,
                     ..route()
                 },
             })

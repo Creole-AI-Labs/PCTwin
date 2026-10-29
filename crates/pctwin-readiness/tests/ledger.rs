@@ -467,6 +467,44 @@ fn the_journal_probe_confirms_only_what_the_journal_shows() {
     );
 }
 
+/// Finishing a move reads every move from this old laptop (each has its own scope), never Quick
+/// Send's, never another laptop's, never what undo took back.
+#[test]
+fn the_journal_probe_for_finishing_reads_every_move_of_this_old_laptop() {
+    let (a, b, c, d) = (file("a.txt"), file("b.txt"), file("c.txt"), file("d.txt"));
+    let mut quick = entry(4, d.id, old_laptop(), committed([4; 32]));
+    quick.write.scope = JScope::QUICK_SEND;
+    let mut later = entry(5, a.id, old_laptop(), committed([6; 32]));
+    later.write.scope = JScope([7; 16]);
+    let entries = vec![
+        entry(1, a.id, old_laptop(), committed([1; 32])),
+        entry(2, b.id, other_laptop(), committed([2; 32])),
+        entry(3, c.id, old_laptop(), committed([3; 32])),
+        quick,
+        later,
+    ];
+    let p = JournalProbe::from_moves(&entries, &BTreeSet::from([3]), old_laptop());
+    // The newest copy of a stands, whichever move wrote it.
+    assert_eq!(p.fingerprint(a.id), Some([6; 32]));
+    assert!(p.has(a.id));
+    for not in [b.id, c.id, d.id] {
+        assert!(!p.has(not));
+        assert_eq!(p.fingerprint(not), None);
+    }
+    let mut ex = entry(
+        6,
+        b.id,
+        old_laptop(),
+        State::Existing {
+            stored_path: "b.txt".into(),
+        },
+    );
+    ex.write.scope = JScope([1; 16]);
+    let p = JournalProbe::from_moves(&[ex], &BTreeSet::new(), old_laptop());
+    assert!(p.has(b.id));
+    assert_eq!(p.fingerprint(b.id), None);
+}
+
 /// The 2.6 scheduler is the real state of a child job: a child's "finished" counts only for a
 /// job the scheduler itself took as done, and only for items inside that job's scope.
 #[test]

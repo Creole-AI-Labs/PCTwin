@@ -924,6 +924,60 @@ impl JournalProbe {
         }
         Ok(Self::from_entries(&entries, &undone, source, scope))
     }
+
+    /// Reads `journal` (read only) for every move from the old laptop `source`, whatever its
+    /// scope, never Quick Send's: item IDs are the old laptop's own, so a copy is this laptop's
+    /// whichever move of it wrote it. Of an item's copies written and checked, the newest stands;
+    /// a copy undo took back counts for nothing.
+    pub fn read_moves(journal: &Journal, source: LaptopId) -> Result<Self, JournalError> {
+        let entries = journal.entries()?;
+        let mut undone = BTreeSet::new();
+        for e in &entries {
+            if let Some(Undo::Done { outcome }) = journal.undo_of(e.id)?
+                && taken_back(&outcome)
+            {
+                undone.insert(e.id);
+            }
+        }
+        Ok(Self::from_moves(&entries, &undone, source))
+    }
+
+    /// [`JournalProbe::read_moves`] from journal `entries`, `undone` naming the entries undo took
+    /// back.
+    pub fn from_moves(entries: &[Entry], undone: &BTreeSet<u64>, source: LaptopId) -> Self {
+        let mut copies = BTreeMap::new();
+        for e in entries {
+            if e.write.source_laptop != source
+                || e.write.scope == JournalScope::QUICK_SEND
+                || undone.contains(&e.id)
+            {
+                continue;
+            }
+            match &e.state {
+                State::Committed { fingerprint, .. } => {
+                    copies.insert(e.write.item, OnDisk::Written(*fingerprint));
+                }
+                State::Existing { .. } => {
+                    copies.entry(e.write.item).or_insert(OnDisk::AlreadyThere);
+                }
+                _ => {}
+            }
+        }
+        Self { copies }
+    }
+
+    /// The fingerprint the journal holds for an item's copy, when it wrote and checked one.
+    pub fn fingerprint(&self, item: ItemId) -> Option<[u8; 32]> {
+        match self.copies.get(&item)? {
+            OnDisk::Written(fp) => Some(*fp),
+            OnDisk::AlreadyThere => None,
+        }
+    }
+
+    /// Whether the journal shows a copy of the item on this laptop now.
+    pub fn has(&self, item: ItemId) -> bool {
+        self.copies.contains_key(&item)
+    }
 }
 
 impl Probe for JournalProbe {

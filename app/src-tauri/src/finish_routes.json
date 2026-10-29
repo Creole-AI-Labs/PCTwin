@@ -1,0 +1,93 @@
+{
+  "about": "The system's own routes for handing an old laptop on (Task List 2.7). Data, not code: one row per system and action; each step is a key the screens put in words. PCTwin never runs these steps itself; the person follows them on the old laptop.",
+  "checked_on": "2026-10-29",
+  "routes": [
+    {
+      "id": "windows-remove-account",
+      "system": "windows",
+      "action": "remove-my-account",
+      "steps": [
+        "windows-make-other-administrator",
+        "windows-sign-in-other-administrator",
+        "windows-open-other-users",
+        "windows-remove-account",
+        "windows-delete-account-and-data"
+      ]
+    },
+    {
+      "id": "windows-reset-clean-drive",
+      "system": "windows",
+      "action": "erase-old-laptop",
+      "steps": [
+        "windows-sign-out-of-everything",
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-the-drive",
+        "windows-wait-until-setup-screen"
+      ]
+    },
+    {
+      "id": "macos-remove-account",
+      "system": "macos",
+      "action": "remove-my-account",
+      "steps": [
+        "macos-make-other-administrator",
+        "macos-sign-in-other-administrator",
+        "macos-open-users-and-groups",
+        "macos-delete-user",
+        "macos-delete-home-folder"
+      ]
+    },
+    {
+      "id": "macos-erase-all-content",
+      "system": "macos",
+      "action": "erase-old-laptop",
+      "steps": [
+        "macos-sign-out-of-apple-account",
+        "macos-open-transfer-or-reset",
+        "macos-erase-all-content-and-settings",
+        "macos-older-mac-use-recovery",
+        "macos-wait-until-setup-screen"
+      ]
+    },
+    {
+      "id": "linux-remove-account",
+      "system": "linux",
+      "action": "remove-my-account",
+      "steps": [
+        "linux-sign-in-other-administrator",
+        "linux-open-users",
+        "linux-remove-user-and-files"
+      ]
+    },
+    {
+      "id": "linux-erase",
+      "system": "linux",
+      "action": "erase-old-laptop",
+      "steps": [
+        "linux-no-built-in-reset",
+        "linux-drive-maker-secure-erase",
+        "linux-reinstall-from-usb"
+      ]
+    },
+    {
+      "id": "unknown-remove-account",
+      "system": null,
+      "action": "remove-my-account",
+      "steps": [
+        "any-sign-in-other-administrator",
+        "any-use-system-account-settings"
+      ]
+    },
+    {
+      "id": "unknown-erase",
+      "system": null,
+      "action": "erase-old-laptop",
+      "steps": [
+        "any-use-system-reset",
+        "any-drive-maker-secure-erase"
+      ]
+    }
+  ]
+}
