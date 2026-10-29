@@ -14,6 +14,8 @@ import QuickHome from "../../screens/QuickHome";
 import QuickPick from "../../screens/QuickPick";
 import QuickProgress from "../../screens/QuickProgress";
 import QuickStop from "../../screens/QuickStop";
+import QsSends from "../../screens/QsSends";
+import OpenSendActions from "../../screens/QsOpenSend";
 import type { Sample } from "../samples";
 
 const nothing = () => undefined;
@@ -73,6 +75,7 @@ export const samples: Sample[] = [
   { id: "Q08-known", title: "A remembered laptop wants to send files", size: "everyday", render: () => <KnownIncomingAsk incoming={INCOMING} folder={DOWNLOADS} nextTime={false} {...ask} /> },
 
   { id: "Q04-one", title: "Who should get these, one laptop now", size: "everyday", render: () => <QsRecipients connections={KNOWN} chosen={[KNOWN[0].id]} when="now" days="7" {...to} /> },
+  { id: "Q04-several-now", title: "Who should get these, several laptops now", size: "everyday", render: () => <QsRecipients connections={KNOWN} chosen={[KNOWN[0].id, KNOWN[2].id]} when="now" days="7" {...to} /> },
   { id: "Q04-several", title: "Who should get these, several laptops waiting", size: "everyday", render: () => <QsRecipients connections={KNOWN} chosen={[KNOWN[0].id, KNOWN[2].id]} when="later" days="7" {...to} /> },
 
   { id: "Q18-waiting", title: "Waiting sends, results for each laptop", size: "everyday", render: () => <WaitingList sends={WAITING} now={1_792_400_000} onRenew={nothing} onCancel={nothing} onSend={nothing} onBack={nothing} /> },
@@ -120,4 +123,36 @@ export const samples: Sample[] = [
   { id: "F08-exported", title: "My PCTwin history, exported", size: "everyday", render: () => <History entries={HISTORY} exported={{ kind: "saved", path: "Documents/PCTwin history.json" }} onOpen={nothing} onContinue={nothing} onExport={nothing} onStart={nothing} onBack={nothing} /> },
   { id: "F08-export-failed", title: "My PCTwin history, export failed", size: "everyday", render: () => <History entries={HISTORY} exported={{ kind: "failed" }} onOpen={nothing} onContinue={nothing} onExport={nothing} onStart={nothing} onBack={nothing} /> },
   { id: "F08-empty", title: "My PCTwin history, nothing yet", size: "everyday", render: () => <History entries={[]} onOpen={nothing} onContinue={nothing} onExport={nothing} onStart={nothing} onBack={nothing} /> },
+  { id: "QS-sends", title: "Your sends: several laptops at once, one finished, one not reached", size: "everyday", render: () => <Sends /> },
+  { id: "QS-sends-empty", title: "Your sends: nothing being sent", size: "everyday", render: () => <QsSends open={{ sessions: [], sends: [], results: [] }} peer="Receiving laptop" onPause={nothing} onResume={nothing} onCancel={nothing} onOpen={nothing} onDone={nothing} /> },
 ];
+
+/** The list of sends: three laptops at once (one paused), one waiting its turn, one result, one laptop not reached. */
+function Sends() {
+  const sessions = [
+    { id: "s1", name: "Ada’s laptop", ending: false },
+    { id: "s2", name: null, ending: false },
+    { id: "s3", name: "Kitchen desktop", ending: true },
+  ];
+  return (
+    <QsSends
+      open={{
+        sessions,
+        sends: [
+          { id: 1, session: "s1", name: "Ada’s laptop", files: 12, bytes: 48_000_000, state: "sending", paused: false },
+          { id: 2, session: "s2", name: null, files: 3, bytes: 2_400_000, state: "sending", paused: true },
+          { id: 3, session: "s1", name: "Ada’s laptop", files: 1, bytes: 900_000, state: "waiting", paused: false },
+        ],
+        results: [{ session: "s3", send: 4, name: "Kitchen desktop", receipt: { side: "sender", lines: RECEIPT_PARTIAL.lines, stopped: false, newDates: 0 } }],
+      }}
+      peer="Receiving laptop"
+      notSent={[{ name: "Old desktop", refusal: { kind: "not-nearby" } }]}
+      openSend={<OpenSendActions sessions={sessions} peer="Receiving laptop" side="send" onAdd={nothing} onEnd={nothing} />}
+      onPause={nothing}
+      onResume={nothing}
+      onCancel={nothing}
+      onOpen={nothing}
+      onDone={nothing}
+    />
+  );
+}
