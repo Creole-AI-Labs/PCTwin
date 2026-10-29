@@ -3004,3 +3004,174 @@ rescue-accept-body = اقبل، وسينسخها PCTwin إلى هذا الحاس
 rescue-progress-title = جارٍ نسخ الملفات من { $drive }
 rescue-safe = القرص يُقرأ فقط. لا يتغير شيء عليه.
 rescue-outcome-title = ملفات نُسخت من { $drive }
+plan-net-title = ما يحتاج إلى الإنترنت
+plan-net-none = لا شيء في هذا النقل يحتاج إلى الإنترنت.
+plan-net-downloads =
+    { $count ->
+        [zero] ينزّل PCTwin { $count } تطبيق من الإنترنت.
+        [one] ينزّل PCTwin تطبيق واحد من الإنترنت.
+        [two] ينزّل PCTwin تطبيقان من الإنترنت.
+        [few] ينزّل PCTwin { $count } تطبيقات من الإنترنت.
+        [many] ينزّل PCTwin { $count } تطبيقًا من الإنترنت.
+       *[other] ينزّل PCTwin { $count } تطبيق من الإنترنت.
+    }
+plan-net-sizes = لا يُعرف حجم كل تنزيل إلا بعد انتهائه.
+plan-net-signins =
+    { $count ->
+        [zero] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيء.
+        [one] ستسجّل الدخول من جديد عبر الإنترنت إلى شيء واحد.
+        [two] ستسجّل الدخول من جديد عبر الإنترنت إلى شيئان.
+        [few] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } أشياء.
+        [many] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيئًا.
+       *[other] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيء.
+    }
+plan-room-title = المساحة اللازمة فوق ملفاتك
+plan-room-body = في أكثر اللحظات ازدحامًا يحتاج PCTwin إلى نحو { $installs } للتطبيقات ونحو { $appData } لبيانات التطبيقات، فوق ملفاتك.
+compat-strip = ما جرى اختباره
+compat-title = { $name }: ما جرى اختباره
+compat-open = التفاصيل
+compat-open-name = عرض ما جرى اختباره في { $name }
+compat-list-title =
+    { $count ->
+        [zero] نتيجة اختبار { $count } تطبيق
+        [one] نتيجة اختبار تطبيق واحد
+        [two] نتيجة اختبار تطبيقان
+        [few] نتيجة اختبار { $count } تطبيقات
+        [many] نتيجة اختبار { $count } تطبيقًا
+       *[other] نتيجة اختبار { $count } تطبيق
+    }
+compat-aspects-title = كل جزء
+compat-steps-title = ما ستفعله أنت
+compat-steps-none = لا خطوات مطلوبة منك.
+compat-never-checked = لم يختبر أحد هذا التطبيق بعد. سيجرّبه PCTwin ويخبرك بما حدث.
+compat-checked-on = جرى الفحص في { $date }.
+compat-version = الإصدار الذي جرى اختباره: { $version }
+work-strip = هل أستطيع العمل؟
+work-title = هل أستطيع العمل فعلًا؟
+work-body = أضف الملفات والخطوط والمهام التي تحتاجها على هذا الحاسوب. ينظر PCTwin في ما يستطيع قراءته، وأنت تقول هل نجح الباقي. لا يُفتح شيء ولا يُشغَّل.
+work-empty = لا توجد فحوصات بعد. أضف ملفًا أو خطًّا أو مهمة في الأسفل.
+work-looked-at = جرى النظر في { $checked } من { $of }.
+work-missing = ناقص:
+work-and-more =
+    { $count ->
+        [zero] وغيرها: { $count }.
+        [one] وغيرها: { $count }.
+        [two] وغيرها: { $count }.
+        [few] وغيرها: { $count }.
+        [many] وغيرها: { $count }.
+       *[other] وغيرها: { $count }.
+    }
+work-not-looked-at = لم يجرِ النظر فيه:
+work-answer-worked = نجح
+work-answer-worked-name = نجح: { $name }
+work-answer-not = لم ينجح
+work-answer-not-name = لم ينجح: { $name }
+work-remove = إزالة
+work-remove-name = إزالة { $name }
+work-run = افحص الآن
+work-add-title = إضافة فحص
+work-add-file = اختيار ملف
+work-add-file-hint = مشروع أو أرشيف أو قاعدة بيانات. يقرؤه PCTwin ولا يغيّره أبدًا.
+work-font-label = خط، بالاسم
+work-add-font = إضافة الخط
+work-task-label = مهمة تؤديها بنفسك
+work-task-hint = مثلًا: طباعة بطاقة صعود الطائرة. أنت تقول هل نجحت.
+work-add-task = إضافة المهمة
+repair-strip = إصلاح ما لم يكتمل
+repair-title =
+    { $count ->
+        [zero] إصلاح { $count } عنصر
+        [one] إصلاح عنصر واحد
+        [two] إصلاح عنصران
+        [few] إصلاح { $count } عناصر
+        [many] إصلاح { $count } عنصرًا
+       *[other] إصلاح { $count } عنصر
+    }
+repair-title-loading = إصلاح ما لم يكتمل
+repair-body =
+    { $kept ->
+        [zero] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصر التي نجحت سابقًا.
+        [one] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي عنصر واحد التي نجحت سابقًا.
+        [two] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي عنصران التي نجحت سابقًا.
+        [few] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عناصر التي نجحت سابقًا.
+        [many] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصرًا التي نجحت سابقًا.
+       *[other] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصر التي نجحت سابقًا.
+    }
+repair-nothing = لا شيء يحتاج إلى إصلاح.
+repair-can-now = يمكن تجربته الآن
+repair-waiting = في الانتظار
+repair-fixed =
+    { $count ->
+        [zero] تم إصلاح { $count } عنصر.
+        [one] تم إصلاح عنصر واحد.
+        [two] تم إصلاح عنصران.
+        [few] تم إصلاح { $count } عناصر.
+        [many] تم إصلاح { $count } عنصرًا.
+       *[other] تم إصلاح { $count } عنصر.
+    }
+repair-run =
+    { $count ->
+        [zero] أعد محاولة { $count } عنصر
+        [one] أعد محاولة عنصر واحد
+        [two] أعد محاولة عنصران
+        [few] أعد محاولة { $count } عناصر
+        [many] أعد محاولة { $count } عنصرًا
+       *[other] أعد محاولة { $count } عنصر
+    }
+changed-strip = تغييرات منذ موافقتك
+changed-title =
+    { $count ->
+        [zero] تغيّر { $count } شيء بعد موافقتك
+        [one] تغيّر شيء واحد بعد موافقتك
+        [two] تغيّر شيئان بعد موافقتك
+        [few] تغيّر { $count } أشياء بعد موافقتك
+        [many] تغيّر { $count } شيئًا بعد موافقتك
+       *[other] تغيّر { $count } شيء بعد موافقتك
+    }
+changed-body = هذه وحدها تحتاج إلى موافقة جديدة. كل ما عداها يبقى موافَقًا عليه.
+changed-affects = يؤثر في: { $steps }
+changed-held =
+    { $count ->
+        [zero] تنتظر { $count } خطوة ردّك.
+        [one] تنتظر خطوة واحدة ردّك.
+        [two] تنتظر خطوتان ردّك.
+        [few] تنتظر { $count } خطوات ردّك.
+        [many] تنتظر { $count } خطوة ردّك.
+       *[other] تنتظر { $count } خطوة ردّك.
+    }
+changed-leave-out = استبعاد هذه
+changed-approve = أوافق مرة أخرى
+safe-stop-strip = التحديث
+safe-stop-title = في انتظار لحظة آمنة
+safe-stop-body = لا يحدّث PCTwin نفسه ولا يزيل نفسه في منتصف النقل. ينتظر حتى لا يبقى شيء نصف منجز.
+safe-stop-failed = لم يستطع PCTwin معرفة ما إذا كان الأمر آمنًا. حاول مرة أخرى.
+safe-stop-ready = لا شيء يتغيّر الآن في منتصف العمل. يمكن لـ PCTwin أن يتحدّث أو يُزال الآن.
+safe-stop-waiting-for = ينتظر انتهاء هذه الأمور:
+safe-stop-nothing-going-on = لا يجري نقل ولا إعداد ولا تراجع.
+safe-stop-check = افحص مرة أخرى
+kit-strip = حزمة الاسترداد
+kit-title = حفظ حزمة استرداد
+kit-body = حزمة الاسترداد سجلّ صغير لهذا النقل، يُحفظ في مجلد تختاره، مثل قرص USB. تُظهر ما حدث وما بقي دون إنجاز، حتى من دون هذا الحاسوب.
+kit-lacks-sentence = لا تحتوي الحزمة على ملفاتك نفسها، ولا تستطيع إعادة ملفات مفقودة.
+kit-not-saved = لم يُختر أي مجلد. لم يُحفظ شيء.
+kit-saved-to = حُفظت في:
+kit-files-title = ملفات الحزمة
+kit-holds-title = ما تحتويه الحزمة
+kit-lacks-title = ما لا تحتويه الحزمة
+kit-save = اختر مجلدًا واحفظ
+kit-save-again = احفظ مرة أخرى
+kit-history = حزمة الاسترداد
+finish-step-repair =
+    { $count ->
+        [zero] إصلاح { $count } عنصر
+        [one] إصلاح عنصر واحد
+        [two] إصلاح عنصران
+        [few] إصلاح { $count } عناصر
+        [many] إصلاح { $count } عنصرًا
+       *[other] إصلاح { $count } عنصر
+    }
+finish-step-repair-detail = أعد محاولة ما لم يكتمل فقط. ما نجح يبقى كما هو.
+finish-step-work = هل أستطيع العمل فعلًا؟
+finish-step-work-detail = تأكد أن الملفات والخطوط والمهام التي تحتاجها موجودة هنا.
+finish-step-kit = حفظ حزمة استرداد
+finish-step-kit-detail = احتفظ بسجلّ صغير لهذا النقل في مجلد تختاره.

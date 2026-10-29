@@ -14,6 +14,9 @@ import FinishHub, { type FinishStep } from "./FinishHub";
 import FinishReport from "./FinishReport";
 import FinishSetup, { FinishSave } from "./FinishSetup";
 import FinishUndo from "./FinishUndo";
+import RecoveryKit from "./RecoveryKit";
+import RepairItems from "./RepairItems";
+import WorkChecks from "./WorkChecks";
 import UndoHost from "./UndoHost";
 
 type Page = { kind: "hub" } | { kind: FinishStep } | { kind: "save" } | { kind: "undoing" };
@@ -28,6 +31,12 @@ export default function FinishHost({ id, onBack, onPair }: { id: string | null; 
       return <FinishHub id={id} onBack={onBack} onOpen={(kind) => { setPage({ kind }); }} />;
     case "setup":
       return <FinishSetup id={id} onBack={hub} onSave={() => { setPage({ kind: "save" }); }} />;
+    case "work":
+      return <WorkChecks onBack={hub} />;
+    case "repair":
+      return <RepairItems onBack={hub} />;
+    case "kit":
+      return <RecoveryKit id={id} onBack={hub} />;
     case "save":
       return <FinishSave id={id} onBack={() => { setPage({ kind: "setup" }); }} />;
     case "goodbye":

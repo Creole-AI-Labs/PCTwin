@@ -6,9 +6,9 @@ import { Attention, Check, Info } from "../icons";
 import { listText } from "../move";
 import { FinishPage, Loaded, MoreLine, Name, useLoad, whenText } from "./FinishParts";
 
-export type FinishStep = "setup" | "goodbye" | "catchup" | "handover" | "undo" | "cleanup" | "report" | "doctor";
+export type FinishStep = "setup" | "work" | "repair" | "goodbye" | "catchup" | "handover" | "undo" | "cleanup" | "kit" | "report" | "doctor";
 
-const STEPS: readonly FinishStep[] = ["setup", "goodbye", "catchup", "handover", "undo", "cleanup", "report", "doctor"];
+const STEPS: readonly FinishStep[] = ["repair", "setup", "work", "goodbye", "catchup", "handover", "undo", "cleanup", "kit", "report", "doctor"];
 
 const TALLY_ROWS: readonly { key: keyof Tally; kebab: string; always: boolean }[] = [
   { key: "selected", kebab: "selected", always: true },
@@ -60,8 +60,8 @@ export default function FinishHub({ id, onBack, onOpen }: { id: string | null; o
             <Where view={view} />
             <Section title={l10n.getString("finish-steps-title")}>
               <RowList>
-                {STEPS.filter((s) => s !== "undo" || view.notes.includes("undo-open")).map((s) => {
-                  const title = l10n.getString(`finish-step-${s}`);
+                {STEPS.filter((s) => (s !== "undo" || view.notes.includes("undo-open")) && (s !== "repair" || view.notFinished.length > 0)).map((s) => {
+                  const title = l10n.getString(`finish-step-${s}`, { count: view.notFinished.length + view.more });
                   return (
                     <Row
                       key={s}

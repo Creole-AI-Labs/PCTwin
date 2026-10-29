@@ -57,11 +57,12 @@ describe("the approval screen's apps, settings and app data", () => {
     const { container } = inApp(<RebuildPlanSection rebuild={fullPlan()} />);
     const body = plain(container.textContent);
     expect(body).toContain(text("fullmove-plan-title"));
-    expect(body).toContain(plain(text("fullmove-group-install", { count: 1 })));
+    expect(body).toContain(plain(text("fullmove-group-install", { count: 2 })));
     expect(body).toContain(plain(text("fullmove-group-settings", { count: 1 })));
     expect(body).toContain(plain(text("fullmove-group-needs", { count: 4 })));
     // The app installed: PCTwin does not remove apps yet, and says so before the approval.
     expect(body).toContain(text("guard-undo-remove-yourself"));
+    expect(body).toContain(text("guard-undo-removes-if-package"));
     // Settings: how many, and that some replace what is here, with undo.
     expect(body).toContain(text("fullmove-settings-replace"));
     expect(body).toContain(text("guard-undo-can-reverse"));

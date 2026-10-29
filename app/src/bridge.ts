@@ -18,6 +18,7 @@ import { FILE_KINDS, ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
+import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem, type ChangesView, type RepairProblem, type SafeStopView, type WorkPick, type WorkProblem } from "./deliver";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 import { parseCleanupDone, parseCleanupView, parseDeltaView, parseDoctorView, parseFinishProblem, parseFinishView, parseGoodbyeView, parseHandoverRecorded, parseHandoverStarted, parseHandoverView, parseReportView, parseSavedSetup, parseSetupView, parseUndoPreview, type CatchupPurpose, type ChoiceIn, type CleanupWhat, type DeltaView, type Disclosure, type DoctorRole, type FinishProblem, type GoodbyeAnswer, type HandoverAction, type PersonSays } from "./finish";
 
@@ -805,7 +806,8 @@ export type MoveEvent =
   | { kind: "rebuild"; step: RebuildStep }
   | { kind: "appdata"; progress: DataProgress }
   | { kind: "appdata-open"; open: AppsOpen }
-  | { kind: "choose"; choice: ChoiceView };
+  | { kind: "choose"; choice: ChoiceView }
+  | { kind: "changed"; changes: ChangesView };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -827,6 +829,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
     on("move-link", parseConnectionView, (link) => ({ kind: "link", link })),
     on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
+    on("move-changed", parseChangesView, (changes) => ({ kind: "changed", changes })),
     on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
     on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
     on("move-choose", parseChoiceView, (choice) => ({ kind: "choose", choice })),
@@ -1225,4 +1228,35 @@ export const reportSave = (id: string | null, disclosure: Disclosure, digest: st
 export const listenFinishDelta = (handler: (delta: DeltaView | null) => void): Promise<UnlistenFn> =>
   listen<unknown>("finish-delta", (e) => {
     handler(parseDeltaView(e.payload));
+  });
+
+/* ---------- The Phase 2 deliverables (src-tauri/src/deliver) ---------- */
+
+export const toWorkProblem = (error: unknown): WorkProblem => parseWorkProblem(error) ?? "failed";
+export const toRepairProblem = (error: unknown): RepairProblem => parseRepairProblem(error) ?? "failed";
+
+export const workChecks = () => ask("work_checks", parseWorkChecks);
+/** A file is picked in the system's own picker, a font by its family, a task by its words. */
+export const workCheckAdd = (pick: WorkPick) => ask("work_check_add", parseWorkChecks, { pick });
+/** Looks at what can be read; never runs anything. */
+export const workCheckRun = () => ask("work_check_run", parseWorkChecks);
+/** `generation` goes back exactly as the list sent it. */
+export const workCheckAnswer = (index: number, generation: number, worked: boolean) => ask("work_check_answer", parseWorkChecks, { index, generation, worked });
+export const workCheckRemove = (index: number, generation: number) => ask("work_check_remove", parseWorkChecks, { index, generation });
+
+export const repairOffer = () => ask("repair_offer", parseRepairOffer);
+/** Tries again only the chosen lines; `generation` goes back exactly as the offer sent it. */
+export const repairRun = (generation: number, lines: number[]) => ask("repair_run", parseRepairDone, { generation, lines });
+
+/** What changed after approval, or none. */
+export const moveChanges = () => ask("move_changes", (v) => (v === null ? { none: true as const } : parseChangesView(v))).then((r) => ("none" in r ? null : r));
+/** The person's new yes or no for what changed; `generation` goes back as received. */
+export const moveReapprove = (generation: number, approve: boolean) => run("move_reapprove", { generation, approve });
+export const safeStop = () => ask("safe_stop", parseSafeStop);
+/** Saves the recovery kit for one My PCTwin history entry; none when the person picked no folder. */
+export const recoveryKitSave = (id: string) => ask("recovery_kit_save", (v) => (v === null ? { none: true as const } : parseKitSaved(v)), { id }).then((r) => ("none" in r ? null : r));
+
+export const listenSafeStop = (handler: (view: SafeStopView | null) => void): Promise<UnlistenFn> =>
+  listen<unknown>("safe-stop", (e) => {
+    handler(parseSafeStop(e.payload));
   });

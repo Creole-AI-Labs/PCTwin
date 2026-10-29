@@ -67,6 +67,8 @@ import UndoHost from "./UndoHost";
 import FinishHost from "./FinishHost";
 import type { DataProgress, RebuildStep } from "../fullmove";
 import StopMove from "./StopMove";
+import MoveChanged from "./MoveChanged";
+import type { ChangesView } from "../deliver";
 
 /** What the move page shows now. */
 type View =
@@ -99,7 +101,9 @@ type View =
   /** The new laptop: the old laptop's app data coming, before the files. */
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
-  | { kind: "close-apps"; apps: string[] };
+  | { kind: "close-apps"; apps: string[] }
+  /** Something changed after the person said yes: only that is asked about again (2.9, X06). */
+  | { kind: "changed"; changes: ChangesView };
 
 type Waiting = Extract<ConnectionView, { kind: "waiting" }>;
 type LinkEnded = Extract<ConnectionView, { kind: "ended" }>;
@@ -162,6 +166,7 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "rebuilding":
     case "appdata":
     case "close-apps":
+    case "changed":
       return "moving";
     case "undo":
     case "finish":
@@ -172,6 +177,8 @@ export function stepOf(view: View, old: boolean): HelpStep {
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
   if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo" || view.kind === "finish") return view;
+  // What changed after approval takes the page until the person answers, wherever the move is.
+  if (event.kind === "changed") return { kind: "changed", changes: event.changes };
   // After the files, the full move sets up apps and settings: only its own steps, the outcome or a problem move the page on.
   if (view.kind === "rebuilding") {
     if (event.kind === "rebuild") return { kind: "rebuilding", step: event.step };
@@ -211,14 +218,14 @@ export function next(view: View, event: MoveEvent): View {
     case "progress":
       // A page waiting on the person (the plan, who is moving, where others go, privacy) is only
       // left by their answer, never by a progress word.
-      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy" || view.kind === "choose") return view;
+      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy" || view.kind === "choose" || view.kind === "changed") return view;
       return view.kind === "reconnecting" ? view : { kind: "progress", progress: event.progress };
     case "finished":
       return { kind: "outcome", outcome: event.outcome };
     case "problem":
       return { kind: "end", end: { kind: "ended", why: event.problem } };
     case "rebuild":
-      return { kind: "rebuilding", step: event.step };
+      return view.kind === "changed" ? view : { kind: "rebuilding", step: event.step };
   }
 }
 
@@ -698,6 +705,15 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
                 }
               : undefined
           }
+        />
+      );
+    case "changed":
+      return (
+        <MoveChanged
+          changes={view.changes}
+          onDone={() => {
+            setView({ kind: "wait", stage: "moving" });
+          }}
         />
       );
     case "rebuilding":

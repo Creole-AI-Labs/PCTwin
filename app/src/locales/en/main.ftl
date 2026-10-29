@@ -2531,3 +2531,130 @@ rescue-accept-body = Accept, and PCTwin copies them to this laptop. Nothing on t
 rescue-progress-title = Copying files from { $drive }
 rescue-safe = The drive is only read. Nothing on it is changed.
 rescue-outcome-title = Files copied from { $drive }
+plan-net-title = What needs the internet
+plan-net-none = Nothing in this move needs the internet.
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin downloads { $count } app from the internet.
+       *[other] PCTwin downloads { $count } apps from the internet.
+    }
+plan-net-sizes = The size of each download is known only once it has been downloaded.
+plan-net-signins =
+    { $count ->
+        [one] You sign in again online to { $count } thing.
+       *[other] You sign in again online to { $count } things.
+    }
+plan-room-title = Room needed beyond your files
+plan-room-body = At the busiest moment PCTwin needs about { $installs } for apps and about { $appData } for app data, on top of your files.
+compat-strip = What was tested
+compat-title = { $name }: what was tested
+compat-open = Details
+compat-open-name = See what was tested for { $name }
+compat-list-title =
+    { $count ->
+        [one] How well { $count } app was tested
+       *[other] How well { $count } apps were tested
+    }
+compat-aspects-title = Each part
+compat-steps-title = What you will do
+compat-steps-none = No steps from you.
+compat-never-checked = Nobody has tested this app yet. PCTwin will try it and tell you what happened.
+compat-checked-on = Checked on { $date }.
+compat-version = Version tested: { $version }
+work-strip = Can I work?
+work-title = Can I actually work?
+work-body = Add the files, fonts and jobs you need on this laptop. PCTwin looks at what it can read. You say whether the rest worked. Nothing is opened or run.
+work-empty = No checks yet. Add a file, a font or a job below.
+work-looked-at = Looked at { $checked } of { $of }.
+work-missing = Missing:
+work-and-more =
+    { $count ->
+        [one] And { $count } more.
+       *[other] And { $count } more.
+    }
+work-not-looked-at = Not looked at:
+work-answer-worked = It worked
+work-answer-worked-name = It worked: { $name }
+work-answer-not = It did not work
+work-answer-not-name = It did not work: { $name }
+work-remove = Remove
+work-remove-name = Remove { $name }
+work-run = Check now
+work-add-title = Add a check
+work-add-file = Choose a file
+work-add-file-hint = A project, an archive or a database. PCTwin reads it and never changes it.
+work-font-label = A font, by name
+work-add-font = Add font
+work-task-label = A job you do yourself
+work-task-hint = For example: print a boarding pass. You say whether it worked.
+work-add-task = Add job
+repair-strip = Fix what did not finish
+repair-title =
+    { $count ->
+        [one] Fix this item
+       *[other] Fix these { $count } items
+    }
+repair-title-loading = Fix what did not finish
+repair-body =
+    { $kept ->
+        [one] Only the items below are tried again. { $kept } item that already worked stays as it is.
+       *[other] Only the items below are tried again. { $kept } items that already worked stay as they are.
+    }
+repair-nothing = Nothing needs fixing.
+repair-can-now = Can be tried now
+repair-waiting = Waiting
+repair-fixed =
+    { $count ->
+        [one] { $count } item fixed.
+       *[other] { $count } items fixed.
+    }
+repair-run =
+    { $count ->
+        [one] Try { $count } item again
+       *[other] Try { $count } items again
+    }
+changed-strip = Changes since you said yes
+changed-title =
+    { $count ->
+        [one] { $count } thing changed after you said yes
+       *[other] { $count } things changed after you said yes
+    }
+changed-body = Only these need a fresh yes. Everything else stays approved.
+changed-affects = Affects: { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } step waits for your answer.
+       *[other] { $count } steps wait for your answer.
+    }
+changed-leave-out = Leave these out
+changed-approve = Say yes again
+safe-stop-strip = Update
+safe-stop-title = Waiting for a safe moment
+safe-stop-body = PCTwin does not update or remove itself in the middle of a move. It waits until nothing is half done.
+safe-stop-failed = PCTwin could not tell whether it is safe. Try again.
+safe-stop-ready = Nothing is in the middle of changing. PCTwin can update or be removed now.
+safe-stop-waiting-for = It is waiting for these to finish:
+safe-stop-nothing-going-on = No move, setup or undo is going on.
+safe-stop-check = Check again
+kit-strip = Recovery kit
+kit-title = Save a recovery kit
+kit-body = A recovery kit is a small record of this move, saved in a folder you choose, for example on a USB drive. It shows what happened and what was left to do, even without this laptop.
+kit-lacks-sentence = The kit does not contain your files themselves. It cannot bring back files that are missing.
+kit-not-saved = No folder was chosen. Nothing was saved.
+kit-saved-to = Saved to:
+kit-files-title = Files in the kit
+kit-holds-title = What the kit holds
+kit-lacks-title = What the kit does not hold
+kit-save = Choose a folder and save
+kit-save-again = Save again
+kit-history = Recovery kit
+finish-step-repair =
+    { $count ->
+        [one] Fix this item
+       *[other] Fix these { $count } items
+    }
+finish-step-repair-detail = Try again only what did not finish. What worked stays.
+finish-step-work = Can I actually work?
+finish-step-work-detail = Check that the files, fonts and jobs you need are here.
+finish-step-kit = Save a recovery kit
+finish-step-kit-detail = Keep a small record of this move in a folder you choose.

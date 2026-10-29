@@ -6,6 +6,8 @@ import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRol
 import { listText } from "../move";
 import FrameFooter from "./FrameFooter";
 import { RebuildPlanSection } from "./FullMoveParts";
+import Compat from "./Compat";
+import type { ChangeView } from "../fullmove";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
@@ -111,6 +113,7 @@ export interface PlanReviewProps {
 export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack, picked = [], onPick, updates = [], onUpdate }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
+  const [compat, setCompat] = useState<ChangeView | null>(null);
   const holds = approvalHolds(plan, approval);
   const key = `${String(plan.revision)}:${plan.fingerprint}`;
   // What the plan was the last time we looked, to hear when it moves on under an approval the person had given.
@@ -153,6 +156,18 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
   const blocked = plan.blocked;
   const canStart = holds && !blocked && !roomless;
   const reference = plan.fingerprint.slice(0, 8).toUpperCase();
+  // One app's compatibility record opens on its own page; Back returns to the plan.
+  if (compat?.tested) {
+    return (
+      <Compat
+        change={compat}
+        tested={compat.tested}
+        onBack={() => {
+          setCompat(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="plan-screen plan-wide">
@@ -278,7 +293,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         </PlanBox>
       </div>
 
-      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} picked={picked} onPick={onPick} updates={updates} onUpdate={onUpdate} />}
+      {plan.rebuild && <RebuildPlanSection rebuild={plan.rebuild} picked={picked} onPick={onPick} updates={updates} onUpdate={onUpdate} onCompat={setCompat} />}
 
       {!blocked && (
         <div className="plan-approve">

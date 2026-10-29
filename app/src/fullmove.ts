@@ -37,6 +37,32 @@ export type ChangeView = {
   source: string | null;
   /** What else the person should know: an older version already here, or saved sign-ins to websites. */
   note: ChangeNote | null;
+  /** `keeps-newer` next to "Update it": undo cannot bring the older version back. */
+  undoIfUpdated: "keeps-newer" | null;
+  /** An app's compatibility record (Task List 2.9 item 8); none for settings and special categories. */
+  tested: Tested | null;
+};
+
+/** How well an app has been tested (`TestedOutcome`). */
+export const TESTED_OUTCOMES = ["works", "works-with-steps", "partly", "not-supported", "not-tested"] as const;
+export type TestedOutcome = (typeof TESTED_OUTCOMES)[number];
+export const TESTED_ASPECTS = ["install", "data-import", "settings", "launch", "undo"] as const;
+export type TestedAspect = (typeof TESTED_ASPECTS)[number];
+export const TESTED_RESULTS = ["works", "guided", "not-supported", "not-applicable", "not-tested"] as const;
+export type TestedResult = (typeof TESTED_RESULTS)[number];
+export const TESTED_STEPS = ["sign-in", "licence", "import-in-app", "relink", "restart"] as const;
+export type TestedStep = (typeof TESTED_STEPS)[number];
+export const TESTED_HOWS = ["lab", "real-laptops"] as const;
+export type TestedHow = (typeof TESTED_HOWS)[number];
+
+export type Tested = {
+  outcome: TestedOutcome;
+  aspects: { aspect: TestedAspect; result: TestedResult }[];
+  steps: TestedStep[];
+  /** The day it was checked, as `YYYY-MM-DD`; none when it never was. */
+  checkedOn: string | null;
+  how: TestedHow | null;
+  version: string | null;
 };
 
 export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" };
@@ -66,6 +92,10 @@ export type RebuildPlan = {
   links: number;
   prompt: boolean;
   restorePoint: boolean;
+  /** What needs the internet: apps PCTwin downloads (sizes known once downloaded) and things to sign in to again. */
+  internet: { downloads: number; signIns: number };
+  /** Room beyond the files at the busiest moment, in bytes; margins, so shown as "about". */
+  room: { installs: number; appData: number };
 };
 
 export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[] };
@@ -118,7 +148,7 @@ function listOf<T>(v: unknown, parse: (x: unknown) => T | null): T[] | null {
   return out;
 }
 
-function parseTitle(v: unknown): Title | null {
+export function parseTitle(v: unknown): Title | null {
   const f = exactly(v, ["kind", "value"]);
   if (!f) return null;
   if (f.kind === "name" && typeof f.value === "string") return { kind: "name", value: f.value };
@@ -164,8 +194,24 @@ function parseLineNote(v: unknown): LineNote | null {
   return null;
 }
 
+function parseTested(v: unknown): Tested | null | undefined {
+  if (v === null) return null;
+  const f = exactly(v, ["outcome", "aspects", "steps", "checkedOn", "how", "version"]);
+  if (!f || !oneOf(f.outcome, TESTED_OUTCOMES)) return undefined;
+  const aspects = listOf(f.aspects, (x) => {
+    const a = exactly(x, ["aspect", "result"]);
+    return a && oneOf(a.aspect, TESTED_ASPECTS) && oneOf(a.result, TESTED_RESULTS) ? { aspect: a.aspect, result: a.result } : null;
+  });
+  const steps = listOf(f.steps, (x) => (oneOf(x, TESTED_STEPS) ? x : null));
+  if (!aspects || !steps) return undefined;
+  if (f.checkedOn !== null && !(typeof f.checkedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(f.checkedOn))) return undefined;
+  if (f.how !== null && !oneOf(f.how, TESTED_HOWS)) return undefined;
+  if (!nameOrNull(f.version)) return undefined;
+  return { outcome: f.outcome, aspects, steps, checkedOn: f.checkedOn, how: f.how, version: f.version };
+}
+
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "undoIfUpdated", "tested"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
@@ -176,25 +222,31 @@ function parseChange(v: unknown): ChangeView | null {
   if (f.source !== null && typeof f.source !== "string") return null;
   const note = parseChangeNote(f.note);
   if (note === undefined) return null;
+  if (f.undoIfUpdated !== null && f.undoIfUpdated !== "keeps-newer") return null;
+  const tested = parseTested(f.tested);
+  if (tested === undefined) return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, undoIfUpdated: f.undoIfUpdated, tested };
 }
 
 /** The plan section (`RebuildPlanView`). */
 export function parseRebuildPlan(v: unknown): RebuildPlan | null {
-  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint"]);
+  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint", "internet", "room"]);
   if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || !isCount(f.links) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
+  const net = exactly(f.internet, ["downloads", "signIns"]);
+  const room = exactly(f.room, ["installs", "appData"]);
+  if (!net || !room || !isCount(net.downloads) || !isCount(net.signIns) || !isCount(room.installs) || !isCount(room.appData)) return null;
   const changes = listOf(f.changes, parseChange);
   const notMoved = listOf(f.notMoved, (x) => {
     const n = exactly(x, ["group", "count"]);
     return n && oneOf(n.group, NOT_MOVED_GROUPS) && isCount(n.count) ? { group: n.group, count: n.count } : null;
   });
-  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint } : null;
+  return changes && notMoved ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint, internet: { downloads: net.downloads, signIns: net.signIns }, room: { installs: room.installs, appData: room.appData } } : null;
 }
 
 function parseLine(v: unknown): RebuiltLine | null {

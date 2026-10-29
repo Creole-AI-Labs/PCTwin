@@ -2739,3 +2739,141 @@ rescue-accept-body = Acceptez, et PCTwin les copie sur cet ordinateur. Rien n’
 rescue-progress-title = Copie des fichiers de { $drive }
 rescue-safe = Le disque est seulement lu. Rien n’y est modifié.
 rescue-outcome-title = Fichiers copiés depuis { $drive }
+plan-net-title = Ce qui a besoin d’internet
+plan-net-none = Rien dans ce transfert n’a besoin d’internet.
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin télécharge { $count } application depuis internet.
+        [many] PCTwin télécharge { $count } applications depuis internet.
+       *[other] PCTwin télécharge { $count } applications depuis internet.
+    }
+plan-net-sizes = La taille de chaque téléchargement n’est connue qu’une fois celui-ci terminé.
+plan-net-signins =
+    { $count ->
+        [one] Vous vous reconnectez en ligne à { $count } chose.
+        [many] Vous vous reconnectez en ligne à { $count } choses.
+       *[other] Vous vous reconnectez en ligne à { $count } choses.
+    }
+plan-room-title = Place nécessaire en plus de vos fichiers
+plan-room-body = Au moment le plus chargé, PCTwin a besoin d’environ { $installs } pour les applications et d’environ { $appData } pour leurs données, en plus de vos fichiers.
+compat-strip = Ce qui a été testé
+compat-title = { $name } : ce qui a été testé
+compat-open = Détails
+compat-open-name = Voir ce qui a été testé pour { $name }
+compat-list-title =
+    { $count ->
+        [one] Résultat du test de { $count } application
+        [many] Résultat du test de { $count } applications
+       *[other] Résultat du test de { $count } applications
+    }
+compat-aspects-title = Chaque partie
+compat-steps-title = Ce que vous ferez
+compat-steps-none = Rien à faire de votre côté.
+compat-never-checked = Personne n’a encore testé cette application. PCTwin l’essaiera et vous dira ce qui s’est passé.
+compat-checked-on = Vérifié le { $date }.
+compat-version = Version testée : { $version }
+work-strip = Puis-je travailler ?
+work-title = Puis-je vraiment travailler ?
+work-body = Ajoutez les fichiers, les polices et les tâches dont vous avez besoin sur cet ordinateur. PCTwin regarde ce qu’il peut lire. Vous dites si le reste a fonctionné. Rien n’est ouvert ni lancé.
+work-empty = Aucune vérification pour l’instant. Ajoutez ci-dessous un fichier, une police ou une tâche.
+work-looked-at = { $checked } sur { $of } examinés.
+work-missing = Manque :
+work-and-more =
+    { $count ->
+        [one] Et { $count } de plus.
+        [many] Et { $count } de plus.
+       *[other] Et { $count } de plus.
+    }
+work-not-looked-at = Non examiné :
+work-answer-worked = Ça a fonctionné
+work-answer-worked-name = Ça a fonctionné : { $name }
+work-answer-not = Ça n’a pas fonctionné
+work-answer-not-name = Ça n’a pas fonctionné : { $name }
+work-remove = Retirer
+work-remove-name = Retirer { $name }
+work-run = Vérifier maintenant
+work-add-title = Ajouter une vérification
+work-add-file = Choisir un fichier
+work-add-file-hint = Un projet, une archive ou une base de données. PCTwin le lit et ne le modifie jamais.
+work-font-label = Une police, par son nom
+work-add-font = Ajouter la police
+work-task-label = Une tâche que vous faites vous-même
+work-task-hint = Par exemple : imprimer une carte d’embarquement. Vous dites si cela a fonctionné.
+work-add-task = Ajouter la tâche
+repair-strip = Réparer ce qui n’a pas fini
+repair-title =
+    { $count ->
+        [one] Réparer cet élément
+        [many] Réparer ces { $count } éléments
+       *[other] Réparer ces { $count } éléments
+    }
+repair-title-loading = Réparer ce qui n’a pas fini
+repair-body =
+    { $kept ->
+        [one] Seuls les éléments ci-dessous sont réessayés. { $kept } élément qui avait déjà fonctionné reste tel quel.
+        [many] Seuls les éléments ci-dessous sont réessayés. { $kept } éléments qui avaient déjà fonctionné restent tels quels.
+       *[other] Seuls les éléments ci-dessous sont réessayés. { $kept } éléments qui avaient déjà fonctionné restent tels quels.
+    }
+repair-nothing = Rien à réparer.
+repair-can-now = Peut être essayé maintenant
+repair-waiting = En attente
+repair-fixed =
+    { $count ->
+        [one] { $count } élément réparé.
+        [many] { $count } éléments réparés.
+       *[other] { $count } éléments réparés.
+    }
+repair-run =
+    { $count ->
+        [one] Réessayer { $count } élément
+        [many] Réessayer { $count } éléments
+       *[other] Réessayer { $count } éléments
+    }
+changed-strip = Changements depuis votre accord
+changed-title =
+    { $count ->
+        [one] { $count } chose a changé après votre accord
+        [many] { $count } choses ont changé après votre accord
+       *[other] { $count } choses ont changé après votre accord
+    }
+changed-body = Seuls ces éléments demandent un nouvel accord. Tout le reste reste approuvé.
+changed-affects = Concerne : { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } étape attend votre réponse.
+        [many] { $count } étapes attendent votre réponse.
+       *[other] { $count } étapes attendent votre réponse.
+    }
+changed-leave-out = Laisser ceci de côté
+changed-approve = Redonner mon accord
+safe-stop-strip = Mise à jour
+safe-stop-title = En attente d’un moment sûr
+safe-stop-body = PCTwin ne se met pas à jour et ne se retire pas en plein transfert. Il attend que plus rien ne soit à moitié fait.
+safe-stop-failed = PCTwin n’a pas pu savoir si c’est sûr. Réessayez.
+safe-stop-ready = Rien n’est en train de changer. PCTwin peut se mettre à jour ou être retiré maintenant.
+safe-stop-waiting-for = Il attend la fin de ceci :
+safe-stop-nothing-going-on = Aucun transfert, réglage ou annulation en cours.
+safe-stop-check = Vérifier à nouveau
+kit-strip = Kit de récupération
+kit-title = Enregistrer un kit de récupération
+kit-body = Un kit de récupération est un petit relevé de ce transfert, enregistré dans un dossier de votre choix, par exemple sur une clé USB. Il montre ce qui s’est passé et ce qui restait à faire, même sans cet ordinateur.
+kit-lacks-sentence = Le kit ne contient pas vos fichiers eux-mêmes. Il ne peut pas rendre des fichiers manquants.
+kit-not-saved = Aucun dossier n’a été choisi. Rien n’a été enregistré.
+kit-saved-to = Enregistré dans :
+kit-files-title = Fichiers du kit
+kit-holds-title = Ce que contient le kit
+kit-lacks-title = Ce que le kit ne contient pas
+kit-save = Choisir un dossier et enregistrer
+kit-save-again = Enregistrer à nouveau
+kit-history = Kit de récupération
+finish-step-repair =
+    { $count ->
+        [one] Réparer cet élément
+        [many] Réparer ces { $count } éléments
+       *[other] Réparer ces { $count } éléments
+    }
+finish-step-repair-detail = Réessayer seulement ce qui n’a pas fini. Ce qui a fonctionné reste.
+finish-step-work = Puis-je vraiment travailler ?
+finish-step-work-detail = Vérifier que les fichiers, polices et tâches dont vous avez besoin sont là.
+finish-step-kit = Enregistrer un kit de récupération
+finish-step-kit-detail = Garder un petit relevé de ce transfert dans un dossier de votre choix.

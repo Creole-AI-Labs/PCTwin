@@ -2401,3 +2401,119 @@ rescue-accept-body = 接受后，PCTwin 会把它们复制到这台电脑。硬�
 rescue-progress-title = 正在从 { $drive } 复制文件
 rescue-safe = 硬盘只会被读取，上面的内容不会被更改。
 rescue-outcome-title = 已从 { $drive } 复制的文件
+plan-net-title = 哪些需要联网
+plan-net-none = 这次移动中没有任何内容需要联网。
+plan-net-downloads =
+    { $count ->
+       *[other] PCTwin 会从网上下载 { $count } 个应用。
+    }
+plan-net-sizes = 每个下载的大小要下载完成后才能知道。
+plan-net-signins =
+    { $count ->
+       *[other] 你需要在网上重新登录 { $count } 项内容。
+    }
+plan-room-title = 除文件外还需要的空间
+plan-room-body = 在最繁忙的时刻，除了你的文件，PCTwin 还需要约 { $installs } 用于应用，约 { $appData } 用于应用数据。
+compat-strip = 测试了什么
+compat-title = { $name }：测试了什么
+compat-open = 详情
+compat-open-name = 查看 { $name } 的测试情况
+compat-list-title =
+    { $count ->
+       *[other] { $count } 个应用的测试情况
+    }
+compat-aspects-title = 每个部分
+compat-steps-title = 你需要做的
+compat-steps-none = 你不需要做任何步骤。
+compat-never-checked = 还没有人测试过这个应用。PCTwin 会尝试，并告诉你结果。
+compat-checked-on = 检查日期：{ $date }。
+compat-version = 测试的版本：{ $version }
+work-strip = 我能工作吗？
+work-title = 我真的能工作吗？
+work-body = 添加你在这台电脑上需要的文件、字体和事项。PCTwin 会查看它能读取的内容，其余的由你来说明是否正常。不会打开或运行任何东西。
+work-empty = 还没有检查。请在下方添加文件、字体或事项。
+work-looked-at = 已查看 { $of } 项中的 { $checked } 项。
+work-missing = 缺少：
+work-and-more =
+    { $count ->
+       *[other] 另有 { $count } 项。
+    }
+work-not-looked-at = 未查看：
+work-answer-worked = 正常
+work-answer-worked-name = 正常：{ $name }
+work-answer-not = 不正常
+work-answer-not-name = 不正常：{ $name }
+work-remove = 移除
+work-remove-name = 移除 { $name }
+work-run = 立即检查
+work-add-title = 添加检查
+work-add-file = 选择文件
+work-add-file-hint = 项目、压缩包或数据库。PCTwin 只读取，不会修改。
+work-font-label = 按名称添加字体
+work-add-font = 添加字体
+work-task-label = 你自己要做的事
+work-task-hint = 例如：打印登机牌。是否成功由你来说明。
+work-add-task = 添加事项
+repair-strip = 修复未完成的内容
+repair-title =
+    { $count ->
+       *[other] 修复这 { $count } 项
+    }
+repair-title-loading = 修复未完成的内容
+repair-body =
+    { $kept ->
+       *[other] 只会重试下面的项目。已经成功的 { $kept } 项保持原样。
+    }
+repair-nothing = 没有需要修复的内容。
+repair-can-now = 现在可以重试
+repair-waiting = 等待中
+repair-fixed =
+    { $count ->
+       *[other] 已修复 { $count } 项。
+    }
+repair-run =
+    { $count ->
+       *[other] 重试 { $count } 项
+    }
+changed-strip = 你同意之后的变化
+changed-title =
+    { $count ->
+       *[other] 你同意之后有 { $count } 项发生了变化
+    }
+changed-body = 只有这些需要你重新同意，其余的仍然保持已批准。
+changed-affects = 影响：{ $steps }
+changed-held =
+    { $count ->
+       *[other] 有 { $count } 个步骤在等你的回答。
+    }
+changed-leave-out = 不处理这些
+changed-approve = 再次同意
+safe-stop-strip = 更新
+safe-stop-title = 正在等待安全的时机
+safe-stop-body = PCTwin 不会在移动进行到一半时更新或卸载自己。它会等到没有任何内容处于半完成状态。
+safe-stop-failed = PCTwin 无法判断现在是否安全。请再试一次。
+safe-stop-ready = 没有任何内容正在更改。PCTwin 现在可以更新或卸载。
+safe-stop-waiting-for = 它正在等待以下内容完成：
+safe-stop-nothing-going-on = 没有正在进行的移动、设置或撤消。
+safe-stop-check = 再检查一次
+kit-strip = 恢复包
+kit-title = 保存恢复包
+kit-body = 恢复包是这次移动的一份简短记录，保存在你选择的文件夹中，例如 USB 闪存盘。即使没有这台电脑，它也能显示发生了什么、还剩下什么没做。
+kit-lacks-sentence = 恢复包不包含你的文件本身，也无法找回已经丢失的文件。
+kit-not-saved = 没有选择文件夹。什么都没有保存。
+kit-saved-to = 已保存到：
+kit-files-title = 恢复包中的文件
+kit-holds-title = 恢复包包含什么
+kit-lacks-title = 恢复包不包含什么
+kit-save = 选择文件夹并保存
+kit-save-again = 再次保存
+kit-history = 恢复包
+finish-step-repair =
+    { $count ->
+       *[other] 修复这 { $count } 项
+    }
+finish-step-repair-detail = 只重试未完成的内容。已成功的保持不变。
+finish-step-work = 我真的能工作吗？
+finish-step-work-detail = 检查你需要的文件、字体和事项是否都在这里。
+finish-step-kit = 保存恢复包
+finish-step-kit-detail = 把这次移动的一份简短记录保存到你选择的文件夹。

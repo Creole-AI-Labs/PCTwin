@@ -41,7 +41,7 @@ export type Measured = { done: number; total: number | null; unit: "bytes" | "it
 
 export const CHANGE_ACTIONS = ["install", "merge", "replace", "leave-alone"] as const;
 export type ChangeAction = (typeof CHANGE_ACTIONS)[number];
-export const UNDO_PROMISES = ["can-reverse", "can-remove-app", "must-keep", "needs-you-service", "needs-you-maker", "remove-yourself"] as const;
+export const UNDO_PROMISES = ["can-reverse", "can-remove-app", "must-keep", "needs-you-service", "needs-you-maker", "removes-if-package", "keeps-newer", "remove-yourself"] as const;
 export type UndoPromise = (typeof UNDO_PROMISES)[number];
 export type ChangeLine = { name: string; action: ChangeAction; undo: UndoPromise };
 

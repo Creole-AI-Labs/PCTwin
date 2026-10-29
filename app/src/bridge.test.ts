@@ -13,6 +13,18 @@ import {
   moveAppdataAnswer,
   moveChooseWhat,
   listenUndoClosed,
+  listenSafeStop,
+  workChecks,
+  workCheckAdd,
+  workCheckRun,
+  workCheckAnswer,
+  workCheckRemove,
+  repairOffer,
+  repairRun,
+  moveChanges,
+  moveReapprove,
+  safeStop,
+  recoveryKitSave,
   listenMove,
   recoveryCheck,
   recoveryRun,
@@ -199,9 +211,21 @@ describe("nothing unchecked reaches a screen", () => {
 
 describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
   it("every command is called by its own name with exactly its own arguments", async () => {
+    const delivered: Record<string, unknown> = {
+      work_checks: { generation: 0, checks: [], more: 0 },
+      work_check_add: { generation: 0, checks: [], more: 0 },
+      work_check_run: { generation: 0, checks: [], more: 0 },
+      work_check_answer: { generation: 0, checks: [], more: 0 },
+      work_check_remove: { generation: 0, checks: [], more: 0 },
+      repair_offer: { generation: 0, kept: 0, lines: [], more: 0 },
+      repair_run: { generation: 0, kept: 0, lines: [], more: 0, fixed: 0 },
+      safe_stop: { safe: true, busy: [] },
+    };
     tauri.invoke.mockImplementation((command: string) =>
       Promise.resolve(
-        command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report"
+        command in delivered
+          ? delivered[command]
+          : command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report"
           ? []
           : command === "pairing_new_connect"
             ? 42
@@ -279,6 +303,17 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await fullmoveUndo("01010101010101010101010101010101");
       await moveAppdataAnswer(true);
       await moveChooseWhat({ folders: [{ role: "documents", parts: ["Work"] }], apps: true });
+      await workChecks();
+      await workCheckAdd({ kind: "font", family: "Inter" });
+      await workCheckRun();
+      await workCheckAnswer(0, 1, true);
+      await workCheckRemove(0, 1);
+      await repairOffer();
+      await repairRun(1, [0, 2]);
+      await moveChanges();
+      await moveReapprove(1, true);
+      await safeStop();
+      await recoveryKitSave("1792627200000-0");
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -300,6 +335,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenQuickSend(() => undefined);
     await listenGuard(() => undefined);
     await listenUndoClosed(() => undefined);
+    await listenSafeStop(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

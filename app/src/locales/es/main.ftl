@@ -2730,3 +2730,141 @@ rescue-accept-body = Acepta y PCTwin los copia a esta laptop. No se cambia nada 
 rescue-progress-title = Copiando archivos de { $drive }
 rescue-safe = El disco solo se lee. No se cambia nada en él.
 rescue-outcome-title = Archivos copiados de { $drive }
+plan-net-title = Lo que necesita internet
+plan-net-none = Nada de este traslado necesita internet.
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin descarga { $count } app de internet.
+        [many] PCTwin descarga { $count } apps de internet.
+       *[other] PCTwin descarga { $count } apps de internet.
+    }
+plan-net-sizes = El tamaño de cada descarga solo se conoce cuando ya se ha descargado.
+plan-net-signins =
+    { $count ->
+        [one] Vuelves a iniciar sesión en línea en { $count } cosa.
+        [many] Vuelves a iniciar sesión en línea en { $count } cosas.
+       *[other] Vuelves a iniciar sesión en línea en { $count } cosas.
+    }
+plan-room-title = Espacio necesario además de tus archivos
+plan-room-body = En el momento de más uso, PCTwin necesita unos { $installs } para las apps y unos { $appData } para los datos de las apps, además de tus archivos.
+compat-strip = Qué se probó
+compat-title = { $name }: qué se probó
+compat-open = Detalles
+compat-open-name = Ver qué se probó de { $name }
+compat-list-title =
+    { $count ->
+        [one] Cómo se probó { $count } app
+        [many] Cómo se probaron { $count } apps
+       *[other] Cómo se probaron { $count } apps
+    }
+compat-aspects-title = Cada parte
+compat-steps-title = Lo que harás tú
+compat-steps-none = No tienes que hacer nada.
+compat-never-checked = Nadie ha probado esta app todavía. PCTwin lo intentará y te dirá qué pasó.
+compat-checked-on = Revisada el { $date }.
+compat-version = Versión probada: { $version }
+work-strip = ¿Puedo trabajar?
+work-title = ¿Puedo trabajar de verdad?
+work-body = Añade los archivos, las fuentes y las tareas que necesitas en esta laptop. PCTwin revisa lo que puede leer. Tú dices si lo demás funcionó. No se abre ni se ejecuta nada.
+work-empty = Aún no hay comprobaciones. Añade abajo un archivo, una fuente o una tarea.
+work-looked-at = Revisados { $checked } de { $of }.
+work-missing = Falta:
+work-and-more =
+    { $count ->
+        [one] Y { $count } más.
+        [many] Y { $count } más.
+       *[other] Y { $count } más.
+    }
+work-not-looked-at = No revisado:
+work-answer-worked = Funcionó
+work-answer-worked-name = Funcionó: { $name }
+work-answer-not = No funcionó
+work-answer-not-name = No funcionó: { $name }
+work-remove = Quitar
+work-remove-name = Quitar { $name }
+work-run = Comprobar ahora
+work-add-title = Añadir una comprobación
+work-add-file = Elegir un archivo
+work-add-file-hint = Un proyecto, un archivo comprimido o una base de datos. PCTwin lo lee y nunca lo cambia.
+work-font-label = Una fuente, por su nombre
+work-add-font = Añadir fuente
+work-task-label = Una tarea que haces tú
+work-task-hint = Por ejemplo: imprimir una tarjeta de embarque. Tú dices si funcionó.
+work-add-task = Añadir tarea
+repair-strip = Arreglar lo que no terminó
+repair-title =
+    { $count ->
+        [one] Arreglar este elemento
+        [many] Arreglar estos { $count } elementos
+       *[other] Arreglar estos { $count } elementos
+    }
+repair-title-loading = Arreglar lo que no terminó
+repair-body =
+    { $kept ->
+        [one] Solo se vuelven a intentar los elementos de abajo. { $kept } elemento que ya funcionó se queda como está.
+        [many] Solo se vuelven a intentar los elementos de abajo. { $kept } elementos que ya funcionaron se quedan como están.
+       *[other] Solo se vuelven a intentar los elementos de abajo. { $kept } elementos que ya funcionaron se quedan como están.
+    }
+repair-nothing = No hay nada que arreglar.
+repair-can-now = Se puede intentar ahora
+repair-waiting = En espera
+repair-fixed =
+    { $count ->
+        [one] { $count } elemento arreglado.
+        [many] { $count } elementos arreglados.
+       *[other] { $count } elementos arreglados.
+    }
+repair-run =
+    { $count ->
+        [one] Intentar { $count } elemento otra vez
+        [many] Intentar { $count } elementos otra vez
+       *[other] Intentar { $count } elementos otra vez
+    }
+changed-strip = Cambios desde tu sí
+changed-title =
+    { $count ->
+        [one] { $count } cosa cambió después de tu sí
+        [many] { $count } cosas cambiaron después de tu sí
+       *[other] { $count } cosas cambiaron después de tu sí
+    }
+changed-body = Solo esto necesita un sí nuevo. Todo lo demás sigue aprobado.
+changed-affects = Afecta a: { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } paso espera tu respuesta.
+        [many] { $count } pasos esperan tu respuesta.
+       *[other] { $count } pasos esperan tu respuesta.
+    }
+changed-leave-out = Dejar esto fuera
+changed-approve = Decir sí otra vez
+safe-stop-strip = Actualización
+safe-stop-title = Esperando un momento seguro
+safe-stop-body = PCTwin no se actualiza ni se quita a sí mismo en medio de un traslado. Espera hasta que nada esté a medias.
+safe-stop-failed = PCTwin no pudo saber si es seguro. Inténtalo de nuevo.
+safe-stop-ready = Nada está cambiando a medias. PCTwin puede actualizarse o quitarse ahora.
+safe-stop-waiting-for = Está esperando a que terminen estas cosas:
+safe-stop-nothing-going-on = No hay ningún traslado, preparación ni deshacer en marcha.
+safe-stop-check = Comprobar otra vez
+kit-strip = Kit de recuperación
+kit-title = Guardar un kit de recuperación
+kit-body = Un kit de recuperación es un pequeño registro de este traslado, guardado en una carpeta que eliges, por ejemplo en una memoria USB. Muestra qué pasó y qué quedó por hacer, incluso sin esta laptop.
+kit-lacks-sentence = El kit no contiene tus archivos. No puede recuperar archivos que faltan.
+kit-not-saved = No elegiste ninguna carpeta. No se guardó nada.
+kit-saved-to = Guardado en:
+kit-files-title = Archivos del kit
+kit-holds-title = Lo que contiene el kit
+kit-lacks-title = Lo que no contiene el kit
+kit-save = Elegir una carpeta y guardar
+kit-save-again = Guardar otra vez
+kit-history = Kit de recuperación
+finish-step-repair =
+    { $count ->
+        [one] Arreglar este elemento
+        [many] Arreglar estos { $count } elementos
+       *[other] Arreglar estos { $count } elementos
+    }
+finish-step-repair-detail = Vuelve a intentar solo lo que no terminó. Lo que funcionó se queda.
+finish-step-work = ¿Puedo trabajar de verdad?
+finish-step-work-detail = Comprueba que están aquí los archivos, fuentes y tareas que necesitas.
+finish-step-kit = Guardar un kit de recuperación
+finish-step-kit-detail = Guarda un pequeño registro de este traslado en una carpeta que elijas.

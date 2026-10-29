@@ -2653,3 +2653,130 @@ rescue-accept-body = स्वीकार करें, और PCTwin उन्
 rescue-progress-title = { $drive } से फ़ाइलें कॉपी हो रही हैं
 rescue-safe = ड्राइव को सिर्फ़ पढ़ा जाता है। उस पर कुछ नहीं बदला जाता।
 rescue-outcome-title = { $drive } से कॉपी की गई फ़ाइलें
+plan-net-title = इंटरनेट की ज़रूरत किसे है
+plan-net-none = इस स्थानांतरण में किसी चीज़ को इंटरनेट की ज़रूरत नहीं है।
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin इंटरनेट से { $count } ऐप डाउनलोड करता है।
+       *[other] PCTwin इंटरनेट से { $count } ऐप डाउनलोड करता है।
+    }
+plan-net-sizes = हर डाउनलोड का आकार डाउनलोड होने के बाद ही पता चलता है।
+plan-net-signins =
+    { $count ->
+        [one] आप ऑनलाइन { $count } चीज़ में फिर से साइन इन करेंगे।
+       *[other] आप ऑनलाइन { $count } चीज़ों में फिर से साइन इन करेंगे।
+    }
+plan-room-title = आपकी फ़ाइलों के अलावा चाहिए जगह
+plan-room-body = सबसे व्यस्त पल में PCTwin को आपकी फ़ाइलों के अलावा ऐप के लिए लगभग { $installs } और ऐप के डेटा के लिए लगभग { $appData } चाहिए।
+compat-strip = क्या जाँचा गया
+compat-title = { $name }: क्या जाँचा गया
+compat-open = ब्योरा
+compat-open-name = { $name } के लिए जाँच का ब्योरा देखें
+compat-list-title =
+    { $count ->
+        [one] { $count } ऐप की जाँच कैसी रही
+       *[other] { $count } ऐप की जाँच कैसी रही
+    }
+compat-aspects-title = हर हिस्सा
+compat-steps-title = आप क्या करेंगे
+compat-steps-none = आपको कुछ नहीं करना है।
+compat-never-checked = इस ऐप को अभी तक किसी ने जाँचा नहीं है। PCTwin इसे आज़माएगा और बताएगा कि क्या हुआ।
+compat-checked-on = { $date } को जाँचा गया।
+compat-version = जाँचा गया संस्करण: { $version }
+work-strip = क्या मैं काम कर सकता हूँ?
+work-title = क्या मैं सच में काम कर सकता हूँ?
+work-body = इस लैपटॉप पर जिन फ़ाइलों, फ़ॉन्ट और कामों की आपको ज़रूरत है, उन्हें जोड़ें। PCTwin वही देखता है जो वह पढ़ सकता है। बाकी के लिए आप बताते हैं कि चला या नहीं। कुछ खोला या चलाया नहीं जाता।
+work-empty = अभी कोई जाँच नहीं है। नीचे कोई फ़ाइल, फ़ॉन्ट या काम जोड़ें।
+work-looked-at = { $of } में से { $checked } देखे गए।
+work-missing = कमी:
+work-and-more =
+    { $count ->
+        [one] और { $count } और।
+       *[other] और { $count } और।
+    }
+work-not-looked-at = नहीं देखा गया:
+work-answer-worked = चल गया
+work-answer-worked-name = चल गया: { $name }
+work-answer-not = नहीं चला
+work-answer-not-name = नहीं चला: { $name }
+work-remove = हटाएँ
+work-remove-name = { $name } हटाएँ
+work-run = अभी जाँचें
+work-add-title = जाँच जोड़ें
+work-add-file = फ़ाइल चुनें
+work-add-file-hint = कोई प्रोजेक्ट, आर्काइव या डेटाबेस। PCTwin उसे पढ़ता है और कभी बदलता नहीं।
+work-font-label = नाम से कोई फ़ॉन्ट
+work-add-font = फ़ॉन्ट जोड़ें
+work-task-label = कोई काम जो आप खुद करते हैं
+work-task-hint = जैसे: बोर्डिंग पास प्रिंट करना। आप बताते हैं कि चला या नहीं।
+work-add-task = काम जोड़ें
+repair-strip = जो पूरा नहीं हुआ उसे ठीक करें
+repair-title =
+    { $count ->
+        [one] इस आइटम को ठीक करें
+       *[other] इन { $count } आइटम को ठीक करें
+    }
+repair-title-loading = जो पूरा नहीं हुआ उसे ठीक करें
+repair-body =
+    { $kept ->
+        [one] सिर्फ़ नीचे के आइटम दोबारा आज़माए जाते हैं। { $kept } आइटम, जो पहले चल चुका था, जैसा है वैसा रहता है।
+       *[other] सिर्फ़ नीचे के आइटम दोबारा आज़माए जाते हैं। { $kept } आइटम, जो पहले चल चुके थे, जैसे हैं वैसे रहते हैं।
+    }
+repair-nothing = कुछ ठीक करने को नहीं है।
+repair-can-now = अभी आज़माया जा सकता है
+repair-waiting = इंतज़ार में
+repair-fixed =
+    { $count ->
+        [one] { $count } आइटम ठीक हुआ।
+       *[other] { $count } आइटम ठीक हुए।
+    }
+repair-run =
+    { $count ->
+        [one] { $count } आइटम फिर आज़माएँ
+       *[other] { $count } आइटम फिर आज़माएँ
+    }
+changed-strip = आपकी हाँ के बाद के बदलाव
+changed-title =
+    { $count ->
+        [one] आपकी हाँ के बाद { $count } चीज़ बदली
+       *[other] आपकी हाँ के बाद { $count } चीज़ें बदलीं
+    }
+changed-body = सिर्फ़ इन्हें नई हाँ चाहिए। बाकी सब मंज़ूर ही रहता है।
+changed-affects = असर: { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } चरण आपके जवाब का इंतज़ार कर रहा है।
+       *[other] { $count } चरण आपके जवाब का इंतज़ार कर रहे हैं।
+    }
+changed-leave-out = इन्हें छोड़ दें
+changed-approve = फिर हाँ कहें
+safe-stop-strip = अपडेट
+safe-stop-title = सुरक्षित पल का इंतज़ार
+safe-stop-body = PCTwin स्थानांतरण के बीच में खुद को अपडेट या हटाता नहीं है। वह तब तक रुकता है जब तक कुछ भी अधूरा न हो।
+safe-stop-failed = PCTwin पता नहीं लगा सका कि यह सुरक्षित है या नहीं। फिर कोशिश करें।
+safe-stop-ready = कुछ भी बीच में बदल नहीं रहा। PCTwin अब अपडेट हो सकता है या हटाया जा सकता है।
+safe-stop-waiting-for = वह इनके पूरा होने का इंतज़ार कर रहा है:
+safe-stop-nothing-going-on = कोई स्थानांतरण, सेटअप या पहले जैसा करना नहीं चल रहा।
+safe-stop-check = फिर जाँचें
+kit-strip = रिकवरी किट
+kit-title = रिकवरी किट सहेजें
+kit-body = रिकवरी किट इस स्थानांतरण का एक छोटा रिकॉर्ड है, जो आपके चुने फ़ोल्डर में सहेजा जाता है, जैसे USB ड्राइव पर। इस लैपटॉप के बिना भी यह दिखाता है कि क्या हुआ और क्या बाकी रहा।
+kit-lacks-sentence = किट में आपकी फ़ाइलें खुद नहीं होतीं। वह खोई हुई फ़ाइलें वापस नहीं ला सकता।
+kit-not-saved = कोई फ़ोल्डर नहीं चुना गया। कुछ सहेजा नहीं गया।
+kit-saved-to = यहाँ सहेजा गया:
+kit-files-title = किट की फ़ाइलें
+kit-holds-title = किट में क्या है
+kit-lacks-title = किट में क्या नहीं है
+kit-save = फ़ोल्डर चुनें और सहेजें
+kit-save-again = फिर सहेजें
+kit-history = रिकवरी किट
+finish-step-repair =
+    { $count ->
+        [one] इस आइटम को ठीक करें
+       *[other] इन { $count } आइटम को ठीक करें
+    }
+finish-step-repair-detail = सिर्फ़ वही फिर आज़माएँ जो पूरा नहीं हुआ। जो चला वह वैसा ही रहता है।
+finish-step-work = क्या मैं सच में काम कर सकता हूँ?
+finish-step-work-detail = देखें कि आपको जिन फ़ाइलों, फ़ॉन्ट और कामों की ज़रूरत है वे यहाँ हैं।
+finish-step-kit = रिकवरी किट सहेजें
+finish-step-kit-detail = इस स्थानांतरण का एक छोटा रिकॉर्ड अपने चुने फ़ोल्डर में रखें।
