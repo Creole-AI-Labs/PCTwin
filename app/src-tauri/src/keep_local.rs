@@ -165,6 +165,64 @@ pub fn opener(
     )
 }
 
+/// The durable list of files a move made local, in PCTwin's own data folder.
+pub fn list_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    Some(crate::moving::journal_path(app)?.with_file_name("kept-local.json"))
+}
+
+/// The list kept in one file in PCTwin's own data folder: written whole beside it, flushed, then
+/// put in its place.
+pub struct FileList(pub PathBuf);
+
+impl pctwin_orchestrate::local_copy_send::ListStore for FileList {
+    fn read(&self) -> std::io::Result<Option<Vec<u8>>> {
+        match std::fs::read(&self.0) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+    fn write(&self, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut tmp = self.0.as_os_str().to_owned();
+        tmp.push(".new");
+        let tmp = PathBuf::from(tmp);
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, &self.0)
+    }
+    fn remove(&self) -> std::io::Result<()> {
+        match std::fs::remove_file(&self.0) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// At PCTwin's start and before a move: puts back online only every file an earlier move made
+/// local and did not put back, then removes the list (Windows; elsewhere no list is ever made).
+pub fn put_back_left<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    #[cfg(windows)]
+    if let Some(list) = list_path(app) {
+        let system32 = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
+            .ok()
+            .map(|w| w.join("System32"));
+        let _ =
+            pctwin_orchestrate::local_copy_send::put_back_listed(&FileList(list), &mut |root| {
+                Box::new(pctwin_orchestrate::local_copy::WindowsCloudFiles::new(
+                    root,
+                    PUT_BACK_WAIT,
+                    system32.as_deref(),
+                ))
+            });
+    }
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
 /// Why keeping copies paused, for the outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]

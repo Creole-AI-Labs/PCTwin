@@ -19,6 +19,13 @@
 //!   read: the send is told it is online only ([`pctwin_transfer::OnlineOnly`]), so it ends safe
 //!   in its cloud (needs action), never copied.
 //!
+//! - **Durable**: with [`KeepOpener::recorded`], the list of files this move may make local, each
+//!   with its state before (online only), is written to PCTwin's own folder and flushed before
+//!   the first one comes down ([`KeptList`]); each is marked before it comes down and again once
+//!   it is online only again. A move that stops part way (the laptop turned off, PCTwin closed)
+//!   leaves the list, and the next start of PCTwin, or of a move, puts back whatever it still
+//!   names ([`put_back_listed`]), then removes it: the old laptop ends as it was.
+//!
 //! Windows only for now ([`crate::local_copy::WindowsCloudFiles`]); macOS has no supported way
 //! yet to make a file online only again, so the choice is not offered there.
 
@@ -29,6 +36,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use pctwin_record::ItemId;
 use pctwin_transfer::{OnlineOnly, Opener, Source, Stamp};
+use serde::{Deserialize, Serialize};
 
 use crate::local_copy::{
     CloudFiles, FileReport, HEAD, KEEP_FREE_OLD, KeepLocal, Network, Report, Stopped, Wanted,
@@ -49,6 +57,166 @@ struct State {
     down: BTreeSet<ItemId>,
     /// Readers of each file still open.
     readers: HashMap<ItemId, usize>,
+    /// The durable list, when the move keeps one.
+    list: Option<KeptList>,
+}
+
+/// A file's state before PCTwin made it local.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Before {
+    OnlineOnly,
+}
+
+/// One file of the durable list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListedFile {
+    pub path: PathBuf,
+    /// The cloud folder it is in (nothing outside it is ever touched when it is put back).
+    pub root: PathBuf,
+    pub before: Before,
+    /// PCTwin is bringing it down, or brought it down and has not seen it online only again.
+    pub down: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListFile {
+    version: u32,
+    files: Vec<ListedFile>,
+}
+
+const LIST_VERSION: u32 = 1;
+/// The most files a list may name when it is read back (more than any move makes local).
+const MOST_LISTED: usize = 1_000_000;
+
+/// Where the durable list is kept: PCTwin's own data folder, on the laptop's own drive. This crate
+/// never writes a file itself (its clippy fence); the app gives the store.
+pub trait ListStore: Send {
+    /// The list as last written, or `None` when there is none.
+    fn read(&self) -> io::Result<Option<Vec<u8>>>;
+    /// Writes the whole list in place of the old one, flushed to the disk before it returns, so
+    /// a list is never half written.
+    fn write(&self, bytes: &[u8]) -> io::Result<()>;
+    /// Removes the list (none there is fine).
+    fn remove(&self) -> io::Result<()>;
+}
+
+fn write_list(store: &dyn ListStore, files: &[ListedFile]) -> io::Result<()> {
+    let body = serde_json::to_vec(&ListFile {
+        version: LIST_VERSION,
+        files: files.to_vec(),
+    })
+    .map_err(io::Error::other)?;
+    store.write(&body)
+}
+
+/// The durable list of the files a move may make local on the old laptop (see the module's
+/// words).
+pub struct KeptList {
+    store: Box<dyn ListStore>,
+    files: Vec<ListedFile>,
+}
+
+impl KeptList {
+    /// Writes the list of `files` (each with `roots[file.cloud]`, its cloud folder) to `store`,
+    /// flushed, before anything comes down. A list already there (an earlier move's, not yet put
+    /// back) is never overwritten: put it back first ([`put_back_listed`]).
+    pub fn create(
+        store: Box<dyn ListStore>,
+        files: &[KeepFile],
+        roots: &[PathBuf],
+    ) -> io::Result<Self> {
+        if store.read()?.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "an earlier list is still there",
+            ));
+        }
+        let listed: Vec<ListedFile> = files
+            .iter()
+            .map(|f| {
+                Ok(ListedFile {
+                    path: f.wanted.path.clone(),
+                    root: roots
+                        .get(f.cloud)
+                        .cloned()
+                        .ok_or_else(|| io::Error::other("a file with no cloud folder"))?,
+                    before: Before::OnlineOnly,
+                    down: false,
+                })
+            })
+            .collect::<io::Result<_>>()?;
+        write_list(store.as_ref(), &listed)?;
+        Ok(Self {
+            store,
+            files: listed,
+        })
+    }
+
+    /// Marks `file` as coming down (`true`) or online only again (`false`), flushed.
+    fn mark(&mut self, file: &Path, down: bool) -> io::Result<()> {
+        let Some(f) = self.files.iter_mut().find(|f| f.path == file) else {
+            return Err(io::Error::other("not on the list"));
+        };
+        f.down = down;
+        write_list(self.store.as_ref(), &self.files)
+    }
+
+    /// Removes the list when nothing on it is still down; otherwise keeps it for the next start.
+    fn finish(&self) -> io::Result<()> {
+        if self.files.iter().any(|f| f.down) {
+            return Ok(());
+        }
+        self.store.remove()
+    }
+}
+
+/// What putting back a left list did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PutBack {
+    /// Files made online only again.
+    pub back: Vec<PathBuf>,
+    /// Files the cloud app has not made online only again (kept on the list for the next start).
+    pub still_down: Vec<PathBuf>,
+}
+
+/// At the start of PCTwin, or of a move: puts back every file a list left in `store` still names
+/// as down, through `cloud_for(its cloud folder)`, then removes the list (or keeps only what is
+/// still down). No list: nothing to do. A list that cannot be read is kept, never acted on.
+pub fn put_back_listed(
+    store: &dyn ListStore,
+    cloud_for: &mut dyn FnMut(&Path) -> Box<dyn CloudFiles>,
+) -> io::Result<PutBack> {
+    let Some(bytes) = store.read()? else {
+        return Ok(PutBack::default());
+    };
+    let list: ListFile = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    if list.version != LIST_VERSION || list.files.len() > MOST_LISTED {
+        return Err(io::Error::other("not a list this version reads"));
+    }
+    let mut done = PutBack::default();
+    let mut left = Vec::new();
+    for f in list.files.into_iter().filter(|f| f.down) {
+        let mut cloud = cloud_for(&f.root);
+        let back = cloud.is_online_only(&f.path).ok() == Some(true)
+            || (cloud.put_back(&f.path).is_ok()
+                && cloud.is_online_only(&f.path).ok() == Some(true));
+        // A file that is gone is not down any more either.
+        if back || !f.path.exists() {
+            done.back.push(f.path);
+        } else {
+            done.still_down.push(f.path.clone());
+            left.push(f);
+        }
+    }
+    if left.is_empty() {
+        store.remove()?;
+    } else {
+        write_list(store, &left)?;
+    }
+    Ok(done)
 }
 
 /// The send's opener while local copies are kept (see the module's words).
@@ -105,8 +273,16 @@ impl KeepOpener {
                 report,
                 down: BTreeSet::new(),
                 readers: HashMap::new(),
+                list: None,
             })),
         }
+    }
+
+    /// Keeps `list` up to date as files come down and go back (see the module's words). Made
+    /// before the first file is opened.
+    pub fn recorded(self, list: KeptList) -> Self {
+        lock(&self.state).list = Some(list);
+        self
     }
 
     /// What keeping copies has done so far.
@@ -130,6 +306,10 @@ impl KeepOpener {
                 f.sent = true;
                 f.why_not = None;
             }
+        }
+        if let Some(list) = &state.list {
+            // Kept while anything is still down: the next start tries again.
+            let _ = list.finish();
         }
         state.report.clone()
     }
@@ -203,14 +383,26 @@ impl KeepOpener {
                 return Err(safe_in_cloud());
             }
         }
+        // Written down, flushed, before it comes down; if the list cannot be written, it does not.
+        if let Some(list) = state.list.as_mut()
+            && list.mark(&w.path, true).is_err()
+        {
+            Self::mark(&mut state, w, Some(WhyNot::DownloadFailed));
+            return Err(safe_in_cloud());
+        }
         let cloud = clouds[f.cloud].as_mut();
         let came =
             cloud.bring_down(&w.path).is_ok() && cloud.is_online_only(&w.path).ok() == Some(false);
         if !came {
             // Whatever part came down goes back.
+            state.down.insert(w.item);
             if cloud.is_online_only(&w.path).ok() != Some(true) {
-                state.down.insert(w.item);
                 put_back(&mut state, cloud, w);
+            } else {
+                state.down.remove(&w.item);
+                if let Some(list) = state.list.as_mut() {
+                    let _ = list.mark(&w.path, false);
+                }
             }
             Self::mark(&mut state, w, Some(WhyNot::DownloadFailed));
             return Err(safe_in_cloud());
@@ -256,6 +448,10 @@ fn put_back(state: &mut State, cloud: &mut dyn CloudFiles, w: &Wanted) {
         return;
     }
     let back = cloud.put_back(&w.path).is_ok() && cloud.is_online_only(&w.path).ok() == Some(true);
+    // Off the list once it is online only again; still on it otherwise, for the next start.
+    if back && let Some(list) = state.list.as_mut() {
+        let _ = list.mark(&w.path, false);
+    }
     if let Some(f) = state.report.files.get_mut(&w.item) {
         // Brought down again later: only how it last ended counts.
         f.back_online_only = Some(back);

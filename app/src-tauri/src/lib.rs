@@ -357,6 +357,9 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             pctwin_helper::os_probes::install();
             // App data staged by a run that never finished is removed before anything else.
             fullmove::sweep_staging(app.handle());
+            // Online-only files an earlier move made local and did not put back go back online
+            // only (the move stopped part way): the old laptop ends as it was.
+            keep_local::put_back_left(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
             }

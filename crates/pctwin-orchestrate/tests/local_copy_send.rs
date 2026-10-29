@@ -380,3 +380,167 @@ fn a_file_already_on_the_laptop_is_read_as_any_other() {
     assert_eq!(r.files[&a.item].why_not, Some(WhyNot::AlreadyOnLaptop));
     assert!(lab.cloud.log().is_empty());
 }
+
+mod durable {
+    use super::*;
+    use pctwin_orchestrate::local_copy_send::{KeptList, ListStore, put_back_listed};
+
+    /// The list in a file, as the app keeps it.
+    struct FileStore(PathBuf);
+
+    impl ListStore for FileStore {
+        fn read(&self) -> io::Result<Option<Vec<u8>>> {
+            match std::fs::read(&self.0) {
+                Ok(b) => Ok(Some(b)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(e),
+            }
+        }
+        fn write(&self, bytes: &[u8]) -> io::Result<()> {
+            std::fs::write(&self.0, bytes)
+        }
+        fn remove(&self) -> io::Result<()> {
+            match std::fs::remove_file(&self.0) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    fn store(list: &Path) -> Box<dyn ListStore> {
+        Box::new(FileStore(list.to_path_buf()))
+    }
+
+    fn listed(lab: &Lab, list: &Path, files: &[Wanted]) -> KeepOpener {
+        let keep: Vec<KeepFile> = files
+            .iter()
+            .map(|w| KeepFile {
+                wanted: w.clone(),
+                cloud: 0,
+            })
+            .collect();
+        let made = KeptList::create(store(list), &keep, &[lab.home.join("OneDrive")]).unwrap();
+        lab.opener(files, Network::Unmetered, false).recorded(made)
+    }
+
+    fn down_in(list: &Path) -> Vec<(String, bool)> {
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(list).unwrap()).unwrap();
+        v["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    name(Path::new(f["path"].as_str().unwrap())),
+                    f["down"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    /// The old laptop ends as it was: a move stopped part way leaves the list, and the next start
+    /// puts every file it names back online only, then removes it.
+    #[test]
+    fn a_move_stopped_part_way_leaves_the_list_and_the_next_start_puts_every_file_back() {
+        let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+        let a = lab.file("a.mp4", 10 * MB);
+        let b = lab.file("b.mp4", 10 * MB);
+        let list = lab.home.join("kept-local.json");
+        let o = listed(&lab, &list, &[a.clone(), b.clone()]);
+        // Written before anything came down, with each file's state before.
+        assert_eq!(
+            down_in(&list),
+            [("a.mp4".to_string(), false), ("b.mp4".to_string(), false)]
+        );
+        assert!(
+            std::fs::read_to_string(&list)
+                .unwrap()
+                .contains("online-only")
+        );
+        read_all(&o, &a.path).unwrap();
+        assert_eq!(
+            down_in(&list),
+            [("a.mp4".to_string(), true), ("b.mp4".to_string(), false)]
+        );
+        // Stopped here: PCTwin closed, nothing put back.
+        drop(o);
+        assert!(!lab.cloud.with(|c| c.online.contains(&a.path)));
+        let cloud = lab.cloud.clone();
+        let done = put_back_listed(store(&list).as_ref(), &mut |root| {
+            assert_eq!(root, lab.home.join("OneDrive"));
+            Box::new(cloud.clone())
+        })
+        .unwrap();
+        assert_eq!(done.back, std::slice::from_ref(&a.path));
+        assert!(done.still_down.is_empty());
+        assert!(lab.cloud.with(|c| c.online.contains(&a.path)));
+        assert_eq!(lab.cloud.log(), ["down a.mp4", "back a.mp4"]);
+        assert!(!list.exists(), "the list is removed");
+        // Nothing left: a second start does nothing.
+        assert_eq!(
+            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap(),
+            Default::default()
+        );
+    }
+
+    #[test]
+    fn a_finished_move_removes_its_list_and_one_the_cloud_app_kept_down_stays_for_next_time() {
+        let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+        let a = lab.file("a.mp4", 10 * MB);
+        let list = lab.home.join("kept-local.json");
+        let o = listed(&lab, &list, std::slice::from_ref(&a));
+        read_all(&o, &a.path).unwrap();
+        o.finish(&|_| true);
+        assert!(!list.exists());
+
+        let b = lab.file("b.mp4", 10 * MB);
+        lab.cloud.with(|c| c.refuse_put_back.insert(b.path.clone()));
+        let o = listed(&lab, &list, std::slice::from_ref(&b));
+        read_all(&o, &b.path).unwrap();
+        o.finish(&|_| true);
+        assert_eq!(down_in(&list), [("b.mp4".to_string(), true)]);
+        // Still refused at the next start: kept on the list.
+        let cloud = lab.cloud.clone();
+        let done =
+            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap();
+        assert_eq!(done.still_down, std::slice::from_ref(&b.path));
+        assert!(list.exists());
+        // The start after that, it goes back, and the list is gone.
+        lab.cloud.with(|c| c.refuse_put_back.clear());
+        let done =
+            put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).unwrap();
+        assert_eq!(done.back, std::slice::from_ref(&b.path));
+        assert!(!list.exists());
+    }
+
+    #[test]
+    fn nothing_comes_down_unless_it_is_written_down_first() {
+        let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+        let a = lab.file("a.mp4", 10 * MB);
+        let dir = lab.home.join("pctwin-data");
+        std::fs::create_dir_all(&dir).unwrap();
+        let list = dir.join("kept-local.json");
+        let o = listed(&lab, &list, std::slice::from_ref(&a));
+        // The list can no longer be written: the file is never brought down.
+        std::fs::remove_file(&list).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(safe_in_cloud(&read_all(&o, &a.path).unwrap_err()));
+        assert!(lab.cloud.log().is_empty());
+        assert_eq!(
+            o.report().files[&a.item].why_not,
+            Some(WhyNot::DownloadFailed)
+        );
+    }
+
+    #[test]
+    fn an_earlier_list_is_never_overwritten_and_a_strange_one_is_never_acted_on() {
+        let lab = Lab::new(KEEP_FREE_OLD + 100 * MB);
+        let list = lab.home.join("kept-local.json");
+        std::fs::write(&list, b"not a list").unwrap();
+        assert!(KeptList::create(store(&list), &[], &[]).is_err());
+        let cloud = lab.cloud.clone();
+        assert!(put_back_listed(store(&list).as_ref(), &mut |_| Box::new(cloud.clone())).is_err());
+        assert!(list.exists(), "kept, never acted on");
+        assert!(lab.cloud.log().is_empty());
+    }
+}
