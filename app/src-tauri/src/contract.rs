@@ -698,6 +698,8 @@ fn report_items() -> Vec<ReportItem> {
     let line = |n: &str, status, reason, evidence| ReportItem {
         id: format!("{n:0>32}"),
         name: format!("{n}.txt"),
+        kind: crate::moving::FileKind::Documents,
+        bytes: 1200,
         source: format!("documents/{n}.txt"),
         destination: (status != ItemStatus::Failed).then(|| format!("{n}.txt")),
         status,

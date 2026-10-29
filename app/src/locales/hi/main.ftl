@@ -1296,8 +1296,27 @@ drive-problem-carry-on = जारी रखें
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = आपका स्थानांतरण, एक-एक आइटम।
-report-body = हर आइटम के साथ क्या हुआ, क्यों हुआ, और वह कहाँ से आया और कहाँ गया।
+report-title = आपका स्थानांतरण, प्रकार के अनुसार।
+report-body = किसी प्रकार को खोलकर उसकी फ़ाइलें देखें। जिन चीज़ों पर आपका ध्यान चाहिए, वे सबसे पहले हैं।
+report-needs-title = { $count ->
+        [one] { $count } चीज़ पर आपका ध्यान चाहिए
+       *[other] { $count } चीज़ों पर आपका ध्यान चाहिए
+    }
+report-group-photos = फ़ोटो
+report-group-videos = वीडियो
+report-group-music = संगीत
+report-group-documents = दस्तावेज़
+report-group-other = अन्य फ़ाइलें
+report-group-size = { $files ->
+        [one] { $files } फ़ाइल
+       *[other] { $files } फ़ाइलें
+    } · { $size }
+report-group-done = सब कॉपी और जाँच लिया गया
+report-group-some = { $total } में से { $done } कॉपी और जाँच लिए गए
+report-group-left = { $count ->
+        [one] { $count } आपके पुराने लैपटॉप पर रहा, जैसा आपने चुना
+       *[other] { $count } आपके पुराने लैपटॉप पर रहे, जैसा आपने चुना
+    }
 report-filter-label = दिखाएं
 report-col-item = आइटम
 report-col-result = नतीजा

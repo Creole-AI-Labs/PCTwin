@@ -1329,8 +1329,30 @@ drive-problem-carry-on = Continuar
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Tu traslado, elemento por elemento.
-report-body = Qué pasó con cada elemento, por qué, de dónde vino y adónde fue.
+report-title = Tu traslado, por tipo.
+report-body = Abre un tipo para ver sus archivos. Lo que necesita tu atención aparece primero.
+report-needs-title = { $count ->
+        [one] 1 cosa necesita tu atención
+        [many] { $count } cosas necesitan tu atención
+       *[other] { $count } cosas necesitan tu atención
+    }
+report-group-photos = Fotos
+report-group-videos = Vídeos
+report-group-music = Música
+report-group-documents = Documentos
+report-group-other = Otros archivos
+report-group-size = { $files ->
+        [one] 1 archivo
+        [many] { $files } archivos
+       *[other] { $files } archivos
+    } · { $size }
+report-group-done = Todo copiado y comprobado
+report-group-some = { $done } de { $total } copiados y comprobados
+report-group-left = { $count ->
+        [one] 1 se quedó en tu portátil antiguo, como elegiste
+        [many] { $count } se quedaron en tu portátil antiguo, como elegiste
+       *[other] { $count } se quedaron en tu portátil antiguo, como elegiste
+    }
 report-filter-label = Mostrar
 report-col-item = Elemento
 report-col-result = Resultado

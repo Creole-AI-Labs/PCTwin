@@ -1541,6 +1541,30 @@ impl AfterMove {
     }
 }
 
+/// A file's kind in the report, the way the scan counts kinds (`pctwin_scan::category`): the
+/// groups the person sees, like a phone's storage page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileKind {
+    Photos,
+    Videos,
+    Music,
+    Documents,
+    Other,
+}
+
+impl FileKind {
+    pub fn of(name: &str) -> Self {
+        match pctwin_scan::category(name) {
+            pctwin_scan::Category::Photo => Self::Photos,
+            pctwin_scan::Category::Video => Self::Videos,
+            pctwin_scan::Category::Music => Self::Music,
+            pctwin_scan::Category::Document => Self::Documents,
+            pctwin_scan::Category::Other => Self::Other,
+        }
+    }
+}
+
 /// How a copied file is known to be a true copy: every copied line says which, and they are never
 /// shown as the same line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1573,6 +1597,10 @@ impl Evidence {
 pub struct ReportItem {
     pub id: String,
     pub name: String,
+    /// What kind of file it is, so the report can show it in its group (photos, videos, ...).
+    pub kind: FileKind,
+    /// Its size on the old laptop.
+    pub bytes: u64,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination: Option<String>,
@@ -1732,6 +1760,8 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination,
             status,
@@ -1815,6 +1845,8 @@ fn whole_lines(
         lines.push(ReportItem {
             id: whole.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: whole.size_bytes,
             source,
             destination,
             status,
@@ -1882,6 +1914,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination: None,
             status,
@@ -1907,6 +1941,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         report.push(ReportItem {
             id: item.id.to_hex(),
             name: name_of(&source),
+            kind: FileKind::of(&source),
+            bytes: item.size_bytes,
             source,
             destination: None,
             status: ItemStatus::SkippedByUser,

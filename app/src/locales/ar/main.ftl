@@ -1471,8 +1471,39 @@ drive-problem-carry-on = متابعة
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = عملية النقل، عنصرًا عنصرًا.
-report-body = ما حدث لكل عنصر، وسببه، ومن أين أتى وإلى أين ذهب.
+report-title = نقلك، حسب النوع.
+report-body = افتح نوعًا لترى ملفاته. ما يحتاج إليك يظهر أولًا.
+report-needs-title = { $count ->
+        [zero] لا شيء يحتاج إليك
+        [one] شيء واحد يحتاج إليك
+        [two] شيئان يحتاجان إليك
+        [few] { $count } أشياء تحتاج إليك
+        [many] { $count } شيئًا يحتاج إليك
+       *[other] { $count } شيء يحتاج إليك
+    }
+report-group-photos = الصور
+report-group-videos = الفيديوهات
+report-group-music = الموسيقى
+report-group-documents = المستندات
+report-group-other = ملفات أخرى
+report-group-size = { $files ->
+        [zero] لا ملفات
+        [one] ملف واحد
+        [two] ملفان
+        [few] { $files } ملفات
+        [many] { $files } ملفًا
+       *[other] { $files } ملف
+    } · { $size }
+report-group-done = نُسخ كل شيء وتم التحقق منه
+report-group-some = نُسخ { $done } من { $total } وتم التحقق منها
+report-group-left = { $count ->
+        [zero] لم يبقَ شيء على حاسوبك القديم
+        [one] بقي واحد على حاسوبك القديم، كما اخترت
+        [two] بقي اثنان على حاسوبك القديم، كما اخترت
+        [few] بقيت { $count } على حاسوبك القديم، كما اخترت
+        [many] بقي { $count } على حاسوبك القديم، كما اخترت
+       *[other] بقي { $count } على حاسوبك القديم، كما اخترت
+    }
 report-filter-label = عرض
 report-col-item = العنصر
 report-col-result = النتيجة

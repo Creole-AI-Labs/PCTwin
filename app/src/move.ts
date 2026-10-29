@@ -142,8 +142,15 @@ export type Outcome =
 export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept"] as const;
 export type ReportNote = (typeof REPORT_NOTES)[number];
 
-/** One line of the detailed report (R02). Names and paths are the person's own text. */
-export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote } & Outcome;
+/** The groups the report shows files in, like a phone's storage page (as the scan counts kinds). */
+export const FILE_KINDS = ["photos", "videos", "music", "documents", "other"] as const;
+export type FileKind = (typeof FILE_KINDS)[number];
+
+/**
+ * One line of the detailed report (R02). Names and paths are the person's own text. Its kind and
+ * size are absent only in a report kept by an older version (shown under other files).
+ */
+export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote; kind?: FileKind; bytes?: number } & Outcome;
 
 /* ---------- Progress: measured numbers only ---------- */
 

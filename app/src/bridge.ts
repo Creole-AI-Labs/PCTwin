@@ -14,7 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import { FILE_KINDS, ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
@@ -383,7 +383,7 @@ export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "plan-view": ["rebuild"],
   "move-outcome": ["rebuilt", "landed"],
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
-  "report-item": ["destination", "reason", "evidence", "note"],
+  "report-item": ["destination", "reason", "evidence", "note", "kind", "bytes"],
   "qs-picked": ["problem"],
 };
 
@@ -658,12 +658,16 @@ export function parseReportItem(value: unknown): ReportItem | null {
   const result = parseResult("reason" in f ? { status: f.status, reason: f.reason } : { status: f.status });
   if (!result) return null;
   if ("note" in f && !oneOf(f.note, REPORT_NOTES)) return null;
+  if ("kind" in f && !oneOf(f.kind, FILE_KINDS)) return null;
+  if ("bytes" in f && !(typeof f.bytes === "number" && Number.isSafeInteger(f.bytes) && f.bytes >= 0)) return null;
   const line = {
     id: f.id,
     name: f.name,
     source: f.source,
     ...(typeof f.destination === "string" ? { destination: f.destination } : {}),
     ...(oneOf(f.note, REPORT_NOTES) ? { note: f.note } : {}),
+    ...(oneOf(f.kind, FILE_KINDS) ? { kind: f.kind } : {}),
+    ...(typeof f.bytes === "number" ? { bytes: f.bytes } : {}),
   };
   if (result.status === "copied") {
     const evidence = parseReportEvidence(f.evidence);

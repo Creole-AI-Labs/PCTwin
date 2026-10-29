@@ -449,3 +449,96 @@
   display: inline-block;
   width: 36px;
 }
+
+/* R02 by kind: the sizes bar, then one line per kind that opens into its files. */
+.rp-title {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--type-row-title);
+}
+.rp-needs .mv-table-wrap {
+  border-color: var(--colour-attention-text);
+}
+.rp-bar {
+  display: flex;
+  height: 12px;
+  margin: var(--space-4) 0 var(--space-2);
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--colour-line-quiet);
+}
+.rp-part {
+  min-width: 2px;
+}
+.rp-groups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rp-group {
+  border-bottom: 1px solid var(--colour-line);
+}
+.rp-head {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  grid-template-areas:
+    "swatch name state"
+    "swatch size state";
+  column-gap: var(--space-3);
+  align-items: center;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.rp-head:hover {
+  background: var(--colour-soft);
+}
+.rp-head:focus-visible {
+  outline: 2px solid var(--colour-focus);
+  outline-offset: -2px;
+}
+.rp-swatch {
+  grid-area: swatch;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.rp-name {
+  grid-area: name;
+  font-size: var(--type-row-title);
+  font-weight: 600;
+}
+.rp-size {
+  grid-area: size;
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+.rp-state {
+  grid-area: state;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: var(--type-small);
+}
+.rp-left {
+  color: var(--colour-muted);
+}
+.rp-body {
+  padding-bottom: var(--space-4);
+}
+.rp-folder {
+  display: block;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  font-weight: 400;
+}
+.rp-photos { background: var(--colour-kind-photos); }
+.rp-videos { background: var(--colour-kind-videos); }
+.rp-music { background: var(--colour-kind-music); }
+.rp-documents { background: var(--colour-kind-documents); }
+.rp-other { background: var(--colour-kind-other); }

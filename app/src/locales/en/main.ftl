@@ -1171,8 +1171,27 @@ drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Your move, item by item.
-report-body = What happened to each item, why, and where it came from and went.
+report-title = Your move, by kind.
+report-body = Open a kind to see its files. Anything that needs you comes first.
+report-needs-title = { $count ->
+        [one] 1 thing needs you
+       *[other] { $count } things need you
+    }
+report-group-photos = Photos
+report-group-videos = Videos
+report-group-music = Music
+report-group-documents = Documents
+report-group-other = Other files
+report-group-size = { $files ->
+        [one] 1 file
+       *[other] { $files } files
+    } · { $size }
+report-group-done = All copied and checked
+report-group-some = { $done } of { $total } copied and checked
+report-group-left = { $count ->
+        [one] 1 left on your old laptop, as you chose
+       *[other] { $count } left on your old laptop, as you chose
+    }
 report-filter-label = Show
 report-col-item = Item
 report-col-result = Outcome

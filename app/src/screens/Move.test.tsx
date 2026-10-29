@@ -342,9 +342,10 @@ describe("the move, once paired", () => {
     send("move-progress", running);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-title"));
     fireEvent.click(screen.getByRole("button", { name: text("outcome-report") }));
-    await waitFor(() => {
-      expect(screen.getByText("1.txt")).toBeTruthy();
-    });
+    // The engine's lines come sorted by kind: open Documents to see them.
+    const documents = await screen.findByRole("button", { name: (n) => n.startsWith(text("report-group-documents")) });
+    fireEvent.click(documents);
+    expect(screen.getByText("1.txt")).toBeTruthy();
     expect(screen.getByText(text("evidence-already-there"))).toBeTruthy();
     expect(screen.getByText(text("evidence-new-laptop"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));

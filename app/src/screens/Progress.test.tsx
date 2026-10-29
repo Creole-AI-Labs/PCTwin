@@ -19,10 +19,12 @@ import {
   WHY_MEMORY,
   whyMemoryKey,
   type Counts,
+  type FileKind,
   type ItemResult,
   type MoveProgress,
   type ReportItem,
 } from "../move";
+import { parseReportItem } from "../bridge";
 import * as sample from "../moveSamples";
 import { counts } from "../moveSamples";
 import { FooterProvider } from "./FrameFooter";
@@ -856,20 +858,25 @@ describe("R01 Welcome to your next laptop", () => {
   });
 });
 
-describe("R02 Your move, item by item", () => {
+describe("R02 Your move, by kind", () => {
+  /** Shows the report with one kind open (the samples have no kind, so they are other files). */
+  const showReport = (items: ReportItem[], kind: FileKind = "other") => {
+    inApp(<Report items={items} onBack={noop} />);
+    fireEvent.click(screen.getByRole("button", { name: (n) => n.startsWith(text(`report-group-${kind}`)) }));
+  };
   const detailsOf = (row: HTMLElement): HTMLDetailsElement => {
     const el = within(row).getByText(text("report-more-details")).closest<HTMLDetailsElement>("details");
     if (!el) throw new Error("no details element");
     return el;
   };
-  const rowOf = (name: string) => screen.getAllByRole("row").find((r) => r.textContent.includes(name)) as HTMLElement;
+  const rowOf = (name: string) => Array.from(document.querySelectorAll<HTMLElement>(".rp-body tbody tr")).find((r) => r.textContent.includes(name)) as HTMLElement;
 
   it("lists every item with its status chip and its reason", async () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("report-title"));
     expect(document.activeElement).toBe(heading);
-    expect(screen.getAllByRole("row")).toHaveLength(sample.report.length + 1);
+    expect(document.querySelectorAll(".rp-body tbody tr")).toHaveLength(sample.report.length);
     expect(within(rowOf("Invoice March.pdf")).getByText(text("status-copied"))).toBeTruthy();
     expect(within(rowOf("Photo editor")).getByText(text("status-reinstalled"))).toBeTruthy();
     expect(within(rowOf("Old notes.rtf")).getByText(text("status-converted"))).toBeTruthy();
@@ -885,7 +892,7 @@ describe("R02 Your move, item by item", () => {
   });
 
   it("a drive read-back and a check from memory are two different lines", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     const fromDrive = rowOf("Invoice March.pdf");
     const fromMemory = rowOf("Holiday 2024");
     expect(within(fromDrive).getByText(text("evidence-read-back"))).toBeTruthy();
@@ -897,7 +904,7 @@ describe("R02 Your move, item by item", () => {
   });
 
   it("explains a memory check behind More details, not in the main line", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     const row = rowOf("Holiday 2024");
     const details = detailsOf(row);
     expect(details.open).toBe(false);
@@ -914,7 +921,7 @@ describe("R02 Your move, item by item", () => {
 
   it.each(WHY_MEMORY)("a check from memory because of %s says why in its own words", (why) => {
     const item: ReportItem = { id: "m", name: "Notes.txt", source: "Notes.txt", status: "copied", evidence: { from: "memory", why } };
-    inApp(<Report items={[item]} onBack={noop} />);
+    showReport([item]);
     const details = detailsOf(rowOf("Notes.txt"));
     const line = details.querySelector(`[data-why="${why}"]`);
     expect(line?.textContent).toBe(text(whyMemoryKey(why)));
@@ -930,7 +937,7 @@ describe("R02 Your move, item by item", () => {
   });
 
   it("shows where it came from and where it went behind More details", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     const details = detailsOf(rowOf("Invoice March.pdf"));
     const path = String.raw`C:\Users\Ada\Documents\Invoice March.pdf`;
     expect(plain(details.textContent)).toContain(plain(text("report-from", { path })));
@@ -941,7 +948,7 @@ describe("R02 Your move, item by item", () => {
     const changed: ReportItem = { id: "c", name: "Budget.xlsx", source: "Budget.xlsx", status: "copied", evidence: { from: "drive" }, note: "changed-since-scan" };
     const gone: ReportItem = { id: "g", name: "Draft.docx", source: "Draft.docx", status: "failed", reason: "unreadable", note: "no-longer-there" };
     const plainFailed: ReportItem = { id: "u", name: "Locked.pst", source: "Locked.pst", status: "failed", reason: "unreadable" };
-    inApp(<Report items={[changed, gone, plainFailed]} onBack={noop} />);
+    showReport([changed, gone, plainFailed]);
     const row = rowOf("Budget.xlsx");
     expect(within(row).getByText(text("report-note-changed-since-scan"))).toBeTruthy();
     expect(within(row).getByText(text("evidence-read-back"))).toBeTruthy();
@@ -958,14 +965,14 @@ describe("R02 Your move, item by item", () => {
   });
 
   it("an item that did not finish is marked as not checked", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     expect(within(rowOf("Archive.zip")).getByText(text("evidence-not-checked"))).toBeTruthy();
     expect(within(rowOf("Games")).queryByText(text("evidence-not-checked"))).toBeNull();
     expect(within(rowOf("Games")).queryByText(text("evidence-read-back"))).toBeNull();
   });
 
   it("has no filter buttons and no count line", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     expect(screen.queryByRole("group", { name: text("report-filter-label") })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(hasText("not the drive."), { selector: "p.eyebrow, .kit-banner p" })).toBeNull();
@@ -986,9 +993,9 @@ describe("R02 Your move, item by item", () => {
   });
 
   it("shows a long report a page at a time and says how much is shown", () => {
-    inApp(<Report items={sample.longReport(250)} onBack={noop} />);
+    showReport(sample.longReport(250));
     // (Counting rows straight from the page: asking for them by role is slow with hundreds.)
-    const rows = () => document.querySelectorAll("tbody tr").length;
+    const rows = () => document.querySelectorAll(".rp-body tbody tr").length;
     expect(rows()).toBe(100);
     expect(screen.getByText(withText(text("report-showing", { shown: 100, total: 250 })))).toBeTruthy();
     fireEvent.click(screen.getByText(text("report-show-more")));
@@ -1007,8 +1014,55 @@ describe("R02 Your move, item by item", () => {
 
   it("is accessible, also right to left", async () => {
     document.documentElement.dir = "rtl";
-    inApp(<Report items={sample.report} onBack={noop} />);
+    showReport(sample.report);
     expect(await violations()).toEqual([]);
+  });
+
+  it("puts what needs the person first, then one line per kind with how many, how much and how it went", () => {
+    const line = (id: string, name: string, kind: FileKind, status: "copied" | "failed" | "skipped-by-user", bytes: number): ReportItem =>
+      status === "copied"
+        ? { id, name, source: `pictures/Trip/${name}`, kind, bytes, status, evidence: { from: "drive" } }
+        : status === "failed"
+          ? { id, name, source: `pictures/Trip/${name}`, kind, bytes, status, reason: "unreadable" }
+          : { id, name, source: `pictures/Trip/${name}`, kind, bytes, status };
+    const items = [
+      line("1", "a.jpg", "photos", "copied", 3000),
+      line("2", "b.jpg", "photos", "failed", 1000),
+      line("3", "c.mp4", "videos", "copied", 9000),
+      line("4", "d.mp3", "music", "skipped-by-user", 500),
+    ];
+    inApp(<Report items={items} onBack={noop} />);
+    // Needs you: the failed photo, listed before any kind, never folded away.
+    const needs = screen.getByRole("heading", { level: 2, name: text("report-needs-title", { count: 1 }) });
+    expect(needs.closest("section")?.textContent).toContain("b.jpg");
+    // One line per kind present, in words; nothing listed under a kind until it is opened.
+    const head = (kind: FileKind) => screen.getByRole("button", { name: (n) => n.startsWith(text(`report-group-${kind}`)) });
+    expect(head("photos").textContent).toContain(text("report-group-some", { done: 1, total: 2 }));
+    expect(head("videos").textContent).toContain(text("report-group-done"));
+    expect(head("music").textContent).toContain(text("report-group-left", { count: 1 }));
+    expect(screen.queryByRole("button", { name: (n) => n.startsWith(text("report-group-documents")) })).toBeNull();
+    expect(document.querySelector(".rp-body")).toBeNull();
+    // The bar is for the eye only: the lines say the same in words.
+    expect(document.querySelector(".rp-bar")?.getAttribute("aria-hidden")).toBe("true");
+    // Opening a kind shows its files with their folder; opening another closes it.
+    fireEvent.click(head("photos"));
+    expect(head("photos").getAttribute("aria-expanded")).toBe("true");
+    const body = document.querySelector<HTMLElement>(".rp-body");
+    expect(body?.textContent).toContain("a.jpg");
+    expect(body?.textContent).toContain("Trip");
+    fireEvent.click(head("videos"));
+    expect(head("photos").getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector(".rp-body")?.textContent).toContain("c.mp4");
+  });
+
+  it("refuses a line whose kind or size is not one it knows", () => {
+    const base = { id: "1", name: "a.jpg", source: "pictures/a.jpg", status: "skipped-by-user" };
+    expect(parseReportItem({ ...base, kind: "photos", bytes: 5 })).not.toBeNull();
+    expect(parseReportItem({ ...base, kind: "pictures" })).toBeNull();
+    expect(parseReportItem({ ...base, bytes: -1 })).toBeNull();
+    expect(parseReportItem({ ...base, bytes: 1.5 })).toBeNull();
+    // A report kept by an older version has neither, and still reads.
+    expect(parseReportItem(base)).not.toBeNull();
   });
 });
 

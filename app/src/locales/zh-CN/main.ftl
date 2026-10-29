@@ -1097,8 +1097,24 @@ drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = 你的迁移，逐项查看。
-report-body = 每个项目的结果、原因，以及它的来源和去向。
+report-title = 你的搬迁，按类型。
+report-body = 打开一个类型即可查看其中的文件。需要你处理的内容排在最前。
+report-needs-title = { $count ->
+       *[other] { $count } 项需要你处理
+    }
+report-group-photos = 照片
+report-group-videos = 视频
+report-group-music = 音乐
+report-group-documents = 文档
+report-group-other = 其他文件
+report-group-size = { $files ->
+       *[other] { $files } 个文件
+    } · { $size }
+report-group-done = 全部已复制并检查
+report-group-some = { $total } 个中的 { $done } 个已复制并检查
+report-group-left = { $count ->
+       *[other] 按你的选择，{ $count } 个留在旧笔记本电脑上
+    }
 report-filter-label = 显示
 report-col-item = 项目
 report-col-result = 结果
