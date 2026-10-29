@@ -1,0 +1,34 @@
+[
+  {
+    "digest": "000000000000000000000000000000000000000000000000000000000000000b",
+    "keeps": [
+      {
+        "bytes": 4000,
+        "name": "pctwin-notes"
+      }
+    ],
+    "removes": [
+      {
+        "bytes": 120000000,
+        "name": "pctwin-installs-0011223344556677"
+      }
+    ],
+    "what": "temporary-files"
+  },
+  {
+    "digest": "000000000000000000000000000000000000000000000000000000000000000b",
+    "keeps": [
+      {
+        "bytes": 4000,
+        "name": "pctwin-notes"
+      }
+    ],
+    "removes": [
+      {
+        "bytes": 120000000,
+        "name": "pctwin-installs-0011223344556677"
+      }
+    ],
+    "what": "model-and-cache"
+  }
+]

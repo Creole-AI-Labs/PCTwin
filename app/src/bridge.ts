@@ -18,7 +18,9 @@ import { FILE_KINDS, ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
+import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem, type ChangesView, type RepairProblem, type SafeStopView, type WorkPick, type WorkProblem } from "./deliver";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
+import { parseCleanupDone, parseCleanupView, parseDeltaView, parseDoctorView, parseFinishProblem, parseFinishView, parseGoodbyeView, parseHandoverRecorded, parseHandoverStarted, parseHandoverView, parseReportView, parseSavedSetup, parseSetupView, parseUndoPreview, type CatchupPurpose, type ChoiceIn, type CleanupWhat, type DeltaView, type Disclosure, type DoctorRole, type FinishProblem, type GoodbyeAnswer, type HandoverAction, type PersonSays } from "./finish";
 
 /* ---------- Shapes ---------- */
 
@@ -811,7 +813,8 @@ export type MoveEvent =
   | { kind: "rebuild"; step: RebuildStep }
   | { kind: "appdata"; progress: DataProgress }
   | { kind: "appdata-open"; open: AppsOpen }
-  | { kind: "choose"; choice: ChoiceView };
+  | { kind: "choose"; choice: ChoiceView }
+  | { kind: "changed"; changes: ChangesView };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -833,6 +836,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
     on("move-link", parseConnectionView, (link) => ({ kind: "link", link })),
     on("move-rebuild", parseRebuildStep, (step) => ({ kind: "rebuild", step })),
+    on("move-changed", parseChangesView, (changes) => ({ kind: "changed", changes })),
     on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
     on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
     on("move-choose", parseChoiceView, (choice) => ({ kind: "choose", choice })),
@@ -1191,4 +1195,78 @@ export async function guardIntent(intent: { job: string; epoch: number; generati
 export const listenGuard = (handler: (view: Projection | null) => void): Promise<UnlistenFn> =>
   listen<unknown>("guard-view", (e) => {
     handler(parseProjection(e.payload));
+  });
+
+/* ---------- Finishing a move (src-tauri/src/finish.rs) ---------- */
+
+/**
+ * A move is named by its My PCTwin history entry ID; none means the newest move. A rejected finishing
+ * command is a `FinishProblem`; anything else is the generic `failed`.
+ */
+export function toFinishProblem(error: unknown): FinishProblem {
+  return parseFinishProblem(error) ?? { kind: "failed" };
+}
+
+export const finishOverview = (id: string | null) => ask("finish_overview", parseFinishView, { id });
+export const goodbyeList = (id: string | null) => ask("goodbye_list", parseGoodbyeView, { id });
+/** `shown` goes back exactly as the list sent it, so an answer is bound to what the person saw. */
+export const goodbyeAnswer = (id: string | null, exception: string, shown: string, answer: GoodbyeAnswer) => ask("goodbye_answer", parseGoodbyeView, { id, exception, shown, answer });
+export const goodbyeKeepUntil = (id: string | null, at: number) => ask("goodbye_keep_until", parseGoodbyeView, { id, at });
+/** Readies the next pairing to look at the old laptop again; its fresh list comes on `finish-delta`. */
+export const catchupArm = (id: string | null, purpose: CatchupPurpose) => run("catchup_arm", { id, purpose });
+/** `digest` goes back exactly as the shown list sent it; only the reviewed changes are sent. */
+export const catchupApprove = (id: string | null, digest: string, choices: ChoiceIn[]) => run("catchup_approve", { id, digest, choices });
+export const handoverPreview = (id: string | null, action: HandoverAction) => ask("handover_preview", parseHandoverView, { id, action });
+/** The separate, irreversible confirmation of exactly the preview with `digest`. */
+export const handoverConfirm = (id: string | null, action: HandoverAction, digest: string, ticket: string) => ask("handover_confirm", parseHandoverStarted, { id, action, digest, ticket });
+/** What the person says happened after the system's own route: their word, never a certificate. */
+export const handoverResult = (id: string | null, action: HandoverAction, says: PersonSays) => ask("handover_result", parseHandoverRecorded, { id, action, says });
+export const doctorRun = (role: DoctorRole) => ask("doctor_run", parseDoctorView, { role });
+export const setupChecklist = (id: string | null) => ask("setup_checklist", parseSetupView, { id });
+export const setupMark = (id: string | null, task: string, done: boolean) => ask("setup_mark", parseSetupView, { id, task, done });
+export const setupSave = (id: string | null) => ask("setup_save", parseSavedSetup, { id });
+export const undoPreview = (id: string | null) => ask("undo_preview", parseUndoPreview, { id });
+export const cleanupPreview = (what: CleanupWhat) => ask("cleanup_preview", parseCleanupView, { what });
+export const cleanupConfirm = (what: CleanupWhat, digest: string) => ask("cleanup_confirm", parseCleanupDone, { what, digest });
+export const reportPreview = (id: string | null, disclosure: Disclosure) => ask("report_preview", parseReportView, { id, disclosure });
+/** The path the report was saved to, or null when the person chose no place. */
+export const reportSave = (id: string | null, disclosure: Disclosure, digest: string, text: string) =>
+  ask("report_save", (v) => (v === null ? { path: null } : typeof v === "string" ? { path: v } : null), { id, disclosure, digest, text }).then((r) => r.path);
+
+/** What changed on the old laptop since the move (event `finish-delta`). One that does not parse is `null`: the screen says it could not read it. */
+export const listenFinishDelta = (handler: (delta: DeltaView | null) => void): Promise<UnlistenFn> =>
+  listen<unknown>("finish-delta", (e) => {
+    handler(parseDeltaView(e.payload));
+  });
+
+/* ---------- The Phase 2 deliverables (src-tauri/src/deliver) ---------- */
+
+export const toWorkProblem = (error: unknown): WorkProblem => parseWorkProblem(error) ?? "failed";
+export const toRepairProblem = (error: unknown): RepairProblem => parseRepairProblem(error) ?? "failed";
+
+export const workChecks = () => ask("work_checks", parseWorkChecks);
+/** A file is picked in the system's own picker, a font by its family, a task by its words. */
+export const workCheckAdd = (pick: WorkPick) => ask("work_check_add", parseWorkChecks, { pick });
+/** Looks at what can be read; never runs anything. */
+export const workCheckRun = () => ask("work_check_run", parseWorkChecks);
+/** `generation` goes back exactly as the list sent it. */
+export const workCheckAnswer = (index: number, generation: number, worked: boolean) => ask("work_check_answer", parseWorkChecks, { index, generation, worked });
+export const workCheckRemove = (index: number, generation: number) => ask("work_check_remove", parseWorkChecks, { index, generation });
+
+export const repairOffer = () => ask("repair_offer", parseRepairOffer);
+/** Tries again only the chosen lines; `generation` goes back exactly as the offer sent it. */
+export const repairRun = (generation: number, lines: number[]) => ask("repair_run", parseRepairDone, { generation, lines });
+
+/** What changed after approval, or none. */
+export const moveChanges = () => ask("move_changes", (v) => (v === null ? { none: true as const } : parseChangesView(v))).then((r) => ("none" in r ? null : r));
+/** The person's new yes or no for what changed; `generation` goes back as received. */
+/** The answer to what changed after approval: what was installed now (a repair result), or a RepairProblem word. */
+export const moveReapprove = (generation: number, approve: boolean) => ask("move_reapprove", parseRepairDone, { generation, approve });
+export const safeStop = () => ask("safe_stop", parseSafeStop);
+/** Saves the recovery kit for one My PCTwin history entry; none when the person picked no folder. */
+export const recoveryKitSave = (id: string) => ask("recovery_kit_save", (v) => (v === null ? { none: true as const } : parseKitSaved(v)), { id }).then((r) => ("none" in r ? null : r));
+
+export const listenSafeStop = (handler: (view: SafeStopView | null) => void): Promise<UnlistenFn> =>
+  listen<unknown>("safe-stop", (e) => {
+    handler(parseSafeStop(e.payload));
   });

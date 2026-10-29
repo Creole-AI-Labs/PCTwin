@@ -812,7 +812,10 @@ pub fn rebuild_full<R: Runtime>(
         let mut b = [0u8; 8];
         let _ = getrandom::fill(&mut b);
         let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
-        std::env::temp_dir().join(format!("pctwin-installs-{tag}"))
+        let work = std::env::temp_dir().join(format!("pctwin-installs-{tag}"));
+        // Recorded before use, so clean-up (R07) knows it is PCTwin's own.
+        crate::finish_cleanup::record(app, &work);
+        work
     };
     #[cfg(windows)]
     let mut chain = winget_here().map(|winget| {
@@ -1122,6 +1125,8 @@ pub fn data_source<R: Runtime>(
     getrandom::fill(&mut b).ok()?;
     let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
     let work = std::env::temp_dir().join(format!("pctwin-capture-{tag}"));
+    // Recorded before use, so clean-up (R07) knows it is PCTwin's own.
+    crate::finish_cleanup::record(app, &work);
     // An app still open: the person is shown which ones to close, and answers Try again or Go
     // on without them (no answer in time is "go on without").
     let (app, moving) = (app.clone(), moving.clone());
@@ -1291,6 +1296,11 @@ const JOB: &str = "move-undo";
 
 /// Where each move's undo book is kept (PCTwin's own data folder, beside the journal), with the
 /// one book PCTwin 0.1.x kept moved in first.
+/// One move's undo book, by its ID (2.7 undo preview).
+pub(crate) fn book_of<R: Runtime>(app: &AppHandle<R>, id: &str) -> Option<UndoBook> {
+    crate::undo_books::find(&books_folder(app)?, Some(id))
+}
+
 fn books_folder<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
     let journal = crate::moving::journal_path(app)?;
     let folder = journal.with_file_name(crate::undo_books::FOLDER);

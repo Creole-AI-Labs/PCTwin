@@ -1,0 +1,131 @@
+/**
+ * Smaller new laptop (2.6): when the plan does not fit, one plain box proposes leaving the files
+ * used longest ago on the old laptop. Nothing is deleted; Accept and Start wait until it fits.
+ */
+import { LocalizationProvider } from "@fluent/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import plans from "../contract/plan-view.json";
+import { parsePlanView } from "../bridge";
+import { localization } from "../i18n";
+import type { FolderRole, PlanView } from "../plan";
+import { violations } from "../testing/a11y";
+import AcceptMove from "./AcceptMove";
+import { FooterProvider } from "./FrameFooter";
+import PlanReview from "./PlanReview";
+import { fitsWith } from "./SpaceBox";
+
+const l10n = localization("en");
+const text = (id: string, vars?: Record<string, string | number>) => l10n.getString(id, vars);
+const plain = (s: string) => s.replace(/[⁦-⁩]/g, "");
+let warnings: string[] = [];
+
+beforeEach(() => {
+  warnings = [];
+  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "));
+  });
+});
+
+afterEach(() => {
+  expect(warnings).toEqual([]);
+  cleanup();
+  vi.restoreAllMocks();
+  document.documentElement.dir = "ltr";
+});
+
+const inFrame = (ui: ReactNode) =>
+  render(
+    <LocalizationProvider l10n={l10n}>
+      <FooterProvider>
+        <main>{ui}</main>
+      </FooterProvider>
+    </LocalizationProvider>,
+  );
+
+/** The engine's "full" plan, made not to fit and with nothing else needing the person. */
+function full(space: PlanView["space"]): PlanView {
+  const p = parsePlanView(plans[1]);
+  if (!p?.preview) throw new Error("the engine's full plan parses");
+  return { ...p, space, preview: { ...p.preview, fits: false, tooBig: 0, refused: 0, runsAtSignIn: 0 } };
+}
+
+const choice = (files: number, size: string) => screen.getByRole("checkbox", { name: (n) => plain(n).startsWith(plain(text("space-box-choice", { count: files, size }))) });
+const accept = () => screen.getByRole("button", { name: text("accept-accept") });
+
+function Accepting({ plan, onAccept }: { plan: PlanView; onAccept: (leaveBehind: boolean) => void }) {
+  const [on, setOn] = useState(false);
+  return <AcceptMove plan={plan} from="Old laptop" leaveBehind={on} onLeaveBehind={setOn} onAccept={() => { onAccept(on); }} onDetails={vi.fn()} onNotNow={vi.fn()} />;
+}
+
+describe("the smaller-laptop proposal", () => {
+  it("fits only once accepted and nothing is still short", () => {
+    expect(fitsWith(undefined, true)).toBe(false);
+    expect(fitsWith({ files: 2, bytes: 10, stillShortBytes: 0 }, false)).toBe(false);
+    expect(fitsWith({ files: 2, bytes: 10, stillShortBytes: 0 }, true)).toBe(true);
+    expect(fitsWith({ files: 2, bytes: 10, stillShortBytes: 5 }, true)).toBe(false);
+  });
+
+  it("on Accept: says there is no room, offers to leave the oldest files, and Accept waits until they are left", async () => {
+    const onAccept = vi.fn();
+    inFrame(<Accepting plan={full({ files: 1204, bytes: 18_400_000_000, stillShortBytes: 0 })} onAccept={onAccept} />);
+    expect(screen.getByText(text("space-box-title"))).toBeTruthy();
+    expect(screen.getByText(text("space-box-kept"))).toBeTruthy();
+    const box = choice(1204, "18.4 GB");
+    expect((box as HTMLInputElement).checked).toBe(false);
+    expect((accept() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(box);
+    expect(screen.getByText(text("space-box-fits"))).toBeTruthy();
+    expect((accept() as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(accept());
+    expect(onAccept).toHaveBeenCalledWith(true);
+    expect(await violations()).toEqual([]);
+  });
+
+  it("says plainly what is still short, and Accept still waits", () => {
+    inFrame(<Accepting plan={full({ files: 3, bytes: 1_000_000_000, stillShortBytes: 2_000_000_000 })} onAccept={vi.fn()} />);
+    fireEvent.click(choice(3, "1 GB"));
+    expect(screen.getByText(text("space-box-short", { size: "2 GB" }))).toBeTruthy();
+    expect((accept() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("on the full plan: Start waits until it fits, by the proposal or by leaving folders out", () => {
+    const plan = full({ files: 3, bytes: 1000, stillShortBytes: 500 });
+    const approval = { revision: plan.revision, fingerprint: plan.fingerprint };
+    const start = () => screen.getByRole<HTMLButtonElement>("button", { name: text("plan-start") });
+    function Review() {
+      const [on, setOn] = useState(false);
+      const [left, setLeft] = useState<FolderRole[]>([]);
+      return (
+        <PlanReview
+          plan={plan}
+          approval={approval}
+          onApprovalChange={vi.fn()}
+          onStart={vi.fn()}
+          leaveBehind={on}
+          onLeaveBehind={setOn}
+          leftOut={left}
+          onToggleGroup={(role, move) => {
+            setLeft((l) => (move ? l.filter((r) => r !== role) : [...l, role]));
+          }}
+        />
+      );
+    }
+    inFrame(<Review />);
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => plain(n).startsWith("Leave 3 files") }));
+    // Still 500 bytes short: Start waits.
+    expect(start().disabled).toBe(true);
+    // Leaving a folder of 1.2 MB out covers what is still short.
+    const documents = plan.groups.find((g) => g.role === "documents");
+    if (!documents) throw new Error("documents group");
+    fireEvent.click(screen.getAllByRole("checkbox").find((c) => c.closest("li")?.textContent.includes(text("plan-role-documents"))) as HTMLElement);
+    expect(start().disabled).toBe(false);
+  });
+
+  it("is accessible right to left", async () => {
+    document.documentElement.dir = "rtl";
+    inFrame(<Accepting plan={full({ files: 3, bytes: 1_000_000_000, stillShortBytes: 2_000_000_000 })} onAccept={vi.fn()} />);
+    expect(await violations()).toEqual([]);
+  });
+});

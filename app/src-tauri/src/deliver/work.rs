@@ -528,7 +528,11 @@ fn line(index: u32, e: &Entry) -> WorkCheck {
                         not_checked: kinds,
                     } => {
                         names.push(crate::guard_views::name(family));
-                        not_checked.extend(kinds.iter().map(|k| crate::guard_views::name(k)));
+                        // The kind as the catalogue names it, else its extension (2.7 made
+                        // these typed; the screens show the name as it is).
+                        not_checked.extend(kinds.iter().map(|k| {
+                            crate::guard_views::name(k.name.as_deref().unwrap_or(&k.ext))
+                        }));
                     }
                     Missing::Damaged { .. } => state = WorkState::Damaged,
                     Missing::NotThere => state = WorkState::NotThere,

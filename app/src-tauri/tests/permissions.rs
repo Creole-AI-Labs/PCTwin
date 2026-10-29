@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 46 names: the app's forty-three commands, listening to and
+/// Exactly what the screens may call, 94 names: the app's ninety-one commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 76] = [
+const SCREENS_MAY_CALL: [&str; 94] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -95,6 +95,24 @@ const SCREENS_MAY_CALL: [&str; 76] = [
     "fullmove_undo",
     "move_appdata_answer",
     "move_choose_what",
+    "finish_overview",
+    "goodbye_list",
+    "goodbye_answer",
+    "goodbye_keep_until",
+    "catchup_arm",
+    "catchup_approve",
+    "handover_preview",
+    "handover_confirm",
+    "handover_result",
+    "doctor_run",
+    "setup_checklist",
+    "setup_mark",
+    "setup_save",
+    "undo_preview",
+    "cleanup_preview",
+    "cleanup_confirm",
+    "report_preview",
+    "report_save",
     "work_checks",
     "work_check_add",
     "work_check_run",
@@ -297,6 +315,9 @@ fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
                 | "history_export"
                 | "update_check"
                 | "update_install"
+                | "doctor_run"
+                | "report_save"
+                | "handover_confirm"
         ) {
             // Checked below, and in the resolved-permissions test (the folder picker would open
             // the system's window and wait for a person). A command with no arguments runs
@@ -654,13 +675,25 @@ fn the_screens_argument_names_are_the_commands_own() {
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/contract/shell/calls.json");
     let calls: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    let commands = calls["commands"].as_array().unwrap();
+    // Finishing a move (2.7) keeps its calls in a file of its own, read the same way.
+    let finish = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../src/contract/shell/finish-calls.json");
+    let finish: Value = serde_json::from_str(&std::fs::read_to_string(finish).unwrap()).unwrap();
+    let commands: Vec<&Value> = calls["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(finish["commands"].as_array().unwrap())
+        .collect();
     let names: BTreeSet<&str> = commands
         .iter()
         .map(|c| c["name"].as_str().unwrap())
         .collect();
     let wanted: BTreeSet<&str> = app_commands().into_iter().collect();
-    assert_eq!(names, wanted, "calls.json lists exactly the app's commands");
+    assert_eq!(
+        names, wanted,
+        "calls.json and finish-calls.json list exactly the app's commands"
+    );
     let app = app();
     let main = window(&app, "main");
     let args_error = |cmd: &str, error: &str| error.contains(&format!("for command `{cmd}`"));
@@ -697,6 +730,9 @@ fn the_screens_argument_names_are_the_commands_own() {
                 | "history_export"
                 | "update_check"
                 | "update_install"
+                | "doctor_run"
+                | "report_save"
+                | "handover_confirm"
         ) {
             continue;
         }

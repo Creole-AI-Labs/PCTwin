@@ -343,3 +343,11 @@ export function minutesRange(r: Range): { low: number; high: number } {
 export function pageLocale(): string {
   return typeof document === "undefined" ? "en" : document.documentElement.lang || "en";
 }
+
+type ListFormatter = new (locale: string, options: { type: "conjunction" }) => { format: (items: string[]) => string };
+
+/** Names as a list in the page's language ("Desktop and Documents"); commas where the system has no list format. */
+export function listText(names: string[]): string {
+  const ListFormat = (Intl as unknown as { ListFormat?: ListFormatter }).ListFormat;
+  return ListFormat ? new ListFormat(pageLocale(), { type: "conjunction" }).format(names) : names.join(", ");
+}

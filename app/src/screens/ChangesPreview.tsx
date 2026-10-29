@@ -49,9 +49,11 @@ export function UndoLegend() {
 /** What undo can do for one change, as a badge with words and an icon. */
 export function PromiseBadge({ promise }: { promise: UndoPromise }) {
   const { l10n } = useLocalization();
-  const icon = promise === "can-reverse" || promise === "can-remove-app" ? <Restore /> : promise === "must-keep" ? <Lock /> : <Attention />;
+  const icon = promise === "can-reverse" || promise === "can-remove-app" ? <Restore /> : promise === "must-keep" || promise === "keeps-newer" ? <Lock /> : <Attention />;
+  // Undo that depends on something the person does or on how the app came is told with a warning shape.
+  const warn = promise === "needs-you-service" || promise === "needs-you-maker" || promise === "removes-if-package";
   return (
-    <Badge tone={promise === "needs-you-service" || promise === "needs-you-maker" ? "warn" : "neutral"} icon={icon}>
+    <Badge tone={warn ? "warn" : "neutral"} icon={icon}>
       {l10n.getString(`guard-undo-${promise}`)}
     </Badge>
   );

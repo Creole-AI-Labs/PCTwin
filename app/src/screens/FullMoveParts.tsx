@@ -16,10 +16,11 @@ import { pageLocale } from "../move";
 import { TopStrip } from "./FrameParts";
 import { PromiseBadge, UndoLegend } from "./ChangesPreview";
 import { Name } from "./GuardParts";
-import { PlanBox } from "./PlanParts";
+import { PlanBox, useFormat } from "./PlanParts";
+import { CompatRow } from "./Compat";
 import { Heading } from "./ProgressParts";
 
-function TitleText({ title }: { title: Title }) {
+export function TitleText({ title }: { title: Title }) {
   const { l10n } = useLocalization();
   return title.kind === "name" ? <Name>{title.value}</Name> : <>{l10n.getString(title.value)}</>;
 }
@@ -58,6 +59,7 @@ export function RebuildPlanSection({
   onPick,
   updates = [],
   onUpdate,
+  onCompat,
 }: {
   rebuild: RebuildPlan;
   picked?: readonly number[];
@@ -65,8 +67,14 @@ export function RebuildPlanSection({
   /** The older apps here ticked "Update it", by their place in the plan. */
   updates?: readonly number[];
   onUpdate?: (app: number, update: boolean) => void;
+  /** Opens one app's compatibility record on its own page. */
+  onCompat?: (change: ChangeView) => void;
 }) {
   const { l10n } = useLocalization();
+  const { bytes } = useFormat();
+  const tested = rebuild.changes.filter((c) => c.kind === "app" && c.tested !== null);
+  const { downloads, signIns } = rebuild.internet;
+  const room = rebuild.room;
   const install = rebuild.changes.filter((c) => c.kind === "app" && c.action === "install");
   const settings = rebuild.changes.filter((c) => c.kind === "settings");
   const appData = rebuild.changes.filter((c) => c.kind === "special" && c.special === "copy" && c.secret === null);
@@ -125,12 +133,30 @@ export function RebuildPlanSection({
                       onUpdate(at, on);
                     }}
                     label={l10n.getString("fullmove-update-it", { name })}
-                    hint={l10n.getString("fullmove-update-hint")}
+                    hint={[l10n.getString("fullmove-update-hint"), c.undoIfUpdated === "keeps-newer" ? l10n.getString("guard-undo-keeps-newer") : ""].filter(Boolean).join(" ")}
                   />
                 </li>
               );
             })}
           </ul>
+        </PlanBox>
+      )}
+      {tested.length > 0 && onCompat && (
+        <PlanBox title={l10n.getString("compat-list-title", { count: tested.length })}>
+          <RowList>
+            {tested.map((c, i) =>
+              c.tested ? (
+                <CompatRow
+                  key={i}
+                  change={c}
+                  tested={c.tested}
+                  onOpen={() => {
+                    onCompat(c);
+                  }}
+                />
+              ) : null,
+            )}
+          </RowList>
         </PlanBox>
       )}
       {rebuild.more > 0 && <p className="subhead">{l10n.getString("fullmove-more", { count: rebuild.more })}</p>}
@@ -142,6 +168,23 @@ export function RebuildPlanSection({
             ))}
             {rebuild.specialNotMoved > 0 && <Row title={l10n.getString("fullmove-special-not-moved", { count: rebuild.specialNotMoved })} />}
           </RowList>
+        </PlanBox>
+      )}
+      <PlanBox title={l10n.getString("plan-net-title")}>
+        {downloads === 0 && signIns === 0 ? (
+          <p className="plan-lead">{l10n.getString("plan-net-none")}</p>
+        ) : (
+          <>
+            <RowList>
+              {downloads > 0 && <Row title={l10n.getString("plan-net-downloads", { count: downloads })} detail={l10n.getString("plan-net-sizes")} />}
+              {signIns > 0 && <Row title={l10n.getString("plan-net-signins", { count: signIns })} />}
+            </RowList>
+          </>
+        )}
+      </PlanBox>
+      {(room.installs > 0 || room.appData > 0) && (
+        <PlanBox title={l10n.getString("plan-room-title")}>
+          <p className="plan-lead">{l10n.getString("plan-room-body", { installs: bytes(room.installs), appData: bytes(room.appData) })}</p>
         </PlanBox>
       )}
       {rebuild.links > 0 && <p className="subhead">{l10n.getString("fullmove-links", { count: rebuild.links })}</p>}
@@ -199,7 +242,7 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
   }
 }
 
-function lineDetail(l: RebuiltLine, l10n: L10n): string {
+export function lineDetail(l: RebuiltLine, l10n: L10n): string {
   const parts: string[] = [];
   if (l.kind === "settings") parts.push(l10n.getString("fullmove-settings-count", { count: l.count }));
   // App data that says why it needs the person says that instead of the general reason.

@@ -1,34 +1,36 @@
-//! Handover and clean-up gates (Task List 2.7; plan 2.7 sections 7 and 8; acceptance T27-015 to
-//! T27-024, T27-026). Every refusal path is tried with everything else in order.
+//! Handover gates (Task List 2.7; plan 2.7 sections 7 and 8; acceptance T27-016 to T27-024,
+//! T27-026). Every refusal path is tried with everything else in order.
 
 mod common;
 
 use common::*;
 use pctwin_journal::keystore::TagKey;
-use pctwin_journal::{ClosedToken, Journal, Resolved};
+use pctwin_journal::{Journal, UndoGate};
 use pctwin_readiness::goodbye::{Checklist, Inputs, OldLaptop};
 use pctwin_readiness::handover::{
-    Account, Action, ActionResult, DeviceIdentity, Facts, NativeOutcome, Ownership,
-    QualifiedMethod, Refusal, SSD_NOTE, TempEntry, Used, WriteExclusion, confirm, preview, request,
+    Account, Action, ActionResult, DeviceIdentity, DriveIdentity, Facts, Method, Note, PersonSays,
+    QualifiedMethod, Refusal, Used, WriteExclusion, confirm, preview, request,
 };
 use pctwin_readiness::ledger::{Observed, Role};
-use pctwin_record::Record;
+use pctwin_record::{LeftOutReason, Record};
 use pctwin_types::{ItemResult, ItemStatus};
 
 fn journal(dir: &std::path::Path, name: &str, key: u8) -> Journal {
     Journal::open_with_record_key(&dir.join(name), TagKey::from_bytes([key; 32])).unwrap()
 }
 
-fn close(j: &Journal) -> ClosedToken {
-    j.close_undo(&mut |_, _| Ok(Resolved::AlreadyGone)).unwrap()
+fn ssd() -> DriveIdentity {
+    DriveIdentity {
+        serial: "S3Z9NB0K123456".into(),
+        model: "Example SSD 512GB".into(),
+        bytes: 512_110_190_592,
+    }
 }
 
-fn drive() -> DeviceIdentity {
+fn device(drive: Option<DriveIdentity>) -> DeviceIdentity {
     DeviceIdentity {
         laptop: old_laptop(),
-        drive_serial: "S3Z9NB0K123456".into(),
-        drive_model: "Example SSD 512GB".into(),
-        drive_bytes: 512_110_190_592,
+        drive,
     }
 }
 
@@ -60,7 +62,7 @@ fn setup() -> Setup {
             old_laptop: OldLaptop::Scanned(&record),
             left_on_old_laptop: &[],
             steps_not_finished: &[],
-            undo_open: false,
+            undo_open: true,
             special: &[],
         },
         None,
@@ -71,365 +73,402 @@ fn setup() -> Setup {
 }
 
 fn accounts() -> Vec<Account> {
-    vec![Account {
-        id: MOVER.into(),
-        has_own_files: true,
-    }]
-}
-
-fn temp() -> Vec<TempEntry> {
     vec![
-        TempEntry {
-            name: "download-cache".into(),
-            ownership: Ownership::RecordedByPctwin,
-            item: None,
-        },
-        TempEntry {
-            name: "model.gguf".into(),
-            ownership: Ownership::RecordedByPctwin,
-            item: Some(file("model.gguf").id),
-        },
-        TempEntry {
-            name: "journal-looking-folder".into(),
-            ownership: Ownership::LooksTemporary,
-            item: None,
-        },
-    ]
-}
-
-macro_rules! facts {
-    ($s:expr, $j:expr, $t:expr, $acc:expr, $tmp:expr, $q:expr, $dev:expr) => {
-        Facts {
-            checklist: &$s.checklist,
-            old_laptop_now: Some(&$s.record),
-            journal: $j,
-            undo_closed: $t,
-            expected: &drive(),
-            device_now: $dev,
-            write_exclusion: WriteExclusion::Held,
-            accounts: $acc,
-            mover: MOVER,
-            temp: $tmp,
-            qualified: $q,
-            now: T0 + 200,
-        }
-    };
-}
-
-#[test]
-fn every_gate_check_refuses_on_its_own() {
-    let dir = tempfile::tempdir().unwrap();
-    let j = journal(dir.path(), "j1", 1);
-    let other = journal(dir.path(), "j2", 2);
-    let other_token = close(&other);
-    let s = setup();
-    let acc = accounts();
-    let tmp = temp();
-    let dev = drive();
-    let none: Vec<QualifiedMethod> = vec![];
-
-    // Undo still open: no token can be had, so the gate refuses (T27-018).
-    let f = facts!(s, &j, None, &acc, &tmp, &none, &dev);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::UndoNotClosed)
-    );
-    // Another journal's close does not close this one.
-    let f = facts!(s, &j, Some(&other_token), &acc, &tmp, &none, &dev);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::UndoNotClosed)
-    );
-    let token = close(&j);
-    // Closed on disk, but with no token, or with another journal's: still refused.
-    let f = facts!(s, &j, None, &acc, &tmp, &none, &dev);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::UndoNotClosed)
-    );
-    let f = facts!(s, &j, Some(&other_token), &acc, &tmp, &none, &dev);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::UndoNotClosed)
-    );
-    let ok = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    assert!(preview(Action::RemoveTemporaryFiles, &ok).is_ok());
-
-    // T27-019: the same letter or label on another drive is another drive.
-    for change in 0..4 {
-        let mut d = drive();
-        match change {
-            0 => d.drive_serial = "S3Z9NB0K999999".into(),
-            1 => d.drive_model = "Other".into(),
-            2 => d.drive_bytes -= 1,
-            _ => d.laptop = other_laptop(),
-        }
-        let f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &d);
-        assert_eq!(
-            preview(Action::RemoveTemporaryFiles, &f),
-            Err(Refusal::WrongDevice)
-        );
-    }
-    // A drive with no serial cannot be told apart from another.
-    let mut blank = drive();
-    blank.drive_serial = " ".into();
-    let mut f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &blank);
-    f.expected = &blank;
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::WrongDevice)
-    );
-
-    // T27-014: the old laptop cannot be reached.
-    let mut f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    f.old_laptop_now = None;
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::OldLaptopNotReachable)
-    );
-    // T27-012: the old laptop changed since the list was made.
-    let mut changed = s.record.clone();
-    changed.items.push(file("new.txt"));
-    let mut f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    f.old_laptop_now = Some(&changed);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::ChecklistStale)
-    );
-    // An open exception.
-    let mut open = s.checklist.clone();
-    let (_, mut l) = ledger(vec![file("a.txt")]);
-    l.searched("Documents");
-    open.exceptions = Checklist::build(
-        &Inputs {
-            ledger: &l,
-            approved: &s.record,
-            old_laptop: OldLaptop::Scanned(&s.record),
-            left_on_old_laptop: &[],
-            steps_not_finished: &[],
-            undo_open: false,
-            special: &[],
-        },
-        None,
-        T0,
-    )
-    .exceptions;
-    let mut f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    f.checklist = &open;
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::ExceptionsOpen { open: 1 })
-    );
-    // T27-020: another program could write.
-    let mut f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    f.write_exclusion = WriteExclusion::CannotExclude;
-    for a in [
-        Action::RemoveTemporaryFiles,
-        Action::RemoveMoversAccount,
-        Action::EraseOldLaptop,
-    ] {
-        assert_eq!(preview(a, &f), Err(Refusal::NoWriteExclusion));
-    }
-}
-
-/// T27-015: only what PCTwin recorded making is removed; what looks temporary, or is the
-/// person's chosen work, is kept and named.
-#[test]
-fn t27_015_only_pctwin_s_own_temporary_files() {
-    let dir = tempfile::tempdir().unwrap();
-    let j = journal(dir.path(), "j", 1);
-    let token = close(&j);
-    let s = setup();
-    let (acc, tmp, dev) = (accounts(), temp(), drive());
-    let none = vec![];
-    let f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    let p = preview(Action::RemoveTemporaryFiles, &f).unwrap();
-    assert_eq!(p.removes, ["download-cache"]);
-    assert_eq!(p.keeps, ["model.gguf", "journal-looking-folder"]);
-    let only_looks = vec![tmp[2].clone(), tmp[1].clone()];
-    let f = facts!(s, &j, Some(&token), &acc, &only_looks, &none, &dev);
-    assert_eq!(
-        preview(Action::RemoveTemporaryFiles, &f),
-        Err(Refusal::NothingToRemove)
-    );
-}
-
-/// T27-016: handing on to family removes only the mover's account; erasing is refused while
-/// other people keep their files there.
-#[test]
-fn t27_016_other_people_s_accounts_are_never_removed() {
-    let dir = tempfile::tempdir().unwrap();
-    let j = journal(dir.path(), "j", 1);
-    let token = close(&j);
-    let s = setup();
-    let family = vec![
         Account {
             id: MOVER.into(),
             has_own_files: true,
         },
         Account {
             id: "1001".into(),
-            has_own_files: true,
-        },
-        Account {
-            id: "1002".into(),
             has_own_files: false,
         },
-    ];
-    let (tmp, dev) = (temp(), drive());
-    let q = vec![QualifiedMethod {
-        drive: drive(),
-        method: "the drive's own sanitize command".into(),
-    }];
-    let f = facts!(s, &j, Some(&token), &family, &tmp, &q, &dev);
-    let p = preview(Action::RemoveMoversAccount, &f).unwrap();
-    assert_eq!(p.removes, [MOVER]);
-    assert_eq!(p.keeps, ["1001", "1002"]);
-    assert!(p.words.contains(SSD_NOTE));
-    assert!(p.words.contains("does not cancel subscriptions"));
-    assert_eq!(
-        preview(Action::EraseOldLaptop, &f),
-        Err(Refusal::OtherPeopleUseIt)
-    );
-    // An empty account of someone else does not hold the erase back; the mover not being on the
-    // laptop refuses the account removal.
-    let others_empty = vec![family[0].clone(), family[2].clone()];
-    let f = facts!(s, &j, Some(&token), &others_empty, &tmp, &q, &dev);
-    assert!(preview(Action::EraseOldLaptop, &f).is_ok());
-    let not_here = vec![family[1].clone()];
-    let f = facts!(s, &j, Some(&token), &not_here, &tmp, &q, &dev);
-    assert_eq!(
-        preview(Action::RemoveMoversAccount, &f),
-        Err(Refusal::NoSuchAccount)
-    );
+    ]
 }
 
-/// T27-017: a finished move is never the confirmation; the confirmation is fresh, for exactly the
-/// preview shown and this action, and used once.
-#[test]
-fn t27_017_only_a_fresh_separate_confirmation() {
-    let dir = tempfile::tempdir().unwrap();
-    let j = journal(dir.path(), "j", 1);
-    let token = close(&j);
-    let s = setup();
-    let (acc, tmp, dev) = (accounts(), temp(), drive());
-    let none = vec![];
-    let f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    let mut used = Used::default();
-    // Everything else is in order (the move finished, the list is clear), and still: no.
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f, None, &mut used),
-        Err(Refusal::NoFreshConfirmation)
-    );
-    let p = preview(Action::RemoveTemporaryFiles, &f).unwrap();
-    let other = preview(Action::RemoveMoversAccount, &f).unwrap();
-    let wrong = confirm(&other, T0 + 190, [1; 16]);
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f, Some(&wrong), &mut used),
-        Err(Refusal::WrongConfirmation)
-    );
-    let old = confirm(&p, T0 + 200 - 601, [2; 16]);
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f, Some(&old), &mut used),
-        Err(Refusal::Expired)
-    );
-    let future = confirm(&p, T0 + 201, [3; 16]);
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f, Some(&future), &mut used),
-        Err(Refusal::Expired)
-    );
-    // Confirmed, then something changed (another file to remove appeared): not what was shown.
-    let c = confirm(&p, T0 + 190, [4; 16]);
-    let mut more = tmp.clone();
-    more.push(TempEntry {
-        name: "x".into(),
-        ownership: Ownership::RecordedByPctwin,
-        item: None,
-    });
-    let f2 = facts!(s, &j, Some(&token), &acc, &more, &none, &dev);
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f2, Some(&c), &mut used),
-        Err(Refusal::ChangedSinceConfirmed)
-    );
-    // Confirmed this very second is fresh.
-    let now = confirm(&p, T0 + 200, [6; 16]);
-    request(Action::RemoveTemporaryFiles, &f, Some(&now), &mut used).unwrap();
-    let edge = confirm(&p, T0 + 200 - 600, [5; 16]);
-    let r = request(Action::RemoveTemporaryFiles, &f, Some(&edge), &mut used).unwrap();
-    assert_eq!(r.removes, ["download-cache"]);
-    assert_eq!(r.device, drive());
-    assert_eq!(r.generation, s.checklist.generation);
-    assert_eq!(
-        request(Action::RemoveTemporaryFiles, &f, Some(&edge), &mut used),
-        Err(Refusal::AlreadyUsed)
-    );
-    // The destructive step itself is not built yet: nothing is done.
-    assert_eq!(r.run(), NativeOutcome::NotBuiltYet);
+struct F<'a> {
+    s: &'a Setup,
+    j: &'a Journal,
+    expected: DeviceIdentity,
+    now_dev: DeviceIdentity,
+    old_now: Option<&'a Record>,
+    excl: WriteExclusion,
+    acc: Vec<Account>,
+    q: Vec<QualifiedMethod>,
+    now: u64,
 }
 
-/// T27-021: no erase method is qualified for this drive: the guided, unsupported outcome.
-#[test]
-fn t27_021_an_unqualified_drive_is_not_supported() {
-    let dir = tempfile::tempdir().unwrap();
-    let j = journal(dir.path(), "j", 1);
-    let token = close(&j);
-    let s = setup();
-    let (acc, tmp, dev) = (accounts(), temp(), drive());
-    let none = vec![];
-    let f = facts!(s, &j, Some(&token), &acc, &tmp, &none, &dev);
-    assert_eq!(
-        preview(Action::EraseOldLaptop, &f),
-        Err(Refusal::NotQualified)
-    );
-    // A method qualified for another drive does not count for this one.
-    let mut d2 = drive();
-    d2.drive_serial = "OTHER".into();
-    let elsewhere = vec![QualifiedMethod {
-        drive: d2,
-        method: "m".into(),
-    }];
-    let f = facts!(s, &j, Some(&token), &acc, &tmp, &elsewhere, &dev);
-    assert_eq!(
-        preview(Action::EraseOldLaptop, &f),
-        Err(Refusal::NotQualified)
-    );
-    assert!(ActionResult::NotSupported.words().contains("Reset this PC"));
-}
-
-/// T27-022 to T27-024, T27-026: results say what was observed and what may be gone; none is a
-/// certificate or claims the old laptop is as it was.
-#[test]
-fn t27_022_to_026_results_never_overclaim() {
-    for r in [
-        ActionResult::Finished,
-        ActionResult::Partial,
-        ActionResult::Inconclusive,
-        ActionResult::Interrupted,
-        ActionResult::CancelledAfterSomeEffects,
-        ActionResult::NotSupported,
-    ] {
-        let w = r.words().to_lowercase();
-        for claim in [
-            "certified",
-            "securely erased",
-            "sanitised",
-            "restored",
-            "is safe to",
-            "guarantee",
-        ] {
-            assert!(!w.contains(claim), "{r:?}: {claim}");
+impl<'a> F<'a> {
+    fn new(s: &'a Setup, j: &'a Journal) -> Self {
+        Self {
+            s,
+            j,
+            expected: device(None),
+            now_dev: device(None),
+            old_now: Some(&s.record),
+            excl: WriteExclusion::Held,
+            acc: accounts(),
+            q: vec![],
+            now: T0 + 200,
         }
     }
-    assert!(ActionResult::Finished.words().contains("not a certificate"));
-    assert!(
-        ActionResult::Interrupted
-            .words()
-            .contains("may already be gone")
+
+    fn facts(&self) -> Facts<'_> {
+        Facts {
+            checklist: &self.s.checklist,
+            old_laptop_now: self.old_now,
+            journal: self.j,
+            expected: &self.expected,
+            device_now: &self.now_dev,
+            write_exclusion: self.excl,
+            accounts: &self.acc,
+            mover: MOVER,
+            qualified: &self.q,
+            now: self.now,
+        }
+    }
+}
+
+fn nonce(n: u8) -> [u8; 16] {
+    [n; 16]
+}
+
+#[test]
+fn every_gate_check_refuses_on_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j1", 1);
+    let s = setup();
+    for action in [Action::RemoveMoversAccount, Action::EraseOldLaptop] {
+        // Everything in order: offered, by the system's own route.
+        let f = F::new(&s, &j);
+        let p = preview(action, &f.facts()).unwrap();
+        assert_eq!(p.method, Method::SystemRoute);
+
+        // T27-019: another laptop answering now.
+        let mut f = F::new(&s, &j);
+        f.now_dev.laptop = other_laptop();
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+
+        // T27-019: the drive named at the move is not the drive there now (same model, another
+        // serial), or no drive is named now.
+        let mut f = F::new(&s, &j);
+        f.expected = device(Some(ssd()));
+        let mut other = ssd();
+        other.serial = "S3Z9NB0K999999".into();
+        f.now_dev = device(Some(other));
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+        f.now_dev = device(None);
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+        // A blank serial recorded is never an identity.
+        let mut blank = ssd();
+        blank.serial = " ".into();
+        f.expected = device(Some(blank.clone()));
+        f.now_dev = device(Some(blank));
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+
+        // T27-014: the old laptop was not checked again.
+        let mut f = F::new(&s, &j);
+        f.old_now = None;
+        assert_eq!(
+            preview(action, &f.facts()),
+            Err(Refusal::OldLaptopNotReachable)
+        );
+
+        // A scan of another laptop is not this one.
+        let stranger = Record::new(other_laptop());
+        let mut f = F::new(&s, &j);
+        f.old_now = Some(&stranger);
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+
+        // A list made for another old laptop is not this one's, even with that laptop here.
+        let mut f = F::new(&s, &j);
+        f.expected.laptop = other_laptop();
+        f.now_dev.laptop = other_laptop();
+        f.old_now = Some(&stranger);
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+
+        // T27-012: the old laptop changed since the list was made.
+        let mut changed = s.record.clone();
+        changed.items.push(file("new.txt"));
+        let mut f = F::new(&s, &j);
+        f.old_now = Some(&changed);
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::ChecklistStale));
+    }
+}
+
+/// An open list refuses with how many are open.
+#[test]
+fn an_open_list_refuses_both_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let (record, l) = ledger(vec![file("a.txt"), file("b.txt")]);
+    let checklist = Checklist::build(
+        &Inputs {
+            ledger: &l,
+            approved: &record,
+            old_laptop: OldLaptop::Scanned(&record),
+            left_on_old_laptop: &[],
+            steps_not_finished: &[],
+            undo_open: true,
+            special: &[],
+        },
+        None,
+        T0 + 100,
     );
-    assert!(
-        ActionResult::CancelledAfterSomeEffects
-            .words()
-            .contains("cannot be brought back")
+    let s = Setup { record, checklist };
+    let f = F::new(&s, &j);
+    for action in [Action::RemoveMoversAccount, Action::EraseOldLaptop] {
+        assert_eq!(
+            preview(action, &f.facts()),
+            Err(Refusal::ExceptionsOpen { open: 1 })
+        );
+    }
+}
+
+/// T27-016: handing on to family removes only the mover's account; erasing is refused while other
+/// people keep their files there; the preview says plainly an SSD delete is not a secure wipe.
+#[test]
+fn t27_016_other_people_s_accounts_are_never_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let s = setup();
+    let f = F::new(&s, &j);
+    let p = preview(Action::RemoveMoversAccount, &f.facts()).unwrap();
+    assert_eq!(p.removes, [MOVER]);
+    assert_eq!(p.keeps, ["1001"]);
+    for n in [
+        Note::SignInAsAnotherAdministrator,
+        Note::OthersStay,
+        Note::DoesNotCancelSubscriptions,
+        Note::SsdNotSecureWipe,
+        Note::ClosesUndo,
+        Note::NotACertificate,
+    ] {
+        assert!(p.notes.contains(&n), "{n:?}");
+    }
+    // The mover's account is not on the laptop: nothing to remove.
+    let mut f = F::new(&s, &j);
+    f.acc.retain(|a| a.id != MOVER);
+    assert_eq!(
+        preview(Action::RemoveMoversAccount, &f.facts()),
+        Err(Refusal::NoSuchAccount)
     );
-    assert!(SSD_NOTE.contains("not a secure wipe"));
+    // Another person keeps files there: no erase.
+    let mut f = F::new(&s, &j);
+    f.acc[1].has_own_files = true;
+    assert_eq!(
+        preview(Action::EraseOldLaptop, &f.facts()),
+        Err(Refusal::OtherPeopleUseIt)
+    );
+    // ... but their account still is not removed with the mover's.
+    let p = preview(Action::RemoveMoversAccount, &f.facts()).unwrap();
+    assert_eq!(p.removes, [MOVER]);
+    let p = preview(Action::EraseOldLaptop, &F::new(&s, &j).facts()).unwrap();
+    for n in [
+        Note::CannotBeUndone,
+        Note::SsdNotSecureWipe,
+        Note::EncryptFirstHelps,
+    ] {
+        assert!(p.notes.contains(&n), "{n:?}");
+    }
+}
+
+/// T27-017, T27-018: a finished move is never the confirmation; only a fresh, separate
+/// confirmation of exactly this preview and action, used once; and only then is undo closed, for
+/// good, on disk.
+#[test]
+fn t27_017_018_only_a_fresh_separate_confirmation_closes_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let s = setup();
+    {
+        let f = F::new(&s, &j);
+        let facts = f.facts();
+        let p = preview(Action::EraseOldLaptop, &facts).unwrap();
+        let mut used = Used::default();
+        let open = |j: &Journal| j.undo_gate().unwrap() == UndoGate::Open;
+
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, None, &mut used).unwrap_err(),
+            Refusal::NoFreshConfirmation
+        );
+        let other = confirm(Action::RemoveMoversAccount, p.digest(), T0 + 150, nonce(1));
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, Some(&other), &mut used).unwrap_err(),
+            Refusal::WrongConfirmation
+        );
+        let stale = confirm(Action::EraseOldLaptop, [9; 32], T0 + 150, nonce(2));
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, Some(&stale), &mut used).unwrap_err(),
+            Refusal::ChangedSinceConfirmed
+        );
+        let old = confirm(Action::EraseOldLaptop, p.digest(), T0 - 1000, nonce(3));
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, Some(&old), &mut used).unwrap_err(),
+            Refusal::Expired
+        );
+        let future = confirm(Action::EraseOldLaptop, p.digest(), T0 + 201, nonce(4));
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, Some(&future), &mut used).unwrap_err(),
+            Refusal::Expired
+        );
+        assert!(open(&j), "no refusal closed undo");
+        // Exactly at the edge of fresh is still fresh.
+        let edge = confirm(
+            Action::EraseOldLaptop,
+            p.digest(),
+            T0 + 200 - pctwin_readiness::handover::FRESH,
+            nonce(5),
+        );
+        let r = request(Action::EraseOldLaptop, &facts, Some(&edge), &mut used).unwrap();
+        assert!(r.undo_closed.is_for(&j));
+        assert!(!open(&j), "undo is closed for good, on disk");
+        assert_eq!(r.method, Method::SystemRoute);
+        // The same confirmation again: undo is closed now, so the preview changed.
+        assert_eq!(
+            request(Action::EraseOldLaptop, &facts, Some(&edge), &mut used).unwrap_err(),
+            Refusal::ChangedSinceConfirmed
+        );
+        // Its number is used, whatever it is put to.
+        let p2 = preview(Action::RemoveMoversAccount, &facts).unwrap();
+        let reused = confirm(Action::RemoveMoversAccount, p2.digest(), T0 + 150, nonce(5));
+        assert_eq!(
+            request(
+                Action::RemoveMoversAccount,
+                &facts,
+                Some(&reused),
+                &mut used
+            )
+            .unwrap_err(),
+            Refusal::AlreadyUsed
+        );
+        let fresh = confirm(Action::RemoveMoversAccount, p2.digest(), T0 + 150, nonce(6));
+        assert!(request(Action::RemoveMoversAccount, &facts, Some(&fresh), &mut used).is_ok());
+        // With undo now closed, the preview no longer says confirming closes it.
+        let again = preview(Action::EraseOldLaptop, &facts).unwrap();
+        assert!(!again.notes.contains(&Note::ClosesUndo));
+    }
+    // The journal stays closed when it is opened again.
+    drop(j);
+    let j = journal(dir.path(), "j", 1);
+    assert_eq!(j.undo_gate().unwrap(), UndoGate::Closed);
+}
+
+/// T27-018: a refused request never closes undo, whatever check refused it.
+#[test]
+fn t27_018_a_refused_request_leaves_undo_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let s = setup();
+    let mut f = F::new(&s, &j);
+    let p = preview(Action::RemoveMoversAccount, &f.facts()).unwrap();
+    let c = confirm(Action::RemoveMoversAccount, p.digest(), T0 + 150, nonce(1));
+    f.old_now = None;
+    let mut used = Used::default();
+    assert_eq!(
+        request(Action::RemoveMoversAccount, &f.facts(), Some(&c), &mut used).unwrap_err(),
+        Refusal::OldLaptopNotReachable
+    );
+    assert_eq!(j.undo_gate().unwrap(), UndoGate::Open);
+}
+
+/// T27-020, T27-021: an erase PCTwin would run itself needs a method qualified for this exact
+/// drive and no other writer; with none qualified, it is the system's own route, never refused
+/// for want of one and never a success certificate.
+#[test]
+fn t27_020_021_qualified_methods_only_for_the_exact_drive() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let s = setup();
+    let mut f = F::new(&s, &j);
+    f.expected = device(Some(ssd()));
+    f.now_dev = device(Some(ssd()));
+    // None qualified: the system's route.
+    assert_eq!(
+        preview(Action::EraseOldLaptop, &f.facts()).unwrap().method,
+        Method::SystemRoute
+    );
+    // Qualified for another drive only: still the system's route.
+    let mut elsewhere = ssd();
+    elsewhere.serial = "OTHER".into();
+    f.q = vec![QualifiedMethod {
+        drive: elsewhere,
+        method: "nvme-sanitize".into(),
+    }];
+    assert_eq!(
+        preview(Action::EraseOldLaptop, &f.facts()).unwrap().method,
+        Method::SystemRoute
+    );
+    // Qualified for this exact drive: it would be PCTwin's, and needs every writer kept out.
+    f.q = vec![QualifiedMethod {
+        drive: ssd(),
+        method: "nvme-sanitize".into(),
+    }];
+    let p = preview(Action::EraseOldLaptop, &f.facts()).unwrap();
+    assert_eq!(
+        p.method,
+        Method::Qualified {
+            name: "nvme-sanitize".into()
+        }
+    );
+    assert_eq!(p.removes, ["Example SSD 512GB"]);
+    f.excl = WriteExclusion::CannotExclude;
+    assert_eq!(
+        preview(Action::EraseOldLaptop, &f.facts()),
+        Err(Refusal::NoWriteExclusion)
+    );
+    // The account is the system's own route always: no writer exclusion asked of it.
+    assert_eq!(
+        preview(Action::RemoveMoversAccount, &f.facts())
+            .unwrap()
+            .method,
+        Method::SystemRoute
+    );
+}
+
+/// T27-022 to T27-024, T27-026: what is recorded is what the person said happened, never a
+/// certificate; part-way and cancelled say so.
+#[test]
+fn t27_022_to_026_results_are_what_the_person_says() {
+    use ActionResult as R;
+    assert_eq!(R::from_person(PersonSays::Done), R::PersonSaidDone);
+    assert_eq!(R::from_person(PersonSays::Partly), R::Partial);
+    assert_eq!(
+        R::from_person(PersonSays::CancelledPartWay),
+        R::CancelledAfterSomeEffects
+    );
+    assert_eq!(R::from_person(PersonSays::NotStarted), R::NotStarted);
+    assert_eq!(R::from_person(PersonSays::CannotTell), R::Inconclusive);
+}
+
+/// A device-bound thing on the list keeps every handover refused until the person says they set
+/// it up again.
+#[test]
+fn a_device_bound_item_blocks_until_the_person_did_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = journal(dir.path(), "j", 1);
+    let (record, mut l) = ledger(vec![left_out("passkey", LeftOutReason::DeviceBound)]);
+    l.searched("Documents");
+    let inputs = Inputs {
+        ledger: &l,
+        approved: &record,
+        old_laptop: OldLaptop::Scanned(&record),
+        left_on_old_laptop: &[],
+        steps_not_finished: &[],
+        undo_open: true,
+        special: &[],
+    };
+    let mut checklist = Checklist::build(&inputs, None, T0 + 100);
+    let s = Setup {
+        record: record.clone(),
+        checklist: checklist.clone(),
+    };
+    assert_eq!(
+        preview(Action::EraseOldLaptop, &F::new(&s, &j).facts()),
+        Err(Refusal::ExceptionsOpen { open: 1 })
+    );
+    let id = checklist.exceptions[0].id;
+    let shown = checklist.shown(&id).unwrap();
+    checklist.person_did_it(&id, shown, T0 + 120).unwrap();
+    let s = Setup { record, checklist };
+    assert!(preview(Action::EraseOldLaptop, &F::new(&s, &j).facts()).is_ok());
 }

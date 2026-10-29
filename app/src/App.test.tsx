@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { violations } from "./testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -95,10 +95,20 @@ describe("screens", () => {
     expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
   });
 
-  it.each([
-    ["Restore setup", "Restore setup"],
-    ["Rescue a laptop", "Rescue a laptop"],
-  ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
+  it("Rescue a laptop opens the rescue page, which lists the drives connected here, and Back returns", async () => {
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "rescue_drives" ? [] : undefined));
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /Rescue a laptop/ }));
+    expect(screen.queryByText("Coming soon")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Rescue a laptop");
+    await waitFor(() => {
+      expect(tauri.invoke.mock.calls.some(([c]) => c === "rescue_drives")).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+  });
+
+  it.each([["Restore setup", "Restore setup"]])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(button) }));
     expect(screen.getByText("Coming soon")).toBeTruthy();

@@ -858,8 +858,8 @@ describe("R01 Welcome to your next laptop", () => {
   });
 });
 
-describe("R02 Your move, by kind", () => {
-  /** Shows the report with one kind open (the samples have no kind, so they are other files). */
+describe("R02 What moved", () => {
+  /** Shows the report and opens one group's page (the samples have no kind, so they are other files). */
   const showReport = (items: ReportItem[], kind: FileKind = "other") => {
     inApp(<Report items={items} onBack={noop} />);
     fireEvent.click(screen.getByRole("button", { name: (n) => n.startsWith(text(`report-group-${kind}`)) }));
@@ -873,8 +873,9 @@ describe("R02 Your move, by kind", () => {
 
   it("lists every item with its status chip and its reason", async () => {
     showReport(sample.report);
+    // The group's own page: its name is the heading, and it has the focus.
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading.textContent).toBe(text("report-title"));
+    expect(heading.textContent).toBe(text("report-group-other"));
     expect(document.activeElement).toBe(heading);
     expect(document.querySelectorAll(".rp-body tbody tr")).toHaveLength(sample.report.length);
     expect(within(rowOf("Invoice March.pdf")).getByText(text("status-copied"))).toBeTruthy();
@@ -1044,14 +1045,21 @@ describe("R02 Your move, by kind", () => {
     expect(document.querySelector(".rp-body")).toBeNull();
     // The bar is for the eye only: the lines say the same in words.
     expect(document.querySelector(".rp-bar")?.getAttribute("aria-hidden")).toBe("true");
-    // Opening a kind shows its files with their folder; opening another closes it.
+    // Selecting a group opens its own page: its name as the heading (focused), its files with
+    // their folder; Back returns to the overview, where "Needs you" stays.
     fireEvent.click(head("photos"));
-    expect(head("photos").getAttribute("aria-expanded")).toBe("true");
+    const page = screen.getByRole("heading", { level: 1 });
+    expect(page.textContent).toBe(text("report-group-photos"));
+    expect(document.activeElement).toBe(page);
+    expect(screen.queryByRole("button", { name: (n) => n.startsWith(text("report-group-videos")) })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: text("report-needs-title", { count: 1 }) })).toBeNull();
     const body = document.querySelector<HTMLElement>(".rp-body");
     expect(body?.textContent).toContain("a.jpg");
     expect(body?.textContent).toContain("Trip");
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("report-title"));
+    expect(screen.getByRole("heading", { level: 2, name: text("report-needs-title", { count: 1 }) })).toBeTruthy();
     fireEvent.click(head("videos"));
-    expect(head("photos").getAttribute("aria-expanded")).toBe("false");
     expect(document.querySelector(".rp-body")?.textContent).toContain("c.mp4");
   });
 

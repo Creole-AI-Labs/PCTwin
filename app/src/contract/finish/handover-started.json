@@ -1,0 +1,66 @@
+[
+  {
+    "action": "erase-old-laptop",
+    "opened": false,
+    "route": {
+      "canOpen": true,
+      "route": "windows-reset-clean-drive",
+      "steps": [
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-drive"
+      ],
+      "system": "windows"
+    },
+    "undoClosed": true
+  },
+  {
+    "action": "erase-old-laptop",
+    "opened": false,
+    "route": {
+      "canOpen": true,
+      "route": "windows-reset-clean-drive",
+      "steps": [
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-drive"
+      ],
+      "system": "macos"
+    },
+    "undoClosed": true
+  },
+  {
+    "action": "erase-old-laptop",
+    "opened": false,
+    "route": {
+      "canOpen": true,
+      "route": "windows-reset-clean-drive",
+      "steps": [
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-drive"
+      ],
+      "system": "linux"
+    },
+    "undoClosed": true
+  },
+  {
+    "action": "erase-old-laptop",
+    "opened": false,
+    "route": {
+      "canOpen": true,
+      "route": "windows-reset-clean-drive",
+      "steps": [
+        "windows-open-recovery",
+        "windows-reset-this-pc",
+        "windows-remove-everything",
+        "windows-clean-drive"
+      ],
+      "system": null
+    },
+    "undoClosed": true
+  }
+]

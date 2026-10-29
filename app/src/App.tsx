@@ -2,7 +2,7 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type Label, type Problem, type ReadyNote } from "./bridge";
+import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type Label, type Problem, type ReadyNote, type RescueDrive } from "./bridge";
 import ThingsReady from "./screens/ThingsReady";
 import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
@@ -10,6 +10,7 @@ import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
 import HelpHome from "./screens/HelpHome";
 import MoveHost from "./screens/MoveHost";
+import RescuePick from "./screens/RescuePick";
 import PickUp from "./screens/PickUp";
 import { FooterProvider } from "./screens/FrameFooter";
 import PairNew from "./screens/PairNew";
@@ -37,7 +38,9 @@ type Screen =
   | { id: "together"; role: Role }
   | { id: "pair"; role: Role }
   // The move, from paired to its outcome. Left only by its own buttons, so a running move always has a screen.
-  | { id: "move"; role: Role }
+  | { id: "move"; role: Role; rescue?: RescueDrive }
+  // Rescue a laptop (2.6), from Home: choose a drive connected here; the move follows as the new laptop.
+  | { id: "rescue" }
   // Another person's things were handed over at their sign-in (M32): shown to them once, at start.
   | { id: "ready"; note: ReadyNote }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
@@ -207,7 +210,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "welcome" && (
               <Welcome
                 onStart={startMove}
-                onSoon={(which) => { setScreen({ id: "soon", which }); }}
+                onSoon={(which) => { setScreen(which === "rescue" ? { id: "rescue" } : { id: "soon", which }); }}
                 onQuick={() => { setScreen({ id: "quick", notice: false }); }}
                 onHistory={() => { setScreen({ id: "history" }); }}
                 unfinished={unfinished > 0}
@@ -261,6 +264,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             )}
             {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "qs" && <QuickHost mode={screen.mode} onWindow={onWindow} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
+            {screen.id === "rescue" && <RescuePick onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(drive) => { setScreen({ id: "move", role: "new", rescue: drive }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
             {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}
@@ -286,6 +290,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "move" && (
               <MoveHost
                 old={screen.role === "old"}
+                rescue={screen.rescue}
                 onWindow={onWindow}
                 onPairAgain={() => { setScreen({ id: "pair", role: screen.role }); }}
                 onHome={() => { setScreen({ id: "welcome" }); }}

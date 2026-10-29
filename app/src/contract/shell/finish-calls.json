@@ -1,0 +1,262 @@
+{
+  "commands": [
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "finish_overview"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "goodbye_list"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "exception",
+          "0000000000000000000000000000000000000000000000000000000000000001"
+        ],
+        [
+          "shown",
+          "0000000000000000000000000000000000000000000000000000000000000002"
+        ],
+        [
+          "answer",
+          "accept-loss"
+        ]
+      ],
+      "name": "goodbye_answer"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "at",
+          1796000000
+        ]
+      ],
+      "name": "goodbye_keep_until"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "purpose",
+          "check"
+        ]
+      ],
+      "name": "catchup_arm"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "digest",
+          "0000000000000000000000000000000000000000000000000000000000000007"
+        ],
+        [
+          "choices",
+          [
+            {
+              "choice": "keep-both",
+              "id": "0101010101010101010101010101010101010101010101010101010101010101"
+            }
+          ]
+        ]
+      ],
+      "name": "catchup_approve"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "action",
+          "remove-my-account"
+        ]
+      ],
+      "name": "handover_preview"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "action",
+          "erase-old-laptop"
+        ],
+        [
+          "digest",
+          "0000000000000000000000000000000000000000000000000000000000000009"
+        ],
+        [
+          "ticket",
+          "00000000000000000000000000000007"
+        ]
+      ],
+      "name": "handover_confirm"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "action",
+          "erase-old-laptop"
+        ],
+        [
+          "says",
+          "cannot-tell"
+        ]
+      ],
+      "name": "handover_result"
+    },
+    {
+      "args": [
+        [
+          "role",
+          "new"
+        ]
+      ],
+      "name": "doctor_run"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "setup_checklist"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "task",
+          "0000000000000000000000000000000000000000000000000000000000000001"
+        ],
+        [
+          "done",
+          true
+        ]
+      ],
+      "name": "setup_mark"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "setup_save"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "undo_preview"
+    },
+    {
+      "args": [
+        [
+          "what",
+          "temporary-files"
+        ]
+      ],
+      "name": "cleanup_preview"
+    },
+    {
+      "args": [
+        [
+          "what",
+          "model-and-cache"
+        ],
+        [
+          "digest",
+          "000000000000000000000000000000000000000000000000000000000000000b"
+        ]
+      ],
+      "name": "cleanup_confirm"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "disclosure",
+          {
+            "accountId": false,
+            "appNames": true,
+            "fileNames": false
+          }
+        ]
+      ],
+      "name": "report_preview"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ],
+        [
+          "disclosure",
+          {
+            "accountId": false,
+            "appNames": true,
+            "fileNames": false
+          }
+        ],
+        [
+          "digest",
+          "000000000000000000000000000000000000000000000000000000000000000d"
+        ],
+        [
+          "text",
+          "PCTwin move report"
+        ]
+      ],
+      "name": "report_save"
+    }
+  ],
+  "events": {
+    "finishDelta": "finish-delta"
+  }
+}

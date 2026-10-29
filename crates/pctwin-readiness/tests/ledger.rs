@@ -226,8 +226,13 @@ fn t27_002_a_sample_is_labelled_as_a_sample() {
     assert_eq!(Coverage::sample(10_000, 10_000), Ok(Coverage::Whole));
     let s = Coverage::sample(12, 10_000).unwrap();
     assert!(!s.is_whole());
-    assert_eq!(s.words(), "checked 12 of 10000");
-    assert_eq!(Coverage::Whole.words(), "checked all");
+    assert_eq!(
+        s,
+        Coverage::Sample {
+            checked: 12,
+            of: 10_000
+        }
+    );
     assert!(Coverage::sample(0, 5).is_err());
     assert!(Coverage::sample(6, 5).is_err());
     // A sample stays a sample through the ledger.
@@ -254,14 +259,9 @@ fn t27_003_an_unsearched_place_is_never_claimed() {
     assert!(l.found_everything());
     l.not_searched("USB drive \"Backup\"");
     assert!(!l.found_everything());
-    let words = l.source_only_words();
-    assert!(
-        words.contains("1 item is only on the old laptop"),
-        "{words}"
-    );
-    assert!(words.contains("in the places PCTwin looked: Documents"));
-    assert!(words.contains("PCTwin did not look in: USB drive \"Backup\""));
-    assert!(!words.to_lowercase().contains("everything"));
+    assert_eq!(l.only_on_old_laptop().len(), 1);
+    assert!(l.search().searched.contains("Documents"));
+    assert!(l.search().not_searched.contains("USB drive \"Backup\""));
     // Searched later: no longer listed as unsearched.
     l.searched("USB drive \"Backup\"");
     assert!(l.found_everything());
@@ -319,8 +319,7 @@ fn t27_027_accepted_loss_is_never_success() {
         T0 + 20,
     )
     .unwrap();
-    let (words, digest) = l.loss_warning(a.id).unwrap();
-    assert!(words.contains("not on the new laptop"), "{words}");
+    let digest = l.loss_warning(a.id).unwrap();
     // Agreeing to some other warning, or to one for a finished item, is refused.
     assert!(l.accept_loss(a.id, [0; 32], T0 + 30).is_err());
     assert!(l.loss_warning(done.id).is_none());
@@ -466,6 +465,44 @@ fn the_journal_probe_confirms_only_what_the_journal_shows() {
         l.accept(r, &other_scope, T0 + 20),
         Err(Refused::NotWhatIsThere)
     );
+}
+
+/// Finishing a move reads every move from this old laptop (each has its own scope), never Quick
+/// Send's, never another laptop's, never what undo took back.
+#[test]
+fn the_journal_probe_for_finishing_reads_every_move_of_this_old_laptop() {
+    let (a, b, c, d) = (file("a.txt"), file("b.txt"), file("c.txt"), file("d.txt"));
+    let mut quick = entry(4, d.id, old_laptop(), committed([4; 32]));
+    quick.write.scope = JScope::QUICK_SEND;
+    let mut later = entry(5, a.id, old_laptop(), committed([6; 32]));
+    later.write.scope = JScope([7; 16]);
+    let entries = vec![
+        entry(1, a.id, old_laptop(), committed([1; 32])),
+        entry(2, b.id, other_laptop(), committed([2; 32])),
+        entry(3, c.id, old_laptop(), committed([3; 32])),
+        quick,
+        later,
+    ];
+    let p = JournalProbe::from_moves(&entries, &BTreeSet::from([3]), old_laptop());
+    // The newest copy of a stands, whichever move wrote it.
+    assert_eq!(p.fingerprint(a.id), Some([6; 32]));
+    assert!(p.has(a.id));
+    for not in [b.id, c.id, d.id] {
+        assert!(!p.has(not));
+        assert_eq!(p.fingerprint(not), None);
+    }
+    let mut ex = entry(
+        6,
+        b.id,
+        old_laptop(),
+        State::Existing {
+            stored_path: "b.txt".into(),
+        },
+    );
+    ex.write.scope = JScope([1; 16]);
+    let p = JournalProbe::from_moves(&[ex], &BTreeSet::new(), old_laptop());
+    assert!(p.has(b.id));
+    assert_eq!(p.fingerprint(b.id), None);
 }
 
 /// The 2.6 scheduler is the real state of a child job: a child's "finished" counts only for a

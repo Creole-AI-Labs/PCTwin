@@ -1,0 +1,32 @@
+[
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "person-says-done"
+  },
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "partial"
+  },
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "interrupted"
+  },
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "cancelled-after-some-effects"
+  },
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "not-started"
+  },
+  {
+    "action": "remove-my-account",
+    "at": 1792627400,
+    "outcome": "inconclusive"
+  }
+]

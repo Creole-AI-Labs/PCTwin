@@ -4,6 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import offeredExamples from "../contract/qs-offered.json";
 import receipts from "../contract/qs-receipt.json";
+import progress from "../contract/qs-progress.json";
+import { formatBytes } from "../move";
+import { violations } from "../testing/a11y";
 import { localization } from "../i18n";
 import QuickHost from "./QuickHost";
 
@@ -243,9 +246,14 @@ describe("receiving", () => {
     await waitFor(() => {
       expect(called("quicksend_receive")).toBe(true);
     });
-    expect(heading()).toBe(text("qs-receiving-title"));
-    // What is offered is not a page: the receive is already going.
+    // What is coming is announced; nothing is saved until the person says where (29 October 2026).
     send("quicksend-incoming", { files: offeredExamples });
+    expect(heading()).toBe(text("qs-where-title"));
+    expect(called("quicksend_save_here")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: text("qs-where-save") }));
+    await waitFor(() => {
+      expect(called("quicksend_save_here")).toBe(true);
+    });
     expect(heading()).toBe(text("qs-receiving-title"));
     send("quicksend-receipt", receipts[0]);
     expect(heading()).toBe(text("qs-done-partial-title"));
@@ -257,6 +265,41 @@ describe("receiving", () => {
       expect(called("quicksend_open_folder")).toBe(true);
     });
     expect(page()).not.toMatch(/receipt/i);
+  });
+
+  it("asks where the files go when they arrive: how many, how much, the folder, another folder, or Stop", async () => {
+    replies.quicksend_folder = () => DOWNLOADS;
+    replies.quicksend_choose_folder = () => ({ name: "Work", path: "D:/Work", freeBytes: null });
+    const onHome = vi.fn();
+    inApp(<QuickHost mode="receive" onHome={onHome} />);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    });
+    send("pairing-new", { kind: "paired" });
+    await waitFor(() => {
+      expect(called("quicksend_receive")).toBe(true);
+    });
+    send("quicksend-incoming", { files: offeredExamples });
+    const total = offeredExamples.reduce((n, f) => n + f.size, 0);
+    expect(page()).toContain(plain(text("qs-where-body", { count: offeredExamples.length, size: formatBytes(total, "en") })));
+    expect(page()).toContain(plain(text("qs-where-folder", { folder: "Downloads" })));
+    // A progress word before saving does not take the page.
+    send("quicksend-progress", progress[0]);
+    expect(heading()).toBe(text("qs-where-title"));
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: text("qs-where-choose") }));
+    await waitFor(() => {
+      expect(page()).toContain(plain(text("qs-where-folder", { folder: "Work" })));
+    });
+    document.documentElement.dir = "rtl";
+    expect(await violations()).toEqual([]);
+    document.documentElement.dir = "ltr";
+    fireEvent.click(screen.getByRole("button", { name: text("qs-where-stop") }));
+    await waitFor(() => {
+      expect(called("quicksend_stop")).toBe(true);
+    });
+    expect(called("quicksend_save_here")).toBe(false);
+    expect(onHome).toHaveBeenCalled();
   });
 
   it("with no Downloads folder, asks for a folder before pairing", async () => {

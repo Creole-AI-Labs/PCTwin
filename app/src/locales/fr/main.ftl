@@ -1338,12 +1338,12 @@ drive-problem-carry-on = Continuer
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Votre transfert, par type.
-report-body = Ouvrez un type pour voir ses fichiers. Ce qui demande votre attention vient en premier.
+report-title = Ce qui a été déplacé
+report-body = Sélectionnez un groupe pour voir ce qu’il contient. Ce qui a besoin de vous est en haut.
 report-needs-title = { $count ->
-        [one] { $count } élément demande votre attention
-        [many] { $count } éléments demandent votre attention
-       *[other] { $count } éléments demandent votre attention
+        [one] À faire par vous : { $count }
+        [many] À faire par vous : { $count }
+       *[other] À faire par vous : { $count }
     }
 report-group-photos = Photos
 report-group-videos = Vidéos
@@ -1358,9 +1358,9 @@ report-group-size = { $files ->
 report-group-done = Tout est copié et vérifié
 report-group-some = { $done } sur { $total } copiés et vérifiés
 report-group-left = { $count ->
-        [one] { $count } laissé sur votre ancien portable, comme vous l'avez choisi
-        [many] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
-       *[other] { $count } laissés sur votre ancien portable, comme vous l'avez choisi
+        [one] { $count } non déplacé : vous l’avez laissé de côté
+        [many] { $count } non déplacés : vous les avez laissés de côté
+       *[other] { $count } non déplacés : vous les avez laissés de côté
     }
 report-filter-label = Afficher
 report-col-item = Élément
@@ -2302,6 +2302,60 @@ forgotten-online-only =
        *[other] { $count } fichiers gardés seulement en ligne, non téléchargés
     }
 
+# 2.7 finishing a move
+doctor-not-connected = Cet ordinateur portable n’est connecté à aucun réseau.
+doctor-not-connected-fix = Connectez-vous au Wi-Fi ou branchez un câble réseau, puis réessayez.
+doctor-mac-local-network-denied = Ce Mac n’autorise peut-être pas PCTwin à communiquer avec les appareils de votre réseau.
+doctor-mac-local-network-denied-fix = Ouvrez Réglages Système, puis Confidentialité et sécurité, puis Réseau local, et activez PCTwin.
+doctor-discovery-blocked = Quelque chose sur cet ordinateur, comme un pare-feu ou une app de sécurité, empêche peut-être les ordinateurs de se trouver.
+doctor-discovery-blocked-fix = Autorisez PCTwin dans votre pare-feu ou votre app de sécurité, ou mettez-le en pause pendant le transfert.
+doctor-windows-public-network = Windows traite le réseau { $name } comme public, ce qui bloque les autres appareils.
+doctor-windows-public-network-fix = Ouvrez Paramètres, puis Réseau et Internet, choisissez { $name } et réglez-le sur réseau privé.
+doctor-vpn-on = Un VPN est activé ({ $name }). Il peut masquer le réseau de votre maison.
+doctor-vpn-on-fix = Désactivez le VPN pendant le transfert, puis réessayez.
+doctor-old-laptop-not-pairing = L’ancien ordinateur n’affiche peut-être pas son code.
+doctor-old-laptop-not-pairing-fix = Sur l’ancien ordinateur, ouvrez PCTwin et indiquez que c’est votre ancien ordinateur.
+doctor-different-networks = Les ordinateurs sont peut-être sur des réseaux différents.
+doctor-different-networks-fix = Connectez les deux ordinateurs au même Wi-Fi.
+doctor-guest-network = Ce réseau empêche peut-être les appareils de se voir, comme souvent les Wi-Fi d’invités, d’hôtel ou de bureau.
+doctor-guest-network-fix = Utilisez le Wi-Fi de votre maison, ou le partage de connexion de votre téléphone.
+doctor-probe-interfaces = PCTwin n’a pas pu lister les connexions réseau de cet ordinateur.
+doctor-probe-hears-itself = PCTwin n’a pas pu vérifier si cet ordinateur peut être trouvé sur le réseau.
+doctor-probe-local-network = PCTwin n’a pas pu vérifier le réglage de réseau local du Mac.
+doctor-probe-network-profiles = PCTwin n’a pas pu vérifier comment Windows traite ce réseau.
+doctor-hotspot = Toujours pas ? Activez le partage de connexion de votre téléphone et connectez-y les deux ordinateurs. Le transfert passe directement entre les ordinateurs, pas par les données de votre téléphone.
+windows-make-other-administrator = Vérifiez que la personne qui garde l’ordinateur y a un compte administrateur.
+windows-sign-in-other-administrator = Déconnectez-vous, puis connectez-vous avec cet autre compte administrateur. Un compte ne peut pas se supprimer lui-même.
+windows-open-other-users = Ouvrez Paramètres, puis Comptes, puis Autres utilisateurs.
+windows-remove-account = Choisissez votre compte, puis Supprimer.
+windows-delete-account-and-data = Choisissez Supprimer le compte et les données. Les comptes des autres restent tels quels.
+windows-sign-out-of-everything = Déconnectez-vous d’abord de vos apps et de vos comptes sur l’ancien ordinateur.
+windows-open-recovery = Ouvrez Paramètres, puis Système, puis Récupération.
+windows-reset-this-pc = Choisissez Réinitialiser ce PC.
+windows-remove-everything = Choisissez Supprimer tout.
+windows-clean-the-drive = Modifiez les paramètres pour que le disque soit nettoyé, pas seulement vidé. Cela prend quelques heures.
+windows-wait-until-setup-screen = Attendez que l’ordinateur affiche son écran de configuration. Il est alors prêt à être donné.
+macos-make-other-administrator = Vérifiez que la personne qui garde le Mac y a un compte administrateur.
+macos-sign-in-other-administrator = Fermez la session, puis ouvrez-la avec cet autre compte administrateur. Un compte ne peut pas se supprimer lui-même.
+macos-open-users-and-groups = Ouvrez Réglages Système, puis Utilisateurs et groupes.
+macos-delete-user = Choisissez le bouton d’information à côté de votre compte, puis Supprimer l’utilisateur.
+macos-delete-home-folder = Choisissez de supprimer le dossier de départ.
+macos-sign-out-of-apple-account = Déconnectez-vous d’abord de votre compte Apple sur l’ancien Mac, pour qu’il soit libre pour son prochain propriétaire.
+macos-open-transfer-or-reset = Ouvrez Réglages Système, puis Général, puis Transférer ou réinitialiser.
+macos-erase-all-content-and-settings = Choisissez Effacer contenu et réglages, et suivez les étapes.
+macos-older-mac-use-recovery = Si votre Mac ne le propose pas (Mac plus anciens), démarrez-le en mode de récupération macOS, effacez le disque avec Utilitaire de disque, puis réinstallez macOS.
+macos-wait-until-setup-screen = Attendez que le Mac affiche son écran de configuration. Il est alors prêt à être donné.
+linux-sign-in-other-administrator = Connectez-vous avec un autre compte administrateur.
+linux-open-users = Ouvrez Paramètres, puis Utilisateurs.
+linux-remove-user-and-files = Choisissez votre compte, puis Supprimer l’utilisateur, et choisissez de supprimer ses fichiers.
+linux-no-built-in-reset = Linux n’a pas de réinitialisation intégrée qui efface le disque.
+linux-drive-maker-secure-erase = Utilisez l’outil d’effacement sécurisé du fabricant du disque, ou l’effacement propre à l’ordinateur dans ses réglages de démarrage, s’il en a un.
+linux-reinstall-from-usb = Installez ensuite un système neuf depuis une clé USB.
+any-sign-in-other-administrator = Connectez-vous avec un autre compte administrateur sur l’ancien ordinateur.
+any-use-system-account-settings = Supprimez votre compte avec les réglages de comptes du système lui-même.
+any-use-system-reset = Utilisez la réinitialisation propre à l’ordinateur qui efface le disque. L’aide du fabricant explique comment.
+any-drive-maker-secure-erase = S’il n’y en a pas, utilisez l’outil d’effacement sécurisé du fabricant du disque.
+
 # 2.9 deliverables
 guard-undo-removes-if-package = PCTwin la supprime si elle venait d'un paquet d'installation ; sinon, supprimez-la vous-même
 guard-undo-keeps-newer = L'annulation garde la version récente : l'ancienne ne peut pas revenir
@@ -2369,11 +2423,11 @@ changed-why-destination-changed = Le dossier de destination a changé
 changed-why-project-edited = Cela a été modifié sur l'ancien ordinateur après votre accord
 changed-step-install = Installation
 changed-step-settings = Réglages
-changed-step-app-data = Données d'applications
+changed-step-app-data = Données d’applis
 changed-step-files = Fichiers
 safe-stop-busy-moving = Transfert des fichiers
 safe-stop-busy-rebuilding = Installation des applications et des réglages
-safe-stop-busy-app-data = Données d'applications
+safe-stop-busy-app-data = Données d’applis
 safe-stop-busy-undoing = Annulation d'un déménagement
 kit-part-move-record = Le relevé de votre déménagement
 kit-part-results = Le résultat de chaque élément
@@ -2381,3 +2435,547 @@ kit-part-before-wipe-list = Ce qui n'est encore que sur l'ancien ordinateur
 kit-part-file-data = Vos fichiers
 kit-part-setup-steps = Les étapes pour réinstaller les applications
 kit-part-recovery-tool = Un outil de restauration
+
+# 2.8 screens
+report-group-apps = Applications
+report-group-settings = Réglages
+report-group-special = Données d’applications et autres choses
+report-group-people = Autres personnes
+report-count-apps = { $count ->
+        [one] { $count } appli
+        [many] { $count } d’applis
+       *[other] { $count } applis
+    }
+report-count-settings = { $count ->
+        [one] { $count } groupe de réglages
+        [many] { $count } de groupes de réglages
+       *[other] { $count } groupes de réglages
+    }
+report-count-special = { $count ->
+        [one] { $count } élément
+        [many] { $count } d’éléments
+       *[other] { $count } éléments
+    }
+report-count-people = { $count ->
+        [one] { $count } personne
+        [many] { $count } de personnes
+       *[other] { $count } personnes
+    }
+report-beyond-done = Tout est fait et vérifié
+report-beyond-some = { $done } sur { $total } faits et vérifiés
+report-beyond-left = { $count ->
+        [one] { $count } non déplacé : vous l’avez laissé de côté
+        [many] { $count } non déplacés : vous les avez laissés de côté
+       *[other] { $count } non déplacés : vous les avez laissés de côté
+    }
+report-beyond-more = { $count ->
+        [one] { $count } autre n’est pas affiché ici.
+        [many] { $count } autres ne sont pas affichés ici.
+       *[other] { $count } autres ne sont pas affichés ici.
+    }
+report-here = { $count ->
+        [one] { $count } application était déjà sur cet ordinateur. PCTwin l’a laissée telle quelle.
+        [many] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
+       *[other] { $count } applications étaient déjà sur cet ordinateur. PCTwin les a laissées telles quelles.
+    }
+progress-ready-title = Prêt à utiliser
+progress-ready-body = { $count ->
+        [one] { $groups } est copié et vérifié. Vous pouvez l’ouvrir sur cet ordinateur pendant que le reste arrive.
+        [many] { $groups } sont copiés et vérifiés. Vous pouvez les ouvrir sur cet ordinateur pendant que le reste arrive.
+       *[other] { $groups } sont copiés et vérifiés. Vous pouvez les ouvrir sur cet ordinateur pendant que le reste arrive.
+    }
+finish-strip = Terminez votre transfert
+finish-title = Terminez votre transfert
+finish-loading = Examen de votre transfert.
+finish-retry = Réessayer
+finish-back-to-list = Retour à la liste
+finish-open = Ouvrir
+finish-open-name = Ouvrir { $title }
+finish-more-not-shown = Autres non affichés : { $count }
+finish-problem-no-move = PCTwin n’a aucun transfert à terminer sur cet ordinateur portable. Rien n’a été modifié.
+finish-problem-changed = Ce qui est affiché n’est plus à jour. Regardez à nouveau avant de répondre. Rien n’a été modifié.
+finish-problem-not-allowed = Cela n’est pas possible. Rien n’a été modifié.
+finish-problem-busy = Un transfert ou une autre étape est en cours. Attendez la fin, puis réessayez. Rien n’a été modifié.
+finish-problem-failed = Un problème est survenu sur cet ordinateur portable. Rien n’a été modifié. Réessayez.
+finish-headline-ready-for-selected-work = Tout ce que vous avez choisi est sur cet ordinateur portable
+finish-headline-ready-for-selected-work-body = PCTwin a trouvé sur cet ordinateur portable chaque élément que vous avez choisi et l’a vérifié autant qu’il le peut. Cela ne garantit pas que toutes les applications fonctionnent comme avant.
+finish-headline-finished-with-tasks = Le transfert est terminé, et il reste des tâches
+finish-headline-finished-with-tasks-body = Certaines choses ont besoin de vous, ou n’ont pas été copiées. Elles sont listées sur cette page.
+finish-headline-data-preserved = Vos éléments sont en sécurité, mais certains ne peuvent pas encore être ouverts
+finish-headline-data-preserved-body = Tout est sur cet ordinateur portable. Une clé ou un code de récupération est nécessaire pour ouvrir une partie, et PCTwin n’a pas pu le vérifier ici.
+finish-headline-handover-unresolved = L’ancien ordinateur portable n’est pas encore prêt à être remis
+finish-headline-handover-unresolved-body = Cet ordinateur portable est prêt. La liste avant de quitter l’ancien ordinateur portable a encore des points ouverts.
+finish-headline-nothing-moved = Rien n’a été choisi pour le transfert
+finish-headline-nothing-moved-body = Aucun fichier, application ni réglage n’a été choisi, donc rien n’a été copié.
+finish-tally-title = Ce qui a été transféré
+finish-tally-selected = Choisis : { $count }
+finish-tally-done = Copiés et vérifiés : { $count }
+finish-tally-needs-action = Ont besoin de vous : { $count }
+finish-tally-failed = Non copiés : { $count }
+finish-tally-waiting = Encore en attente : { $count }
+finish-tally-not-reachable = Ancien ordinateur portable injoignable : { $count }
+finish-tally-no-result-yet = Pas encore de résultat : { $count }
+finish-tally-skipped = Ignorés par vous : { $count }
+finish-tally-left-out = Laissés de côté : { $count }
+finish-tally-accepted-loss = Laissés volontairement : { $count }
+finish-others = Éléments d’autres personnes, seulement comptés et jamais affichés : { $count }
+finish-after-title = Vérifié maintenant sur cet ordinateur portable
+finish-after-body = PCTwin les a comptés sur l’ancien ordinateur portable, puis comptés à nouveau sur cet ordinateur portable.
+finish-after-count = { $onNew } sur { $atScan } sont sur cet ordinateur portable
+finish-after-all = Tout est là
+finish-after-short = Il en manque
+finish-group-photos = Photos
+finish-group-videos = Vidéos
+finish-group-music = Musique
+finish-group-documents = Documents
+finish-group-other-files = Autres fichiers
+finish-group-apps = Applications
+finish-group-settings = Réglages
+finish-note-parental-controls = Le contrôle parental et les réglages de sécurité familiale ne sont pas transférés. Configurez-les à nouveau sur cet ordinateur portable.
+finish-note-not-everywhere = Certains endroits de l’ancien ordinateur portable n’ont pas été examinés.
+finish-note-results-refused = Certains résultats n’ont pas été acceptés, car cet ordinateur portable ne les a pas montrés comme terminés.
+finish-note-undo-open = L’annulation reste possible pour ce transfert. Elle se ferme définitivement si vous effacez l’ancien ordinateur portable.
+finish-open-title = Pas terminé
+finish-open-body = Voici vos éléments qui demandent encore de l’attention.
+finish-standing-copied = Copié
+finish-standing-reinstalled = Réinstallé
+finish-standing-converted = Converti
+finish-standing-needs-action = A besoin de vous
+finish-standing-failed = Non copié
+finish-standing-waiting = En attente
+finish-standing-not-reachable = Ancien ordinateur portable injoignable
+finish-standing-no-result-yet = Pas encore de résultat
+finish-standing-skipped-by-user = Ignoré par vous
+finish-standing-left-out = Laissé de côté
+finish-access-key-not-checked = Une clé ou un code pour l’ouvrir n’a pas été vérifié ici.
+finish-access-not-on-new-laptop = Il n’est pas sur cet ordinateur portable.
+finish-search-title = Où PCTwin a regardé sur l’ancien ordinateur portable
+finish-search-searched = A regardé dans : { $places }
+finish-search-not-searched = N’a pas regardé dans : { $places }
+finish-search-all = PCTwin a regardé dans tous les endroits qu’il connaît. Il ne peut pas dire qu’il n’y a rien ailleurs.
+finish-old-checked = Dernière vérification de l’ancien ordinateur portable : { $when }
+finish-old-never = L’ancien ordinateur portable n’a pas été vérifié depuis le transfert.
+finish-steps-title = Étapes suivantes
+finish-step-setup = Terminer la configuration
+finish-step-setup-detail = Applications qui demandent que vous vous connectiez ou terminiez une étape.
+finish-step-goodbye = Avant de quitter l’ancien ordinateur portable
+finish-step-goodbye-detail = Ce qui n’est encore que sur l’ancien ordinateur portable.
+finish-step-catchup = Me mettre à jour
+finish-step-catchup-detail = Copier ce qui a changé sur l’ancien ordinateur portable depuis le transfert.
+finish-step-handover = Remettre l’ancien ordinateur portable
+finish-step-handover-detail = Retirer votre compte ou effacer l’ancien ordinateur portable, avec les outils du système lui-même.
+finish-step-undo = Annuler ce transfert
+finish-step-undo-detail = Retirer des applications et remettre les réglages.
+finish-step-cleanup = Nettoyer
+finish-step-cleanup-detail = Retirer de cet ordinateur portable les fichiers temporaires de PCTwin.
+finish-step-report = Partager le rapport
+finish-step-report-detail = Enregistrer un rapport simple. Vous choisissez ce qu’il contient.
+finish-step-doctor = Vérifier la connexion
+finish-step-doctor-detail = Trouver pourquoi les deux ordinateurs portables ne se connectent pas.
+finish-setup-title = Terminer la configuration
+finish-setup-body = Ces applications demandent une étape de votre part. Une coche enregistre ce que vous dites. Elle ne compte pas comme une vérification de PCTwin.
+finish-setup-empty = Rien ne vous attend.
+finish-setup-sign-in = Connectez-vous à { $name }
+finish-setup-licence-key = Saisissez la clé de licence de { $name }
+finish-setup-set-up-again = Configurez { $name } à nouveau
+finish-setup-download-from-maker = Téléchargez { $name } depuis le site de son éditeur
+finish-setup-permission = Donnez l’autorisation à { $name } quand il la demande
+finish-setup-restart = Redémarrez cet ordinateur portable pour terminer { $name }
+finish-setup-finish-by-hand = Terminez { $name } à la main
+finish-setup-parts-missing = Certaines parties de { $name } ne sont pas arrivées. Envoyez-les à nouveau
+finish-setup-export-first = Exportez d’abord depuis { $name } sur l’ancien ordinateur portable
+finish-setup-relink = Reliez { $name } à votre compte à nouveau
+finish-setup-look-at-it = Regardez { $name } et vérifiez que tout est correct
+finish-setup-mark-open = Pas fait
+finish-setup-mark-machine-checked = PCTwin a vérifié
+finish-setup-mark-you-did-it = Vous avez dit que c’est fait
+finish-setup-tick-hint = Cochez quand c’est fait.
+finish-setup-save-row = Enregistrer la liste de vos applications
+finish-setup-save-row-detail = Garder une liste de vos applications et réglages dans Mon historique PCTwin.
+finish-save-title = Enregistrer la liste de vos applications
+finish-save-body = PCTwin garde une liste de vos applications et réglages dans Mon historique PCTwin, sur cet ordinateur portable seulement. C’est une liste, pas une copie de vos fichiers.
+finish-save-button = Enregistrer la liste
+finish-save-saved = Enregistré dans Mon historique PCTwin. Applications : { $apps }. Réglages : { $settings }.
+finish-save-earlier-title = Enregistré avant
+finish-save-earlier = Enregistré : { $when }
+finish-goodbye-title = Avant de quitter l’ancien ordinateur portable
+finish-goodbye-body = Voici ce qui n’est encore que sur l’ancien ordinateur portable. Répondez pour chaque point. Rien n’est effacé ici. Effacer est une étape séparée.
+finish-goodbye-saved = Cette liste est enregistrée sur cet ordinateur portable.
+finish-goodbye-only-on-old-laptop = Seulement sur l’ancien ordinateur portable : { $count }
+finish-goodbye-key-not-checked = Éléments qui demandent une clé ou un code non vérifié : { $count }
+finish-goodbye-tied-to-old-laptop = Liés à l’ancien ordinateur portable : { $count }
+finish-goodbye-do-first-on-old-laptop = À faire d’abord sur l’ancien ordinateur portable : { $count }
+finish-goodbye-steps-not-finished = Étapes non terminées : { $count }
+finish-goodbye-not-searched = Endroits non examinés : { $count }
+finish-goodbye-old-laptop-not-reachable = L’ancien ordinateur portable n’a pas pu être joint
+finish-goodbye-special-sign-in = { $names } : connectez-vous à nouveau
+finish-goodbye-special-relink = { $names } : reliez-le à votre compte à nouveau
+finish-goodbye-special-export-first = { $names } : exportez d’abord ce dont vous avez besoin depuis l’ancien ordinateur portable
+finish-goodbye-special-look-at-it = { $names } : regardez-le et vérifiez que tout est correct
+finish-goodbye-places = Endroits : { $places }
+finish-goodbye-did-it = C’est fait
+finish-goodbye-accept = J’accepte de le perdre
+finish-goodbye-accept-warning = Si vous acceptez, cela reste seulement sur l’ancien ordinateur portable. Quand l’ancien ordinateur portable sera effacé, cela sera perdu.
+finish-goodbye-cannot-answer = Seule une nouvelle vérification de l’ancien ordinateur portable peut régler cela. Connectez-le et vérifiez à nouveau.
+finish-goodbye-res-open = Pas encore de réponse
+finish-goodbye-res-person-did-it = Vous avez dit que c’est fait
+finish-goodbye-res-accepted-loss = Vous avez accepté de le perdre
+finish-goodbye-answer-label = Votre réponse pour : { $title }
+finish-goodbye-keep-title = Gardez l’ancien ordinateur portable intact jusqu’au
+finish-goodbye-keep-body = Date suggérée : { $date }. D’ici là, ne l’effacez pas, au cas où vous auriez besoin de quelque chose.
+finish-goodbye-keep-label = Garder jusqu’au
+finish-goodbye-keep-use = Utiliser la date suggérée
+finish-goodbye-keep-save = Enregistrer cette date
+finish-goodbye-keep-set = Gardé jusqu’au : { $date }
+finish-goodbye-keep-none = Aucune date choisie pour l’instant
+finish-goodbye-blocked = L’ancien ordinateur portable ne peut pas encore être remis. Encore ouvert : { $count }.
+finish-goodbye-blocked-unchecked = L’ancien ordinateur portable n’a pas été vérifié depuis le transfert. Vérifiez-le d’abord à nouveau.
+finish-goodbye-clear = Tout a une réponse et l’ancien ordinateur portable a été vérifié. Vous pouvez demander une remise. C’est une étape séparée.
+finish-goodbye-handover = Remettre l’ancien ordinateur portable
+finish-goodbye-check-again = Vérifier à nouveau l’ancien ordinateur portable
+finish-catchup-title = Me mettre à jour
+finish-catchup-body = Voyez ce qui a changé sur l’ancien ordinateur portable depuis le transfert. Vous examinez chaque changement. PCTwin envoie seulement ceux que vous choisissez.
+finish-catchup-purpose-check = Seulement regarder l’ancien ordinateur portable
+finish-catchup-purpose-check-detail = Rien n’est copié. Votre liste avant de partir est mise à jour.
+finish-catchup-purpose-catch-up = Regarder et copier ce qui a changé
+finish-catchup-purpose-catch-up-detail = Vous voyez d’abord les changements et choisissez ce qui est envoyé.
+finish-catchup-armed = Prêt. Connectez l’ancien ordinateur portable comme pour le transfert. Cette page montre les changements quand l’ancien ordinateur portable répond.
+finish-catchup-connect = Connecter l’ancien ordinateur portable
+finish-catchup-waiting = En attente de l’ancien ordinateur portable.
+finish-catchup-unreadable = PCTwin n’a pas pu lire la réponse de l’ancien ordinateur portable. Rien n’a été modifié. Réessayez.
+finish-catchup-changes-title = Ce qui a changé
+finish-catchup-check-only = Rien n’est envoyé. Cette liste met seulement à jour ce que PCTwin sait de l’ancien ordinateur portable.
+finish-catchup-none = Rien n’a changé sur l’ancien ordinateur portable.
+finish-catchup-others = Changements d’éléments d’autres personnes, seulement comptés : { $count }
+finish-catchup-choose-label = Que doit faire PCTwin avec { $title } ?
+finish-catchup-send-label = Envoyer { $title }
+finish-catchup-nothing-to-send = Rien à envoyer
+finish-change-new = Nouveau sur l’ancien ordinateur
+finish-change-updated = Modifié sur l’ancien ordinateur portable
+finish-change-both-changed = Modifié sur les deux ordinateurs portables
+finish-change-gone-on-new-laptop = Retiré de cet ordinateur portable
+finish-change-gone-on-old-laptop = Retiré de l’ancien ordinateur portable
+finish-change-cannot-tell = PCTwin ne peut pas le dire
+finish-choice-none = Ne pas envoyer
+finish-choice-send = L’envoyer à nouveau
+finish-choice-keep-both = Garder les deux copies
+finish-choice-keep-new-laptop-version = Garder la version de cet ordinateur portable
+finish-catchup-approve = Envoyer les changements choisis : { $count }
+finish-catchup-sent = Envoyé pour copie. Seuls les changements que vous avez choisis sont copiés.
+finish-handover-title = Remettre l’ancien ordinateur portable
+finish-handover-body = Chaque choix est une décision séparée. Rien ne se passe tant que vous ne confirmez pas sur sa propre page.
+finish-handover-remove-title = Retirer mon compte de l’ancien ordinateur portable
+finish-handover-remove-detail = Seulement votre compte. Les comptes des autres personnes restent.
+finish-handover-erase-title = Effacer l’ancien ordinateur portable
+finish-handover-erase-detail = Tout ce qui se trouve sur le disque de l’ancien ordinateur portable.
+finish-handover-preview-remove = Retirer mon compte
+finish-handover-preview-erase = Effacer l’ancien ordinateur portable
+finish-handover-removes = Ce qui sera retiré
+finish-handover-keeps = Ce qui reste
+finish-handover-keeps-none = Rien n’est conservé.
+finish-handover-route = Comment cela se fait
+finish-handover-route-body = PCTwin ne le fait pas lui-même. C’est l’outil du système qui le fait, et PCTwin vous y conduit.
+finish-handover-continue = Continuer pour confirmer
+finish-handover-not-offered = Ce n’est pas proposé pour l’instant
+finish-handover-refused-open = Points encore ouverts dans votre liste avant de partir : { $count }
+finish-handover-refused-nothing-done = Rien n’a été fait.
+finish-handover-to-list = Aller à la liste avant de partir
+finish-route-system-windows = Windows
+finish-route-system-macos = macOS
+finish-route-system-linux = Linux
+finish-route-unknown-step = Suivez la prochaine étape que le système vous montre.
+finish-hnote-ssd-not-secure-wipe = Supprimer des fichiers sur un SSD n’est pas un effacement sécurisé.
+finish-hnote-does-not-cancel-subscriptions = Retirer un compte n’annule pas les abonnements et ne vous déconnecte pas des autres endroits.
+finish-hnote-others-stay = Les comptes de tous les autres restent tels quels.
+finish-hnote-cannot-be-undone = Cela ne peut pas être annulé.
+finish-hnote-closes-undo = Continuer ferme définitivement l’annulation pour ce transfert.
+finish-hnote-sign-in-as-another-administrator = Un compte ne peut pas se retirer lui-même. Connectez-vous d’abord à l’ancien ordinateur portable avec un autre compte administrateur.
+finish-hnote-family-group-first = Si le compte fait partie d’un groupe familial Microsoft, retirez-le d’abord du groupe familial en ligne.
+finish-hnote-not-a-certificate = PCTwin enregistre ce que vous avez demandé et ce que vous lui dites qu’il s’est passé. Ce n’est pas un certificat que quelque chose a été effacé.
+finish-hnote-encrypt-first-helps = Activer le chiffrement du disque avant la réinitialisation rend ce qui reste beaucoup plus difficile à lire.
+finish-refused-wrong-device = Cette étape n’est pas disponible sur cet ordinateur portable.
+finish-refused-undo-not-closed = L’annulation reste possible pour ce transfert. Il faut d’abord la fermer.
+finish-refused-old-laptop-not-checked = L’ancien ordinateur a été vérifié pour la dernière fois il y a plus de 15 minutes. Vérifiez-le à nouveau d’abord.
+finish-refused-list-out-of-date = La liste avant de partir n’est plus à jour. Ouvrez-la à nouveau.
+finish-refused-list-not-clear = La liste avant de partir a encore des points ouverts.
+finish-refused-no-write-exclusion = PCTwin n’a pas pu s’assurer que rien ne change en ce moment sur l’ancien ordinateur portable.
+finish-refused-no-such-account = Votre compte est introuvable sur l’ancien ordinateur portable.
+finish-refused-other-people-use-it = D’autres personnes utilisent ce compte, donc PCTwin ne le retirera pas.
+finish-refused-not-qualified = Cet ancien ordinateur portable ne peut pas être remis de cette façon.
+finish-refused-no-fresh-confirmation = Une nouvelle confirmation est nécessaire.
+finish-refused-wrong-confirmation = Cette confirmation ne correspond pas à ce qui est affiché maintenant. Regardez à nouveau.
+finish-refused-changed-since-confirmed = Quelque chose a changé après votre confirmation. Regardez à nouveau et confirmez encore.
+finish-refused-expired = La confirmation a expiré. Regardez à nouveau et confirmez encore.
+finish-refused-already-used = Cette confirmation a déjà été utilisée.
+finish-refused-nothing-to-remove = Il n’y a rien à retirer.
+finish-confirm-title-remove-my-account = Confirmer : retirer mon compte
+finish-confirm-title-erase-old-laptop = Confirmer : effacer l’ancien ordinateur portable
+finish-confirm-target = Ceci va modifier : { $target }
+finish-confirm-consequences = Ce que cela signifie
+finish-confirm-tick-remove-my-account = Je comprends que le compte { $target } sera retiré de l’ancien ordinateur portable et que cela ne peut pas être annulé.
+finish-confirm-tick-erase-old-laptop = Je comprends que tout ce qui se trouve sur { $target } sera effacé et que cela ne peut pas être annulé.
+finish-confirm-go = Confirmer et ouvrir l’outil du système
+finish-confirm-cancel = Revenir sans rien faire
+finish-confirm-needs-tick = Le bouton fonctionne une fois la case ci-dessus cochée.
+finish-started-title = Suivez les étapes du système lui-même
+finish-started-body = Les étapes ci-dessous sont celles du système, pas de PCTwin. PCTwin n’en dessine pas sa propre copie.
+finish-started-opened = PCTwin a ouvert la page du système.
+finish-started-not-opened = PCTwin n’a pas pu ouvrir la page du système. Ouvrez-la vous-même et suivez les étapes.
+finish-started-undo-closed = L’annulation est maintenant fermée pour ce transfert.
+finish-says-title = Dites à PCTwin ce qui s’est passé
+finish-says-label = Qu’avez-vous vu ?
+finish-says-choose = Choisissez ce que vous avez vu
+finish-says-done = J’ai terminé les étapes
+finish-says-partly = J’ai terminé une partie des étapes
+finish-says-cancelled-part-way = J’ai annulé en cours de route
+finish-says-not-started = Je n’ai pas commencé
+finish-says-cannot-tell = Je ne sais pas
+finish-says-record = Enregistrer ce que j’ai vu
+finish-recorded-person-says-done = Enregistré : vous avez dit que c’est terminé. C’est votre parole. Ce n’est pas un certificat.
+finish-recorded-partial = Enregistré : seulement une partie a été faite.
+finish-recorded-interrupted = Enregistré : cela a été interrompu.
+finish-recorded-cancelled-after-some-effects = Enregistré : cela a été annulé après quelques changements.
+finish-recorded-not-started = Enregistré : cela n’a pas commencé.
+finish-recorded-inconclusive = Enregistré : vous n’avez pas pu savoir ce qui s’est passé.
+finish-recorded-time = Enregistré : { $when }
+finish-undo-title = Vérifier avant d’annuler
+finish-undo-body = Voici ce que l’annulation fait et ce qu’elle laisse. Rien ne se passe tant que vous ne choisissez pas Commencer l’annulation.
+finish-undo-row-removes = Applications installées par PCTwin : l’annulation les retire
+finish-undo-row-yours = Applications qui sont maintenant à vous : l’annulation les laisse. Retirez-les vous-même si vous voulez.
+finish-undo-row-settings = Réglages remis comme avant : { $count }
+finish-undo-row-appdata = Données d’application remises pour ces applications
+finish-undo-row-files = Fichiers copiés par le transfert : { $count }
+finish-undo-limit-files = Seulement avec l’ancien ordinateur portable connecté, et seulement les copies que personne n’a modifiées depuis.
+finish-undo-limit-apps = Seulement tant que chaque application est encore la version installée par PCTwin.
+finish-undo-keeps = Ce que l’annulation garde : les applications qui sont maintenant à vous, et tout ce que vous avez modifié après le transfert.
+finish-undo-closed = L’annulation est fermée pour ce transfert. Elle ne peut pas être utilisée.
+finish-undo-nothing = Il n’y a ni application ni réglage à annuler pour ce transfert.
+finish-undo-start = Commencer l’annulation
+finish-cleanup-title = Nettoyer
+finish-cleanup-body = Chaque question est posée séparément. Rien n’est retiré sans votre confirmation.
+finish-cleanup-temp = Fichiers temporaires de PCTwin
+finish-cleanup-temp-detail = Fichiers que PCTwin a créés sur cet ordinateur portable pendant son travail.
+finish-cleanup-model = Modèle et données enregistrées de PCTwin
+finish-cleanup-model-detail = Fichiers d’aide que PCTwin garde sur cet ordinateur portable pour aller plus vite.
+finish-cleanup-look = Voir
+finish-cleanup-removes = Sera retiré
+finish-cleanup-keeps = Sera conservé
+finish-cleanup-keeps-body = Ils ressemblent seulement à ceux de PCTwin, ou sont en cours d’utilisation.
+finish-cleanup-nothing = Il n’y a rien à retirer.
+finish-cleanup-tick = Retirer les éléments listés sous Sera retiré
+finish-cleanup-confirm = Les retirer
+finish-cleanup-done = Retirés : { $removed }. Conservés : { $kept }. Impossible à retirer : { $failed }.
+finish-doctor-title = Vérifier la connexion
+finish-doctor-body = PCTwin examine cet ordinateur portable pour trouver pourquoi les deux ordinateurs portables ne se connectent pas.
+finish-doctor-role-label = Quel ordinateur portable est-ce ?
+finish-doctor-role-old = L’ancien ordinateur portable
+finish-doctor-role-new = Le nouvel ordinateur portable
+finish-doctor-run = Lancer la vérification
+finish-doctor-running = Vérification en cours.
+finish-doctor-found = Ce que PCTwin a trouvé
+finish-doctor-none = PCTwin n’a trouvé aucun problème sur cet ordinateur portable. Cela ne prouve pas que la connexion fonctionnera.
+finish-doctor-sure = Certain
+finish-doctor-likely = Probable
+finish-doctor-fix = Que faire
+finish-doctor-not-checked = PCTwin n’a pas pu vérifier
+finish-notchecked-unknown = Une vérification n’a pas pu être faite sur cet ordinateur portable.
+finish-report-title = Partager le rapport
+finish-report-body = Choisissez ce que le rapport contient. Rien n’est inclus sans votre choix. Rien n’est envoyé. Vous enregistrez le texte que vous lisez, et vous le partagez vous-même.
+finish-report-choices = Inclure dans le rapport
+finish-report-file-names = Noms de fichiers
+finish-report-app-names = Noms d’applications
+finish-report-account-id = Identifiant du compte
+finish-report-preview = Le rapport tel qu’il sera enregistré
+finish-report-withheld = Gardé hors du rapport : noms { $names }, secrets { $secrets }, identifiants de compte { $ids }.
+finish-report-save = Enregistrer le rapport
+finish-report-saved = Enregistré dans : { $path }
+finish-report-not-saved = Aucun fichier n’a été enregistré.
+finish-report-feedback = Pour dire à l’équipe PCTwin ce qui s’est passé, utilisez Aide, puis Commentaires. Aucun compte n’est nécessaire, et rien n’est envoyé automatiquement.
+finish-report-help = Ouvrir l’aide
+finish-report-text-title = Rapport de transfert PCTwin
+finish-report-text-unnamed-file = Un fichier
+finish-report-text-unnamed-app = Une application
+finish-report-text-account = Identifiant du compte : { $id }
+finish-report-text-others = Éléments d’autres personnes non terminés, seulement comptés : { $count }
+finish-report-text-goodbye = Liste avant de partir : { $total } points, { $open } encore ouverts
+finish-report-text-lines = Éléments non terminés
+rescue-eyebrow = Récupérer un ordinateur
+rescue-title = Récupérer un ordinateur
+rescue-lead = Récupérez les fichiers d’un ordinateur qui ne démarre plus. Branchez son disque sur cet ordinateur, puis choisissez-le ici.
+rescue-checking = Recherche des disques branchés.
+rescue-failed = PCTwin n’a pas pu lister les disques branchés sur cet ordinateur. Vérifiez le câble, puis vérifiez à nouveau.
+rescue-empty = Aucun disque branché. Branchez le disque de l’ancien ordinateur avec un adaptateur USB, puis vérifiez à nouveau.
+rescue-looks-like-laptop = Semble être le disque d’un ordinateur
+rescue-choose = Choisir { $name }
+rescue-check-again = Vérifier à nouveau
+rescue-locked-title = Si le disque est verrouillé
+rescue-locked-windows = Si le disque est verrouillé par BitLocker, Windows demande sa clé de récupération dans sa propre fenêtre quand vous ouvrez le disque.
+rescue-wait-title = Lecture de { $drive }
+rescue-wait-body = PCTwin parcourt les dossiers de { $drive }. Rien n’est modifié sur le disque.
+rescue-accept-title = Fichiers trouvés sur { $drive }
+rescue-accept-body = Acceptez, et PCTwin les copie sur cet ordinateur. Rien n’est modifié sur le disque.
+rescue-progress-title = Copie des fichiers de { $drive }
+rescue-safe = Le disque est seulement lu. Rien n’y est modifié.
+rescue-outcome-title = Fichiers copiés depuis { $drive }
+plan-net-title = Ce qui a besoin d’internet
+plan-net-none = Rien dans ce transfert n’a besoin d’internet.
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin télécharge { $count } application depuis internet.
+        [many] PCTwin télécharge { $count } applications depuis internet.
+       *[other] PCTwin télécharge { $count } applications depuis internet.
+    }
+plan-net-sizes = La taille de chaque téléchargement n’est connue qu’une fois celui-ci terminé.
+plan-net-signins =
+    { $count ->
+        [one] Vous vous reconnectez en ligne à { $count } chose.
+        [many] Vous vous reconnectez en ligne à { $count } choses.
+       *[other] Vous vous reconnectez en ligne à { $count } choses.
+    }
+plan-room-title = Place nécessaire en plus de vos fichiers
+plan-room-body = Au moment le plus chargé, PCTwin a besoin d’environ { $installs } pour les applications et d’environ { $appData } pour leurs données, en plus de vos fichiers.
+compat-strip = Ce qui a été testé
+compat-title = { $name } : ce qui a été testé
+compat-open = Détails
+compat-open-name = Voir ce qui a été testé pour { $name }
+compat-list-title =
+    { $count ->
+        [one] Résultat du test de { $count } application
+        [many] Résultat du test de { $count } applications
+       *[other] Résultat du test de { $count } applications
+    }
+compat-aspects-title = Chaque partie
+compat-steps-title = Ce que vous ferez
+compat-steps-none = Rien à faire de votre côté.
+compat-never-checked = Personne n’a encore testé cette application. PCTwin l’essaiera et vous dira ce qui s’est passé.
+compat-checked-on = Vérifié le { $date }.
+compat-version = Version testée : { $version }
+work-strip = Puis-je travailler ?
+work-title = Puis-je vraiment travailler ?
+work-body = Ajoutez les fichiers, les polices et les tâches dont vous avez besoin sur cet ordinateur. PCTwin regarde ce qu’il peut lire. Vous dites si le reste a fonctionné. Rien n’est ouvert ni lancé.
+work-empty = Aucune vérification pour l’instant. Ajoutez ci-dessous un fichier, une police ou une tâche.
+work-looked-at = { $checked } sur { $of } examinés.
+work-missing = Manque :
+work-and-more =
+    { $count ->
+        [one] Et { $count } de plus.
+        [many] Et { $count } de plus.
+       *[other] Et { $count } de plus.
+    }
+work-not-looked-at = Non examiné :
+work-answer-worked = Ça a fonctionné
+work-answer-worked-name = Ça a fonctionné : { $name }
+work-answer-not = Ça n’a pas fonctionné
+work-answer-not-name = Ça n’a pas fonctionné : { $name }
+work-remove = Retirer
+work-remove-name = Retirer { $name }
+work-run = Vérifier maintenant
+work-add-title = Ajouter une vérification
+work-add-file = Choisir un fichier
+work-add-file-hint = Un projet, une archive ou une base de données. PCTwin le lit et ne le modifie jamais.
+work-font-label = Une police, par son nom
+work-add-font = Ajouter la police
+work-task-label = Une tâche que vous faites vous-même
+work-task-hint = Par exemple : imprimer une carte d’embarquement. Vous dites si cela a fonctionné.
+work-add-task = Ajouter la tâche
+repair-strip = Réparer ce qui n’a pas fini
+repair-title =
+    { $count ->
+        [one] Réparer cet élément
+        [many] Réparer ces { $count } éléments
+       *[other] Réparer ces { $count } éléments
+    }
+repair-title-loading = Réparer ce qui n’a pas fini
+repair-body =
+    { $kept ->
+        [one] Seuls les éléments ci-dessous sont réessayés. { $kept } élément qui avait déjà fonctionné reste tel quel.
+        [many] Seuls les éléments ci-dessous sont réessayés. { $kept } éléments qui avaient déjà fonctionné restent tels quels.
+       *[other] Seuls les éléments ci-dessous sont réessayés. { $kept } éléments qui avaient déjà fonctionné restent tels quels.
+    }
+repair-nothing = Rien à réparer.
+repair-can-now = Peut être essayé maintenant
+repair-waiting = En attente
+repair-fixed =
+    { $count ->
+        [one] { $count } élément réparé.
+        [many] { $count } éléments réparés.
+       *[other] { $count } éléments réparés.
+    }
+repair-run =
+    { $count ->
+        [one] Réessayer { $count } élément
+        [many] Réessayer { $count } éléments
+       *[other] Réessayer { $count } éléments
+    }
+changed-strip = Changements depuis votre accord
+changed-title =
+    { $count ->
+        [one] { $count } chose a changé après votre accord
+        [many] { $count } choses ont changé après votre accord
+       *[other] { $count } choses ont changé après votre accord
+    }
+changed-body = Seuls ces éléments demandent un nouvel accord. Tout le reste reste approuvé.
+changed-affects = Concerne : { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } étape attend votre réponse.
+        [many] { $count } étapes attendent votre réponse.
+       *[other] { $count } étapes attendent votre réponse.
+    }
+changed-leave-out = Laisser ceci de côté
+changed-approve = Redonner mon accord
+safe-stop-strip = Mise à jour
+safe-stop-title = En attente d’un moment sûr
+safe-stop-body = PCTwin ne se met pas à jour et ne se retire pas en plein transfert. Il attend que plus rien ne soit à moitié fait.
+safe-stop-failed = PCTwin n’a pas pu savoir si c’est sûr. Réessayez.
+safe-stop-ready = Rien n’est en train de changer. PCTwin peut se mettre à jour ou être retiré maintenant.
+safe-stop-waiting-for = Il attend la fin de ceci :
+safe-stop-nothing-going-on = Aucun transfert, réglage ou annulation en cours.
+safe-stop-check = Vérifier à nouveau
+kit-strip = Kit de récupération
+kit-title = Enregistrer un kit de récupération
+kit-body = Un kit de récupération est un petit relevé de ce transfert, enregistré dans un dossier de votre choix, par exemple sur une clé USB. Il montre ce qui s’est passé et ce qui restait à faire, même sans cet ordinateur.
+kit-lacks-sentence = Le kit ne contient pas vos fichiers eux-mêmes. Il ne peut pas rendre des fichiers manquants.
+kit-not-saved = Aucun dossier n’a été choisi. Rien n’a été enregistré.
+kit-saved-to = Enregistré dans :
+kit-files-title = Fichiers du kit
+kit-holds-title = Ce que contient le kit
+kit-lacks-title = Ce que le kit ne contient pas
+kit-save = Choisir un dossier et enregistrer
+kit-save-again = Enregistrer à nouveau
+kit-history = Kit de récupération
+finish-step-repair =
+    { $count ->
+        [one] Réparer cet élément
+        [many] Réparer ces { $count } éléments
+       *[other] Réparer ces { $count } éléments
+    }
+finish-step-repair-detail = Réessayer seulement ce qui n’a pas fini. Ce qui a fonctionné reste.
+finish-step-work = Puis-je vraiment travailler ?
+finish-step-work-detail = Vérifier que les fichiers, polices et tâches dont vous avez besoin sont là.
+finish-step-kit = Enregistrer un kit de récupération
+finish-step-kit-detail = Garder un petit relevé de ce transfert dans un dossier de votre choix.
+space-box-title = Cet ordinateur n’a pas assez de place pour tout.
+space-box-choice = { $count ->
+        [one] Laisser sur votre ancien ordinateur { $count } fichier ({ $size }) que vous n’avez pas utilisé depuis le plus longtemps
+        [many] Laisser sur votre ancien ordinateur { $count } fichiers ({ $size }) que vous n’avez pas utilisés depuis le plus longtemps
+       *[other] Laisser sur votre ancien ordinateur { $count } fichiers ({ $size }) que vous n’avez pas utilisés depuis le plus longtemps
+    }
+space-box-kept = Rien n’est supprimé. Ils restent sur votre ancien ordinateur.
+space-box-short = Même ainsi, il manque { $size }. Décochez certains dossiers ou choisissez un autre endroit pour eux.
+space-box-fits = S’ils restent sur votre ancien ordinateur, tout le reste tient.
+finish-handover-check-old = Vérifier à nouveau l’ancien ordinateur
+finish-handover-check-armed = PCTwin est prêt à vérifier l’ancien ordinateur. Ouvrez PCTwin sur l’ancien ordinateur et connectez les deux ordinateurs comme pour un transfert. Puis appuyez sur Regarder à nouveau.
+finish-handover-look-again = Regarder à nouveau
+qs-where-title = Où les enregistrer ?
+qs-where-body = { $count ->
+        [one] { $count } fichier, { $size }. Rien n’est enregistré avant votre choix.
+        [many] { $count } fichiers, { $size }. Rien n’est enregistré avant votre choix.
+       *[other] { $count } fichiers, { $size }. Rien n’est enregistré avant votre choix.
+    }
+qs-where-folder = Dossier : { $folder }
+qs-where-details = Plus de détails
+qs-where-path = Emplacement complet : { $path }
+qs-where-save = Enregistrer ici
+qs-where-choose = Choisir un autre dossier
+qs-where-stop = Arrêter

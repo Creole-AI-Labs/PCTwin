@@ -60,7 +60,8 @@ pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-move = { path = "../../crates/pctwin-move" }
 # More move types (2.6): the screens show their plans, budgets and reports (src/guard_views.rs).
 pctwin-orchestrate = { path = "../../crates/pctwin-orchestrate" }
-# "Can I actually work?" checks, focused repair and the recovery kit (Task List 2.9).
+# Finishing a move (2.7: the evidence ledger, the before-wipe list, the handover gates) and the
+# "Can I actually work?" checks, focused repair and the recovery kit (2.9).
 pctwin-readiness = { path = "../../crates/pctwin-readiness" }
 pctwin-catalogue = { path = "../../crates/pctwin-catalogue" }
 pctwin-power = { path = "../../crates/pctwin-power" }

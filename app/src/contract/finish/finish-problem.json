@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "no-move"
+  },
+  {
+    "kind": "changed"
+  },
+  {
+    "kind": "not-allowed"
+  },
+  {
+    "kind": "busy"
+  },
+  {
+    "kind": "failed"
+  }
+]

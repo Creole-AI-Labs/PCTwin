@@ -1296,11 +1296,11 @@ drive-problem-carry-on = जारी रखें
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = आपका स्थानांतरण, प्रकार के अनुसार।
-report-body = किसी प्रकार को खोलकर उसकी फ़ाइलें देखें। जिन चीज़ों पर आपका ध्यान चाहिए, वे सबसे पहले हैं।
+report-title = क्या ले जाया गया
+report-body = कोई समूह चुनें और देखें कि उसमें क्या है। जिन चीज़ों पर आपको ध्यान देना है, वे सबसे ऊपर हैं।
 report-needs-title = { $count ->
-        [one] { $count } चीज़ पर आपका ध्यान चाहिए
-       *[other] { $count } चीज़ों पर आपका ध्यान चाहिए
+        [one] आपको देखना है: { $count }
+       *[other] आपको देखना है: { $count }
     }
 report-group-photos = फ़ोटो
 report-group-videos = वीडियो
@@ -1314,8 +1314,8 @@ report-group-size = { $files ->
 report-group-done = सब कॉपी और जाँच लिया गया
 report-group-some = { $total } में से { $done } कॉपी और जाँच लिए गए
 report-group-left = { $count ->
-        [one] { $count } आपके पुराने लैपटॉप पर रहा, जैसा आपने चुना
-       *[other] { $count } आपके पुराने लैपटॉप पर रहे, जैसा आपने चुना
+        [one] { $count } नहीं ले जाया गया: आपने इसे छोड़ा
+       *[other] { $count } नहीं ले जाए गए: आपने इन्हें छोड़ा
     }
 report-filter-label = दिखाएं
 report-col-item = आइटम
@@ -2222,6 +2222,60 @@ forgotten-online-only =
        *[other] { $count } फ़ाइलें सिर्फ़ ऑनलाइन हैं, डाउनलोड नहीं की गईं
     }
 
+# 2.7 finishing a move
+doctor-not-connected = यह लैपटॉप किसी नेटवर्क से नहीं जुड़ा है।
+doctor-not-connected-fix = Wi-Fi से जुड़ें या नेटवर्क केबल लगाएँ, फिर दोबारा कोशिश करें।
+doctor-mac-local-network-denied = हो सकता है यह Mac PCTwin को आपके नेटवर्क के डिवाइसों से बात न करने दे रहा हो।
+doctor-mac-local-network-denied-fix = System Settings खोलें, फिर Privacy & Security, फिर Local Network, और PCTwin चालू करें।
+doctor-discovery-blocked = इस लैपटॉप पर कोई चीज़, जैसे फ़ायरवॉल या सुरक्षा ऐप, लैपटॉपों को एक-दूसरे को ढूँढने से रोक रही हो सकती है।
+doctor-discovery-blocked-fix = अपने फ़ायरवॉल या सुरक्षा ऐप में PCTwin को अनुमति दें, या मूव के दौरान उसे रोक दें।
+doctor-windows-public-network = Windows नेटवर्क { $name } को सार्वजनिक मानता है, जिससे दूसरे डिवाइस रुक जाते हैं।
+doctor-windows-public-network-fix = Settings खोलें, फिर Network & internet, { $name } चुनें, और उसे निजी नेटवर्क पर सेट करें।
+doctor-vpn-on = एक VPN चालू है ({ $name })। यह आपके घर के नेटवर्क को छिपा सकता है।
+doctor-vpn-on-fix = मूव के दौरान VPN बंद करें, फिर दोबारा कोशिश करें।
+doctor-old-laptop-not-pairing = हो सकता है पुराना लैपटॉप अपना कोड न दिखा रहा हो।
+doctor-old-laptop-not-pairing-fix = पुराने लैपटॉप पर PCTwin खोलें और चुनें कि यह आपका पुराना लैपटॉप है।
+doctor-different-networks = हो सकता है दोनों लैपटॉप अलग-अलग नेटवर्क पर हों।
+doctor-different-networks-fix = दोनों लैपटॉप को एक ही Wi-Fi से जोड़ें।
+doctor-guest-network = यह नेटवर्क डिवाइसों को एक-दूसरे को देखने से रोक सकता है, जैसा अक्सर मेहमान, होटल और दफ़्तर के Wi-Fi में होता है।
+doctor-guest-network-fix = अपने घर का Wi-Fi या अपने फ़ोन का हॉटस्पॉट इस्तेमाल करें।
+doctor-probe-interfaces = PCTwin इस लैपटॉप के नेटवर्क कनेक्शन नहीं देख सका।
+doctor-probe-hears-itself = PCTwin जाँच नहीं सका कि यह लैपटॉप नेटवर्क पर मिल सकता है या नहीं।
+doctor-probe-local-network = PCTwin Mac की लोकल नेटवर्क सेटिंग नहीं जाँच सका।
+doctor-probe-network-profiles = PCTwin नहीं जाँच सका कि Windows इस नेटवर्क को कैसे मानता है।
+doctor-hotspot = अब भी काम नहीं कर रहा? अपने फ़ोन का हॉटस्पॉट चालू करें और दोनों लैपटॉप उससे जोड़ें। मूव सीधे दोनों लैपटॉप के बीच होता है, आपके फ़ोन के डेटा से नहीं।
+windows-make-other-administrator = पक्का करें कि जो व्यक्ति लैपटॉप रखेगा उसका उस पर एडमिनिस्ट्रेटर खाता हो।
+windows-sign-in-other-administrator = साइन आउट करें, फिर उस दूसरे एडमिनिस्ट्रेटर खाते से साइन इन करें। कोई खाता खुद को नहीं हटा सकता।
+windows-open-other-users = Settings खोलें, फिर Accounts, फिर Other users।
+windows-remove-account = अपना खाता चुनें, फिर Remove।
+windows-delete-account-and-data = Delete account and data चुनें। बाकी सबके खाते जैसे हैं वैसे ही रहेंगे।
+windows-sign-out-of-everything = पहले पुराने लैपटॉप पर अपने ऐप और खातों से साइन आउट करें।
+windows-open-recovery = Settings खोलें, फिर System, फिर Recovery।
+windows-reset-this-pc = Reset PC चुनें।
+windows-remove-everything = Remove everything चुनें।
+windows-clean-the-drive = सेटिंग बदलें ताकि ड्राइव साफ़ की जाए, सिर्फ़ खाली नहीं। इसमें कुछ घंटे लगते हैं।
+windows-wait-until-setup-screen = लैपटॉप के सेटअप स्क्रीन दिखाने तक रुकें। तब वह सौंपने के लिए तैयार है।
+macos-make-other-administrator = पक्का करें कि जो व्यक्ति Mac रखेगा उसका उस पर एडमिनिस्ट्रेटर खाता हो।
+macos-sign-in-other-administrator = लॉग आउट करें, फिर उस दूसरे एडमिनिस्ट्रेटर खाते से लॉग इन करें। कोई खाता खुद को नहीं हटा सकता।
+macos-open-users-and-groups = System Settings खोलें, फिर Users & Groups।
+macos-delete-user = अपने खाते के पास जानकारी बटन चुनें, फिर Delete User।
+macos-delete-home-folder = होम फ़ोल्डर मिटाना चुनें।
+macos-sign-out-of-apple-account = पहले पुराने Mac पर अपने Apple खाते से साइन आउट करें, ताकि वह अगले मालिक के लिए खाली हो।
+macos-open-transfer-or-reset = System Settings खोलें, फिर General, फिर Transfer or Reset।
+macos-erase-all-content-and-settings = Erase All Content and Settings चुनें, और चरणों का पालन करें।
+macos-older-mac-use-recovery = अगर आपका Mac यह नहीं देता (पुराने Mac), तो उसे macOS Recovery में शुरू करें, Disk Utility से ड्राइव मिटाएँ, फिर macOS दोबारा इंस्टॉल करें।
+macos-wait-until-setup-screen = Mac के सेटअप स्क्रीन दिखाने तक रुकें। तब वह सौंपने के लिए तैयार है।
+linux-sign-in-other-administrator = किसी दूसरे एडमिनिस्ट्रेटर खाते से साइन इन करें।
+linux-open-users = Settings खोलें, फिर Users।
+linux-remove-user-and-files = अपना खाता चुनें, फिर Remove User, और उसकी फ़ाइलें मिटाना चुनें।
+linux-no-built-in-reset = Linux में ड्राइव मिटाने वाला अपना रीसेट नहीं होता।
+linux-drive-maker-secure-erase = ड्राइव बनाने वाली कंपनी का सुरक्षित मिटाने वाला टूल इस्तेमाल करें, या अगर हो तो लैपटॉप की स्टार्टअप सेटिंग में उसका अपना मिटाने का विकल्प।
+linux-reinstall-from-usb = फिर USB स्टिक से नया सिस्टम इंस्टॉल करें।
+any-sign-in-other-administrator = पुराने लैपटॉप पर किसी दूसरे एडमिनिस्ट्रेटर खाते से साइन इन करें।
+any-use-system-account-settings = सिस्टम की अपनी खाता सेटिंग से अपना खाता हटाएँ।
+any-use-system-reset = लैपटॉप का अपना रीसेट इस्तेमाल करें जो ड्राइव मिटाता है। लैपटॉप बनाने वाली कंपनी की मदद में तरीका बताया है।
+any-drive-maker-secure-erase = अगर ऐसा न हो, तो ड्राइव बनाने वाली कंपनी का सुरक्षित मिटाने वाला टूल इस्तेमाल करें।
+
 # 2.9 deliverables
 guard-undo-removes-if-package = अगर यह इंस्टॉलर पैकेज से आया है तो PCTwin इसे हटा देगा; वरना इसे खुद हटाएँ
 guard-undo-keeps-newer = पहले जैसा करने पर नया संस्करण रहेगा: पुराना वापस नहीं आ सकता
@@ -2301,3 +2355,526 @@ kit-part-before-wipe-list = जो अभी भी सिर्फ़ पुर
 kit-part-file-data = आपकी फ़ाइलें
 kit-part-setup-steps = ऐप फिर से सेट करने के कदम
 kit-part-recovery-tool = चीज़ें वापस लाने का टूल
+
+# 2.8 screens
+report-group-apps = ऐप
+report-group-settings = सेटिंग्स
+report-group-special = ऐप डेटा और दूसरी चीज़ें
+report-group-people = दूसरे लोग
+report-count-apps = { $count ->
+        [one] { $count } ऐप
+       *[other] { $count } ऐप
+    }
+report-count-settings = { $count ->
+        [one] सेटिंग्स का { $count } समूह
+       *[other] सेटिंग्स के { $count } समूह
+    }
+report-count-special = { $count ->
+        [one] { $count } चीज़
+       *[other] { $count } चीज़ें
+    }
+report-count-people = { $count ->
+        [one] { $count } व्यक्ति
+       *[other] { $count } लोग
+    }
+report-beyond-done = सब पूरा हुआ और जाँच लिया गया
+report-beyond-some = { $total } में से { $done } पूरे हुए और जाँच लिए गए
+report-beyond-left = { $count ->
+        [one] { $count } नहीं ले जाया गया: आपने इसे छोड़ा
+       *[other] { $count } नहीं ले जाए गए: आपने इन्हें छोड़ा
+    }
+report-beyond-more = { $count ->
+        [one] { $count } और यहाँ नहीं दिखाया गया।
+       *[other] { $count } और यहाँ नहीं दिखाए गए।
+    }
+report-here = { $count ->
+        [one] { $count } ऐप इस लैपटॉप पर पहले से था। PCTwin ने उसे वैसा ही छोड़ दिया।
+       *[other] { $count } ऐप इस लैपटॉप पर पहले से थे। PCTwin ने उन्हें वैसा ही छोड़ दिया।
+    }
+progress-ready-title = अभी इस्तेमाल के लिए तैयार
+progress-ready-body = { $count ->
+        [one] { $groups } कॉपी हो गया है और जाँच लिया गया है। बाकी आने तक आप इसे इस लैपटॉप पर खोल सकते हैं।
+       *[other] { $groups } कॉपी हो गए हैं और जाँच लिए गए हैं। बाकी आने तक आप इन्हें इस लैपटॉप पर खोल सकते हैं।
+    }
+finish-strip = अपना स्थानांतरण पूरा करें
+finish-title = अपना स्थानांतरण पूरा करें
+finish-loading = आपका स्थानांतरण देखा जा रहा है।
+finish-retry = फिर कोशिश करें
+finish-back-to-list = सूची पर वापस
+finish-open = खोलें
+finish-open-name = { $title } खोलें
+finish-more-not-shown = और जो नहीं दिखाए गए: { $count }
+finish-problem-no-move = इस लैपटॉप पर PCTwin के पास पूरा करने के लिए कोई स्थानांतरण नहीं है। कुछ भी नहीं बदला।
+finish-problem-changed = जो दिख रहा है वह पुराना है। जवाब देने से पहले इसे फिर से देखें। कुछ भी नहीं बदला।
+finish-problem-not-allowed = यह नहीं किया जा सकता। कुछ भी नहीं बदला।
+finish-problem-busy = कोई स्थानांतरण या दूसरा चरण चल रहा है। उसके खत्म होने तक रुकें, फिर कोशिश करें। कुछ भी नहीं बदला।
+finish-problem-failed = इस लैपटॉप पर कुछ गड़बड़ हुई। कुछ भी नहीं बदला। फिर कोशिश करें।
+finish-headline-ready-for-selected-work = आपकी चुनी हुई हर चीज़ इस लैपटॉप पर है
+finish-headline-ready-for-selected-work-body = PCTwin को आपकी चुनी हुई हर चीज़ इस लैपटॉप पर मिली और उसने जहाँ तक हो सका जाँची। इसका यह मतलब नहीं कि हर ऐप पहले जैसा चलेगा।
+finish-headline-finished-with-tasks = स्थानांतरण पूरा हुआ, कुछ काम बाकी हैं
+finish-headline-finished-with-tasks-body = कुछ चीज़ों में आपकी ज़रूरत है, या वे कॉपी नहीं हुईं। वे इसी पेज पर सूचीबद्ध हैं।
+finish-headline-data-preserved = आपकी चीज़ें सुरक्षित हैं, पर कुछ अभी खुल नहीं सकतीं
+finish-headline-data-preserved-body = सब कुछ इस लैपटॉप पर है। कुछ चीज़ें खोलने के लिए कुंजी या रिकवरी कोड चाहिए, और PCTwin उसे यहाँ जाँच नहीं सका।
+finish-headline-handover-unresolved = पुराना लैपटॉप अभी सौंपा नहीं गया
+finish-headline-handover-unresolved-body = यह लैपटॉप तैयार है। पुराना लैपटॉप छोड़ने की सूची में अभी कुछ बातें खुली हैं।
+finish-headline-nothing-moved = स्थानांतरण के लिए कुछ नहीं चुना गया
+finish-headline-nothing-moved-body = कोई फ़ाइल, ऐप या सेटिंग नहीं चुनी गई, इसलिए कुछ कॉपी नहीं हुआ।
+finish-tally-title = क्या स्थानांतरित हुआ
+finish-tally-selected = चुनी गईं: { $count }
+finish-tally-done = कॉपी और जाँची गईं: { $count }
+finish-tally-needs-action = आपकी ज़रूरत वाली: { $count }
+finish-tally-failed = कॉपी नहीं हुईं: { $count }
+finish-tally-waiting = अभी इंतज़ार में: { $count }
+finish-tally-not-reachable = पुराना लैपटॉप नहीं मिला: { $count }
+finish-tally-no-result-yet = अभी कोई नतीजा नहीं: { $count }
+finish-tally-skipped = आपने छोड़ीं: { $count }
+finish-tally-left-out = छोड़ी गईं: { $count }
+finish-tally-accepted-loss = जानबूझकर पीछे छोड़ी गईं: { $count }
+finish-others = दूसरे लोगों की चीज़ें, सिर्फ़ गिनती, कभी दिखाई नहीं जातीं: { $count }
+finish-after-title = अब इस लैपटॉप पर जाँचा गया
+finish-after-body = PCTwin ने इन्हें पुराने लैपटॉप पर गिना, फिर इस लैपटॉप पर दोबारा गिना।
+finish-after-count = { $atScan } में से { $onNew } इस लैपटॉप पर हैं
+finish-after-all = सब मौजूद हैं
+finish-after-short = कुछ कम हैं
+finish-group-photos = फ़ोटो
+finish-group-videos = वीडियो
+finish-group-music = संगीत
+finish-group-documents = दस्तावेज़
+finish-group-other-files = दूसरी फ़ाइलें
+finish-group-apps = ऐप
+finish-group-settings = सेटिंग
+finish-note-parental-controls = पैरेंटल कंट्रोल और परिवार की सुरक्षा सेटिंग नहीं जातीं। उन्हें इस लैपटॉप पर फिर से सेट करें।
+finish-note-not-everywhere = पुराने लैपटॉप की कुछ जगहों में खोज नहीं की गई।
+finish-note-results-refused = कुछ नतीजे नहीं माने गए, क्योंकि इस लैपटॉप ने उन्हें पूरा हुआ नहीं दिखाया।
+finish-note-undo-open = इस स्थानांतरण के लिए पहले जैसा करना अभी खुला है। पुराना लैपटॉप मिटाने पर यह हमेशा के लिए बंद हो जाता है।
+finish-open-title = पूरा नहीं हुआ
+finish-open-body = आपकी ये चीज़ें अभी ध्यान माँगती हैं।
+finish-standing-copied = कॉपी हुई
+finish-standing-reinstalled = दोबारा इंस्टॉल हुई
+finish-standing-converted = बदली गई
+finish-standing-needs-action = आपकी ज़रूरत है
+finish-standing-failed = कॉपी नहीं हुई
+finish-standing-waiting = इंतज़ार में
+finish-standing-not-reachable = पुराना लैपटॉप नहीं मिला
+finish-standing-no-result-yet = अभी कोई नतीजा नहीं
+finish-standing-skipped-by-user = आपने छोड़ी
+finish-standing-left-out = छोड़ी गई
+finish-access-key-not-checked = इसे खोलने की कुंजी या कोड यहाँ जाँचा नहीं गया।
+finish-access-not-on-new-laptop = यह इस लैपटॉप पर नहीं है।
+finish-search-title = PCTwin ने पुराने लैपटॉप पर कहाँ देखा
+finish-search-searched = इनमें देखा: { $places }
+finish-search-not-searched = इनमें नहीं देखा: { $places }
+finish-search-all = PCTwin ने अपनी जानी हुई हर जगह में देखा। वह यह नहीं कह सकता कि कहीं और कुछ नहीं है।
+finish-old-checked = पुराना लैपटॉप आखिरी बार यहाँ जाँचा गया: { $when }
+finish-old-never = स्थानांतरण के बाद से पुराना लैपटॉप जाँचा नहीं गया।
+finish-steps-title = अगले कदम
+finish-step-setup = सेटअप पूरा करें
+finish-step-setup-detail = वे ऐप जिनमें आपको साइन इन करना है या कोई चरण पूरा करना है।
+finish-step-goodbye = पुराना लैपटॉप छोड़ने से पहले
+finish-step-goodbye-detail = जो अभी सिर्फ़ पुराने लैपटॉप पर है।
+finish-step-catchup = मुझे अपडेट करें
+finish-step-catchup-detail = स्थानांतरण के बाद पुराने लैपटॉप पर जो बदला, उसे कॉपी करें।
+finish-step-handover = पुराना लैपटॉप सौंपें
+finish-step-handover-detail = सिस्टम के अपने टूल से अपना खाता हटाएँ या पुराना लैपटॉप मिटाएँ।
+finish-step-undo = इस स्थानांतरण को पहले जैसा करें
+finish-step-undo-detail = ऐप हटाएँ और सेटिंग वापस रखें।
+finish-step-cleanup = सफ़ाई करें
+finish-step-cleanup-detail = इस लैपटॉप से PCTwin की अस्थायी फ़ाइलें हटाएँ।
+finish-step-report = रिपोर्ट साझा करें
+finish-step-report-detail = एक सादी रिपोर्ट सहेजें। उसमें क्या हो, यह आप चुनते हैं।
+finish-step-doctor = कनेक्शन जाँचें
+finish-step-doctor-detail = पता लगाएँ कि दोनों लैपटॉप क्यों नहीं जुड़ पा रहे।
+finish-setup-title = सेटअप पूरा करें
+finish-setup-body = इन ऐप में आपका एक कदम चाहिए। टिक वही दर्ज करता है जो आप कहते हैं। यह PCTwin की जाँच नहीं गिना जाता।
+finish-setup-empty = आपके लिए कुछ इंतज़ार में नहीं है।
+finish-setup-sign-in = { $name } में साइन इन करें
+finish-setup-licence-key = { $name } की लाइसेंस कुंजी डालें
+finish-setup-set-up-again = { $name } को फिर से सेट करें
+finish-setup-download-from-maker = { $name } को उसके बनाने वाले की वेबसाइट से डाउनलोड करें
+finish-setup-permission = { $name } जब अनुमति माँगे, तब दें
+finish-setup-restart = { $name } पूरा करने के लिए इस लैपटॉप को रीस्टार्ट करें
+finish-setup-finish-by-hand = { $name } को खुद पूरा करें
+finish-setup-parts-missing = { $name } के कुछ हिस्से नहीं पहुँचे। उन्हें फिर से भेजें
+finish-setup-export-first = पहले पुराने लैपटॉप पर { $name } से एक्सपोर्ट करें
+finish-setup-relink = { $name } को अपने खाते से फिर से जोड़ें
+finish-setup-look-at-it = { $name } को देखें और जाँचें कि सब ठीक है
+finish-setup-mark-open = पूरा नहीं हुआ
+finish-setup-mark-machine-checked = PCTwin ने जाँचा
+finish-setup-mark-you-did-it = आपने कहा कि हो गया
+finish-setup-tick-hint = कर लेने पर टिक करें।
+finish-setup-save-row = अपनी ऐप सूची और सेटअप सहेजें
+finish-setup-save-row-detail = अपने ऐप और सेटिंग की सूची मेरा PCTwin इतिहास में रखें।
+finish-save-title = अपनी ऐप सूची और सेटअप सहेजें
+finish-save-body = PCTwin आपके ऐप और सेटिंग की सूची मेरा PCTwin इतिहास में रखता है, सिर्फ़ इस लैपटॉप पर। यह सूची है, आपकी फ़ाइलों की कॉपी नहीं।
+finish-save-button = सूची सहेजें
+finish-save-saved = मेरा PCTwin इतिहास में सहेजा गया। ऐप: { $apps }। सेटिंग: { $settings }।
+finish-save-earlier-title = पहले सहेजी गई
+finish-save-earlier = सहेजी गई: { $when }
+finish-goodbye-title = पुराना लैपटॉप छोड़ने से पहले
+finish-goodbye-body = यह वह है जो अभी सिर्फ़ पुराने लैपटॉप पर है। हर एक का जवाब दें। यहाँ कुछ मिटाया नहीं जाता। मिटाना अलग चरण है।
+finish-goodbye-saved = यह सूची इस लैपटॉप पर सहेजी गई है।
+finish-goodbye-only-on-old-laptop = सिर्फ़ पुराने लैपटॉप पर: { $count }
+finish-goodbye-key-not-checked = ऐसी चीज़ें जिनकी कुंजी या कोड जाँचा नहीं गया: { $count }
+finish-goodbye-tied-to-old-laptop = पुराने लैपटॉप से बँधी: { $count }
+finish-goodbye-do-first-on-old-laptop = पहले पुराने लैपटॉप पर करने के लिए: { $count }
+finish-goodbye-steps-not-finished = अधूरे चरण: { $count }
+finish-goodbye-not-searched = जिन जगहों में नहीं देखा गया: { $count }
+finish-goodbye-old-laptop-not-reachable = पुराना लैपटॉप नहीं मिल सका
+finish-goodbye-special-sign-in = { $names }: फिर से साइन इन करें
+finish-goodbye-special-relink = { $names }: इसे अपने खाते से फिर से जोड़ें
+finish-goodbye-special-export-first = { $names }: पहले पुराने लैपटॉप से ज़रूरी चीज़ें एक्सपोर्ट करें
+finish-goodbye-special-look-at-it = { $names }: इसे देखें और जाँचें कि सब ठीक है
+finish-goodbye-places = जगहें: { $places }
+finish-goodbye-did-it = मैंने कर लिया
+finish-goodbye-accept = मैं मानता/मानती हूँ कि यह खो जाएगा
+finish-goodbye-accept-warning = अगर आप यह मानते हैं, तो यह सिर्फ़ पुराने लैपटॉप पर रहेगा। पुराना लैपटॉप मिटाने पर यह चला जाएगा।
+finish-goodbye-cannot-answer = इसका फ़ैसला सिर्फ़ पुराने लैपटॉप की नई जाँच से हो सकता है। उसे जोड़ें और फिर जाँचें।
+finish-goodbye-res-open = अभी जवाब नहीं दिया
+finish-goodbye-res-person-did-it = आपने कहा कि कर लिया
+finish-goodbye-res-accepted-loss = आपने माना कि यह खो जाएगा
+finish-goodbye-answer-label = आपका जवाब: { $title }
+finish-goodbye-keep-title = पुराने लैपटॉप को इस तारीख तक वैसा ही रखें
+finish-goodbye-keep-body = सुझाई गई तारीख: { $date }। तब तक इसे न मिटाएँ, ताकि कुछ चाहिए हो तो मिल सके।
+finish-goodbye-keep-label = इस तारीख तक रखें
+finish-goodbye-keep-use = सुझाई गई तारीख लें
+finish-goodbye-keep-save = यह तारीख सहेजें
+finish-goodbye-keep-set = इस तारीख तक रखा गया: { $date }
+finish-goodbye-keep-none = अभी कोई तारीख नहीं चुनी
+finish-goodbye-blocked = पुराना लैपटॉप अभी सौंपा नहीं जा सकता। अभी खुले: { $count }।
+finish-goodbye-blocked-unchecked = स्थानांतरण के बाद से पुराना लैपटॉप जाँचा नहीं गया। पहले उसे फिर से जाँचें।
+finish-goodbye-clear = सबका जवाब दे दिया गया है और पुराना लैपटॉप जाँचा गया है। आप सौंपने का अनुरोध कर सकते हैं। वह अलग चरण है।
+finish-goodbye-handover = पुराना लैपटॉप सौंपें
+finish-goodbye-check-again = पुराना लैपटॉप फिर से जाँचें
+finish-catchup-title = मुझे अपडेट करें
+finish-catchup-body = देखें कि स्थानांतरण के बाद पुराने लैपटॉप पर क्या बदला। हर बदलाव आप देखते हैं। PCTwin सिर्फ़ वही भेजता है जो आप चुनें।
+finish-catchup-purpose-check = सिर्फ़ पुराने लैपटॉप को देखें
+finish-catchup-purpose-check-detail = कुछ कॉपी नहीं होता। छोड़ने से पहले की आपकी सूची अपडेट होती है।
+finish-catchup-purpose-catch-up = देखें और जो बदला उसे कॉपी करें
+finish-catchup-purpose-catch-up-detail = आप पहले बदलाव देखते हैं और चुनते हैं कि क्या भेजा जाए।
+finish-catchup-armed = तैयार। पुराने लैपटॉप को वैसे ही जोड़ें जैसे स्थानांतरण के लिए जोड़ा था। पुराना लैपटॉप जवाब दे तो यह पेज बदलाव दिखाएगा।
+finish-catchup-connect = पुराना लैपटॉप जोड़ें
+finish-catchup-waiting = पुराने लैपटॉप का इंतज़ार है।
+finish-catchup-unreadable = PCTwin पुराने लैपटॉप का जवाब पढ़ नहीं सका। कुछ भी नहीं बदला। फिर कोशिश करें।
+finish-catchup-changes-title = क्या बदला
+finish-catchup-check-only = कुछ नहीं भेजा जाता। यह सूची सिर्फ़ इतना अपडेट करती है कि PCTwin पुराने लैपटॉप के बारे में क्या जानता है।
+finish-catchup-none = पुराने लैपटॉप पर कुछ नहीं बदला।
+finish-catchup-others = दूसरे लोगों की चीज़ों में बदलाव, सिर्फ़ गिनती: { $count }
+finish-catchup-choose-label = PCTwin { $title } के साथ क्या करे?
+finish-catchup-send-label = { $title } भेजें
+finish-catchup-nothing-to-send = भेजने के लिए कुछ नहीं
+finish-change-new = पुराने लैपटॉप पर नया
+finish-change-updated = पुराने लैपटॉप पर बदला
+finish-change-both-changed = दोनों लैपटॉप पर बदला
+finish-change-gone-on-new-laptop = इस लैपटॉप से हटाया गया
+finish-change-gone-on-old-laptop = पुराने लैपटॉप से हटाया गया
+finish-change-cannot-tell = PCTwin बता नहीं सकता
+finish-choice-none = न भेजें
+finish-choice-send = फिर से भेजें
+finish-choice-keep-both = दोनों कॉपी रखें
+finish-choice-keep-new-laptop-version = इस लैपटॉप वाली रखें
+finish-catchup-approve = मेरे चुने बदलाव भेजें: { $count }
+finish-catchup-sent = कॉपी करने के लिए भेजा गया। सिर्फ़ आपके चुने बदलाव कॉपी होते हैं।
+finish-handover-title = पुराना लैपटॉप सौंपें
+finish-handover-body = हर विकल्प अलग फ़ैसला है। अपने पेज पर पुष्टि करने तक कुछ नहीं होता।
+finish-handover-remove-title = पुराने लैपटॉप से मेरा खाता हटाएँ
+finish-handover-remove-detail = सिर्फ़ आपका खाता। दूसरों के खाते रहेंगे।
+finish-handover-erase-title = पुराना लैपटॉप मिटाएँ
+finish-handover-erase-detail = पुराने लैपटॉप की ड्राइव पर सब कुछ।
+finish-handover-preview-remove = मेरा खाता हटाएँ
+finish-handover-preview-erase = पुराना लैपटॉप मिटाएँ
+finish-handover-removes = क्या हटेगा
+finish-handover-keeps = क्या रहेगा
+finish-handover-keeps-none = उस पर कुछ नहीं रखा जाता।
+finish-handover-route = यह कैसे होता है
+finish-handover-route-body = PCTwin यह खुद नहीं करता। यह सिस्टम का अपना टूल करता है, और PCTwin आपको उसके पास पहुँचा देता है।
+finish-handover-continue = पुष्टि के लिए आगे बढ़ें
+finish-handover-not-offered = यह अभी उपलब्ध नहीं है
+finish-handover-refused-open = छोड़ने से पहले की आपकी सूची में अभी खुली बातें: { $count }
+finish-handover-refused-nothing-done = कुछ नहीं किया गया।
+finish-handover-to-list = छोड़ने से पहले की सूची पर जाएँ
+finish-route-system-windows = Windows
+finish-route-system-macos = macOS
+finish-route-system-linux = Linux
+finish-route-unknown-step = सिस्टम जो अगला चरण दिखाए, उसे करें।
+finish-hnote-ssd-not-secure-wipe = SSD पर फ़ाइलें हटाना सुरक्षित मिटाना नहीं है।
+finish-hnote-does-not-cancel-subscriptions = खाता हटाने से सदस्यताएँ रद्द नहीं होतीं और आप दूसरी जगहों से साइन आउट नहीं होते।
+finish-hnote-others-stay = बाकी सबके खाते जैसे हैं वैसे रहेंगे।
+finish-hnote-cannot-be-undone = इसे पहले जैसा नहीं किया जा सकता।
+finish-hnote-closes-undo = आगे बढ़ने पर इस स्थानांतरण का पहले जैसा करना हमेशा के लिए बंद हो जाता है।
+finish-hnote-sign-in-as-another-administrator = कोई खाता खुद को नहीं हटा सकता। पहले पुराने लैपटॉप पर किसी दूसरे एडमिन खाते से साइन इन करें।
+finish-hnote-family-group-first = अगर खाता Microsoft परिवार समूह में है, तो पहले उसे ऑनलाइन परिवार से हटाएँ।
+finish-hnote-not-a-certificate = PCTwin दर्ज करता है कि आपने क्या माँगा और आपने उसे क्या बताया। यह इसका प्रमाणपत्र नहीं कि कुछ मिटाया गया।
+finish-hnote-encrypt-first-helps = रीसेट से पहले ड्राइव का एन्क्रिप्शन चालू करने से जो बचता है उसे पढ़ना बहुत मुश्किल हो जाता है।
+finish-refused-wrong-device = यह चरण इस लैपटॉप पर उपलब्ध नहीं है।
+finish-refused-undo-not-closed = इस स्थानांतरण का पहले जैसा करना अभी खुला है। पहले इसे बंद करना होगा।
+finish-refused-old-laptop-not-checked = पुराने लैपटॉप को आख़िरी बार 15 मिनट से ज़्यादा पहले जाँचा गया था। पहले उसे दोबारा जाँचें।
+finish-refused-list-out-of-date = छोड़ने से पहले की सूची पुरानी है। उसे फिर से खोलें।
+finish-refused-list-not-clear = छोड़ने से पहले की सूची में अभी खुली बातें हैं।
+finish-refused-no-write-exclusion = PCTwin पक्का नहीं कर सका कि पुराने लैपटॉप पर अभी कुछ बदल नहीं रहा।
+finish-refused-no-such-account = पुराने लैपटॉप पर आपका खाता नहीं मिला।
+finish-refused-other-people-use-it = इस खाते को दूसरे लोग भी इस्तेमाल करते हैं, इसलिए PCTwin इसे नहीं हटाएगा।
+finish-refused-not-qualified = इस पुराने लैपटॉप को इस तरह नहीं सौंपा जा सकता।
+finish-refused-no-fresh-confirmation = नई पुष्टि चाहिए।
+finish-refused-wrong-confirmation = वह पुष्टि अभी दिख रही बातों से मेल नहीं खाती। फिर से देखें।
+finish-refused-changed-since-confirmed = आपके पुष्टि करने के बाद कुछ बदल गया। फिर से देखें और दोबारा पुष्टि करें।
+finish-refused-expired = पुष्टि की अवधि खत्म हो गई। फिर से देखें और दोबारा पुष्टि करें।
+finish-refused-already-used = यह पुष्टि पहले ही इस्तेमाल हो चुकी है।
+finish-refused-nothing-to-remove = हटाने के लिए कुछ नहीं है।
+finish-confirm-title-remove-my-account = पुष्टि करें: मेरा खाता हटाएँ
+finish-confirm-title-erase-old-laptop = पुष्टि करें: पुराना लैपटॉप मिटाएँ
+finish-confirm-target = इसमें बदलाव होगा: { $target }
+finish-confirm-consequences = इसका मतलब
+finish-confirm-tick-remove-my-account = मैं समझता/समझती हूँ कि खाता { $target } पुराने लैपटॉप से हट जाएगा और इसे पहले जैसा नहीं किया जा सकता।
+finish-confirm-tick-erase-old-laptop = मैं समझता/समझती हूँ कि { $target } पर सब कुछ मिट जाएगा और इसे पहले जैसा नहीं किया जा सकता।
+finish-confirm-go = पुष्टि करें और सिस्टम का टूल खोलें
+finish-confirm-cancel = वापस जाएँ और कुछ न करें
+finish-confirm-needs-tick = ऊपर का बॉक्स टिक करने पर बटन काम करेगा।
+finish-started-title = सिस्टम के अपने चरण अपनाएँ
+finish-started-body = नीचे के चरण सिस्टम के हैं, PCTwin के नहीं। PCTwin उनकी अपनी कोई कॉपी नहीं बनाता।
+finish-started-opened = PCTwin ने सिस्टम का पेज खोल दिया।
+finish-started-not-opened = PCTwin सिस्टम का पेज नहीं खोल सका। उसे खुद खोलें और चरणों का पालन करें।
+finish-started-undo-closed = इस स्थानांतरण का पहले जैसा करना अब बंद है।
+finish-says-title = PCTwin को बताएँ कि क्या हुआ
+finish-says-label = आपने क्या देखा?
+finish-says-choose = चुनें कि आपने क्या देखा
+finish-says-done = मैंने चरण पूरे किए
+finish-says-partly = मैंने कुछ चरण पूरे किए
+finish-says-cancelled-part-way = मैंने बीच में रद्द किया
+finish-says-not-started = मैंने शुरू नहीं किया
+finish-says-cannot-tell = मैं बता नहीं सकता/सकती
+finish-says-record = जो देखा उसे दर्ज करें
+finish-recorded-person-says-done = दर्ज किया: आपने कहा कि यह पूरा हुआ। यह आपकी बात है। यह प्रमाणपत्र नहीं है।
+finish-recorded-partial = दर्ज किया: इसका सिर्फ़ एक हिस्सा हुआ।
+finish-recorded-interrupted = दर्ज किया: यह बीच में रुक गया।
+finish-recorded-cancelled-after-some-effects = दर्ज किया: कुछ बदलाव होने के बाद इसे रद्द किया गया।
+finish-recorded-not-started = दर्ज किया: यह शुरू नहीं हुआ।
+finish-recorded-inconclusive = दर्ज किया: आप बता नहीं सके कि क्या हुआ।
+finish-recorded-time = दर्ज किया: { $when }
+finish-undo-title = पहले जैसा करने से पहले देखें
+finish-undo-body = पहले जैसा करना क्या करता है और क्या छोड़ता है, यह यहाँ है। पहले जैसा करें शुरू करने तक कुछ नहीं होता।
+finish-undo-row-removes = PCTwin के इंस्टॉल किए ऐप: पहले जैसा करने पर हट जाते हैं
+finish-undo-row-yours = जो ऐप अब आपके हैं: पहले जैसा करना उन्हें छोड़ देता है। चाहें तो खुद हटा लें।
+finish-undo-row-settings = जैसी थीं वैसी वापस रखी सेटिंग: { $count }
+finish-undo-row-appdata = इन ऐप का डेटा वापस रखा गया
+finish-undo-row-files = स्थानांतरण में कॉपी हुई फ़ाइलें: { $count }
+finish-undo-limit-files = सिर्फ़ तब जब पुराना लैपटॉप जुड़ा हो, और सिर्फ़ वे कॉपी जिन्हें तब से किसी ने नहीं बदला।
+finish-undo-limit-apps = सिर्फ़ तब जब ऐप अब भी वही संस्करण हो जो PCTwin ने इंस्टॉल किया।
+finish-undo-keeps = पहले जैसा करना क्या रखता है: जो ऐप अब आपके हैं, और स्थानांतरण के बाद आपने जो बदला।
+finish-undo-closed = इस स्थानांतरण का पहले जैसा करना बंद है। इसे इस्तेमाल नहीं किया जा सकता।
+finish-undo-nothing = इस स्थानांतरण में पहले जैसा करने के लिए कोई ऐप या सेटिंग नहीं है।
+finish-undo-start = पहले जैसा करना शुरू करें
+finish-cleanup-title = सफ़ाई करें
+finish-cleanup-body = हर सवाल अलग से पूछा जाता है। आपकी पुष्टि के बिना कुछ नहीं हटता।
+finish-cleanup-temp = PCTwin की अस्थायी फ़ाइलें
+finish-cleanup-temp-detail = वे फ़ाइलें जो PCTwin ने काम करते समय इस लैपटॉप पर बनाईं।
+finish-cleanup-model = PCTwin का मॉडल और सहेजा डेटा
+finish-cleanup-model-detail = सहायक फ़ाइलें जो PCTwin इस लैपटॉप पर रखता है ताकि वह तेज़ चले।
+finish-cleanup-look = देखें
+finish-cleanup-removes = हटाया जाएगा
+finish-cleanup-keeps = रखा जाएगा
+finish-cleanup-keeps-body = ये सिर्फ़ PCTwin की जैसी दिखती हैं, या इस्तेमाल में हैं।
+finish-cleanup-nothing = हटाने के लिए कुछ नहीं है।
+finish-cleanup-tick = हटाया जाएगा के नीचे की चीज़ें हटाएँ
+finish-cleanup-confirm = इन्हें हटाएँ
+finish-cleanup-done = हटाई गईं: { $removed }। रखी गईं: { $kept }। हटा नहीं सकीं: { $failed }।
+finish-doctor-title = कनेक्शन जाँचें
+finish-doctor-body = PCTwin इस लैपटॉप को देखकर पता लगाता है कि दोनों लैपटॉप क्यों नहीं जुड़ पा रहे।
+finish-doctor-role-label = यह कौन सा लैपटॉप है?
+finish-doctor-role-old = पुराना लैपटॉप
+finish-doctor-role-new = नया लैपटॉप
+finish-doctor-run = जाँच चलाएँ
+finish-doctor-running = इस लैपटॉप की जाँच हो रही है।
+finish-doctor-found = PCTwin को क्या मिला
+finish-doctor-none = PCTwin को इस लैपटॉप पर कोई समस्या नहीं मिली। इसका मतलब यह नहीं कि कनेक्शन चलेगा ही।
+finish-doctor-sure = पक्का
+finish-doctor-likely = संभव
+finish-doctor-fix = क्या करें
+finish-doctor-not-checked = PCTwin जाँच नहीं सका
+finish-notchecked-unknown = इस लैपटॉप पर एक जाँच नहीं हो सकी।
+finish-report-title = रिपोर्ट साझा करें
+finish-report-body = चुनें कि रिपोर्ट में क्या हो। आप जो न चुनें, वह शामिल नहीं होता। कुछ भेजा नहीं जाता। आप पढ़ा हुआ पाठ सहेजते हैं और खुद साझा करते हैं।
+finish-report-choices = रिपोर्ट में शामिल करें
+finish-report-file-names = फ़ाइलों के नाम
+finish-report-app-names = ऐप के नाम
+finish-report-account-id = खाता आईडी
+finish-report-preview = रिपोर्ट जैसी सहेजी जाएगी
+finish-report-withheld = रिपोर्ट से बाहर रखा गया: नाम { $names }, गोपनीय बातें { $secrets }, खाता आईडी { $ids }।
+finish-report-save = रिपोर्ट सहेजें
+finish-report-saved = यहाँ सहेजी गई: { $path }
+finish-report-not-saved = कोई फ़ाइल नहीं सहेजी गई।
+finish-report-feedback = PCTwin टीम को बताने के लिए कि क्या हुआ, मदद खोलें, फिर फ़ीडबैक। खाता नहीं चाहिए, और अपने आप कुछ नहीं भेजा जाता।
+finish-report-help = मदद खोलें
+finish-report-text-title = PCTwin स्थानांतरण रिपोर्ट
+finish-report-text-unnamed-file = एक फ़ाइल
+finish-report-text-unnamed-app = एक ऐप
+finish-report-text-account = खाता आईडी: { $id }
+finish-report-text-others = दूसरे लोगों की अधूरी चीज़ें, सिर्फ़ गिनती: { $count }
+finish-report-text-goodbye = छोड़ने से पहले की सूची: { $total } बातें, { $open } अभी खुली
+finish-report-text-lines = अधूरी चीज़ें
+rescue-eyebrow = लैपटॉप से फ़ाइलें बचाएँ
+rescue-title = लैपटॉप से फ़ाइलें बचाएँ
+rescue-lead = जो लैपटॉप चालू नहीं होता, उससे फ़ाइलें वापस पाएँ। उसकी ड्राइव इस लैपटॉप से जोड़ें, फिर उसे यहाँ चुनें।
+rescue-checking = जुड़ी हुई ड्राइव ढूँढी जा रही हैं।
+rescue-failed = PCTwin इस लैपटॉप से जुड़ी ड्राइव की सूची नहीं बना सका। केबल देखें, फिर दोबारा जाँचें।
+rescue-empty = कोई ड्राइव नहीं जुड़ी है। पुराने लैपटॉप की ड्राइव को USB अडैप्टर से जोड़ें, फिर दोबारा जाँचें।
+rescue-looks-like-laptop = लैपटॉप की ड्राइव लगती है
+rescue-choose = { $name } चुनें
+rescue-check-again = दोबारा जाँचें
+rescue-locked-title = अगर ड्राइव लॉक है
+rescue-locked-windows = अगर ड्राइव BitLocker से लॉक है, तो ड्राइव खोलने पर Windows अपनी विंडो में उसकी रिकवरी कुंजी माँगता है।
+rescue-wait-title = { $drive } पढ़ी जा रही है
+rescue-wait-body = PCTwin { $drive } के फ़ोल्डर देख रहा है। ड्राइव पर कुछ नहीं बदला जाता।
+rescue-accept-title = { $drive } पर मिली फ़ाइलें
+rescue-accept-body = स्वीकार करें, और PCTwin उन्हें इस लैपटॉप पर कॉपी करेगा। ड्राइव पर कुछ नहीं बदला जाता।
+rescue-progress-title = { $drive } से फ़ाइलें कॉपी हो रही हैं
+rescue-safe = ड्राइव को सिर्फ़ पढ़ा जाता है। उस पर कुछ नहीं बदला जाता।
+rescue-outcome-title = { $drive } से कॉपी की गई फ़ाइलें
+plan-net-title = इंटरनेट की ज़रूरत किसे है
+plan-net-none = इस स्थानांतरण में किसी चीज़ को इंटरनेट की ज़रूरत नहीं है।
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin इंटरनेट से { $count } ऐप डाउनलोड करता है।
+       *[other] PCTwin इंटरनेट से { $count } ऐप डाउनलोड करता है।
+    }
+plan-net-sizes = हर डाउनलोड का आकार डाउनलोड होने के बाद ही पता चलता है।
+plan-net-signins =
+    { $count ->
+        [one] आप ऑनलाइन { $count } चीज़ में फिर से साइन इन करेंगे।
+       *[other] आप ऑनलाइन { $count } चीज़ों में फिर से साइन इन करेंगे।
+    }
+plan-room-title = आपकी फ़ाइलों के अलावा चाहिए जगह
+plan-room-body = सबसे व्यस्त पल में PCTwin को आपकी फ़ाइलों के अलावा ऐप के लिए लगभग { $installs } और ऐप के डेटा के लिए लगभग { $appData } चाहिए।
+compat-strip = क्या जाँचा गया
+compat-title = { $name }: क्या जाँचा गया
+compat-open = ब्योरा
+compat-open-name = { $name } के लिए जाँच का ब्योरा देखें
+compat-list-title =
+    { $count ->
+        [one] { $count } ऐप की जाँच कैसी रही
+       *[other] { $count } ऐप की जाँच कैसी रही
+    }
+compat-aspects-title = हर हिस्सा
+compat-steps-title = आप क्या करेंगे
+compat-steps-none = आपको कुछ नहीं करना है।
+compat-never-checked = इस ऐप को अभी तक किसी ने जाँचा नहीं है। PCTwin इसे आज़माएगा और बताएगा कि क्या हुआ।
+compat-checked-on = { $date } को जाँचा गया।
+compat-version = जाँचा गया संस्करण: { $version }
+work-strip = क्या मैं काम कर सकता हूँ?
+work-title = क्या मैं सच में काम कर सकता हूँ?
+work-body = इस लैपटॉप पर जिन फ़ाइलों, फ़ॉन्ट और कामों की आपको ज़रूरत है, उन्हें जोड़ें। PCTwin वही देखता है जो वह पढ़ सकता है। बाकी के लिए आप बताते हैं कि चला या नहीं। कुछ खोला या चलाया नहीं जाता।
+work-empty = अभी कोई जाँच नहीं है। नीचे कोई फ़ाइल, फ़ॉन्ट या काम जोड़ें।
+work-looked-at = { $of } में से { $checked } देखे गए।
+work-missing = कमी:
+work-and-more =
+    { $count ->
+        [one] और { $count } और।
+       *[other] और { $count } और।
+    }
+work-not-looked-at = नहीं देखा गया:
+work-answer-worked = चल गया
+work-answer-worked-name = चल गया: { $name }
+work-answer-not = नहीं चला
+work-answer-not-name = नहीं चला: { $name }
+work-remove = हटाएँ
+work-remove-name = { $name } हटाएँ
+work-run = अभी जाँचें
+work-add-title = जाँच जोड़ें
+work-add-file = फ़ाइल चुनें
+work-add-file-hint = कोई प्रोजेक्ट, आर्काइव या डेटाबेस। PCTwin उसे पढ़ता है और कभी बदलता नहीं।
+work-font-label = नाम से कोई फ़ॉन्ट
+work-add-font = फ़ॉन्ट जोड़ें
+work-task-label = कोई काम जो आप खुद करते हैं
+work-task-hint = जैसे: बोर्डिंग पास प्रिंट करना। आप बताते हैं कि चला या नहीं।
+work-add-task = काम जोड़ें
+repair-strip = जो पूरा नहीं हुआ उसे ठीक करें
+repair-title =
+    { $count ->
+        [one] इस आइटम को ठीक करें
+       *[other] इन { $count } आइटम को ठीक करें
+    }
+repair-title-loading = जो पूरा नहीं हुआ उसे ठीक करें
+repair-body =
+    { $kept ->
+        [one] सिर्फ़ नीचे के आइटम दोबारा आज़माए जाते हैं। { $kept } आइटम, जो पहले चल चुका था, जैसा है वैसा रहता है।
+       *[other] सिर्फ़ नीचे के आइटम दोबारा आज़माए जाते हैं। { $kept } आइटम, जो पहले चल चुके थे, जैसे हैं वैसे रहते हैं।
+    }
+repair-nothing = कुछ ठीक करने को नहीं है।
+repair-can-now = अभी आज़माया जा सकता है
+repair-waiting = इंतज़ार में
+repair-fixed =
+    { $count ->
+        [one] { $count } आइटम ठीक हुआ।
+       *[other] { $count } आइटम ठीक हुए।
+    }
+repair-run =
+    { $count ->
+        [one] { $count } आइटम फिर आज़माएँ
+       *[other] { $count } आइटम फिर आज़माएँ
+    }
+changed-strip = आपकी हाँ के बाद के बदलाव
+changed-title =
+    { $count ->
+        [one] आपकी हाँ के बाद { $count } चीज़ बदली
+       *[other] आपकी हाँ के बाद { $count } चीज़ें बदलीं
+    }
+changed-body = सिर्फ़ इन्हें नई हाँ चाहिए। बाकी सब मंज़ूर ही रहता है।
+changed-affects = असर: { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } चरण आपके जवाब का इंतज़ार कर रहा है।
+       *[other] { $count } चरण आपके जवाब का इंतज़ार कर रहे हैं।
+    }
+changed-leave-out = इन्हें छोड़ दें
+changed-approve = फिर हाँ कहें
+safe-stop-strip = अपडेट
+safe-stop-title = सुरक्षित पल का इंतज़ार
+safe-stop-body = PCTwin स्थानांतरण के बीच में खुद को अपडेट या हटाता नहीं है। वह तब तक रुकता है जब तक कुछ भी अधूरा न हो।
+safe-stop-failed = PCTwin पता नहीं लगा सका कि यह सुरक्षित है या नहीं। फिर कोशिश करें।
+safe-stop-ready = कुछ भी बीच में बदल नहीं रहा। PCTwin अब अपडेट हो सकता है या हटाया जा सकता है।
+safe-stop-waiting-for = वह इनके पूरा होने का इंतज़ार कर रहा है:
+safe-stop-nothing-going-on = कोई स्थानांतरण, सेटअप या पहले जैसा करना नहीं चल रहा।
+safe-stop-check = फिर जाँचें
+kit-strip = रिकवरी किट
+kit-title = रिकवरी किट सहेजें
+kit-body = रिकवरी किट इस स्थानांतरण का एक छोटा रिकॉर्ड है, जो आपके चुने फ़ोल्डर में सहेजा जाता है, जैसे USB ड्राइव पर। इस लैपटॉप के बिना भी यह दिखाता है कि क्या हुआ और क्या बाकी रहा।
+kit-lacks-sentence = किट में आपकी फ़ाइलें खुद नहीं होतीं। वह खोई हुई फ़ाइलें वापस नहीं ला सकता।
+kit-not-saved = कोई फ़ोल्डर नहीं चुना गया। कुछ सहेजा नहीं गया।
+kit-saved-to = यहाँ सहेजा गया:
+kit-files-title = किट की फ़ाइलें
+kit-holds-title = किट में क्या है
+kit-lacks-title = किट में क्या नहीं है
+kit-save = फ़ोल्डर चुनें और सहेजें
+kit-save-again = फिर सहेजें
+kit-history = रिकवरी किट
+finish-step-repair =
+    { $count ->
+        [one] इस आइटम को ठीक करें
+       *[other] इन { $count } आइटम को ठीक करें
+    }
+finish-step-repair-detail = सिर्फ़ वही फिर आज़माएँ जो पूरा नहीं हुआ। जो चला वह वैसा ही रहता है।
+finish-step-work = क्या मैं सच में काम कर सकता हूँ?
+finish-step-work-detail = देखें कि आपको जिन फ़ाइलों, फ़ॉन्ट और कामों की ज़रूरत है वे यहाँ हैं।
+finish-step-kit = रिकवरी किट सहेजें
+finish-step-kit-detail = इस स्थानांतरण का एक छोटा रिकॉर्ड अपने चुने फ़ोल्डर में रखें।
+space-box-title = इस लैपटॉप पर सब कुछ रखने की जगह नहीं है।
+space-box-choice = { $count ->
+        [one] जो { $count } फ़ाइल ({ $size }) आपने सबसे लंबे समय से इस्तेमाल नहीं की, उसे पुराने लैपटॉप पर छोड़ दें
+       *[other] जो { $count } फ़ाइलें ({ $size }) आपने सबसे लंबे समय से इस्तेमाल नहीं कीं, उन्हें पुराने लैपटॉप पर छोड़ दें
+    }
+space-box-kept = कुछ भी मिटाया नहीं जाता। वे आपके पुराने लैपटॉप पर रहती हैं।
+space-box-short = फिर भी { $size } की कमी है। कुछ फ़ोल्डरों से निशान हटाएँ, या उनके लिए कोई दूसरी जगह चुनें।
+space-box-fits = उन्हें पुराने लैपटॉप पर छोड़ने से बाकी सब आ जाता है।
+finish-handover-check-old = पुराने लैपटॉप को दोबारा जाँचें
+finish-handover-check-armed = PCTwin पुराने लैपटॉप को जाँचने के लिए तैयार है। पुराने लैपटॉप पर PCTwin खोलें और दोनों लैपटॉप को वैसे ही जोड़ें जैसे ले जाने के लिए जोड़ते हैं। फिर दोबारा देखें दबाएँ।
+finish-handover-look-again = दोबारा देखें
+qs-where-title = इन्हें कहाँ रखें?
+qs-where-body = { $count ->
+        [one] { $count } फ़ाइल, { $size }। आपके चुनने तक कुछ भी सेव नहीं होता।
+       *[other] { $count } फ़ाइलें, { $size }। आपके चुनने तक कुछ भी सेव नहीं होता।
+    }
+qs-where-folder = फ़ोल्डर: { $folder }
+qs-where-details = और जानकारी
+qs-where-path = पूरी जगह: { $path }
+qs-where-save = यहाँ सेव करें
+qs-where-choose = दूसरा फ़ोल्डर चुनें
+qs-where-stop = रोकें

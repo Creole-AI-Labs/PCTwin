@@ -18,6 +18,7 @@ import {
   openPrivacySettings,
   moveReport,
   moveResume,
+  rescueBegin,
   moveRetry,
   moveStop,
   toMoveProblem,
@@ -29,6 +30,7 @@ import {
   type OthersWhy,
   type PeopleHere,
   type PeopleToPlace,
+  type RescueDrive as RescueDriveView,
   type Peer,
   type WaitStage,
 } from "../bridge";
@@ -39,6 +41,7 @@ import FullDiskAccess from "./FullDiskAccess";
 import type { BeforeItem } from "../people";
 import PlaceOthers from "./PlaceOthers";
 import WhoHere from "./WhoHere";
+import { RescueDrive } from "./rescueContext";
 import type { HelpCode } from "../people";
 import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
@@ -61,8 +64,11 @@ import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
 import { AppDataComing, CloseApps, Rebuilding } from "./FullMoveParts";
 import UndoHost from "./UndoHost";
+import FinishHost from "./FinishHost";
 import type { DataProgress, RebuildStep } from "../fullmove";
 import StopMove from "./StopMove";
+import MoveChanged from "./MoveChanged";
+import type { ChangesView } from "../deliver";
 
 /** What the move page shows now. */
 type View =
@@ -90,10 +96,14 @@ type View =
   | { kind: "rebuilding"; step: RebuildStep | null }
   /** Undo of the full move's apps and settings, through the flow guard (R05, R06). */
   | { kind: "undo"; outcome: MoveOutcome }
+  /** Finishing the move (2.7), from the outcome on the new laptop: the newest move. */
+  | { kind: "finish"; outcome: MoveOutcome }
   /** The new laptop: the old laptop's app data coming, before the files. */
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
-  | { kind: "close-apps"; apps: string[] };
+  | { kind: "close-apps"; apps: string[] }
+  /** Something changed after the person said yes: only that is asked about again (2.9, X06). */
+  | { kind: "changed"; changes: ChangesView };
 
 type Waiting = Extract<ConnectionView, { kind: "waiting" }>;
 type LinkEnded = Extract<ConnectionView, { kind: "ended" }>;
@@ -156,15 +166,19 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "rebuilding":
     case "appdata":
     case "close-apps":
+    case "changed":
       return "moving";
     case "undo":
+    case "finish":
       return "finished";
   }
 }
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
-  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo") return view;
+  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo" || view.kind === "finish") return view;
+  // What changed after approval takes the page until the person answers, wherever the move is.
+  if (event.kind === "changed") return { kind: "changed", changes: event.changes };
   // After the files, the full move sets up apps and settings: only its own steps, the outcome or a problem move the page on.
   if (view.kind === "rebuilding") {
     if (event.kind === "rebuild") return { kind: "rebuilding", step: event.step };
@@ -204,14 +218,14 @@ export function next(view: View, event: MoveEvent): View {
     case "progress":
       // A page waiting on the person (the plan, who is moving, where others go, privacy) is only
       // left by their answer, never by a progress word.
-      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy" || view.kind === "choose") return view;
+      if (view.kind === "plan" || view.kind === "who" || view.kind === "people" || view.kind === "privacy" || view.kind === "choose" || view.kind === "changed") return view;
       return view.kind === "reconnecting" ? view : { kind: "progress", progress: event.progress };
     case "finished":
       return { kind: "outcome", outcome: event.outcome };
     case "problem":
       return { kind: "end", end: { kind: "ended", why: event.problem } };
     case "rebuild":
-      return { kind: "rebuilding", step: event.step };
+      return view.kind === "changed" ? view : { kind: "rebuilding", step: event.step };
   }
 }
 
@@ -230,18 +244,26 @@ export function windowFor(view: View, expanded: boolean, mini: boolean): WindowM
   return "everyday";
 }
 
-export default function MoveHost({
-  old,
-  onPairAgain,
-  onHome,
-  onWindow,
-}: {
+type HostProps = {
   old: boolean;
   onPairAgain: () => void;
   onHome: () => void;
   /** The window size the page asks for, so the frame can fit it (the mini panel has no header). */
   onWindow?: (mode: WindowMode) => void;
-}) {
+  /** Rescue a laptop (2.6): the drive chosen, read as the old laptop. This laptop is the new one. */
+  rescue?: RescueDriveView;
+};
+
+/** The move's pages, with the rescued drive's name for the pages whose words must fit a drive. */
+export default function MoveHost(props: HostProps) {
+  return (
+    <RescueDrive.Provider value={props.rescue?.name ?? null}>
+      <MoveHostPages {...props} />
+    </RescueDrive.Provider>
+  );
+}
+
+function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps) {
   const { l10n } = useLocalization();
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
   // Each step of the move settles in like a new screen; one that ends or loses the link arrives without travel.
@@ -254,6 +276,8 @@ export default function MoveHost({
   const [picked, setPicked] = useState<number[]>([]);
   // The older apps here the person ticked "Update it" for: none unless ticked.
   const [updates, setUpdates] = useState<number[]>([]);
+  // The smaller-laptop proposal (2.6): leave the files used longest ago on the old laptop. Not unless ticked.
+  const [leaveBehind, setLeaveBehind] = useState(false);
   // The places the person chose for some folders (M05), and why the last one was not taken.
   const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
@@ -266,7 +290,8 @@ export default function MoveHost({
   // The two laptops, as each said when the move started (C06), and the connection (C07): each
   // shown once, as its own page, before the waiting page.
   const [peer, setPeer] = useState<Peer | null>(null);
-  const [intro, setIntro] = useState<"meet" | "check" | "done">("meet");
+  // A rescue has no other laptop to meet or check the connection with (C06, C07).
+  const [intro, setIntro] = useState<"meet" | "check" | "done">(rescue ? "done" : "meet");
   // "Before you leave this laptop": open or not, and the person's own ticks (their word only).
   const [before, setBefore] = useState(false);
   const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
@@ -286,7 +311,7 @@ export default function MoveHost({
     const fallback = Object.fromEntries(MAY_LACK.map((role) => [role, `${l10n.getString("move-fallback-folder")}/${l10n.getString(`plan-role-${role}`)}`]));
     // The place for the names passes through as it is: the engine fills it in a Mac's administrator window.
     const approve = l10n.getString("approve-prompt", { names: "{names}" });
-    moveBegin(fallback, others, approve).catch((error: unknown) => {
+    (rescue ? rescueBegin(rescue.id, fallback) : moveBegin(fallback, others, approve)).catch((error: unknown) => {
       setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
     });
   });
@@ -516,7 +541,7 @@ export default function MoveHost({
             plan={view.plan}
             from={otherLaptop}
             onAccept={() => {
-              moveApprove(key, true, [], []).then(
+              moveApprove(key, true, [], [], [], leaveBehind).then(
                 () => {
                   setView({ kind: "wait", stage: "moving" });
                 },
@@ -529,6 +554,8 @@ export default function MoveHost({
             onDetails={() => {
               setOverviewSeen(true);
             }}
+            leaveBehind={leaveBehind}
+            onLeaveBehind={setLeaveBehind}
             onNotNow={() => {
               void moveApprove(key, false).catch(() => undefined);
             }}
@@ -567,6 +594,8 @@ export default function MoveHost({
             );
           }}
           onApprovalChange={setApproval}
+          leaveBehind={leaveBehind}
+          onLeaveBehind={setLeaveBehind}
           picked={picked}
           onPick={(line, bring) => {
             setPicked((p) => (bring ? (p.includes(line) ? p : [...p, line]) : p.filter((l) => l !== line)));
@@ -576,7 +605,7 @@ export default function MoveHost({
             setUpdates((u) => (update ? (u.includes(app) ? u : [...u, app]) : u.filter((a) => a !== app)));
           }}
           onStart={(a) => {
-            moveApprove(a, true, leftOut, picked, updates).then(
+            moveApprove(a, true, leftOut, picked, updates, leaveBehind).then(
               () => {
                 setView({ kind: "wait", stage: "moving" });
               },
@@ -662,6 +691,13 @@ export default function MoveHost({
             );
           }}
           onHome={onHome}
+          onFinish={
+            old
+              ? undefined
+              : () => {
+                  setView({ kind: "finish", outcome: view.outcome });
+                }
+          }
           onUndo={
             view.outcome.rebuilt?.canUndo
               ? () => {
@@ -675,6 +711,15 @@ export default function MoveHost({
                 }
               : undefined
           }
+        />
+      );
+    case "changed":
+      return (
+        <MoveChanged
+          changes={view.changes}
+          onDone={() => {
+            setView({ kind: "wait", stage: "moving" });
+          }}
         />
       );
     case "rebuilding":
@@ -699,8 +744,17 @@ export default function MoveHost({
           }}
         />
       );
+    case "finish":
+      return (
+        <FinishHost
+          id={null}
+          onBack={() => {
+            setView({ kind: "outcome", outcome: view.outcome });
+          }}
+        />
+      );
     case "report":
-      return <Report items={view.items} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
+      return <Report items={view.items} rebuilt={view.outcome.rebuilt} people={view.outcome.people} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
     case "reconnecting":
       return (
         <>

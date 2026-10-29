@@ -1097,10 +1097,10 @@ drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = 你的搬迁，按类型。
-report-body = 打开一个类型即可查看其中的文件。需要你处理的内容排在最前。
+report-title = 迁移了什么
+report-body = 选择一个分组，查看其中的内容。需要你处理的在最上面。
 report-needs-title = { $count ->
-       *[other] { $count } 项需要你处理
+       *[other] 需要你处理：{ $count }
     }
 report-group-photos = 照片
 report-group-videos = 视频
@@ -1113,7 +1113,7 @@ report-group-size = { $files ->
 report-group-done = 全部已复制并检查
 report-group-some = { $total } 个中的 { $done } 个已复制并检查
 report-group-left = { $count ->
-       *[other] 按你的选择，{ $count } 个留在旧笔记本电脑上
+       *[other] { $count } 项未迁移：你没有选择它们
     }
 report-filter-label = 显示
 report-col-item = 项目
@@ -1976,6 +1976,60 @@ forgotten-online-only =
        *[other] { $count } 个文件只保存在网上，未下载
     }
 
+# 2.7 finishing a move
+doctor-not-connected = 这台笔记本电脑没有连接任何网络。
+doctor-not-connected-fix = 请连接 Wi-Fi 或插上网线，然后重试。
+doctor-mac-local-network-denied = 这台 Mac 可能没有允许 PCTwin 与你网络中的设备通信。
+doctor-mac-local-network-denied-fix = 打开“系统设置”，再打开“隐私与安全性”，然后是“本地网络”，打开 PCTwin。
+doctor-discovery-blocked = 这台电脑上的某个程序（例如防火墙或安全软件）可能阻止了两台电脑互相找到。
+doctor-discovery-blocked-fix = 在防火墙或安全软件中允许 PCTwin，或在搬迁期间暂停它。
+doctor-windows-public-network = Windows 把网络 { $name } 视为公用网络，这会阻止其他设备。
+doctor-windows-public-network-fix = 打开“设置”，再打开“网络和 Internet”，选择 { $name }，把它设为专用网络。
+doctor-vpn-on = VPN 已打开（{ $name }）。它可能会隐藏你家里的网络。
+doctor-vpn-on-fix = 搬迁期间请关闭 VPN，然后重试。
+doctor-old-laptop-not-pairing = 旧电脑可能没有显示它的代码。
+doctor-old-laptop-not-pairing-fix = 在旧电脑上打开 PCTwin，并选择这是你的旧电脑。
+doctor-different-networks = 两台电脑可能连在不同的网络上。
+doctor-different-networks-fix = 把两台电脑连到同一个 Wi-Fi。
+doctor-guest-network = 这个网络可能会阻止设备互相看到，访客、酒店和办公室的 Wi-Fi 常常这样。
+doctor-guest-network-fix = 请使用家里的 Wi-Fi，或手机热点。
+doctor-probe-interfaces = PCTwin 无法列出这台电脑的网络连接。
+doctor-probe-hears-itself = PCTwin 无法测试这台电脑能否在网络上被找到。
+doctor-probe-local-network = PCTwin 无法检查 Mac 的本地网络设置。
+doctor-probe-network-profiles = PCTwin 无法检查 Windows 如何对待这个网络。
+doctor-hotspot = 还是不行？打开手机热点，让两台电脑都连上它。搬迁直接在两台电脑之间进行，不会用你的手机流量。
+windows-make-other-administrator = 请确认留下这台电脑的人在上面有一个管理员帐户。
+windows-sign-in-other-administrator = 注销，然后用那个管理员帐户登录。一个帐户不能删除它自己。
+windows-open-other-users = 打开“设置”，再打开“帐户”，然后是“其他用户”。
+windows-remove-account = 选择你的帐户，然后选择“删除”。
+windows-delete-account-and-data = 选择“删除帐户和数据”。其他人的帐户保持不变。
+windows-sign-out-of-everything = 请先在旧电脑上退出你的应用和帐户。
+windows-open-recovery = 打开“设置”，再打开“系统”，然后是“恢复”。
+windows-reset-this-pc = 选择“重置此电脑”。
+windows-remove-everything = 选择“删除所有内容”。
+windows-clean-the-drive = 更改设置，让驱动器被清理，而不只是清空。这需要几个小时。
+windows-wait-until-setup-screen = 等到电脑显示设置界面。这时就可以交给别人了。
+macos-make-other-administrator = 请确认留下这台 Mac 的人在上面有一个管理员帐户。
+macos-sign-in-other-administrator = 退出登录，然后用那个管理员帐户登录。一个帐户不能删除它自己。
+macos-open-users-and-groups = 打开“系统设置”，然后是“用户与群组”。
+macos-delete-user = 选择你帐户旁边的信息按钮，然后选择“删除用户”。
+macos-delete-home-folder = 选择删除个人文件夹。
+macos-sign-out-of-apple-account = 请先在旧 Mac 上退出你的 Apple 账户，让它可以给下一位主人使用。
+macos-open-transfer-or-reset = 打开“系统设置”，再打开“通用”，然后是“传输或还原”。
+macos-erase-all-content-and-settings = 选择“抹掉所有内容和设置”，按步骤操作。
+macos-older-mac-use-recovery = 如果你的 Mac 没有这个选项（较旧的 Mac），请在 macOS 恢复中启动它，用“磁盘工具”抹掉磁盘，然后重新安装 macOS。
+macos-wait-until-setup-screen = 等到 Mac 显示设置界面。这时就可以交给别人了。
+linux-sign-in-other-administrator = 用另一个管理员帐户登录。
+linux-open-users = 打开“设置”，然后是“用户”。
+linux-remove-user-and-files = 选择你的帐户，然后“删除用户”，并选择删除它的文件。
+linux-no-built-in-reset = Linux 没有自带的、会抹掉驱动器的重置功能。
+linux-drive-maker-secure-erase = 请使用驱动器厂商的安全擦除工具，或者电脑启动设置里自带的擦除功能（如果有）。
+linux-reinstall-from-usb = 然后从 USB 闪存盘安装一个全新的系统。
+any-sign-in-other-administrator = 在旧电脑上用另一个管理员帐户登录。
+any-use-system-account-settings = 用系统自带的帐户设置删除你的帐户。
+any-use-system-reset = 使用电脑自带的、会抹掉驱动器的重置功能。电脑厂商的帮助里有说明。
+any-drive-maker-secure-erase = 如果没有，请使用驱动器厂商的安全擦除工具。
+
 # 2.9 deliverables
 guard-undo-removes-if-package = 如果它是以安装程序包形式安装的，PCTwin 会将其删除；否则请您自行删除
 guard-undo-keeps-newer = 撤消会保留较新的版本：较旧的版本无法恢复
@@ -2055,3 +2109,505 @@ kit-part-before-wipe-list = 仍然只在旧笔记本电脑上的内容
 kit-part-file-data = 您的文件
 kit-part-setup-steps = 重新设置应用的步骤
 kit-part-recovery-tool = 用于恢复的工具
+
+# 2.8 screens
+report-group-apps = 应用
+report-group-settings = 设置
+report-group-special = 应用数据和其他内容
+report-group-people = 其他人
+report-count-apps = { $count ->
+       *[other] { $count } 个应用
+    }
+report-count-settings = { $count ->
+       *[other] { $count } 组设置
+    }
+report-count-special = { $count ->
+       *[other] { $count } 项
+    }
+report-count-people = { $count ->
+       *[other] { $count } 人
+    }
+report-beyond-done = 全部完成并已检查
+report-beyond-some = { $total } 项中的 { $done } 项已完成并检查
+report-beyond-left = { $count ->
+       *[other] { $count } 项未迁移：你没有选择它们
+    }
+report-beyond-more = { $count ->
+       *[other] 还有 { $count } 项未在这里显示。
+    }
+report-here = { $count ->
+       *[other] { $count } 个应用原本就在这台电脑上。PCTwin 保持了原样。
+    }
+progress-ready-title = 现在就能用
+progress-ready-body = { $count ->
+       *[other] { $groups } 已复制并检查。其余内容传输期间，你可以在这台电脑上打开它们。
+    }
+finish-strip = 完成你的迁移
+finish-title = 完成你的迁移
+finish-loading = 正在查看你的迁移。
+finish-retry = 重试
+finish-back-to-list = 返回列表
+finish-open = 打开
+finish-open-name = 打开 { $title }
+finish-more-not-shown = 未显示的其他项目：{ $count }
+finish-problem-no-move = 这台笔记本电脑上，PCTwin 没有需要完成的迁移。没有更改任何内容。
+finish-problem-changed = 显示的内容已过期。回答之前请重新查看。没有更改任何内容。
+finish-problem-not-allowed = 无法这样做。没有更改任何内容。
+finish-problem-busy = 正在进行迁移或其他步骤。请等它结束后再试。没有更改任何内容。
+finish-problem-failed = 这台笔记本电脑出了问题。没有更改任何内容。请重试。
+finish-headline-ready-for-selected-work = 你选的所有内容都在这台笔记本电脑上
+finish-headline-ready-for-selected-work-body = PCTwin 在这台笔记本电脑上找到了你选的每一项，并尽可能做了检查。这并不保证每个应用都和以前一样运行。
+finish-headline-finished-with-tasks = 迁移已完成，还有一些待办事项
+finish-headline-finished-with-tasks-body = 有些内容需要你处理，或没有复制成功。它们都列在本页。
+finish-headline-data-preserved = 你的内容已安全保存，但有些暂时无法打开
+finish-headline-data-preserved-body = 所有内容都在这台笔记本电脑上。打开其中一些需要密钥或恢复码，PCTwin 无法在这里检查。
+finish-headline-handover-unresolved = 旧笔记本电脑还没有交接
+finish-headline-handover-unresolved-body = 这台笔记本电脑已完成。离开旧笔记本电脑前的清单上还有未处理的事项。
+finish-headline-nothing-moved = 没有选择要迁移的内容
+finish-headline-nothing-moved-body = 没有选择文件、应用或设置，所以没有复制任何内容。
+finish-tally-title = 已迁移的内容
+finish-tally-selected = 已选择：{ $count }
+finish-tally-done = 已复制并检查：{ $count }
+finish-tally-needs-action = 需要你处理：{ $count }
+finish-tally-failed = 未能复制：{ $count }
+finish-tally-waiting = 仍在等待：{ $count }
+finish-tally-not-reachable = 无法连接旧笔记本电脑：{ $count }
+finish-tally-no-result-yet = 暂无结果：{ $count }
+finish-tally-skipped = 你已跳过：{ $count }
+finish-tally-left-out = 已排除：{ $count }
+finish-tally-accepted-loss = 有意留下：{ $count }
+finish-others = 其他人的项目，只计数，从不显示：{ $count }
+finish-after-title = 现已在这台笔记本电脑上检查
+finish-after-body = PCTwin 先在旧笔记本电脑上数了一遍，又在这台笔记本电脑上数了一遍。
+finish-after-count = { $atScan } 项中有 { $onNew } 项在这台笔记本电脑上
+finish-after-all = 全部都在
+finish-after-short = 有些缺失
+finish-group-photos = 照片
+finish-group-videos = 视频
+finish-group-music = 音乐
+finish-group-documents = 文档
+finish-group-other-files = 其他文件
+finish-group-apps = 应用
+finish-group-settings = 设置
+finish-note-parental-controls = 家长控制和家庭安全设置不会迁移。请在这台笔记本电脑上重新设置。
+finish-note-not-everywhere = 旧笔记本电脑上有些位置没有搜索。
+finish-note-results-refused = 有些结果未被接受，因为这台笔记本电脑没有显示它们已完成。
+finish-note-undo-open = 这次迁移仍可撤销。如果你清除旧笔记本电脑，撤销将永久关闭。
+finish-open-title = 未完成
+finish-open-body = 这些是仍需要你处理的项目。
+finish-standing-copied = 已复制
+finish-standing-reinstalled = 已重新安装
+finish-standing-converted = 已转换
+finish-standing-needs-action = 需要你处理
+finish-standing-failed = 未能复制
+finish-standing-waiting = 等待中
+finish-standing-not-reachable = 无法连接旧笔记本电脑
+finish-standing-no-result-yet = 暂无结果
+finish-standing-skipped-by-user = 你已跳过
+finish-standing-left-out = 已排除
+finish-access-key-not-checked = 打开它所需的密钥或代码没有在这里检查。
+finish-access-not-on-new-laptop = 它不在这台笔记本电脑上。
+finish-search-title = PCTwin 在旧笔记本电脑上查看的位置
+finish-search-searched = 已查看：{ $places }
+finish-search-not-searched = 未查看：{ $places }
+finish-search-all = PCTwin 查看了它知道的所有位置。它无法确定其他地方是否真的没有。
+finish-old-checked = 旧笔记本电脑上次检查时间：{ $when }
+finish-old-never = 迁移之后还没有检查过旧笔记本电脑。
+finish-steps-title = 下一步
+finish-step-setup = 完成设置
+finish-step-setup-detail = 需要你登录或完成某一步的应用。
+finish-step-goodbye = 离开旧笔记本电脑之前
+finish-step-goodbye-detail = 仍然只在旧笔记本电脑上的内容。
+finish-step-catchup = 同步最新内容
+finish-step-catchup-detail = 复制迁移之后旧笔记本电脑上的更改。
+finish-step-handover = 交出旧笔记本电脑
+finish-step-handover-detail = 用系统自带的工具移除你的账户或清除旧笔记本电脑。
+finish-step-undo = 撤销这次迁移
+finish-step-undo-detail = 移除应用并恢复设置。
+finish-step-cleanup = 清理
+finish-step-cleanup-detail = 从这台笔记本电脑上移除 PCTwin 的临时文件。
+finish-step-report = 分享报告
+finish-step-report-detail = 保存一份简单的报告。包含什么由你选择。
+finish-step-doctor = 检查连接
+finish-step-doctor-detail = 找出两台笔记本电脑无法连接的原因。
+finish-setup-title = 完成设置
+finish-setup-body = 这些应用需要你做一步操作。打勾只记录你所说的，不算 PCTwin 的检查。
+finish-setup-empty = 没有需要你处理的事项。
+finish-setup-sign-in = 登录 { $name }
+finish-setup-licence-key = 输入 { $name } 的许可证密钥
+finish-setup-set-up-again = 重新设置 { $name }
+finish-setup-download-from-maker = 从开发商的网站下载 { $name }
+finish-setup-permission = { $name } 请求时，给予它权限
+finish-setup-restart = 重启这台笔记本电脑以完成 { $name }
+finish-setup-finish-by-hand = 手动完成 { $name }
+finish-setup-parts-missing = { $name } 的一些部分没有送达。请重新发送
+finish-setup-export-first = 先在旧笔记本电脑上从 { $name } 导出
+finish-setup-relink = 重新将 { $name } 关联到你的账户
+finish-setup-look-at-it = 查看 { $name }，确认没有问题
+finish-setup-mark-open = 未完成
+finish-setup-mark-machine-checked = PCTwin 已检查
+finish-setup-mark-you-did-it = 你说已完成
+finish-setup-tick-hint = 完成后请打勾。
+finish-setup-save-row = 保存你的应用列表和设置
+finish-setup-save-row-detail = 将你的应用和设置列表保存在“我的 PCTwin 历史记录”中。
+finish-save-title = 保存你的应用列表和设置
+finish-save-body = PCTwin 把你的应用和设置列表保存在“我的 PCTwin 历史记录”中，只保存在这台笔记本电脑上。这是一份列表，不是文件的副本。
+finish-save-button = 保存列表
+finish-save-saved = 已保存到“我的 PCTwin 历史记录”。应用：{ $apps }。设置：{ $settings }。
+finish-save-earlier-title = 之前保存的
+finish-save-earlier = 已保存：{ $when }
+finish-goodbye-title = 离开旧笔记本电脑之前
+finish-goodbye-body = 这些内容仍然只在旧笔记本电脑上。请逐项回答。这里不会清除任何内容。清除是单独的一步。
+finish-goodbye-saved = 这份列表已保存在这台笔记本电脑上。
+finish-goodbye-only-on-old-laptop = 仅在旧笔记本电脑上：{ $count }
+finish-goodbye-key-not-checked = 需要密钥或代码但未检查的项目：{ $count }
+finish-goodbye-tied-to-old-laptop = 与旧笔记本电脑绑定：{ $count }
+finish-goodbye-do-first-on-old-laptop = 需先在旧笔记本电脑上做：{ $count }
+finish-goodbye-steps-not-finished = 未完成的步骤：{ $count }
+finish-goodbye-not-searched = 未搜索的位置：{ $count }
+finish-goodbye-old-laptop-not-reachable = 无法连接旧笔记本电脑
+finish-goodbye-special-sign-in = { $names }：重新登录
+finish-goodbye-special-relink = { $names }：重新关联到你的账户
+finish-goodbye-special-export-first = { $names }：先从旧笔记本电脑导出你需要的内容
+finish-goodbye-special-look-at-it = { $names }：查看并确认没有问题
+finish-goodbye-places = 位置：{ $places }
+finish-goodbye-did-it = 我已完成
+finish-goodbye-accept = 我接受它会丢失
+finish-goodbye-accept-warning = 如果你接受，它只会留在旧笔记本电脑上。旧笔记本电脑被清除后，它就没了。
+finish-goodbye-cannot-answer = 只有重新检查旧笔记本电脑才能确定。请连接它，再检查一次。
+finish-goodbye-res-open = 尚未回答
+finish-goodbye-res-person-did-it = 你说你已完成
+finish-goodbye-res-accepted-loss = 你接受它会丢失
+finish-goodbye-answer-label = 你对此的回答：{ $title }
+finish-goodbye-keep-title = 保持旧笔记本电脑原样，直到
+finish-goodbye-keep-body = 建议日期：{ $date }。在此之前请不要清除，以防你需要其中的东西。
+finish-goodbye-keep-label = 保留到
+finish-goodbye-keep-use = 使用建议日期
+finish-goodbye-keep-save = 保存这个日期
+finish-goodbye-keep-set = 保留到：{ $date }
+finish-goodbye-keep-none = 还没有选择日期
+finish-goodbye-blocked = 旧笔记本电脑暂时不能交接。仍未处理：{ $count }。
+finish-goodbye-blocked-unchecked = 迁移之后还没有检查过旧笔记本电脑。请先重新检查。
+finish-goodbye-clear = 所有问题都已回答，旧笔记本电脑也已检查。你可以申请交接。那是单独的一步。
+finish-goodbye-handover = 交出旧笔记本电脑
+finish-goodbye-check-again = 重新检查旧笔记本电脑
+finish-catchup-title = 同步最新内容
+finish-catchup-body = 查看迁移之后旧笔记本电脑上有什么更改。每项更改由你确认。PCTwin 只发送你选择的。
+finish-catchup-purpose-check = 只查看旧笔记本电脑
+finish-catchup-purpose-check-detail = 不复制任何内容。你的离开前清单会更新。
+finish-catchup-purpose-catch-up = 查看并复制更改的内容
+finish-catchup-purpose-catch-up-detail = 你先查看更改，再选择发送什么。
+finish-catchup-armed = 已就绪。请像迁移时一样连接旧笔记本电脑。旧笔记本电脑响应后，本页会显示更改。
+finish-catchup-connect = 连接旧笔记本电脑
+finish-catchup-waiting = 正在等待旧笔记本电脑。
+finish-catchup-unreadable = PCTwin 无法读取旧笔记本电脑的响应。没有更改任何内容。请重试。
+finish-catchup-changes-title = 有什么更改
+finish-catchup-check-only = 不会发送任何内容。此列表只会更新 PCTwin 对旧笔记本电脑的了解。
+finish-catchup-none = 旧笔记本电脑上没有更改。
+finish-catchup-others = 其他人项目的更改，只计数：{ $count }
+finish-catchup-choose-label = PCTwin 要如何处理 { $title }？
+finish-catchup-send-label = 发送 { $title }
+finish-catchup-nothing-to-send = 没有要发送的内容
+finish-change-new = 旧笔记本电脑上的新内容
+finish-change-updated = 旧笔记本电脑上已更改
+finish-change-both-changed = 两台笔记本电脑上都已更改
+finish-change-gone-on-new-laptop = 已从这台笔记本电脑移除
+finish-change-gone-on-old-laptop = 已从旧笔记本电脑移除
+finish-change-cannot-tell = PCTwin 无法判断
+finish-choice-none = 不发送
+finish-choice-send = 再次发送
+finish-choice-keep-both = 两个副本都保留
+finish-choice-keep-new-laptop-version = 保留这台笔记本电脑的版本
+finish-catchup-approve = 发送我选择的更改：{ $count }
+finish-catchup-sent = 已发送去复制。只会复制你选择的更改。
+finish-handover-title = 交出旧笔记本电脑
+finish-handover-body = 每个选项都是单独的决定。在对应页面确认之前，什么都不会发生。
+finish-handover-remove-title = 从旧笔记本电脑移除我的账户
+finish-handover-remove-detail = 只移除你的账户。其他人的账户保留。
+finish-handover-erase-title = 清除旧笔记本电脑
+finish-handover-erase-detail = 旧笔记本电脑硬盘上的所有内容。
+finish-handover-preview-remove = 移除我的账户
+finish-handover-preview-erase = 清除旧笔记本电脑
+finish-handover-removes = 将被移除的内容
+finish-handover-keeps = 保留的内容
+finish-handover-keeps-none = 上面不会保留任何内容。
+finish-handover-route = 如何进行
+finish-handover-route-body = PCTwin 自己不做这件事。由系统自带的工具来做，PCTwin 会带你过去。
+finish-handover-continue = 继续去确认
+finish-handover-not-offered = 目前不提供
+finish-handover-refused-open = 离开前清单上仍未处理的事项：{ $count }
+finish-handover-refused-nothing-done = 没有执行任何操作。
+finish-handover-to-list = 前往离开前清单
+finish-route-system-windows = Windows
+finish-route-system-macos = macOS
+finish-route-system-linux = Linux
+finish-route-unknown-step = 按系统显示的下一步操作。
+finish-hnote-ssd-not-secure-wipe = 在 SSD 上删除文件不等于安全擦除。
+finish-hnote-does-not-cancel-subscriptions = 移除账户不会取消订阅，也不会让你退出其他地方的登录。
+finish-hnote-others-stay = 其他所有人的账户保持不变。
+finish-hnote-cannot-be-undone = 此操作无法撤销。
+finish-hnote-closes-undo = 继续后，这次迁移的撤销将永久关闭。
+finish-hnote-sign-in-as-another-administrator = 账户不能移除自己。请先用另一个管理员账户登录旧笔记本电脑。
+finish-hnote-family-group-first = 如果该账户在 Microsoft 家庭组中，请先在线将其从家庭组移除。
+finish-hnote-not-a-certificate = PCTwin 记录你提出的要求和你告诉它的结果。这不是已清除内容的证明。
+finish-hnote-encrypt-first-helps = 重置之前先开启驱动器加密，会让剩下的内容更难被读取。
+finish-refused-wrong-device = 这一步在这台笔记本电脑上不可用。
+finish-refused-undo-not-closed = 这次迁移仍可撤销。必须先关闭撤销。
+finish-refused-old-laptop-not-checked = 旧电脑上次检查已是 15 分钟以前。请先再次检查。
+finish-refused-list-out-of-date = 离开前清单已过期。请重新打开。
+finish-refused-list-not-clear = 离开前清单上还有未处理的事项。
+finish-refused-no-write-exclusion = PCTwin 无法确认旧笔记本电脑此刻没有在变化。
+finish-refused-no-such-account = 在旧笔记本电脑上没有找到你的账户。
+finish-refused-other-people-use-it = 其他人也在使用这个账户，所以 PCTwin 不会移除它。
+finish-refused-not-qualified = 这台旧笔记本电脑不能用这种方式交接。
+finish-refused-no-fresh-confirmation = 需要新的确认。
+finish-refused-wrong-confirmation = 该确认与现在显示的内容不符。请重新查看。
+finish-refused-changed-since-confirmed = 你确认之后有内容发生了变化。请重新查看并再次确认。
+finish-refused-expired = 确认已过期。请重新查看并再次确认。
+finish-refused-already-used = 这个确认已经使用过。
+finish-refused-nothing-to-remove = 没有可移除的内容。
+finish-confirm-title-remove-my-account = 确认：移除我的账户
+finish-confirm-title-erase-old-laptop = 确认：清除旧笔记本电脑
+finish-confirm-target = 这将更改：{ $target }
+finish-confirm-consequences = 这意味着什么
+finish-confirm-tick-remove-my-account = 我明白账户 { $target } 将从旧笔记本电脑移除，且无法撤销。
+finish-confirm-tick-erase-old-laptop = 我明白 { $target } 上的所有内容将被清除，且无法撤销。
+finish-confirm-go = 确认并打开系统工具
+finish-confirm-cancel = 返回，什么都不做
+finish-confirm-needs-tick = 勾选上面的框后，按钮才能使用。
+finish-started-title = 按系统自带的步骤操作
+finish-started-body = 下面的步骤是系统的，不是 PCTwin 的。PCTwin 不会自己画一份。
+finish-started-opened = PCTwin 已打开系统页面。
+finish-started-not-opened = PCTwin 无法打开系统页面。请自己打开并按步骤操作。
+finish-started-undo-closed = 这次迁移的撤销现已关闭。
+finish-says-title = 告诉 PCTwin 发生了什么
+finish-says-label = 你看到了什么？
+finish-says-choose = 选择你看到的情况
+finish-says-done = 我完成了这些步骤
+finish-says-partly = 我完成了部分步骤
+finish-says-cancelled-part-way = 我做到一半取消了
+finish-says-not-started = 我没有开始
+finish-says-cannot-tell = 我无法判断
+finish-says-record = 记录我看到的
+finish-recorded-person-says-done = 已记录：你说已完成。这是你的说法，不是证明。
+finish-recorded-partial = 已记录：只完成了一部分。
+finish-recorded-interrupted = 已记录：中途被中断。
+finish-recorded-cancelled-after-some-effects = 已记录：做了一些更改后被取消。
+finish-recorded-not-started = 已记录：没有开始。
+finish-recorded-inconclusive = 已记录：你无法判断发生了什么。
+finish-recorded-time = 已记录：{ $when }
+finish-undo-title = 撤销前请查看
+finish-undo-body = 这里是撤销会做什么、会保留什么。在你选择“开始撤销”之前，什么都不会发生。
+finish-undo-row-removes = PCTwin 安装的应用：撤销会移除它们
+finish-undo-row-yours = 现在属于你的应用：撤销会保留它们。想移除的话请自己动手。
+finish-undo-row-settings = 恢复原样的设置：{ $count }
+finish-undo-row-appdata = 这些应用的数据已恢复
+finish-undo-row-files = 迁移复制的文件：{ $count }
+finish-undo-limit-files = 仅在连接旧笔记本电脑时可用，且仅限之后没有人改动过的副本。
+finish-undo-limit-apps = 仅限每个应用仍是 PCTwin 安装的版本时。
+finish-undo-keeps = 撤销会保留：现在属于你的应用，以及迁移之后你做的任何更改。
+finish-undo-closed = 这次迁移的撤销已关闭，无法使用。
+finish-undo-nothing = 这次迁移没有可撤销的应用或设置。
+finish-undo-start = 开始撤销
+finish-cleanup-title = 清理
+finish-cleanup-body = 每个问题都单独询问。你不确认，就不会移除任何内容。
+finish-cleanup-temp = PCTwin 的临时文件
+finish-cleanup-temp-detail = PCTwin 工作时在这台笔记本电脑上生成的文件。
+finish-cleanup-model = PCTwin 的模型和已保存数据
+finish-cleanup-model-detail = PCTwin 保存在这台笔记本电脑上的辅助文件，让它运行得更快。
+finish-cleanup-look = 查看
+finish-cleanup-removes = 将被移除
+finish-cleanup-keeps = 将被保留
+finish-cleanup-keeps-body = 这些只是看起来像 PCTwin 的，或正在使用中。
+finish-cleanup-nothing = 没有可移除的内容。
+finish-cleanup-tick = 移除“将被移除”下列出的项目
+finish-cleanup-confirm = 移除
+finish-cleanup-done = 已移除：{ $removed }。已保留：{ $kept }。无法移除：{ $failed }。
+finish-doctor-title = 检查连接
+finish-doctor-body = PCTwin 查看这台笔记本电脑，找出两台笔记本电脑无法连接的原因。
+finish-doctor-role-label = 这是哪一台笔记本电脑？
+finish-doctor-role-old = 旧笔记本电脑
+finish-doctor-role-new = 新笔记本电脑
+finish-doctor-run = 开始检查
+finish-doctor-running = 正在检查这台笔记本电脑。
+finish-doctor-found = PCTwin 发现了什么
+finish-doctor-none = PCTwin 在这台笔记本电脑上没有发现问题。这并不能证明连接一定可用。
+finish-doctor-sure = 确定
+finish-doctor-likely = 可能
+finish-doctor-fix = 怎么做
+finish-doctor-not-checked = PCTwin 无法检查
+finish-notchecked-unknown = 有一项检查无法在这台笔记本电脑上进行。
+finish-report-title = 分享报告
+finish-report-body = 选择报告包含什么。你不选，就不会包含。不会发送任何内容。你保存所读到的文本，然后自己分享。
+finish-report-choices = 报告中包含
+finish-report-file-names = 文件名
+finish-report-app-names = 应用名称
+finish-report-account-id = 账户 ID
+finish-report-preview = 将要保存的报告
+finish-report-withheld = 报告中未包含：名称 { $names }，机密 { $secrets }，账户 ID { $ids }。
+finish-report-save = 保存报告
+finish-report-saved = 已保存到：{ $path }
+finish-report-not-saved = 没有保存文件。
+finish-report-feedback = 要告诉 PCTwin 团队发生了什么，请打开“帮助”，再选“反馈”。不需要账户，也不会自动发送任何内容。
+finish-report-help = 打开帮助
+finish-report-text-title = PCTwin 迁移报告
+finish-report-text-unnamed-file = 一个文件
+finish-report-text-unnamed-app = 一个应用
+finish-report-text-account = 账户 ID：{ $id }
+finish-report-text-others = 其他人未完成的项目，只计数：{ $count }
+finish-report-text-goodbye = 离开前清单：{ $total } 项，{ $open } 项仍未处理
+finish-report-text-lines = 未完成的项目
+rescue-eyebrow = 救回电脑里的文件
+rescue-title = 救回电脑里的文件
+rescue-lead = 从无法启动的电脑中取回文件。把它的硬盘连接到这台电脑，然后在这里选择它。
+rescue-checking = 正在查找已连接的硬盘。
+rescue-failed = PCTwin 无法列出连接到这台电脑的硬盘。请检查连接线，然后再检查一次。
+rescue-empty = 没有连接硬盘。请用 USB 转接器连接旧电脑的硬盘，然后再检查一次。
+rescue-looks-like-laptop = 看起来是电脑的硬盘
+rescue-choose = 选择 { $name }
+rescue-check-again = 再检查一次
+rescue-locked-title = 如果硬盘已锁定
+rescue-locked-windows = 如果硬盘被 BitLocker 锁定，打开硬盘时 Windows 会在它自己的窗口中要求输入恢复密钥。
+rescue-wait-title = 正在读取 { $drive }
+rescue-wait-body = PCTwin 正在查看 { $drive } 上的文件夹。硬盘上的内容不会被更改。
+rescue-accept-title = 在 { $drive } 上找到的文件
+rescue-accept-body = 接受后，PCTwin 会把它们复制到这台电脑。硬盘上的内容不会被更改。
+rescue-progress-title = 正在从 { $drive } 复制文件
+rescue-safe = 硬盘只会被读取，上面的内容不会被更改。
+rescue-outcome-title = 已从 { $drive } 复制的文件
+plan-net-title = 哪些需要联网
+plan-net-none = 这次移动中没有任何内容需要联网。
+plan-net-downloads =
+    { $count ->
+       *[other] PCTwin 会从网上下载 { $count } 个应用。
+    }
+plan-net-sizes = 每个下载的大小要下载完成后才能知道。
+plan-net-signins =
+    { $count ->
+       *[other] 你需要在网上重新登录 { $count } 项内容。
+    }
+plan-room-title = 除文件外还需要的空间
+plan-room-body = 在最繁忙的时刻，除了你的文件，PCTwin 还需要约 { $installs } 用于应用，约 { $appData } 用于应用数据。
+compat-strip = 测试了什么
+compat-title = { $name }：测试了什么
+compat-open = 详情
+compat-open-name = 查看 { $name } 的测试情况
+compat-list-title =
+    { $count ->
+       *[other] { $count } 个应用的测试情况
+    }
+compat-aspects-title = 每个部分
+compat-steps-title = 你需要做的
+compat-steps-none = 你不需要做任何步骤。
+compat-never-checked = 还没有人测试过这个应用。PCTwin 会尝试，并告诉你结果。
+compat-checked-on = 检查日期：{ $date }。
+compat-version = 测试的版本：{ $version }
+work-strip = 我能工作吗？
+work-title = 我真的能工作吗？
+work-body = 添加你在这台电脑上需要的文件、字体和事项。PCTwin 会查看它能读取的内容，其余的由你来说明是否正常。不会打开或运行任何东西。
+work-empty = 还没有检查。请在下方添加文件、字体或事项。
+work-looked-at = 已查看 { $of } 项中的 { $checked } 项。
+work-missing = 缺少：
+work-and-more =
+    { $count ->
+       *[other] 另有 { $count } 项。
+    }
+work-not-looked-at = 未查看：
+work-answer-worked = 正常
+work-answer-worked-name = 正常：{ $name }
+work-answer-not = 不正常
+work-answer-not-name = 不正常：{ $name }
+work-remove = 移除
+work-remove-name = 移除 { $name }
+work-run = 立即检查
+work-add-title = 添加检查
+work-add-file = 选择文件
+work-add-file-hint = 项目、压缩包或数据库。PCTwin 只读取，不会修改。
+work-font-label = 按名称添加字体
+work-add-font = 添加字体
+work-task-label = 你自己要做的事
+work-task-hint = 例如：打印登机牌。是否成功由你来说明。
+work-add-task = 添加事项
+repair-strip = 修复未完成的内容
+repair-title =
+    { $count ->
+       *[other] 修复这 { $count } 项
+    }
+repair-title-loading = 修复未完成的内容
+repair-body =
+    { $kept ->
+       *[other] 只会重试下面的项目。已经成功的 { $kept } 项保持原样。
+    }
+repair-nothing = 没有需要修复的内容。
+repair-can-now = 现在可以重试
+repair-waiting = 等待中
+repair-fixed =
+    { $count ->
+       *[other] 已修复 { $count } 项。
+    }
+repair-run =
+    { $count ->
+       *[other] 重试 { $count } 项
+    }
+changed-strip = 你同意之后的变化
+changed-title =
+    { $count ->
+       *[other] 你同意之后有 { $count } 项发生了变化
+    }
+changed-body = 只有这些需要你重新同意，其余的仍然保持已批准。
+changed-affects = 影响：{ $steps }
+changed-held =
+    { $count ->
+       *[other] 有 { $count } 个步骤在等你的回答。
+    }
+changed-leave-out = 不处理这些
+changed-approve = 再次同意
+safe-stop-strip = 更新
+safe-stop-title = 正在等待安全的时机
+safe-stop-body = PCTwin 不会在移动进行到一半时更新或卸载自己。它会等到没有任何内容处于半完成状态。
+safe-stop-failed = PCTwin 无法判断现在是否安全。请再试一次。
+safe-stop-ready = 没有任何内容正在更改。PCTwin 现在可以更新或卸载。
+safe-stop-waiting-for = 它正在等待以下内容完成：
+safe-stop-nothing-going-on = 没有正在进行的移动、设置或撤消。
+safe-stop-check = 再检查一次
+kit-strip = 恢复包
+kit-title = 保存恢复包
+kit-body = 恢复包是这次移动的一份简短记录，保存在你选择的文件夹中，例如 USB 闪存盘。即使没有这台电脑，它也能显示发生了什么、还剩下什么没做。
+kit-lacks-sentence = 恢复包不包含你的文件本身，也无法找回已经丢失的文件。
+kit-not-saved = 没有选择文件夹。什么都没有保存。
+kit-saved-to = 已保存到：
+kit-files-title = 恢复包中的文件
+kit-holds-title = 恢复包包含什么
+kit-lacks-title = 恢复包不包含什么
+kit-save = 选择文件夹并保存
+kit-save-again = 再次保存
+kit-history = 恢复包
+finish-step-repair =
+    { $count ->
+       *[other] 修复这 { $count } 项
+    }
+finish-step-repair-detail = 只重试未完成的内容。已成功的保持不变。
+finish-step-work = 我真的能工作吗？
+finish-step-work-detail = 检查你需要的文件、字体和事项是否都在这里。
+finish-step-kit = 保存恢复包
+finish-step-kit-detail = 把这次移动的一份简短记录保存到你选择的文件夹。
+space-box-title = 这台电脑没有足够的空间放下所有内容。
+space-box-choice = { $count ->
+       *[other] 把你最久没用过的 { $count } 个文件（{ $size }）留在旧电脑上
+    }
+space-box-kept = 不会删除任何东西。它们会留在你的旧电脑上。
+space-box-short = 即使这样，仍差 { $size }。请取消勾选一些文件夹，或为它们选择其他位置。
+space-box-fits = 把它们留在旧电脑上后，其余内容都放得下。
+finish-handover-check-old = 再次检查旧电脑
+finish-handover-check-armed = PCTwin 已准备好检查旧电脑。请在旧电脑上打开 PCTwin，并像迁移时一样连接两台电脑。然后点击“再看一次”。
+finish-handover-look-again = 再看一次
+qs-where-title = 这些文件保存到哪里？
+qs-where-body = { $count ->
+       *[other] { $count } 个文件，{ $size }。在你选择之前不会保存任何内容。
+    }
+qs-where-folder = 文件夹：{ $folder }
+qs-where-details = 更多详情
+qs-where-path = 完整位置：{ $path }
+qs-where-save = 保存到这里
+qs-where-choose = 选择其他文件夹
+qs-where-stop = 停止

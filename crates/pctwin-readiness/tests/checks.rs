@@ -668,13 +668,6 @@ fn t27_005_ready_only_when_every_picked_check_passed() {
     // A key that is not checked keeps it from ready.
     l.needs_key(doc.id).unwrap();
     assert_eq!(summarize(&l, &[passed]), Summary::FinishedWithTasks);
-    for s in [
-        Summary::ReadyForSelectedWork,
-        Summary::DataPreserved,
-        Summary::FinishedWithTasks,
-    ] {
-        assert!(!s.words().to_lowercase().contains("everything works"));
-    }
 }
 
 /// ZIP64: any one of the three fields at its largest value calls for the ZIP64 locator.
@@ -753,7 +746,11 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
                 family: "Brand".into(),
-                not_checked: vec!["Web font (.woff2)".into()]
+                not_checked: vec![pctwin_readiness::checks::FontNotChecked {
+                    ext: "woff2".into(),
+                    name: Some("Web font".into()),
+                    why: pctwin_readiness::checks::FontWhy::KindNotRead,
+                }]
             }],
             coverage: Coverage::Sample { checked: 1, of: 3 }
         }
@@ -795,7 +792,11 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
                 family: "Brand".into(),
-                not_checked: vec!["X font (.xfont)".into()]
+                not_checked: vec![pctwin_readiness::checks::FontNotChecked {
+                    ext: "xfont".into(),
+                    name: Some("X font".into()),
+                    why: pctwin_readiness::checks::FontWhy::KindNotRead,
+                }]
             }],
             coverage: Coverage::Sample { checked: 1, of: 2 }
         }
@@ -821,7 +822,7 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
 /// not whole, and a font whose names cannot be read, are found, not checked, and said so.
 #[test]
 fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
-    use pctwin_readiness::checks::{DAMAGED_FONT, UNREADABLE_FONT, font_with, shipped_font_files};
+    use pctwin_readiness::checks::{FontNotChecked, FontWhy, font_with, shipped_font_files};
     let only = tempfile::tempdir().unwrap();
     write(only.path(), "Family.ttf", b"\0\0\0\0garbage");
     write(only.path(), "Family.xyzfont", b"zz");
@@ -852,8 +853,16 @@ fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
             missing: vec![Missing::Font {
                 family: "Family".into(),
                 not_checked: vec![
-                    format!("{UNREADABLE_FONT} (.otf)"),
-                    format!("TrueType font {DAMAGED_FONT} (.ttf)"),
+                    FontNotChecked {
+                        ext: "otf".into(),
+                        name: None,
+                        why: FontWhy::NamesUnreadable,
+                    },
+                    FontNotChecked {
+                        ext: "ttf".into(),
+                        name: Some("TrueType font".into()),
+                        why: FontWhy::Damaged,
+                    },
                 ]
             }],
             coverage: Coverage::Sample { checked: 1, of: 3 }

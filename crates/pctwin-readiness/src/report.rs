@@ -2,21 +2,22 @@
 //! plan 2.7 section 9; acceptance T27-025, T27-026, T27-028, T27-030).
 //!
 //! The report the person may share is built by allowing in, not by taking out: counts, result
-//! words, reasons, check labels and coverage, and the kinds of what is left to do. Names of the
-//! person's files and apps go in only when the person selects them, account IDs only when
-//! selected, and another person's things are never named. Whatever names go in are then scrubbed
-//! of what looks like a secret (an e-mail address, a web address, a long code), since a name
-//! matched by patterns alone can still carry one.
+//! keys, reasons, check labels and the before-wipe list's counts. Names of the person's files and
+//! apps go in only when the person selects them, their account ID only when selected, and another
+//! person's things are never named. Whatever names go in are scrubbed of what looks like a secret
+//! (an e-mail address, a web address, a long code), since a name can still carry one.
 //!
-//! [`share_preview`] gives the exact text that would leave the laptop. Nothing here sends it, or
-//! anything else: the crate has no way to reach the network, and sending is the person's own act
-//! in the Help and Feedback screens, which need no account ([`FEEDBACK_WORDS`]).
+//! The report is typed ([`ShareReport`]): the screens put it in the person's language. Before the
+//! person's text is saved, [`check_text`] refuses it if it holds anything the report kept out (a
+//! name not chosen, the account ID not chosen, anything that looks like a secret), so the screens
+//! cannot widen what leaves. Nothing here sends anything: the crate cannot reach the network, and
+//! feedback is the person's own act in Help, which needs no account.
 
 use serde::{Deserialize, Serialize};
 
-use crate::checks::{CheckResult, Summary};
+use crate::checks::{CheckResult, Label, Summary};
 use crate::goodbye::Checklist;
-use crate::ledger::{Ledger, Standing};
+use crate::ledger::{Ledger, Standing, Tally};
 
 /// What the person chose to include. Nothing is included unless chosen.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct Disclosure {
     pub account_id: bool,
 }
 
-/// What was kept out of the preview.
+/// What was kept out.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Withheld {
     pub names: u64,
@@ -37,39 +38,62 @@ pub struct Withheld {
     pub account_ids: u64,
 }
 
-/// Exactly what would leave the laptop, and what was kept out.
+/// One unfinished line of the report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SharePreview {
-    pub text: String,
-    pub withheld: Withheld,
+pub struct ShareLine {
+    /// The name, only when chosen, scrubbed.
+    pub name: Option<String>,
+    pub is_app: bool,
+    pub standing: Standing,
+    pub reason: Option<pctwin_types::Reason>,
 }
 
-/// How to send feedback: from Help, with no account (R12; T27-028).
-pub const FEEDBACK_WORDS: &str = "To tell us about a problem, open Help, then Feedback. You do \
-    not need an account. Nothing is sent until you choose Send, and you see exactly what is sent \
-    first.";
+/// Exactly what the shareable report holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareReport {
+    pub summary: Summary,
+    pub tally: Tally,
+    pub account_id: Option<String>,
+    pub lines: Vec<ShareLine>,
+    pub others_not_finished: u64,
+    /// The checks the person picked, by label, in their order.
+    pub checks: Vec<Label>,
+    /// The before-wipe list: how many things, how many still open.
+    pub goodbye: Option<(u64, u64)>,
+    pub withheld: Withheld,
+    /// What was kept out, to refuse text that holds it ([`check_text`]). Never sent anywhere.
+    #[serde(skip)]
+    kept_out: Vec<String>,
+}
 
-/// What the report is not (T27-026).
-pub const NOT_A_CERTIFICATE: &str = "This report is a record of what PCTwin observed on these \
-    laptops. It is not a certificate of erasure or of anything else.";
-
-fn standing_word(s: Standing) -> &'static str {
-    match s {
-        Standing::Done(pctwin_types::ItemStatus::Reinstalled) => "reinstalled",
-        Standing::Done(pctwin_types::ItemStatus::Converted) => "converted",
-        Standing::Done(_) => "copied",
-        Standing::NeedsAction => "needs action",
-        Standing::Failed => "failed",
-        Standing::Deferred => "waiting",
-        Standing::Inaccessible => "could not be reached",
-        Standing::NotTested => "no result yet",
-        Standing::SkippedByUser => "skipped by you",
-        Standing::Excluded => "left out",
+impl ShareReport {
+    /// Binds a save to exactly this report.
+    pub fn digest(&self) -> [u8; 32] {
+        let mut h = blake3::Hasher::new();
+        h.update(b"pctwin/v1/share-report\0");
+        h.update(&serde_json::to_vec(self).expect("serialises"));
+        *h.finalize().as_bytes()
     }
 }
 
 fn token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '/' | '=' | '.')
+}
+
+fn secret_like(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    let url = lower.contains("://") || lower.starts_with("www.");
+    let email = word
+        .split_once('@')
+        .is_some_and(|(a, b)| !a.is_empty() && b.contains('.'));
+    let long_code = word
+        .split(|c: char| !token_char(c) || c == '/' || c == '.')
+        .any(|run| {
+            run.chars().count() >= 20
+                && run.chars().any(|c| c.is_ascii_digit())
+                && run.chars().any(|c| c.is_ascii_alphabetic())
+        });
+    url || email || long_code
 }
 
 /// Removes what looks like a secret from `text`: e-mail addresses, web addresses and long codes
@@ -81,19 +105,7 @@ pub fn scrub(text: &str) -> (String, u64) {
         if i > 0 {
             out.push(' ');
         }
-        let lower = word.to_ascii_lowercase();
-        let url = lower.contains("://") || lower.starts_with("www.");
-        let email = word
-            .split_once('@')
-            .is_some_and(|(a, b)| !a.is_empty() && b.contains('.'));
-        let long_code = word
-            .split(|c: char| !token_char(c) || c == '/' || c == '.')
-            .any(|run| {
-                run.chars().count() >= 20
-                    && run.chars().any(|c| c.is_ascii_digit())
-                    && run.chars().any(|c| c.is_ascii_alphabetic())
-            });
-        if url || email || long_code {
+        if secret_like(word) {
             removed += 1;
             out.push_str("[removed]");
         } else {
@@ -111,33 +123,17 @@ pub fn share_preview(
     checklist: Option<&Checklist>,
     mover_account: &str,
     d: Disclosure,
-) -> SharePreview {
+) -> ShareReport {
     let mut w = Withheld::default();
-    let t = ledger.tally();
-    let mut text = String::from("PCTwin move report\n\n");
-    text.push_str(summary.words());
-    text.push_str("\n\n");
-    text.push_str(&format!(
-        "Picked to move: {}. On the new laptop: {}. Need action: {}. Failed: {}. Waiting: {}. \
-         Could not be reached: {}. No result yet: {}. Skipped by you: {}. Left out: {}. Left \
-         behind by your choice: {}.\n",
-        t.selected,
-        t.done,
-        t.needs_action,
-        t.failed,
-        t.deferred,
-        t.inaccessible,
-        t.not_tested,
-        t.skipped,
-        t.excluded,
-        t.accepted_loss
-    ));
-    if d.account_id {
-        text.push_str(&format!("Account on the old laptop: {mover_account}\n"));
+    let mut kept_out = Vec::new();
+    let account_id = if d.account_id {
+        Some(mover_account.to_string())
     } else {
         w.account_ids += 1;
-    }
-    text.push_str("\nItems not finished:\n");
+        kept_out.push(mover_account.to_string());
+        None
+    };
+    let mut lines = Vec::new();
     let mut others = 0u64;
     for (id, line) in ledger.lines() {
         let s = ledger.standing(*id).expect("listed");
@@ -146,6 +142,7 @@ pub fn share_preview(
         }
         if !line.mine {
             others += 1;
+            kept_out.push(line.label.clone());
             continue;
         }
         let is_app = matches!(
@@ -156,53 +153,92 @@ pub fn share_preview(
         let name = if shown {
             let (n, k) = scrub(&line.label);
             w.secrets += k;
-            n
+            Some(n)
         } else {
             w.names += 1;
-            if is_app {
-                "an app or setting".into()
-            } else {
-                "a file".into()
-            }
+            kept_out.push(line.label.clone());
+            None
         };
-        let reason = line
-            .result
-            .as_ref()
-            .and_then(|a| a.result.reason())
-            .map(|r| {
-                format!(
-                    " ({})",
-                    serde_json::to_value(r)
-                        .ok()
-                        .and_then(|v| v.as_str().map(String::from))
-                        .unwrap_or_default()
-                )
-            })
-            .unwrap_or_default();
-        text.push_str(&format!("- {name}: {}{reason}\n", standing_word(s)));
+        lines.push(ShareLine {
+            name,
+            is_app,
+            standing: s,
+            reason: line.result.as_ref().and_then(|a| a.result.reason()),
+        });
     }
-    if others > 0 {
-        text.push_str(&format!("- other people's items not finished: {others}\n"));
-    }
-    if !checks.is_empty() {
-        text.push_str("\nChecks you picked:\n");
-        for c in checks {
-            let label = serde_json::to_value(c.outcome.label())
-                .ok()
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_default();
-            text.push_str(&format!("- check {}: {label}\n", c.index + 1));
+    // Done lines are never named: their names are kept out too.
+    for (id, line) in ledger.lines() {
+        if matches!(ledger.standing(*id), Some(Standing::Done(_))) {
+            kept_out.push(line.label.clone());
         }
     }
-    if let Some(list) = checklist {
-        text.push_str(&format!(
-            "\nBefore leaving the old laptop: {} things on the list, {} still open.\n",
-            list.exceptions.len(),
-            list.open().count()
-        ));
+    // A path is kept out whole and by its last part, the name a screen would show.
+    let last: Vec<String> = kept_out
+        .iter()
+        .filter_map(|n| n.rsplit('/').next().filter(|l| l.len() < n.len()))
+        .map(String::from)
+        .collect();
+    kept_out.extend(last);
+    kept_out.retain(|n| !n.trim().is_empty());
+    kept_out.sort();
+    kept_out.dedup();
+    ShareReport {
+        summary,
+        tally: ledger.tally(),
+        account_id,
+        lines,
+        others_not_finished: others,
+        checks: checks.iter().map(|c| c.outcome.label()).collect(),
+        goodbye: checklist.map(|l| (l.exceptions.len() as u64, l.open().count() as u64)),
+        withheld: w,
+        kept_out,
     }
-    text.push('\n');
-    text.push_str(NOT_A_CERTIFICATE);
-    text.push('\n');
-    SharePreview { text, withheld: w }
+}
+
+/// Whether `needle` is in `hay` as a whole: not inside a longer word.
+fn contains_whole(hay: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    hay.match_indices(needle).any(|(at, _)| {
+        let before = hay[..at].chars().next_back();
+        let after = hay[at + needle.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
+}
+
+/// Why the person's text was refused. Nothing was saved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Leak {
+    #[error("it names something the report kept out")]
+    KeptOut,
+    #[error("it holds something that looks like a secret")]
+    SecretLike,
+}
+
+/// Whether `text` (the report as the screens put it in words) holds only what `report` allows: no
+/// name, file or account ID it kept out (in any letter case), and nothing that looks like a secret.
+pub fn check_text(report: &ShareReport, text: &str) -> Result<(), Leak> {
+    let lower = text.to_lowercase();
+    // A chosen name is in the text by choice, even when a name kept out is part of it.
+    let mut allowed = lower.clone();
+    for l in &report.lines {
+        if let Some(n) = &l.name {
+            allowed = allowed.replace(&n.to_lowercase(), " ");
+        }
+    }
+    if let Some(a) = &report.account_id {
+        allowed = allowed.replace(&a.to_lowercase(), " ");
+    }
+    if report
+        .kept_out
+        .iter()
+        .any(|n| contains_whole(&allowed, &n.to_lowercase()))
+    {
+        return Err(Leak::KeptOut);
+    }
+    if allowed.split_whitespace().any(secret_like) {
+        return Err(Leak::SecretLike);
+    }
+    Ok(())
 }

@@ -1171,11 +1171,11 @@ drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = Your move, by kind.
-report-body = Open a kind to see its files. Anything that needs you comes first.
+report-title = What moved
+report-body = Select a group to see what is in it. Things that need you are at the top.
 report-needs-title = { $count ->
-        [one] 1 thing needs you
-       *[other] { $count } things need you
+        [one] Needs you: 1
+       *[other] Needs you: { $count }
     }
 report-group-photos = Photos
 report-group-videos = Videos
@@ -1189,8 +1189,8 @@ report-group-size = { $files ->
 report-group-done = All copied and checked
 report-group-some = { $done } of { $total } copied and checked
 report-group-left = { $count ->
-        [one] 1 left on your old laptop, as you chose
-       *[other] { $count } left on your old laptop, as you chose
+        [one] 1 not moved: you left it out
+       *[other] { $count } not moved: you left them out
     }
 report-filter-label = Show
 report-col-item = Item
@@ -2100,6 +2100,60 @@ forgotten-online-only =
        *[other] { $count } files kept only online, not downloaded
     }
 
+# 2.7 finishing a move
+doctor-not-connected = This laptop is not connected to any network.
+doctor-not-connected-fix = Connect to Wi-Fi or plug in a network cable, then try again.
+doctor-mac-local-network-denied = This Mac may not be letting PCTwin talk to devices on your network.
+doctor-mac-local-network-denied-fix = Open System Settings, then Privacy & Security, then Local Network, and turn on PCTwin.
+doctor-discovery-blocked = Something on this laptop, such as a firewall or security app, may be stopping the laptops from finding each other.
+doctor-discovery-blocked-fix = Allow PCTwin in your firewall or security app, or pause it while you move.
+doctor-windows-public-network = Windows treats the network { $name } as public, which blocks other devices.
+doctor-windows-public-network-fix = Open Settings, then Network & internet, choose { $name }, and set it to a private network.
+doctor-vpn-on = A VPN is on ({ $name }). It can hide your home network.
+doctor-vpn-on-fix = Turn off the VPN while you move, then try again.
+doctor-old-laptop-not-pairing = The old laptop may not be showing its code.
+doctor-old-laptop-not-pairing-fix = On the old laptop, open PCTwin and choose that it is your old laptop.
+doctor-different-networks = The laptops may be on different networks.
+doctor-different-networks-fix = Put both laptops on the same Wi-Fi.
+doctor-guest-network = This network may stop devices from seeing each other, as guest, hotel and office Wi-Fi often do.
+doctor-guest-network-fix = Use your home Wi-Fi, or your phone’s hotspot.
+doctor-probe-interfaces = PCTwin could not list this laptop’s network connections.
+doctor-probe-hears-itself = PCTwin could not test whether this laptop can be found on the network.
+doctor-probe-local-network = PCTwin could not check the Mac’s local network setting.
+doctor-probe-network-profiles = PCTwin could not check how Windows treats this network.
+doctor-hotspot = Still not working? Turn on your phone’s hotspot and join both laptops to it. The move goes straight between the laptops, not through your phone’s data.
+windows-make-other-administrator = Make sure the person keeping the laptop has an administrator account on it.
+windows-sign-in-other-administrator = Sign out, then sign in with that other administrator account. An account cannot remove itself.
+windows-open-other-users = Open Settings, then Accounts, then Other users.
+windows-remove-account = Choose your account, then Remove.
+windows-delete-account-and-data = Choose Delete account and data. Everyone else’s account stays as it is.
+windows-sign-out-of-everything = First sign out of your apps and accounts on the old laptop.
+windows-open-recovery = Open Settings, then System, then Recovery.
+windows-reset-this-pc = Choose Reset PC.
+windows-remove-everything = Choose Remove everything.
+windows-clean-the-drive = Change the settings so the drive is cleaned, not just emptied. This takes a few hours.
+windows-wait-until-setup-screen = Wait until the laptop shows its setup screen. Then it is ready to hand on.
+macos-make-other-administrator = Make sure the person keeping the Mac has an administrator account on it.
+macos-sign-in-other-administrator = Log out, then log in with that other administrator account. An account cannot remove itself.
+macos-open-users-and-groups = Open System Settings, then Users & Groups.
+macos-delete-user = Choose the information button next to your account, then Delete User.
+macos-delete-home-folder = Choose to delete the home folder.
+macos-sign-out-of-apple-account = First sign out of your Apple Account on the old Mac, so it is free for its next owner.
+macos-open-transfer-or-reset = Open System Settings, then General, then Transfer or Reset.
+macos-erase-all-content-and-settings = Choose Erase All Content and Settings, and follow the steps.
+macos-older-mac-use-recovery = If your Mac does not offer this (older Macs), start it in macOS Recovery, erase the drive with Disk Utility, then reinstall macOS.
+macos-wait-until-setup-screen = Wait until the Mac shows its setup screen. Then it is ready to hand on.
+linux-sign-in-other-administrator = Sign in with another administrator account.
+linux-open-users = Open Settings, then Users.
+linux-remove-user-and-files = Choose your account, then Remove User, and choose to delete its files.
+linux-no-built-in-reset = Linux has no built-in reset that erases the drive.
+linux-drive-maker-secure-erase = Use the drive maker’s secure erase tool, or the laptop’s own erase in its startup settings, if it has one.
+linux-reinstall-from-usb = Then install a fresh system from a USB stick.
+any-sign-in-other-administrator = Sign in with another administrator account on the old laptop.
+any-use-system-account-settings = Remove your account with the system’s own account settings.
+any-use-system-reset = Use the laptop’s own reset that erases the drive. The laptop maker’s help says how.
+any-drive-maker-secure-erase = If there is none, use the drive maker’s secure erase tool.
+
 # 2.9 deliverables
 guard-undo-removes-if-package = PCTwin removes it if it came as an installer package; otherwise remove it yourself
 guard-undo-keeps-newer = Undo keeps the newer version: the older one cannot come back
@@ -2179,3 +2233,526 @@ kit-part-before-wipe-list = What is still only on the old laptop
 kit-part-file-data = Your files
 kit-part-setup-steps = The steps to set apps up again
 kit-part-recovery-tool = A tool to restore things
+
+# 2.8 screens
+report-group-apps = Apps
+report-group-settings = Settings
+report-group-special = App data and other things
+report-group-people = Other people
+report-count-apps = { $count ->
+        [one] 1 app
+       *[other] { $count } apps
+    }
+report-count-settings = { $count ->
+        [one] 1 group of settings
+       *[other] { $count } groups of settings
+    }
+report-count-special = { $count ->
+        [one] 1 thing
+       *[other] { $count } things
+    }
+report-count-people = { $count ->
+        [one] 1 person
+       *[other] { $count } people
+    }
+report-beyond-done = All done and checked
+report-beyond-some = { $done } of { $total } done and checked
+report-beyond-left = { $count ->
+        [one] 1 not moved: you left it out
+       *[other] { $count } not moved: you left them out
+    }
+report-beyond-more = { $count ->
+        [one] 1 more is not shown here.
+       *[other] { $count } more are not shown here.
+    }
+report-here = { $count ->
+        [one] 1 app was already on this laptop. PCTwin left it as it is.
+       *[other] { $count } apps were already on this laptop. PCTwin left them as they are.
+    }
+progress-ready-title = Ready to use now
+progress-ready-body = { $count ->
+        [one] { $groups } is copied and checked. You can open it on this laptop while the rest comes.
+       *[other] { $groups } are copied and checked. You can open them on this laptop while the rest comes.
+    }
+finish-strip = Finish your move
+finish-title = Finish your move
+finish-loading = Looking at your move.
+finish-retry = Try again
+finish-back-to-list = Back to the list
+finish-open = Open
+finish-open-name = Open { $title }
+finish-more-not-shown = More not shown: { $count }
+finish-problem-no-move = PCTwin has no move to finish on this laptop. Nothing was changed.
+finish-problem-changed = What is shown is out of date. Look at it again before you answer. Nothing was changed.
+finish-problem-not-allowed = That cannot be done. Nothing was changed.
+finish-problem-busy = A move or another step is going on. Wait until it ends, then try again. Nothing was changed.
+finish-problem-failed = Something went wrong on this laptop. Nothing was changed. Try again.
+finish-headline-ready-for-selected-work = Everything you picked is on this laptop
+finish-headline-ready-for-selected-work-body = PCTwin found each item you picked on this laptop and checked it as far as it can. This does not promise that every app works as it did before.
+finish-headline-finished-with-tasks = The move is finished, and some tasks are left
+finish-headline-finished-with-tasks-body = Some things need you, or did not copy. They are listed on this page.
+finish-headline-data-preserved = Your things are kept safe, but some cannot be opened yet
+finish-headline-data-preserved-body = Everything is on this laptop. A key or recovery code is needed to open some of it, and PCTwin could not check that here.
+finish-headline-handover-unresolved = The old laptop is not handed over yet
+finish-headline-handover-unresolved-body = This laptop is done. The list for leaving the old laptop still has open things.
+finish-headline-nothing-moved = Nothing was picked to move
+finish-headline-nothing-moved-body = No files, apps or settings were picked, so nothing was copied.
+finish-tally-title = What moved
+finish-tally-selected = Picked: { $count }
+finish-tally-done = Copied and checked: { $count }
+finish-tally-needs-action = Need you: { $count }
+finish-tally-failed = Did not copy: { $count }
+finish-tally-waiting = Still waiting: { $count }
+finish-tally-not-reachable = Old laptop not reachable: { $count }
+finish-tally-no-result-yet = No result yet: { $count }
+finish-tally-skipped = Skipped by you: { $count }
+finish-tally-left-out = Left out: { $count }
+finish-tally-accepted-loss = Left behind on purpose: { $count }
+finish-others = Other people’s items, counted only and never shown: { $count }
+finish-after-title = Checked on this laptop now
+finish-after-body = PCTwin counted these on the old laptop, then counted again on this laptop.
+finish-after-count = { $onNew } of { $atScan } are on this laptop
+finish-after-all = All there
+finish-after-short = Some missing
+finish-group-photos = Photos
+finish-group-videos = Videos
+finish-group-music = Music
+finish-group-documents = Documents
+finish-group-other-files = Other files
+finish-group-apps = Apps
+finish-group-settings = Settings
+finish-note-parental-controls = Parental controls and family safety settings do not move. Set them up again on this laptop.
+finish-note-not-everywhere = Some places on the old laptop were not searched.
+finish-note-results-refused = Some results were not accepted, because this laptop did not show them as done.
+finish-note-undo-open = Undo is still open for this move. It closes for good if you erase the old laptop.
+finish-open-title = Not finished
+finish-open-body = These are your items that still need attention.
+finish-standing-copied = Copied
+finish-standing-reinstalled = Reinstalled
+finish-standing-converted = Converted
+finish-standing-needs-action = Needs you
+finish-standing-failed = Did not copy
+finish-standing-waiting = Waiting
+finish-standing-not-reachable = Old laptop not reachable
+finish-standing-no-result-yet = No result yet
+finish-standing-skipped-by-user = Skipped by you
+finish-standing-left-out = Left out
+finish-access-key-not-checked = A key or code to open it was not checked here.
+finish-access-not-on-new-laptop = It is not on this laptop.
+finish-search-title = Where PCTwin looked on the old laptop
+finish-search-searched = Looked in: { $places }
+finish-search-not-searched = Did not look in: { $places }
+finish-search-all = PCTwin looked in every place it knows about. It cannot say there is nothing anywhere else.
+finish-old-checked = The old laptop was last checked: { $when }
+finish-old-never = The old laptop has not been checked since the move.
+finish-steps-title = Next steps
+finish-step-setup = Finish setting up
+finish-step-setup-detail = Apps that need you to sign in or finish a step.
+finish-step-goodbye = Before you leave the old laptop
+finish-step-goodbye-detail = What is still only on the old laptop.
+finish-step-catchup = Bring me up to date
+finish-step-catchup-detail = Copy what changed on the old laptop since the move.
+finish-step-handover = Hand the old laptop on
+finish-step-handover-detail = Remove your account or erase the old laptop, with the system’s own tools.
+finish-step-undo = Undo this move
+finish-step-undo-detail = Remove apps and put settings back.
+finish-step-cleanup = Clean up
+finish-step-cleanup-detail = Remove PCTwin’s temporary files from this laptop.
+finish-step-report = Share the report
+finish-step-report-detail = Save a plain report. You choose what it includes.
+finish-step-doctor = Check the connection
+finish-step-doctor-detail = Find out why the two laptops cannot connect.
+finish-setup-title = Finish setting up
+finish-setup-body = These apps need a step from you. A tick records what you say. It does not count as a PCTwin check.
+finish-setup-empty = Nothing is waiting for you.
+finish-setup-sign-in = Sign in to { $name }
+finish-setup-licence-key = Enter the licence key for { $name }
+finish-setup-set-up-again = Set up { $name } again
+finish-setup-download-from-maker = Download { $name } from its maker’s website
+finish-setup-permission = Give { $name } permission when it asks
+finish-setup-restart = Restart this laptop to finish { $name }
+finish-setup-finish-by-hand = Finish { $name } by hand
+finish-setup-parts-missing = Some parts of { $name } did not arrive. Send them again
+finish-setup-export-first = Export from { $name } on the old laptop first
+finish-setup-relink = Link { $name } to your account again
+finish-setup-look-at-it = Look at { $name } and check it is right
+finish-setup-mark-open = Not done
+finish-setup-mark-machine-checked = PCTwin checked
+finish-setup-mark-you-did-it = You said it is done
+finish-setup-tick-hint = Tick when you have done it.
+finish-setup-save-row = Save your app list and setup
+finish-setup-save-row-detail = Keep a list of your apps and settings in My PCTwin history.
+finish-save-title = Save your app list and setup
+finish-save-body = PCTwin keeps a list of your apps and settings in My PCTwin history, on this laptop only. It is a list, not a copy of your files.
+finish-save-button = Save the list
+finish-save-saved = Saved in My PCTwin history. Apps: { $apps }. Settings: { $settings }.
+finish-save-earlier-title = Saved before
+finish-save-earlier = Saved: { $when }
+finish-goodbye-title = Before you leave the old laptop
+finish-goodbye-body = This is what is still only on the old laptop. Answer each one. Nothing is erased here. Erasing is a separate step.
+finish-goodbye-saved = This list is saved on this laptop.
+finish-goodbye-only-on-old-laptop = Only on the old laptop: { $count }
+finish-goodbye-key-not-checked = Items that need a key or code that was not checked: { $count }
+finish-goodbye-tied-to-old-laptop = Tied to the old laptop: { $count }
+finish-goodbye-do-first-on-old-laptop = To do on the old laptop first: { $count }
+finish-goodbye-steps-not-finished = Steps not finished: { $count }
+finish-goodbye-not-searched = Places not searched: { $count }
+finish-goodbye-old-laptop-not-reachable = The old laptop could not be reached
+finish-goodbye-special-sign-in = { $names }: sign in again
+finish-goodbye-special-relink = { $names }: link it to your account again
+finish-goodbye-special-export-first = { $names }: export what you need from the old laptop first
+finish-goodbye-special-look-at-it = { $names }: look at it and check it is right
+finish-goodbye-places = Places: { $places }
+finish-goodbye-did-it = I did it
+finish-goodbye-accept = I accept it is lost
+finish-goodbye-accept-warning = If you accept this, it stays only on the old laptop. When the old laptop is erased, it is gone.
+finish-goodbye-cannot-answer = Only a new check of the old laptop can settle this. Connect it and check again.
+finish-goodbye-res-open = Not answered yet
+finish-goodbye-res-person-did-it = You said you did it
+finish-goodbye-res-accepted-loss = You accepted it is lost
+finish-goodbye-answer-label = Your answer for: { $title }
+finish-goodbye-keep-title = Keep the old laptop untouched until
+finish-goodbye-keep-body = Suggested date: { $date }. Until then, do not erase it, in case you need something from it.
+finish-goodbye-keep-label = Keep until
+finish-goodbye-keep-use = Use the suggested date
+finish-goodbye-keep-save = Save this date
+finish-goodbye-keep-set = Kept until: { $date }
+finish-goodbye-keep-none = No date chosen yet
+finish-goodbye-blocked = The old laptop cannot be handed on yet. Still open: { $count }.
+finish-goodbye-blocked-unchecked = The old laptop has not been checked since the move. Check it again first.
+finish-goodbye-clear = Everything is answered and the old laptop was checked. You can ask for a handover. That is a separate step.
+finish-goodbye-handover = Hand the old laptop on
+finish-goodbye-check-again = Check the old laptop again
+finish-catchup-title = Bring me up to date
+finish-catchup-body = See what changed on the old laptop since the move. You review each change. PCTwin sends only the ones you choose.
+finish-catchup-purpose-check = Only look at the old laptop
+finish-catchup-purpose-check-detail = Nothing is copied. Your before-you-leave list is updated.
+finish-catchup-purpose-catch-up = Look and copy what changed
+finish-catchup-purpose-catch-up-detail = You see the changes first and choose what is sent.
+finish-catchup-armed = Ready. Connect the old laptop the same way as for the move. This page shows the changes when the old laptop answers.
+finish-catchup-connect = Connect the old laptop
+finish-catchup-waiting = Waiting for the old laptop.
+finish-catchup-unreadable = PCTwin could not read the old laptop’s answer. Nothing was changed. Try again.
+finish-catchup-changes-title = What changed
+finish-catchup-check-only = Nothing is sent. This list only updates what PCTwin knows about the old laptop.
+finish-catchup-none = Nothing changed on the old laptop.
+finish-catchup-others = Changes to other people’s items, counted only: { $count }
+finish-catchup-choose-label = What should PCTwin do with { $title }?
+finish-catchup-send-label = Send { $title }
+finish-catchup-nothing-to-send = Nothing to send
+finish-change-new = New on the old laptop
+finish-change-updated = Changed on the old laptop
+finish-change-both-changed = Changed on both laptops
+finish-change-gone-on-new-laptop = Removed from this laptop
+finish-change-gone-on-old-laptop = Removed from the old laptop
+finish-change-cannot-tell = PCTwin cannot tell
+finish-choice-none = Do not send
+finish-choice-send = Send it again
+finish-choice-keep-both = Keep both copies
+finish-choice-keep-new-laptop-version = Keep this laptop’s version
+finish-catchup-approve = Send the changes I chose: { $count }
+finish-catchup-sent = Sent for copying. Only the changes you chose are copied.
+finish-handover-title = Hand the old laptop on
+finish-handover-body = Each choice is a separate decision. Nothing happens until you confirm on its own page.
+finish-handover-remove-title = Remove my account from the old laptop
+finish-handover-remove-detail = Only your account. Other people’s accounts stay.
+finish-handover-erase-title = Erase the old laptop
+finish-handover-erase-detail = Everything on the old laptop’s drive.
+finish-handover-preview-remove = Remove my account
+finish-handover-preview-erase = Erase the old laptop
+finish-handover-removes = What will be removed
+finish-handover-keeps = What stays
+finish-handover-keeps-none = Nothing on it is kept.
+finish-handover-route = How it is done
+finish-handover-route-body = PCTwin does not do this itself. The system’s own tool does it, and PCTwin hands you over to it.
+finish-handover-continue = Continue to confirm
+finish-handover-not-offered = This is not offered now
+finish-handover-refused-open = Things still open on your before-you-leave list: { $count }
+finish-handover-refused-nothing-done = Nothing was done.
+finish-handover-to-list = Go to the before-you-leave list
+finish-route-system-windows = Windows
+finish-route-system-macos = macOS
+finish-route-system-linux = Linux
+finish-route-unknown-step = Follow the next step the system shows you.
+finish-hnote-ssd-not-secure-wipe = Deleting files on an SSD is not a secure wipe.
+finish-hnote-does-not-cancel-subscriptions = Removing an account does not cancel subscriptions or sign you out of other places.
+finish-hnote-others-stay = Everyone else’s accounts stay as they are.
+finish-hnote-cannot-be-undone = This cannot be undone.
+finish-hnote-closes-undo = Going ahead closes undo for this move for good.
+finish-hnote-sign-in-as-another-administrator = An account cannot remove itself. Sign in to the old laptop with another administrator account first.
+finish-hnote-family-group-first = If the account is in a Microsoft family group, remove it from the family online first.
+finish-hnote-not-a-certificate = PCTwin records what you asked for and what you tell it happened. That is not a certificate that anything was erased.
+finish-hnote-encrypt-first-helps = Turning on the drive’s encryption before the reset makes what is left much harder to read.
+finish-refused-wrong-device = This step is not available on this laptop.
+finish-refused-undo-not-closed = Undo is still open for this move. It must be closed first.
+finish-refused-old-laptop-not-checked = The old laptop was last checked more than 15 minutes ago. Check it again first.
+finish-refused-list-out-of-date = The before-you-leave list is out of date. Open it again.
+finish-refused-list-not-clear = The before-you-leave list still has open things.
+finish-refused-no-write-exclusion = PCTwin could not make sure nothing is changing on the old laptop right now.
+finish-refused-no-such-account = Your account was not found on the old laptop.
+finish-refused-other-people-use-it = Other people use this account, so PCTwin will not remove it.
+finish-refused-not-qualified = This old laptop cannot be handed on this way.
+finish-refused-no-fresh-confirmation = A new confirmation is needed.
+finish-refused-wrong-confirmation = That confirmation does not match what is shown now. Look again.
+finish-refused-changed-since-confirmed = Something changed after you confirmed. Look again and confirm again.
+finish-refused-expired = The confirmation ran out. Look again and confirm again.
+finish-refused-already-used = This confirmation was already used.
+finish-refused-nothing-to-remove = There is nothing to remove.
+finish-confirm-title-remove-my-account = Confirm: remove my account
+finish-confirm-title-erase-old-laptop = Confirm: erase the old laptop
+finish-confirm-target = This will change: { $target }
+finish-confirm-consequences = What this means
+finish-confirm-tick-remove-my-account = I understand that the account { $target } will be removed from the old laptop and that this cannot be undone.
+finish-confirm-tick-erase-old-laptop = I understand that everything on { $target } will be erased and that this cannot be undone.
+finish-confirm-go = Confirm and open the system’s tool
+finish-confirm-cancel = Go back and do nothing
+finish-confirm-needs-tick = The button works after you tick the box above.
+finish-started-title = Follow the system’s own steps
+finish-started-body = The steps below are the system’s, not PCTwin’s. PCTwin does not draw its own copy of them.
+finish-started-opened = PCTwin opened the system’s page.
+finish-started-not-opened = PCTwin could not open the system’s page. Open it yourself and follow the steps.
+finish-started-undo-closed = Undo is now closed for this move.
+finish-says-title = Tell PCTwin what happened
+finish-says-label = What did you see?
+finish-says-choose = Choose what you saw
+finish-says-done = I finished the steps
+finish-says-partly = I finished part of the steps
+finish-says-cancelled-part-way = I cancelled part way
+finish-says-not-started = I did not start
+finish-says-cannot-tell = I cannot tell
+finish-says-record = Record what I saw
+finish-recorded-person-says-done = Recorded: you said it finished. This is your word. It is not a certificate.
+finish-recorded-partial = Recorded: only part of it was done.
+finish-recorded-interrupted = Recorded: it was interrupted.
+finish-recorded-cancelled-after-some-effects = Recorded: it was cancelled after some changes were made.
+finish-recorded-not-started = Recorded: it was not started.
+finish-recorded-inconclusive = Recorded: you could not tell what happened.
+finish-recorded-time = Recorded: { $when }
+finish-undo-title = Review before undo
+finish-undo-body = This is what undo does and what it leaves. Nothing happens until you choose Start undo.
+finish-undo-row-removes = Apps PCTwin installed: undo removes them
+finish-undo-row-yours = Apps that are now yours: undo leaves them. Remove them yourself if you want.
+finish-undo-row-settings = Settings put back as they were: { $count }
+finish-undo-row-appdata = App data put back for these apps
+finish-undo-row-files = Files the move copied: { $count }
+finish-undo-limit-files = Only with the old laptop connected, and only copies nobody changed since.
+finish-undo-limit-apps = Only while each app is still the version PCTwin installed.
+finish-undo-keeps = What undo keeps: apps that are now yours, and anything you changed after the move.
+finish-undo-closed = Undo is closed for this move. It cannot be used.
+finish-undo-nothing = There are no apps or settings to undo for this move.
+finish-undo-start = Start undo
+finish-cleanup-title = Clean up
+finish-cleanup-body = Each question is asked separately. Nothing is removed unless you confirm.
+finish-cleanup-temp = PCTwin’s temporary files
+finish-cleanup-temp-detail = Files PCTwin made on this laptop while it worked.
+finish-cleanup-model = PCTwin’s model and saved data
+finish-cleanup-model-detail = Helper files PCTwin keeps on this laptop so it works faster.
+finish-cleanup-look = Look
+finish-cleanup-removes = Will be removed
+finish-cleanup-keeps = Will be kept
+finish-cleanup-keeps-body = These only look like PCTwin’s, or are in use.
+finish-cleanup-nothing = There is nothing to remove.
+finish-cleanup-tick = Remove the items listed under Will be removed
+finish-cleanup-confirm = Remove them
+finish-cleanup-done = Removed: { $removed }. Kept: { $kept }. Could not remove: { $failed }.
+finish-doctor-title = Check the connection
+finish-doctor-body = PCTwin looks at this laptop to find why the two laptops cannot connect.
+finish-doctor-role-label = Which laptop is this?
+finish-doctor-role-old = The old laptop
+finish-doctor-role-new = The new laptop
+finish-doctor-run = Run the check
+finish-doctor-running = Checking this laptop.
+finish-doctor-found = What PCTwin found
+finish-doctor-none = PCTwin found no problem on this laptop. That does not prove the connection will work.
+finish-doctor-sure = Sure
+finish-doctor-likely = Likely
+finish-doctor-fix = What to do
+finish-doctor-not-checked = PCTwin could not check
+finish-notchecked-unknown = One check could not be made on this laptop.
+finish-report-title = Share the report
+finish-report-body = Choose what the report includes. Nothing is included unless you choose it. Nothing is sent. You save the text you read, and share it yourself.
+finish-report-choices = Include in the report
+finish-report-file-names = File names
+finish-report-app-names = App names
+finish-report-account-id = Account ID
+finish-report-preview = The report as it will be saved
+finish-report-withheld = Kept out of the report: names { $names }, secrets { $secrets }, account IDs { $ids }.
+finish-report-save = Save the report
+finish-report-saved = Saved to: { $path }
+finish-report-not-saved = No file was saved.
+finish-report-feedback = To tell the PCTwin team what happened, use Help, then Feedback. No account is needed, and nothing is sent automatically.
+finish-report-help = Open Help
+finish-report-text-title = PCTwin move report
+finish-report-text-unnamed-file = A file
+finish-report-text-unnamed-app = An app
+finish-report-text-account = Account ID: { $id }
+finish-report-text-others = Other people’s items not finished, counted only: { $count }
+finish-report-text-goodbye = Before-you-leave list: { $total } things, { $open } still open
+finish-report-text-lines = Items not finished
+rescue-eyebrow = Rescue a laptop
+rescue-title = Rescue a laptop
+rescue-lead = Bring files back from a laptop that will not start. Connect its drive to this laptop, then choose it here.
+rescue-checking = Looking for connected drives.
+rescue-failed = PCTwin could not list the drives connected to this laptop. Check the cable, then check again.
+rescue-empty = No drive connected. Connect the old laptop’s drive with a USB adapter, then check again.
+rescue-looks-like-laptop = Looks like a laptop’s drive
+rescue-choose = Choose { $name }
+rescue-check-again = Check again
+rescue-locked-title = If the drive is locked
+rescue-locked-windows = If the drive is locked with BitLocker, Windows asks for its recovery key in its own window when you open the drive.
+rescue-wait-title = Reading { $drive }
+rescue-wait-body = PCTwin is looking through the folders on { $drive }. Nothing on the drive is changed.
+rescue-accept-title = Files found on { $drive }
+rescue-accept-body = Accept, and PCTwin copies them to this laptop. Nothing on the drive is changed.
+rescue-progress-title = Copying files from { $drive }
+rescue-safe = The drive is only read. Nothing on it is changed.
+rescue-outcome-title = Files copied from { $drive }
+plan-net-title = What needs the internet
+plan-net-none = Nothing in this move needs the internet.
+plan-net-downloads =
+    { $count ->
+        [one] PCTwin downloads { $count } app from the internet.
+       *[other] PCTwin downloads { $count } apps from the internet.
+    }
+plan-net-sizes = The size of each download is known only once it has been downloaded.
+plan-net-signins =
+    { $count ->
+        [one] You sign in again online to { $count } thing.
+       *[other] You sign in again online to { $count } things.
+    }
+plan-room-title = Room needed beyond your files
+plan-room-body = At the busiest moment PCTwin needs about { $installs } for apps and about { $appData } for app data, on top of your files.
+compat-strip = What was tested
+compat-title = { $name }: what was tested
+compat-open = Details
+compat-open-name = See what was tested for { $name }
+compat-list-title =
+    { $count ->
+        [one] How well { $count } app was tested
+       *[other] How well { $count } apps were tested
+    }
+compat-aspects-title = Each part
+compat-steps-title = What you will do
+compat-steps-none = No steps from you.
+compat-never-checked = Nobody has tested this app yet. PCTwin will try it and tell you what happened.
+compat-checked-on = Checked on { $date }.
+compat-version = Version tested: { $version }
+work-strip = Can I work?
+work-title = Can I actually work?
+work-body = Add the files, fonts and jobs you need on this laptop. PCTwin looks at what it can read. You say whether the rest worked. Nothing is opened or run.
+work-empty = No checks yet. Add a file, a font or a job below.
+work-looked-at = Looked at { $checked } of { $of }.
+work-missing = Missing:
+work-and-more =
+    { $count ->
+        [one] And { $count } more.
+       *[other] And { $count } more.
+    }
+work-not-looked-at = Not looked at:
+work-answer-worked = It worked
+work-answer-worked-name = It worked: { $name }
+work-answer-not = It did not work
+work-answer-not-name = It did not work: { $name }
+work-remove = Remove
+work-remove-name = Remove { $name }
+work-run = Check now
+work-add-title = Add a check
+work-add-file = Choose a file
+work-add-file-hint = A project, an archive or a database. PCTwin reads it and never changes it.
+work-font-label = A font, by name
+work-add-font = Add font
+work-task-label = A job you do yourself
+work-task-hint = For example: print a boarding pass. You say whether it worked.
+work-add-task = Add job
+repair-strip = Fix what did not finish
+repair-title =
+    { $count ->
+        [one] Fix this item
+       *[other] Fix these { $count } items
+    }
+repair-title-loading = Fix what did not finish
+repair-body =
+    { $kept ->
+        [one] Only the items below are tried again. { $kept } item that already worked stays as it is.
+       *[other] Only the items below are tried again. { $kept } items that already worked stay as they are.
+    }
+repair-nothing = Nothing needs fixing.
+repair-can-now = Can be tried now
+repair-waiting = Waiting
+repair-fixed =
+    { $count ->
+        [one] { $count } item fixed.
+       *[other] { $count } items fixed.
+    }
+repair-run =
+    { $count ->
+        [one] Try { $count } item again
+       *[other] Try { $count } items again
+    }
+changed-strip = Changes since you said yes
+changed-title =
+    { $count ->
+        [one] { $count } thing changed after you said yes
+       *[other] { $count } things changed after you said yes
+    }
+changed-body = Only these need a fresh yes. Everything else stays approved.
+changed-affects = Affects: { $steps }
+changed-held =
+    { $count ->
+        [one] { $count } step waits for your answer.
+       *[other] { $count } steps wait for your answer.
+    }
+changed-leave-out = Leave these out
+changed-approve = Say yes again
+safe-stop-strip = Update
+safe-stop-title = Waiting for a safe moment
+safe-stop-body = PCTwin does not update or remove itself in the middle of a move. It waits until nothing is half done.
+safe-stop-failed = PCTwin could not tell whether it is safe. Try again.
+safe-stop-ready = Nothing is in the middle of changing. PCTwin can update or be removed now.
+safe-stop-waiting-for = It is waiting for these to finish:
+safe-stop-nothing-going-on = No move, setup or undo is going on.
+safe-stop-check = Check again
+kit-strip = Recovery kit
+kit-title = Save a recovery kit
+kit-body = A recovery kit is a small record of this move, saved in a folder you choose, for example on a USB drive. It shows what happened and what was left to do, even without this laptop.
+kit-lacks-sentence = The kit does not contain your files themselves. It cannot bring back files that are missing.
+kit-not-saved = No folder was chosen. Nothing was saved.
+kit-saved-to = Saved to:
+kit-files-title = Files in the kit
+kit-holds-title = What the kit holds
+kit-lacks-title = What the kit does not hold
+kit-save = Choose a folder and save
+kit-save-again = Save again
+kit-history = Recovery kit
+finish-step-repair =
+    { $count ->
+        [one] Fix this item
+       *[other] Fix these { $count } items
+    }
+finish-step-repair-detail = Try again only what did not finish. What worked stays.
+finish-step-work = Can I actually work?
+finish-step-work-detail = Check that the files, fonts and jobs you need are here.
+finish-step-kit = Save a recovery kit
+finish-step-kit-detail = Keep a small record of this move in a folder you choose.
+space-box-title = This laptop does not have room for everything.
+space-box-choice = { $count ->
+        [one] Leave 1 file ({ $size }) you have not used for the longest time on your old laptop
+       *[other] Leave { $count } files ({ $size }) you have not used for the longest time on your old laptop
+    }
+space-box-kept = Nothing is deleted. They stay on your old laptop.
+space-box-short = Even then, { $size } is still short. Untick some folders, or choose another place for them.
+space-box-fits = With them left on your old laptop, everything else fits.
+finish-handover-check-old = Check the old laptop again
+finish-handover-check-armed = PCTwin is ready to check the old laptop. Open PCTwin on the old laptop and connect the two laptops as for a move. Then press Look again.
+finish-handover-look-again = Look again
+qs-where-title = Where should these go?
+qs-where-body = { $count ->
+        [one] 1 file, { $size }. Nothing is saved until you choose.
+       *[other] { $count } files, { $size }. Nothing is saved until you choose.
+    }
+qs-where-folder = Folder: { $folder }
+qs-where-details = More details
+qs-where-path = Full place: { $path }
+qs-where-save = Save here
+qs-where-choose = Choose another folder
+qs-where-stop = Stop

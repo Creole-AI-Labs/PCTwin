@@ -303,7 +303,7 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
         wipe.iter()
             .any(|s| s.kind == ExceptionKind::DoFirstOnOldLaptop)
     );
-    assert!(!wipe.iter().any(|s| s.words.contains("journal.db")));
+    assert!(!wipe.iter().any(|s| s.place.contains("journal.db")));
 
     // The copied database's landing is recorded, so it can be undone.
     assert!(journal_effect.is_some());

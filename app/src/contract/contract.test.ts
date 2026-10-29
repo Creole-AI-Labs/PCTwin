@@ -6,9 +6,9 @@
  *   PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract
  */
 import { describe, expect, it } from "vitest";
-import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere,
-  parseRescueDrive, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView } from "../bridge";
+import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView, parseRescueDrive } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
+import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem } from "../deliver";
 import { parseAppsOpen, parseDataProgress, parseRebuildStep } from "../fullmove";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
@@ -53,6 +53,14 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "qs-problem": parseQsProblem,
   tidied: parseTidied,
   "guard-snapshot": parseSnapshot,
+  "work-checks": parseWorkChecks,
+  "work-problem": parseWorkProblem,
+  "repair-offer": parseRepairOffer,
+  "repair-done": parseRepairDone,
+  "repair-problem": parseRepairProblem,
+  "move-changed": parseChangesView,
+  "safe-stop": parseSafeStop,
+  "kit-saved": parseKitSaved,
   "guard-refused": (v: unknown) => {
     const r = parseRefusal(v);
     return r === null ? null : { kind: r };

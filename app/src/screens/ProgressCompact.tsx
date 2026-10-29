@@ -4,7 +4,8 @@ import { measuredPercent, type MoveProgress } from "../move";
 import FrameFooter from "./FrameFooter";
 import MoveTips, { type TipContext } from "./MoveTips";
 import Paused from "./Paused";
-import { Eyebrow, GroupRows, Heading, MeasuredBar, Notices, NowLine, PercentValue, RouteStrip } from "./ProgressParts";
+import { useRescueDrive } from "./rescueContext";
+import { Eyebrow, GroupRows, Heading, MeasuredBar, Notices, NowLine, PercentValue, ReadyNow, RouteStrip } from "./ProgressParts";
 
 export type ProgressHandlers = {
   onPause: () => void;
@@ -19,6 +20,7 @@ export type ProgressHandlers = {
  * X01 Move progress, compact (480 x 620): the route between the two laptops, the measured percent,
  * the bar, and a row for each group. Footer, as in the mockup: Pause move at the start and Keep
  * compact at the end. When the move is pausing or paused, the same window shows X05 instead.
+ * While the move goes on, the new laptop names the groups already copied and checked (X03).
  * `tips`: what this laptop knows about itself, for the one tip under the bar (T14); none without it.
  */
 export default function ProgressCompact({
@@ -31,6 +33,7 @@ export default function ProgressCompact({
   tips,
 }: { progress: MoveProgress; onMinimise: () => void; tips?: Omit<TipContext, "batteryWarning"> } & ProgressHandlers) {
   const { l10n } = useLocalization();
+  const drive = useRescueDrive();
   if (progress.state !== "running") return <Paused progress={progress} onResume={onResume} onStop={onStop} />;
   return (
     <>
@@ -39,16 +42,18 @@ export default function ProgressCompact({
         <div>
           <Eyebrow id="progress-eyebrow" />
           {/* The old laptop sends; the new laptop is being set up: each says its own part. */}
-          <Heading id={tips?.old ? "progress-title-old" : "progress-title"} />
+          {drive !== null ? <Heading id="rescue-progress-title" vars={{ drive }} /> : <Heading id={tips?.old ? "progress-title-old" : "progress-title"} />}
         </div>
         <PercentValue pct={measuredPercent(progress)} />
       </div>
       <MeasuredBar progress={progress} />
       {tips && <MoveTips context={{ ...tips, batteryWarning: progress.notice?.kind === "low-battery" }} />}
+      {/* X03: only the new laptop, where the person arrives, has anything ready to use. */}
+      {tips && !tips.old && <ReadyNow groups={progress.groups} />}
       <GroupRows groups={progress.groups} />
       <NowLine current={progress.current} />
       <Notices progress={progress} onSeeNeedsAction={onSeeNeedsAction} />
-      <p className="mv-safe">{l10n.getString("progress-old-safe")}</p>
+      <p className="mv-safe">{l10n.getString(drive !== null ? "rescue-safe" : "progress-old-safe")}</p>
       <FrameFooter note="none">
         <Button variant="quiet" onClick={onPause}>
           {l10n.getString("progress-pause")}

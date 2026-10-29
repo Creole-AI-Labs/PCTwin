@@ -26,6 +26,8 @@ export default function History({
   onOpen,
   onContinue,
   onUndo,
+  onFinish,
+  onKit,
   onExport,
   onStart,
   onBack,
@@ -36,6 +38,10 @@ export default function History({
   onContinue: (id: string) => void;
   /** Undo a past move's apps and settings, by its undo book. */
   onUndo?: (undoId: string) => void;
+  /** Finish a finished move (2.7), by its history entry. */
+  onFinish?: (id: string) => void;
+  /** Save a recovery kit for a move, by its history entry. */
+  onKit?: (id: string) => void;
   onExport: () => void;
   onStart: () => void;
   onBack: () => void;
@@ -102,6 +108,28 @@ export default function History({
                       }}
                     >
                       {l10n.getString("history-undo")}
+                    </Button>
+                  )}
+                  {e.state === "finished" && onFinish && (
+                    <Button
+                      variant="quiet"
+                      aria-label={l10n.getString("history-open-name", { what: l10n.getString("finish-title"), title: title(e) })}
+                      onClick={() => {
+                        onFinish(e.id);
+                      }}
+                    >
+                      {l10n.getString("finish-title")}
+                    </Button>
+                  )}
+                  {onKit && (
+                    <Button
+                      variant="quiet"
+                      aria-label={l10n.getString("history-open-name", { what: l10n.getString("kit-history"), title: title(e) })}
+                      onClick={() => {
+                        onKit(e.id);
+                      }}
+                    >
+                      {l10n.getString("kit-history")}
                     </Button>
                   )}
                   <Button

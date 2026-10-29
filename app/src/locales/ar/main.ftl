@@ -1471,15 +1471,15 @@ drive-problem-carry-on = متابعة
 
 ## R02 Your move, item by item (detailed report)
 
-report-title = نقلك، حسب النوع.
-report-body = افتح نوعًا لترى ملفاته. ما يحتاج إليك يظهر أولًا.
+report-title = ما نُقل
+report-body = اختر مجموعة لترى ما فيها. ما يحتاج إليك في الأعلى.
 report-needs-title = { $count ->
-        [zero] لا شيء يحتاج إليك
-        [one] شيء واحد يحتاج إليك
-        [two] شيئان يحتاجان إليك
-        [few] { $count } أشياء تحتاج إليك
-        [many] { $count } شيئًا يحتاج إليك
-       *[other] { $count } شيء يحتاج إليك
+        [zero] يحتاج إليك: لا شيء
+        [one] يحتاج إليك: واحد
+        [two] يحتاج إليك: اثنان
+        [few] يحتاج إليك: { $count }
+        [many] يحتاج إليك: { $count }
+       *[other] يحتاج إليك: { $count }
     }
 report-group-photos = الصور
 report-group-videos = الفيديوهات
@@ -1497,12 +1497,12 @@ report-group-size = { $files ->
 report-group-done = نُسخ كل شيء وتم التحقق منه
 report-group-some = نُسخ { $done } من { $total } وتم التحقق منها
 report-group-left = { $count ->
-        [zero] لم يبقَ شيء على حاسوبك القديم
-        [one] بقي واحد على حاسوبك القديم، كما اخترت
-        [two] بقي اثنان على حاسوبك القديم، كما اخترت
-        [few] بقيت { $count } على حاسوبك القديم، كما اخترت
-        [many] بقي { $count } على حاسوبك القديم، كما اخترت
-       *[other] بقي { $count } على حاسوبك القديم، كما اخترت
+        [zero] لا شيء لم يُنقل
+        [one] واحد لم يُنقل: تركته أنت
+        [two] اثنان لم يُنقلا: تركتهما أنت
+        [few] { $count } لم تُنقل: تركتها أنت
+        [many] { $count } لم يُنقل: تركتها أنت
+       *[other] { $count } لم يُنقل: تركتها أنت
     }
 report-filter-label = عرض
 report-col-item = العنصر
@@ -2549,6 +2549,60 @@ forgotten-online-only =
        *[other] { $count } من الملفات محفوظة على الإنترنت فقط، ولم تُنزَّل
     }
 
+# 2.7 finishing a move
+doctor-not-connected = هذا الحاسوب غير متصل بأي شبكة.
+doctor-not-connected-fix = اتصل بشبكة Wi-Fi أو صِل كابل شبكة، ثم حاول مرة أخرى.
+doctor-mac-local-network-denied = قد لا يسمح جهاز Mac هذا لـ PCTwin بالتواصل مع الأجهزة على شبكتك.
+doctor-mac-local-network-denied-fix = افتح إعدادات النظام، ثم الخصوصية والأمن، ثم الشبكة المحلية، وفعّل PCTwin.
+doctor-discovery-blocked = قد يكون شيء على هذا الحاسوب، مثل جدار حماية أو تطبيق أمان، يمنع الحاسوبين من إيجاد بعضهما.
+doctor-discovery-blocked-fix = اسمح لـ PCTwin في جدار الحماية أو تطبيق الأمان، أو أوقفه مؤقتًا أثناء النقل.
+doctor-windows-public-network = يعامل Windows الشبكة { $name } كشبكة عامة، وهذا يحجب الأجهزة الأخرى.
+doctor-windows-public-network-fix = افتح الإعدادات، ثم الشبكة والإنترنت، واختر { $name }، واجعلها شبكة خاصة.
+doctor-vpn-on = هناك VPN قيد التشغيل ({ $name }). قد يُخفي شبكة منزلك.
+doctor-vpn-on-fix = أوقف VPN أثناء النقل، ثم حاول مرة أخرى.
+doctor-old-laptop-not-pairing = قد لا يعرض الحاسوب القديم رمزه.
+doctor-old-laptop-not-pairing-fix = على الحاسوب القديم، افتح PCTwin واختر أنه حاسوبك القديم.
+doctor-different-networks = قد يكون الحاسوبان على شبكتين مختلفتين.
+doctor-different-networks-fix = صِل الحاسوبين بشبكة Wi-Fi نفسها.
+doctor-guest-network = قد تمنع هذه الشبكة الأجهزة من رؤية بعضها، كما يحدث غالبًا في شبكات Wi-Fi للضيوف والفنادق والمكاتب.
+doctor-guest-network-fix = استخدم شبكة Wi-Fi في منزلك، أو نقطة الاتصال في هاتفك.
+doctor-probe-interfaces = تعذّر على PCTwin عرض اتصالات الشبكة لهذا الحاسوب.
+doctor-probe-hears-itself = تعذّر على PCTwin اختبار ما إذا كان يمكن العثور على هذا الحاسوب على الشبكة.
+doctor-probe-local-network = تعذّر على PCTwin التحقق من إعداد الشبكة المحلية في Mac.
+doctor-probe-network-profiles = تعذّر على PCTwin التحقق من كيفية تعامل Windows مع هذه الشبكة.
+doctor-hotspot = ما زال لا يعمل؟ شغّل نقطة الاتصال في هاتفك وصِل الحاسوبين بها. يتم النقل مباشرة بين الحاسوبين، وليس عبر بيانات هاتفك.
+windows-make-other-administrator = تأكد من أن الشخص الذي سيحتفظ بالحاسوب لديه حساب مسؤول عليه.
+windows-sign-in-other-administrator = سجّل الخروج، ثم سجّل الدخول بحساب المسؤول الآخر. لا يمكن لأي حساب أن يحذف نفسه.
+windows-open-other-users = افتح الإعدادات، ثم الحسابات، ثم المستخدمون الآخرون.
+windows-remove-account = اختر حسابك، ثم إزالة.
+windows-delete-account-and-data = اختر حذف الحساب والبيانات. تبقى حسابات الآخرين كما هي.
+windows-sign-out-of-everything = أولًا سجّل الخروج من تطبيقاتك وحساباتك على الحاسوب القديم.
+windows-open-recovery = افتح الإعدادات، ثم النظام، ثم الاسترداد.
+windows-reset-this-pc = اختر إعادة تعيين الكمبيوتر.
+windows-remove-everything = اختر إزالة كل شيء.
+windows-clean-the-drive = غيّر الإعدادات ليتم تنظيف محرك الأقراص، لا تفريغه فقط. يستغرق ذلك بضع ساعات.
+windows-wait-until-setup-screen = انتظر حتى يعرض الحاسوب شاشة الإعداد. عندها يكون جاهزًا للتسليم.
+macos-make-other-administrator = تأكد من أن الشخص الذي سيحتفظ بجهاز Mac لديه حساب مسؤول عليه.
+macos-sign-in-other-administrator = سجّل الخروج، ثم سجّل الدخول بحساب المسؤول الآخر. لا يمكن لأي حساب أن يحذف نفسه.
+macos-open-users-and-groups = افتح إعدادات النظام، ثم المستخدمون والمجموعات.
+macos-delete-user = اختر زر المعلومات بجانب حسابك، ثم حذف المستخدم.
+macos-delete-home-folder = اختر حذف مجلد الحساب الرئيسي.
+macos-sign-out-of-apple-account = أولًا سجّل الخروج من حساب Apple على جهاز Mac القديم، ليصبح متاحًا لمالكه التالي.
+macos-open-transfer-or-reset = افتح إعدادات النظام، ثم عام، ثم النقل أو إعادة التعيين.
+macos-erase-all-content-and-settings = اختر مسح كل المحتوى والإعدادات، واتبع الخطوات.
+macos-older-mac-use-recovery = إذا لم يعرض جهاز Mac ذلك (أجهزة Mac الأقدم)، شغّله في استرداد macOS، وامسح القرص بأداة القرص، ثم أعد تثبيت macOS.
+macos-wait-until-setup-screen = انتظر حتى يعرض جهاز Mac شاشة الإعداد. عندها يكون جاهزًا للتسليم.
+linux-sign-in-other-administrator = سجّل الدخول بحساب مسؤول آخر.
+linux-open-users = افتح الإعدادات، ثم المستخدمون.
+linux-remove-user-and-files = اختر حسابك، ثم إزالة المستخدم، واختر حذف ملفاته.
+linux-no-built-in-reset = لا يحتوي Linux على إعادة تعيين مدمجة تمسح محرك الأقراص.
+linux-drive-maker-secure-erase = استخدم أداة المسح الآمن من الشركة المصنّعة لمحرك الأقراص، أو المسح الخاص بالحاسوب في إعدادات بدء التشغيل إن وُجد.
+linux-reinstall-from-usb = ثم ثبّت نظامًا جديدًا من ذاكرة USB.
+any-sign-in-other-administrator = سجّل الدخول بحساب مسؤول آخر على الحاسوب القديم.
+any-use-system-account-settings = احذف حسابك من إعدادات الحسابات في النظام نفسه.
+any-use-system-reset = استخدم إعادة التعيين الخاصة بالحاسوب التي تمسح محرك الأقراص. تشرح مساعدة الشركة المصنّعة الطريقة.
+any-drive-maker-secure-erase = إن لم توجد، استخدم أداة المسح الآمن من الشركة المصنّعة لمحرك الأقراص.
+
 # 2.9 deliverables
 guard-undo-removes-if-package = يزيله PCTwin إذا ثُبّت من حزمة تثبيت؛ وإلا فأزله بنفسك
 guard-undo-keeps-newer = التراجع يُبقي الإصدار الأحدث: لا يمكن إرجاع الإصدار الأقدم
@@ -2628,3 +2682,610 @@ kit-part-before-wipe-list = ما لا يزال موجودًا على الحاس�
 kit-part-file-data = ملفاتك
 kit-part-setup-steps = خطوات إعداد التطبيقات من جديد
 kit-part-recovery-tool = أداة لاستعادة الأشياء
+
+# 2.8 screens
+report-group-apps = التطبيقات
+report-group-settings = الإعدادات
+report-group-special = بيانات التطبيقات وأشياء أخرى
+report-group-people = أشخاص آخرون
+report-count-apps = { $count ->
+        [zero] لا تطبيقات
+        [one] تطبيق واحد
+        [two] تطبيقان
+        [few] { $count } تطبيقات
+        [many] { $count } تطبيقًا
+       *[other] { $count } تطبيق
+    }
+report-count-settings = { $count ->
+        [zero] لا مجموعات إعدادات
+        [one] مجموعة إعدادات واحدة
+        [two] مجموعتا إعدادات
+        [few] { $count } مجموعات إعدادات
+        [many] { $count } مجموعة إعدادات
+       *[other] { $count } مجموعة إعدادات
+    }
+report-count-special = { $count ->
+        [zero] لا شيء
+        [one] شيء واحد
+        [two] شيئان
+        [few] { $count } أشياء
+        [many] { $count } شيئًا
+       *[other] { $count } شيء
+    }
+report-count-people = { $count ->
+        [zero] لا أحد
+        [one] شخص واحد
+        [two] شخصان
+        [few] { $count } أشخاص
+        [many] { $count } شخصًا
+       *[other] { $count } شخص
+    }
+report-beyond-done = اكتمل كل شيء وتم التحقق منه
+report-beyond-some = اكتمل { $done } من { $total } وتم التحقق منها
+report-beyond-left = { $count ->
+        [zero] لا شيء لم يُنقل
+        [one] واحد لم يُنقل: تركته أنت
+        [two] اثنان لم يُنقلا: تركتهما أنت
+        [few] { $count } لم تُنقل: تركتها أنت
+        [many] { $count } لم يُنقل: تركتها أنت
+       *[other] { $count } لم يُنقل: تركتها أنت
+    }
+report-beyond-more = { $count ->
+        [zero] لا شيء آخر.
+        [one] واحد آخر لا يظهر هنا.
+        [two] اثنان آخران لا يظهران هنا.
+        [few] { $count } أخرى لا تظهر هنا.
+        [many] { $count } آخر لا يظهر هنا.
+       *[other] { $count } آخر لا يظهر هنا.
+    }
+report-here = { $count ->
+        [zero] لم يكن أي تطبيق موجودًا على هذا الحاسوب.
+        [one] كان تطبيق واحد موجودًا على هذا الحاسوب. تركه PCTwin كما هو.
+        [two] كان تطبيقان موجودين على هذا الحاسوب. تركهما PCTwin كما هما.
+        [few] كانت { $count } تطبيقات موجودة على هذا الحاسوب. تركها PCTwin كما هي.
+        [many] كان { $count } تطبيقًا موجودًا على هذا الحاسوب. تركها PCTwin كما هي.
+       *[other] كان { $count } تطبيق موجودًا على هذا الحاسوب. تركها PCTwin كما هي.
+    }
+progress-ready-title = جاهز للاستخدام الآن
+progress-ready-body = { $count ->
+        [zero] لا شيء جاهز بعد.
+        [one] { $groups } نُسخ وتم التحقق منه. يمكنك فتحه على هذا الحاسوب بينما يصل الباقي.
+        [two] { $groups } نُسخا وتم التحقق منهما. يمكنك فتحهما على هذا الحاسوب بينما يصل الباقي.
+        [few] { $groups } نُسخت وتم التحقق منها. يمكنك فتحها على هذا الحاسوب بينما يصل الباقي.
+        [many] { $groups } نُسخت وتم التحقق منها. يمكنك فتحها على هذا الحاسوب بينما يصل الباقي.
+       *[other] { $groups } نُسخت وتم التحقق منها. يمكنك فتحها على هذا الحاسوب بينما يصل الباقي.
+    }
+finish-strip = أنهِ عملية النقل
+finish-title = أنهِ عملية النقل
+finish-loading = جارٍ عرض عملية النقل.
+finish-retry = حاول مرة أخرى
+finish-back-to-list = العودة إلى القائمة
+finish-open = فتح
+finish-open-name = فتح { $title }
+finish-more-not-shown = عناصر أخرى غير معروضة: { $count }
+finish-problem-no-move = لا توجد لدى PCTwin عملية نقل لإنهائها على هذا الحاسوب المحمول. لم يتغير شيء.
+finish-problem-changed = ما يظهر قديم. انظر إليه مرة أخرى قبل أن تجيب. لم يتغير شيء.
+finish-problem-not-allowed = لا يمكن القيام بذلك. لم يتغير شيء.
+finish-problem-busy = هناك عملية نقل أو خطوة أخرى قيد التنفيذ. انتظر حتى تنتهي ثم حاول مرة أخرى. لم يتغير شيء.
+finish-problem-failed = حدث خطأ على هذا الحاسوب المحمول. لم يتغير شيء. حاول مرة أخرى.
+finish-headline-ready-for-selected-work = كل ما اخترته موجود على هذا الحاسوب المحمول
+finish-headline-ready-for-selected-work-body = وجد PCTwin كل عنصر اخترته على هذا الحاسوب المحمول وتحقق منه بقدر ما يستطيع. هذا لا يضمن أن كل تطبيق سيعمل كما كان.
+finish-headline-finished-with-tasks = اكتمل النقل، وبقيت بعض المهام
+finish-headline-finished-with-tasks-body = بعض العناصر تحتاج إليك، أو لم يتم نسخها. وهي مدرجة في هذه الصفحة.
+finish-headline-data-preserved = ملفاتك محفوظة بأمان، لكن بعضها لا يمكن فتحه بعد
+finish-headline-data-preserved-body = كل شيء موجود على هذا الحاسوب المحمول. فتح بعضها يحتاج إلى مفتاح أو رمز استرداد، ولم يستطع PCTwin التحقق من ذلك هنا.
+finish-headline-handover-unresolved = لم يتم تسليم الحاسوب المحمول القديم بعد
+finish-headline-handover-unresolved-body = انتهى العمل على هذا الحاسوب المحمول. قائمة ما قبل ترك الحاسوب المحمول القديم ما زالت فيها أمور مفتوحة.
+finish-headline-nothing-moved = لم يتم اختيار شيء للنقل
+finish-headline-nothing-moved-body = لم تُختر أي ملفات أو تطبيقات أو إعدادات، لذلك لم يُنسخ شيء.
+finish-tally-title = ما تم نقله
+finish-tally-selected = المختار: { $count }
+finish-tally-done = المنسوخ والمتحقق منه: { $count }
+finish-tally-needs-action = يحتاج إليك: { $count }
+finish-tally-failed = لم يُنسخ: { $count }
+finish-tally-waiting = ما زال ينتظر: { $count }
+finish-tally-not-reachable = الحاسوب المحمول القديم غير متاح: { $count }
+finish-tally-no-result-yet = لا نتيجة بعد: { $count }
+finish-tally-skipped = تجاوزته أنت: { $count }
+finish-tally-left-out = المستبعد: { $count }
+finish-tally-accepted-loss = تُرك عمدًا: { $count }
+finish-others = عناصر أشخاص آخرين، تُحسب فقط ولا تُعرض أبدًا: { $count }
+finish-after-title = تم التحقق على هذا الحاسوب المحمول الآن
+finish-after-body = عدّ PCTwin هذه العناصر على الحاسوب المحمول القديم، ثم عدّها مرة أخرى على هذا الحاسوب المحمول.
+finish-after-count = { $onNew } من { $atScan } موجودة على هذا الحاسوب المحمول
+finish-after-all = كلها موجودة
+finish-after-short = بعضها ناقص
+finish-group-photos = الصور
+finish-group-videos = مقاطع الفيديو
+finish-group-music = الموسيقى
+finish-group-documents = المستندات
+finish-group-other-files = ملفات أخرى
+finish-group-apps = التطبيقات
+finish-group-settings = الإعدادات
+finish-note-parental-controls = إعدادات الرقابة الأبوية وسلامة الأسرة لا تُنقل. أعد ضبطها على هذا الحاسوب المحمول.
+finish-note-not-everywhere = لم يتم البحث في بعض الأماكن على الحاسوب المحمول القديم.
+finish-note-results-refused = لم تُقبل بعض النتائج، لأن هذا الحاسوب المحمول لم يُظهرها على أنها اكتملت.
+finish-note-undo-open = التراجع ما زال متاحًا لعملية النقل هذه. ويُغلق نهائيًا إذا مسحت الحاسوب المحمول القديم.
+finish-open-title = لم يكتمل
+finish-open-body = هذه عناصرك التي ما زالت تحتاج إلى انتباه.
+finish-standing-copied = تم النسخ
+finish-standing-reinstalled = أُعيد تثبيته
+finish-standing-converted = تم تحويله
+finish-standing-needs-action = يحتاج إليك
+finish-standing-failed = لم يُنسخ
+finish-standing-waiting = ينتظر
+finish-standing-not-reachable = الحاسوب المحمول القديم غير متاح
+finish-standing-no-result-yet = لا نتيجة بعد
+finish-standing-skipped-by-user = تجاوزته أنت
+finish-standing-left-out = مستبعد
+finish-access-key-not-checked = لم يتم التحقق هنا من المفتاح أو الرمز اللازم لفتحه.
+finish-access-not-on-new-laptop = غير موجود على هذا الحاسوب المحمول.
+finish-search-title = أين بحث PCTwin على الحاسوب المحمول القديم
+finish-search-searched = تم البحث في: { $places }
+finish-search-not-searched = لم يتم البحث في: { $places }
+finish-search-all = بحث PCTwin في كل مكان يعرفه. ولا يستطيع القول إنه لا يوجد شيء في أي مكان آخر.
+finish-old-checked = آخر فحص للحاسوب المحمول القديم: { $when }
+finish-old-never = لم يُفحص الحاسوب المحمول القديم منذ النقل.
+finish-steps-title = الخطوات التالية
+finish-step-setup = أنهِ الإعداد
+finish-step-setup-detail = تطبيقات تحتاج إلى تسجيل دخولك أو إلى إنهاء خطوة.
+finish-step-goodbye = قبل أن تترك الحاسوب المحمول القديم
+finish-step-goodbye-detail = ما ما زال موجودًا على الحاسوب المحمول القديم فقط.
+finish-step-catchup = حدّثني بالجديد
+finish-step-catchup-detail = انسخ ما تغيّر على الحاسوب المحمول القديم منذ النقل.
+finish-step-handover = سلّم الحاسوب المحمول القديم
+finish-step-handover-detail = أزل حسابك أو امسح الحاسوب المحمول القديم، بأدوات النظام نفسه.
+finish-step-undo = تراجع عن عملية النقل هذه
+finish-step-undo-detail = أزل التطبيقات وأعد الإعدادات.
+finish-step-cleanup = تنظيف
+finish-step-cleanup-detail = أزل ملفات PCTwin المؤقتة من هذا الحاسوب المحمول.
+finish-step-report = شارك التقرير
+finish-step-report-detail = احفظ تقريرًا بسيطًا. أنت تختار ما يتضمنه.
+finish-step-doctor = افحص الاتصال
+finish-step-doctor-detail = اعرف لماذا لا يتصل الحاسوبان المحمولان.
+finish-setup-title = أنهِ الإعداد
+finish-setup-body = هذه التطبيقات تحتاج إلى خطوة منك. علامة الصح تسجّل ما تقوله أنت. ولا تُعدّ فحصًا من PCTwin.
+finish-setup-empty = لا شيء ينتظرك.
+finish-setup-sign-in = سجّل الدخول إلى { $name }
+finish-setup-licence-key = أدخل مفتاح ترخيص { $name }
+finish-setup-set-up-again = أعد إعداد { $name }
+finish-setup-download-from-maker = نزّل { $name } من موقع الجهة المطورة
+finish-setup-permission = امنح { $name } الإذن عندما يطلبه
+finish-setup-restart = أعد تشغيل هذا الحاسوب المحمول لإنهاء { $name }
+finish-setup-finish-by-hand = أنهِ { $name } بنفسك
+finish-setup-parts-missing = لم تصل بعض أجزاء { $name }. أرسلها مرة أخرى
+finish-setup-export-first = صدّر من { $name } على الحاسوب المحمول القديم أولًا
+finish-setup-relink = اربط { $name } بحسابك مرة أخرى
+finish-setup-look-at-it = افتح { $name } وتأكد أنه سليم
+finish-setup-mark-open = لم يتم
+finish-setup-mark-machine-checked = تحقق منه PCTwin
+finish-setup-mark-you-did-it = قلت إنه تم
+finish-setup-tick-hint = ضع علامة عندما تنتهي منه.
+finish-setup-save-row = احفظ قائمة تطبيقاتك وإعداداتك
+finish-setup-save-row-detail = احتفظ بقائمة تطبيقاتك وإعداداتك في سجل PCTwin الخاص بي.
+finish-save-title = احفظ قائمة تطبيقاتك وإعداداتك
+finish-save-body = يحتفظ PCTwin بقائمة تطبيقاتك وإعداداتك في سجل PCTwin الخاص بي، على هذا الحاسوب المحمول فقط. هي قائمة، وليست نسخة من ملفاتك.
+finish-save-button = احفظ القائمة
+finish-save-saved = تم الحفظ في سجل PCTwin الخاص بي. التطبيقات: { $apps }. الإعدادات: { $settings }.
+finish-save-earlier-title = محفوظ سابقًا
+finish-save-earlier = تم الحفظ: { $when }
+finish-goodbye-title = قبل أن تترك الحاسوب المحمول القديم
+finish-goodbye-body = هذا ما ما زال موجودًا على الحاسوب المحمول القديم فقط. أجب عن كل عنصر. لا يُمسح شيء هنا. المسح خطوة منفصلة.
+finish-goodbye-saved = هذه القائمة محفوظة على هذا الحاسوب المحمول.
+finish-goodbye-only-on-old-laptop = على الحاسوب المحمول القديم فقط: { $count }
+finish-goodbye-key-not-checked = عناصر تحتاج إلى مفتاح أو رمز لم يتم التحقق منه: { $count }
+finish-goodbye-tied-to-old-laptop = مرتبطة بالحاسوب المحمول القديم: { $count }
+finish-goodbye-do-first-on-old-laptop = يجب فعله على الحاسوب المحمول القديم أولًا: { $count }
+finish-goodbye-steps-not-finished = خطوات لم تنتهِ: { $count }
+finish-goodbye-not-searched = أماكن لم يُبحث فيها: { $count }
+finish-goodbye-old-laptop-not-reachable = تعذّر الوصول إلى الحاسوب المحمول القديم
+finish-goodbye-special-sign-in = { $names }: سجّل الدخول مرة أخرى
+finish-goodbye-special-relink = { $names }: اربطه بحسابك مرة أخرى
+finish-goodbye-special-export-first = { $names }: صدّر ما تحتاجه من الحاسوب المحمول القديم أولًا
+finish-goodbye-special-look-at-it = { $names }: افتحه وتأكد أنه سليم
+finish-goodbye-places = الأماكن: { $places }
+finish-goodbye-did-it = لقد فعلت ذلك
+finish-goodbye-accept = أقبل أنه سيضيع
+finish-goodbye-accept-warning = إذا قبلت ذلك، فسيبقى على الحاسوب المحمول القديم فقط. وعندما يُمسح الحاسوب المحمول القديم، يضيع.
+finish-goodbye-cannot-answer = لا يحسم هذا إلا فحص جديد للحاسوب المحمول القديم. صله وافحصه مرة أخرى.
+finish-goodbye-res-open = لم تتم الإجابة بعد
+finish-goodbye-res-person-did-it = قلت إنك فعلت ذلك
+finish-goodbye-res-accepted-loss = قبلت أنه سيضيع
+finish-goodbye-answer-label = إجابتك عن: { $title }
+finish-goodbye-keep-title = اترك الحاسوب المحمول القديم كما هو حتى
+finish-goodbye-keep-body = التاريخ المقترح: { $date }. حتى ذلك الحين لا تمسحه، تحسبًا لحاجتك إلى شيء منه.
+finish-goodbye-keep-label = احتفظ به حتى
+finish-goodbye-keep-use = استخدم التاريخ المقترح
+finish-goodbye-keep-save = احفظ هذا التاريخ
+finish-goodbye-keep-set = محفوظ حتى: { $date }
+finish-goodbye-keep-none = لم يُختر تاريخ بعد
+finish-goodbye-blocked = لا يمكن تسليم الحاسوب المحمول القديم بعد. ما زال مفتوحًا: { $count }.
+finish-goodbye-blocked-unchecked = لم يُفحص الحاسوب المحمول القديم منذ النقل. افحصه مرة أخرى أولًا.
+finish-goodbye-clear = تمت الإجابة عن كل شيء وفُحص الحاسوب المحمول القديم. يمكنك طلب التسليم. وهي خطوة منفصلة.
+finish-goodbye-handover = سلّم الحاسوب المحمول القديم
+finish-goodbye-check-again = افحص الحاسوب المحمول القديم مرة أخرى
+finish-catchup-title = حدّثني بالجديد
+finish-catchup-body = اطّلع على ما تغيّر في الحاسوب المحمول القديم منذ النقل. تراجع كل تغيير بنفسك. ولا يرسل PCTwin إلا ما تختاره.
+finish-catchup-purpose-check = انظر إلى الحاسوب المحمول القديم فقط
+finish-catchup-purpose-check-detail = لا يُنسخ شيء. تتحدث قائمة ما قبل المغادرة.
+finish-catchup-purpose-catch-up = انظر وانسخ ما تغيّر
+finish-catchup-purpose-catch-up-detail = ترى التغييرات أولًا وتختار ما يُرسل.
+finish-catchup-armed = جاهز. صل الحاسوب المحمول القديم بالطريقة نفسها التي استخدمتها في النقل. ستعرض هذه الصفحة التغييرات عندما يستجيب الحاسوب المحمول القديم.
+finish-catchup-connect = صل الحاسوب المحمول القديم
+finish-catchup-waiting = بانتظار الحاسوب المحمول القديم.
+finish-catchup-unreadable = لم يستطع PCTwin قراءة رد الحاسوب المحمول القديم. لم يتغير شيء. حاول مرة أخرى.
+finish-catchup-changes-title = ما الذي تغيّر
+finish-catchup-check-only = لا يُرسل شيء. هذه القائمة تحدّث فقط ما يعرفه PCTwin عن الحاسوب المحمول القديم.
+finish-catchup-none = لم يتغير شيء على الحاسوب المحمول القديم.
+finish-catchup-others = تغييرات في عناصر أشخاص آخرين، تُحسب فقط: { $count }
+finish-catchup-choose-label = ماذا يفعل PCTwin مع { $title }؟
+finish-catchup-send-label = أرسل { $title }
+finish-catchup-nothing-to-send = لا شيء للإرسال
+finish-change-new = جديد على الحاسوب المحمول القديم
+finish-change-updated = تغيّر على الحاسوب المحمول القديم
+finish-change-both-changed = تغيّر على الحاسوبين المحمولين
+finish-change-gone-on-new-laptop = أُزيل من هذا الحاسوب المحمول
+finish-change-gone-on-old-laptop = أُزيل من الحاسوب المحمول القديم
+finish-change-cannot-tell = لا يستطيع PCTwin الجزم
+finish-choice-none = لا ترسل
+finish-choice-send = أرسله مرة أخرى
+finish-choice-keep-both = احتفظ بالنسختين
+finish-choice-keep-new-laptop-version = احتفظ بنسخة هذا الحاسوب المحمول
+finish-catchup-approve = أرسل التغييرات التي اخترتها: { $count }
+finish-catchup-sent = أُرسلت للنسخ. لا تُنسخ إلا التغييرات التي اخترتها.
+finish-handover-title = سلّم الحاسوب المحمول القديم
+finish-handover-body = كل خيار قرار منفصل. لا يحدث شيء حتى تؤكد في صفحته الخاصة.
+finish-handover-remove-title = أزل حسابي من الحاسوب المحمول القديم
+finish-handover-remove-detail = حسابك أنت فقط. حسابات الآخرين تبقى.
+finish-handover-erase-title = امسح الحاسوب المحمول القديم
+finish-handover-erase-detail = كل ما على محرك الحاسوب المحمول القديم.
+finish-handover-preview-remove = أزل حسابي
+finish-handover-preview-erase = امسح الحاسوب المحمول القديم
+finish-handover-removes = ما الذي سيُزال
+finish-handover-keeps = ما الذي سيبقى
+finish-handover-keeps-none = لا يبقى عليه شيء.
+finish-handover-route = كيف يتم ذلك
+finish-handover-route-body = لا ينفذ PCTwin هذا بنفسه. تنفذه أداة النظام نفسه، ويوصلك PCTwin إليها.
+finish-handover-continue = تابع إلى التأكيد
+finish-handover-not-offered = هذا غير متاح الآن
+finish-handover-refused-open = أمور ما زالت مفتوحة في قائمة ما قبل المغادرة: { $count }
+finish-handover-refused-nothing-done = لم يتم فعل أي شيء.
+finish-handover-to-list = اذهب إلى قائمة ما قبل المغادرة
+finish-route-system-windows = Windows
+finish-route-system-macos = macOS
+finish-route-system-linux = Linux
+finish-route-unknown-step = اتبع الخطوة التالية التي يعرضها النظام.
+finish-hnote-ssd-not-secure-wipe = حذف الملفات على SSD ليس مسحًا آمنًا.
+finish-hnote-does-not-cancel-subscriptions = إزالة الحساب لا تلغي الاشتراكات ولا تُخرجك من حساباتك في أماكن أخرى.
+finish-hnote-others-stay = حسابات الجميع الآخرين تبقى كما هي.
+finish-hnote-cannot-be-undone = لا يمكن التراجع عن هذا.
+finish-hnote-closes-undo = المتابعة تُغلق التراجع عن عملية النقل هذه نهائيًا.
+finish-hnote-sign-in-as-another-administrator = لا يستطيع الحساب إزالة نفسه. سجّل الدخول إلى الحاسوب المحمول القديم بحساب مسؤول آخر أولًا.
+finish-hnote-family-group-first = إذا كان الحساب في مجموعة عائلة Microsoft، فأزله من العائلة عبر الإنترنت أولًا.
+finish-hnote-not-a-certificate = يسجّل PCTwin ما طلبته وما تخبره به عمّا حدث. وهذا ليس شهادة بأن شيئًا قد مُسح.
+finish-hnote-encrypt-first-helps = تشغيل تشفير المحرك قبل إعادة التعيين يجعل قراءة ما يتبقى أصعب بكثير.
+finish-refused-wrong-device = هذه الخطوة غير متاحة على هذا الحاسوب المحمول.
+finish-refused-undo-not-closed = التراجع ما زال متاحًا لعملية النقل هذه. يجب إغلاقه أولًا.
+finish-refused-old-laptop-not-checked = آخر فحص للحاسوب القديم كان قبل أكثر من 15 دقيقة. افحصه مرة أخرى أولًا.
+finish-refused-list-out-of-date = قائمة ما قبل المغادرة قديمة. افتحها مرة أخرى.
+finish-refused-list-not-clear = قائمة ما قبل المغادرة ما زالت فيها أمور مفتوحة.
+finish-refused-no-write-exclusion = لم يستطع PCTwin التأكد من أنه لا شيء يتغير على الحاسوب المحمول القديم الآن.
+finish-refused-no-such-account = لم يُعثر على حسابك في الحاسوب المحمول القديم.
+finish-refused-other-people-use-it = أشخاص آخرون يستخدمون هذا الحساب، لذلك لن يزيله PCTwin.
+finish-refused-not-qualified = لا يمكن تسليم هذا الحاسوب المحمول القديم بهذه الطريقة.
+finish-refused-no-fresh-confirmation = يلزم تأكيد جديد.
+finish-refused-wrong-confirmation = هذا التأكيد لا يطابق ما يظهر الآن. انظر مرة أخرى.
+finish-refused-changed-since-confirmed = تغيّر شيء بعد أن أكدت. انظر مرة أخرى وأكد من جديد.
+finish-refused-expired = انتهت صلاحية التأكيد. انظر مرة أخرى وأكد من جديد.
+finish-refused-already-used = هذا التأكيد استُخدم من قبل.
+finish-refused-nothing-to-remove = لا يوجد شيء لإزالته.
+finish-confirm-title-remove-my-account = تأكيد: إزالة حسابي
+finish-confirm-title-erase-old-laptop = تأكيد: مسح الحاسوب المحمول القديم
+finish-confirm-target = سيتغير هذا: { $target }
+finish-confirm-consequences = ماذا يعني هذا
+finish-confirm-tick-remove-my-account = أفهم أن الحساب { $target } سيُزال من الحاسوب المحمول القديم وأنه لا يمكن التراجع عن ذلك.
+finish-confirm-tick-erase-old-laptop = أفهم أن كل ما على { $target } سيُمسح وأنه لا يمكن التراجع عن ذلك.
+finish-confirm-go = أكّد وافتح أداة النظام
+finish-confirm-cancel = ارجع ولا تفعل شيئًا
+finish-confirm-needs-tick = يعمل الزر بعد أن تضع علامة في المربع أعلاه.
+finish-started-title = اتبع خطوات النظام نفسه
+finish-started-body = الخطوات أدناه من النظام وليست من PCTwin. لا يرسم PCTwin نسخة خاصة به منها.
+finish-started-opened = فتح PCTwin صفحة النظام.
+finish-started-not-opened = تعذّر على PCTwin فتح صفحة النظام. افتحها بنفسك واتبع الخطوات.
+finish-started-undo-closed = أُغلق التراجع الآن لعملية النقل هذه.
+finish-says-title = أخبر PCTwin بما حدث
+finish-says-label = ماذا رأيت؟
+finish-says-choose = اختر ما رأيته
+finish-says-done = أنهيت الخطوات
+finish-says-partly = أنهيت جزءًا من الخطوات
+finish-says-cancelled-part-way = ألغيت في منتصف الطريق
+finish-says-not-started = لم أبدأ
+finish-says-cannot-tell = لا أستطيع الجزم
+finish-says-record = سجّل ما رأيته
+finish-recorded-person-says-done = تم التسجيل: قلت إنه انتهى. هذا قولك أنت. وهو ليس شهادة.
+finish-recorded-partial = تم التسجيل: لم يتم منه إلا جزء.
+finish-recorded-interrupted = تم التسجيل: توقف في المنتصف.
+finish-recorded-cancelled-after-some-effects = تم التسجيل: أُلغي بعد إجراء بعض التغييرات.
+finish-recorded-not-started = تم التسجيل: لم يبدأ.
+finish-recorded-inconclusive = تم التسجيل: لم تستطع الجزم بما حدث.
+finish-recorded-time = تم التسجيل: { $when }
+finish-undo-title = راجع قبل التراجع
+finish-undo-body = هذا ما يفعله التراجع وما يتركه. لا يحدث شيء حتى تختار بدء التراجع.
+finish-undo-row-removes = التطبيقات التي ثبّتها PCTwin: يزيلها التراجع
+finish-undo-row-yours = التطبيقات التي أصبحت لك الآن: يتركها التراجع. أزلها بنفسك إن أردت.
+finish-undo-row-settings = إعدادات أُعيدت كما كانت: { $count }
+finish-undo-row-appdata = بيانات التطبيقات أُعيدت لهذه التطبيقات
+finish-undo-row-files = ملفات نسخها النقل: { $count }
+finish-undo-limit-files = فقط والحاسوب المحمول القديم متصل، وفقط للنسخ التي لم يغيّرها أحد منذ ذلك الحين.
+finish-undo-limit-apps = فقط ما دام كل تطبيق على الإصدار الذي ثبّته PCTwin.
+finish-undo-keeps = ما يحتفظ به التراجع: التطبيقات التي أصبحت لك الآن، وكل ما غيّرته بعد النقل.
+finish-undo-closed = أُغلق التراجع لعملية النقل هذه. لا يمكن استخدامه.
+finish-undo-nothing = لا توجد تطبيقات أو إعدادات للتراجع عنها في عملية النقل هذه.
+finish-undo-start = ابدأ التراجع
+finish-cleanup-title = تنظيف
+finish-cleanup-body = يُطرح كل سؤال على حدة. لا يُزال شيء ما لم تؤكد.
+finish-cleanup-temp = ملفات PCTwin المؤقتة
+finish-cleanup-temp-detail = ملفات أنشأها PCTwin على هذا الحاسوب المحمول أثناء عمله.
+finish-cleanup-model = نموذج PCTwin وبياناته المحفوظة
+finish-cleanup-model-detail = ملفات مساعدة يحتفظ بها PCTwin على هذا الحاسوب المحمول ليعمل أسرع.
+finish-cleanup-look = انظر
+finish-cleanup-removes = ستُزال
+finish-cleanup-keeps = ستبقى
+finish-cleanup-keeps-body = هذه تشبه ملفات PCTwin فقط، أو أنها قيد الاستخدام.
+finish-cleanup-nothing = لا يوجد شيء لإزالته.
+finish-cleanup-tick = أزل العناصر المدرجة تحت ستُزال
+finish-cleanup-confirm = أزلها
+finish-cleanup-done = أُزيل: { $removed }. بقي: { $kept }. تعذّرت إزالته: { $failed }.
+finish-doctor-title = افحص الاتصال
+finish-doctor-body = ينظر PCTwin في هذا الحاسوب المحمول ليعرف لماذا لا يتصل الحاسوبان المحمولان.
+finish-doctor-role-label = أي حاسوب محمول هذا؟
+finish-doctor-role-old = الحاسوب المحمول القديم
+finish-doctor-role-new = الحاسوب المحمول الجديد
+finish-doctor-run = ابدأ الفحص
+finish-doctor-running = جارٍ فحص هذا الحاسوب المحمول.
+finish-doctor-found = ما وجده PCTwin
+finish-doctor-none = لم يجد PCTwin مشكلة على هذا الحاسوب المحمول. وهذا لا يثبت أن الاتصال سيعمل.
+finish-doctor-sure = مؤكد
+finish-doctor-likely = محتمل
+finish-doctor-fix = ما العمل
+finish-doctor-not-checked = لم يستطع PCTwin فحصه
+finish-notchecked-unknown = تعذّر إجراء فحص واحد على هذا الحاسوب المحمول.
+finish-report-title = شارك التقرير
+finish-report-body = اختر ما يتضمنه التقرير. لا يُضاف شيء ما لم تختره. لا يُرسل شيء. أنت تحفظ النص الذي تقرؤه، وتشاركه بنفسك.
+finish-report-choices = ضمّن في التقرير
+finish-report-file-names = أسماء الملفات
+finish-report-app-names = أسماء التطبيقات
+finish-report-account-id = معرّف الحساب
+finish-report-preview = التقرير كما سيُحفظ
+finish-report-withheld = تُرك خارج التقرير: الأسماء { $names }، الأسرار { $secrets }، معرّفات الحسابات { $ids }.
+finish-report-save = احفظ التقرير
+finish-report-saved = تم الحفظ في: { $path }
+finish-report-not-saved = لم يُحفظ أي ملف.
+finish-report-feedback = لإخبار فريق PCTwin بما حدث، افتح مساعدة ثم ملاحظات. لا حاجة إلى حساب، ولا يُرسل شيء تلقائيًا.
+finish-report-help = افتح المساعدة
+finish-report-text-title = تقرير نقل PCTwin
+finish-report-text-unnamed-file = ملف
+finish-report-text-unnamed-app = تطبيق
+finish-report-text-account = معرّف الحساب: { $id }
+finish-report-text-others = عناصر أشخاص آخرين لم تنتهِ، تُحسب فقط: { $count }
+finish-report-text-goodbye = قائمة ما قبل المغادرة: { $total } أمور، { $open } ما زالت مفتوحة
+finish-report-text-lines = العناصر التي لم تنتهِ
+rescue-eyebrow = إنقاذ حاسوب
+rescue-title = إنقاذ حاسوب
+rescue-lead = استرجع الملفات من حاسوب لا يعمل. صِل قرصه بهذا الحاسوب، ثم اختره هنا.
+rescue-checking = جارٍ البحث عن الأقراص الموصولة.
+rescue-failed = لم يتمكن PCTwin من عرض الأقراص الموصولة بهذا الحاسوب. تحقق من الكابل، ثم تحقق مرة أخرى.
+rescue-empty = لا يوجد قرص موصول. صِل قرص الحاسوب القديم بمحوّل USB، ثم تحقق مرة أخرى.
+rescue-looks-like-laptop = يبدو أنه قرص حاسوب
+rescue-choose = اختر { $name }
+rescue-check-again = تحقق مرة أخرى
+rescue-locked-title = إذا كان القرص مقفلًا
+rescue-locked-windows = إذا كان القرص مقفلًا بـ BitLocker، يطلب Windows مفتاح الاسترداد في نافذته الخاصة عند فتح القرص.
+rescue-wait-title = جارٍ قراءة { $drive }
+rescue-wait-body = يفحص PCTwin المجلدات على { $drive }. لا يتغير شيء على القرص.
+rescue-accept-title = ملفات وُجدت على { $drive }
+rescue-accept-body = اقبل، وسينسخها PCTwin إلى هذا الحاسوب. لا يتغير شيء على القرص.
+rescue-progress-title = جارٍ نسخ الملفات من { $drive }
+rescue-safe = القرص يُقرأ فقط. لا يتغير شيء عليه.
+rescue-outcome-title = ملفات نُسخت من { $drive }
+plan-net-title = ما يحتاج إلى الإنترنت
+plan-net-none = لا شيء في هذا النقل يحتاج إلى الإنترنت.
+plan-net-downloads =
+    { $count ->
+        [zero] ينزّل PCTwin { $count } تطبيق من الإنترنت.
+        [one] ينزّل PCTwin تطبيق واحد من الإنترنت.
+        [two] ينزّل PCTwin تطبيقان من الإنترنت.
+        [few] ينزّل PCTwin { $count } تطبيقات من الإنترنت.
+        [many] ينزّل PCTwin { $count } تطبيقًا من الإنترنت.
+       *[other] ينزّل PCTwin { $count } تطبيق من الإنترنت.
+    }
+plan-net-sizes = لا يُعرف حجم كل تنزيل إلا بعد انتهائه.
+plan-net-signins =
+    { $count ->
+        [zero] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيء.
+        [one] ستسجّل الدخول من جديد عبر الإنترنت إلى شيء واحد.
+        [two] ستسجّل الدخول من جديد عبر الإنترنت إلى شيئان.
+        [few] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } أشياء.
+        [many] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيئًا.
+       *[other] ستسجّل الدخول من جديد عبر الإنترنت إلى { $count } شيء.
+    }
+plan-room-title = المساحة اللازمة فوق ملفاتك
+plan-room-body = في أكثر اللحظات ازدحامًا يحتاج PCTwin إلى نحو { $installs } للتطبيقات ونحو { $appData } لبيانات التطبيقات، فوق ملفاتك.
+compat-strip = ما جرى اختباره
+compat-title = { $name }: ما جرى اختباره
+compat-open = التفاصيل
+compat-open-name = عرض ما جرى اختباره في { $name }
+compat-list-title =
+    { $count ->
+        [zero] نتيجة اختبار { $count } تطبيق
+        [one] نتيجة اختبار تطبيق واحد
+        [two] نتيجة اختبار تطبيقان
+        [few] نتيجة اختبار { $count } تطبيقات
+        [many] نتيجة اختبار { $count } تطبيقًا
+       *[other] نتيجة اختبار { $count } تطبيق
+    }
+compat-aspects-title = كل جزء
+compat-steps-title = ما ستفعله أنت
+compat-steps-none = لا خطوات مطلوبة منك.
+compat-never-checked = لم يختبر أحد هذا التطبيق بعد. سيجرّبه PCTwin ويخبرك بما حدث.
+compat-checked-on = جرى الفحص في { $date }.
+compat-version = الإصدار الذي جرى اختباره: { $version }
+work-strip = هل أستطيع العمل؟
+work-title = هل أستطيع العمل فعلًا؟
+work-body = أضف الملفات والخطوط والمهام التي تحتاجها على هذا الحاسوب. ينظر PCTwin في ما يستطيع قراءته، وأنت تقول هل نجح الباقي. لا يُفتح شيء ولا يُشغَّل.
+work-empty = لا توجد فحوصات بعد. أضف ملفًا أو خطًّا أو مهمة في الأسفل.
+work-looked-at = جرى النظر في { $checked } من { $of }.
+work-missing = ناقص:
+work-and-more =
+    { $count ->
+        [zero] وغيرها: { $count }.
+        [one] وغيرها: { $count }.
+        [two] وغيرها: { $count }.
+        [few] وغيرها: { $count }.
+        [many] وغيرها: { $count }.
+       *[other] وغيرها: { $count }.
+    }
+work-not-looked-at = لم يجرِ النظر فيه:
+work-answer-worked = نجح
+work-answer-worked-name = نجح: { $name }
+work-answer-not = لم ينجح
+work-answer-not-name = لم ينجح: { $name }
+work-remove = إزالة
+work-remove-name = إزالة { $name }
+work-run = افحص الآن
+work-add-title = إضافة فحص
+work-add-file = اختيار ملف
+work-add-file-hint = مشروع أو أرشيف أو قاعدة بيانات. يقرؤه PCTwin ولا يغيّره أبدًا.
+work-font-label = خط، بالاسم
+work-add-font = إضافة الخط
+work-task-label = مهمة تؤديها بنفسك
+work-task-hint = مثلًا: طباعة بطاقة صعود الطائرة. أنت تقول هل نجحت.
+work-add-task = إضافة المهمة
+repair-strip = إصلاح ما لم يكتمل
+repair-title =
+    { $count ->
+        [zero] إصلاح { $count } عنصر
+        [one] إصلاح عنصر واحد
+        [two] إصلاح عنصران
+        [few] إصلاح { $count } عناصر
+        [many] إصلاح { $count } عنصرًا
+       *[other] إصلاح { $count } عنصر
+    }
+repair-title-loading = إصلاح ما لم يكتمل
+repair-body =
+    { $kept ->
+        [zero] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصر التي نجحت سابقًا.
+        [one] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي عنصر واحد التي نجحت سابقًا.
+        [two] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي عنصران التي نجحت سابقًا.
+        [few] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عناصر التي نجحت سابقًا.
+        [many] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصرًا التي نجحت سابقًا.
+       *[other] تُعاد محاولة العناصر أدناه فقط. تبقى كما هي { $kept } عنصر التي نجحت سابقًا.
+    }
+repair-nothing = لا شيء يحتاج إلى إصلاح.
+repair-can-now = يمكن تجربته الآن
+repair-waiting = في الانتظار
+repair-fixed =
+    { $count ->
+        [zero] تم إصلاح { $count } عنصر.
+        [one] تم إصلاح عنصر واحد.
+        [two] تم إصلاح عنصران.
+        [few] تم إصلاح { $count } عناصر.
+        [many] تم إصلاح { $count } عنصرًا.
+       *[other] تم إصلاح { $count } عنصر.
+    }
+repair-run =
+    { $count ->
+        [zero] أعد محاولة { $count } عنصر
+        [one] أعد محاولة عنصر واحد
+        [two] أعد محاولة عنصران
+        [few] أعد محاولة { $count } عناصر
+        [many] أعد محاولة { $count } عنصرًا
+       *[other] أعد محاولة { $count } عنصر
+    }
+changed-strip = تغييرات منذ موافقتك
+changed-title =
+    { $count ->
+        [zero] تغيّر { $count } شيء بعد موافقتك
+        [one] تغيّر شيء واحد بعد موافقتك
+        [two] تغيّر شيئان بعد موافقتك
+        [few] تغيّر { $count } أشياء بعد موافقتك
+        [many] تغيّر { $count } شيئًا بعد موافقتك
+       *[other] تغيّر { $count } شيء بعد موافقتك
+    }
+changed-body = هذه وحدها تحتاج إلى موافقة جديدة. كل ما عداها يبقى موافَقًا عليه.
+changed-affects = يؤثر في: { $steps }
+changed-held =
+    { $count ->
+        [zero] تنتظر { $count } خطوة ردّك.
+        [one] تنتظر خطوة واحدة ردّك.
+        [two] تنتظر خطوتان ردّك.
+        [few] تنتظر { $count } خطوات ردّك.
+        [many] تنتظر { $count } خطوة ردّك.
+       *[other] تنتظر { $count } خطوة ردّك.
+    }
+changed-leave-out = استبعاد هذه
+changed-approve = أوافق مرة أخرى
+safe-stop-strip = التحديث
+safe-stop-title = في انتظار لحظة آمنة
+safe-stop-body = لا يحدّث PCTwin نفسه ولا يزيل نفسه في منتصف النقل. ينتظر حتى لا يبقى شيء نصف منجز.
+safe-stop-failed = لم يستطع PCTwin معرفة ما إذا كان الأمر آمنًا. حاول مرة أخرى.
+safe-stop-ready = لا شيء يتغيّر الآن في منتصف العمل. يمكن لـ PCTwin أن يتحدّث أو يُزال الآن.
+safe-stop-waiting-for = ينتظر انتهاء هذه الأمور:
+safe-stop-nothing-going-on = لا يجري نقل ولا إعداد ولا تراجع.
+safe-stop-check = افحص مرة أخرى
+kit-strip = حزمة الاسترداد
+kit-title = حفظ حزمة استرداد
+kit-body = حزمة الاسترداد سجلّ صغير لهذا النقل، يُحفظ في مجلد تختاره، مثل قرص USB. تُظهر ما حدث وما بقي دون إنجاز، حتى من دون هذا الحاسوب.
+kit-lacks-sentence = لا تحتوي الحزمة على ملفاتك نفسها، ولا تستطيع إعادة ملفات مفقودة.
+kit-not-saved = لم يُختر أي مجلد. لم يُحفظ شيء.
+kit-saved-to = حُفظت في:
+kit-files-title = ملفات الحزمة
+kit-holds-title = ما تحتويه الحزمة
+kit-lacks-title = ما لا تحتويه الحزمة
+kit-save = اختر مجلدًا واحفظ
+kit-save-again = احفظ مرة أخرى
+kit-history = حزمة الاسترداد
+finish-step-repair =
+    { $count ->
+        [zero] إصلاح { $count } عنصر
+        [one] إصلاح عنصر واحد
+        [two] إصلاح عنصران
+        [few] إصلاح { $count } عناصر
+        [many] إصلاح { $count } عنصرًا
+       *[other] إصلاح { $count } عنصر
+    }
+finish-step-repair-detail = أعد محاولة ما لم يكتمل فقط. ما نجح يبقى كما هو.
+finish-step-work = هل أستطيع العمل فعلًا؟
+finish-step-work-detail = تأكد أن الملفات والخطوط والمهام التي تحتاجها موجودة هنا.
+finish-step-kit = حفظ حزمة استرداد
+finish-step-kit-detail = احتفظ بسجلّ صغير لهذا النقل في مجلد تختاره.
+space-box-title = لا توجد مساحة كافية على هذا الحاسوب لكل شيء.
+space-box-choice = { $count ->
+        [zero] لا ملفات لتركها على حاسوبك القديم
+        [one] اترك على حاسوبك القديم ملفًا واحدًا ({ $size }) لم تستخدمه منذ أطول مدة
+        [two] اترك على حاسوبك القديم ملفين ({ $size }) لم تستخدمهما منذ أطول مدة
+        [few] اترك على حاسوبك القديم { $count } ملفات ({ $size }) لم تستخدمها منذ أطول مدة
+        [many] اترك على حاسوبك القديم { $count } ملفًا ({ $size }) لم تستخدمها منذ أطول مدة
+       *[other] اترك على حاسوبك القديم { $count } ملف ({ $size }) لم تستخدمها منذ أطول مدة
+    }
+space-box-kept = لا يُحذف شيء. تبقى على حاسوبك القديم.
+space-box-short = حتى مع ذلك، ما زال ينقص { $size }. ألغِ تحديد بعض المجلدات، أو اختر مكانًا آخر لها.
+space-box-fits = مع بقائها على حاسوبك القديم، يتسع كل ما تبقى.
+finish-handover-check-old = افحص الحاسوب القديم مرة أخرى
+finish-handover-check-armed = PCTwin جاهز لفحص الحاسوب القديم. افتح PCTwin على الحاسوب القديم وصِل الحاسوبين كما في النقل. ثم اضغط انظر مرة أخرى.
+finish-handover-look-again = انظر مرة أخرى
+qs-where-title = أين تُحفظ هذه الملفات؟
+qs-where-body = { $count ->
+        [zero] لا ملفات، { $size }. لا يُحفظ شيء حتى تختار.
+        [one] ملف واحد، { $size }. لا يُحفظ شيء حتى تختار.
+        [two] ملفان، { $size }. لا يُحفظ شيء حتى تختار.
+        [few] { $count } ملفات، { $size }. لا يُحفظ شيء حتى تختار.
+        [many] { $count } ملفًا، { $size }. لا يُحفظ شيء حتى تختار.
+       *[other] { $count } ملف، { $size }. لا يُحفظ شيء حتى تختار.
+    }
+qs-where-folder = المجلد: { $folder }
+qs-where-details = مزيد من التفاصيل
+qs-where-path = المكان الكامل: { $path }
+qs-where-save = احفظ هنا
+qs-where-choose = اختر مجلدًا آخر
+qs-where-stop = إيقاف
