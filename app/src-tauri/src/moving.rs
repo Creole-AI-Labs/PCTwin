@@ -312,6 +312,9 @@ struct Run {
     new_name: Option<LabelView>,
     report: Vec<ReportItem>,
     finished: bool,
+    /// The move is going on: PCTwin's own update and uninstall wait for it to end or be stopped
+    /// (Task List 2.9; `deliver::safe_stop`). Dropped when the run finishes.
+    hold: Option<crate::deliver::safe_stop::Hold>,
 }
 
 /// The old laptop: what it found, for the person to choose what moves (`move-choose`).
@@ -577,6 +580,9 @@ impl Moving {
             new_name: None,
             report: Vec::new(),
             finished: false,
+            hold: Some(crate::deliver::safe_stop::hold(
+                crate::deliver::safe_stop::BusyWith::Moving,
+            )),
         });
         Ok((live, scan_stop))
     }
@@ -852,6 +858,7 @@ impl Moving {
         if let Some(run) = lock(&self.run).as_mut() {
             run.report = report;
             run.finished = true;
+            run.hold = None;
             run.waiting = None;
             run.placing = None;
         }

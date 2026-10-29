@@ -30,9 +30,9 @@ commands and events with their argument names.
 | `work_check_answer` | `index`, `generation`, `worked` | `WorkChecks` or `WorkProblem` | 2 |
 | `work_check_remove` | `index`, `generation` | `WorkChecks` or `WorkProblem` | 2 |
 | `repair_offer` | none | `RepairOffer` (`repair-offer.json`) | 4. Repair only what failed |
-| `repair_run` | `generation`, `lines` | `RepairDone` or `RepairProblem` | 4 |
+| `repair_run` | `generation`, `lines` | `RepairDone` (with `undoId`: the retry's own undo record, for `fullmove_undo`) or `RepairProblem` | 4 |
 | `move_changes` | none | `ChangesView` or null (`move-changed.json`) | 6. Changes during the move |
-| `move_reapprove` | `generation`, `approve` | nothing, or `MoveProblem` | 6 |
+| `move_reapprove` | `generation`, `approve` | `RepairDone` (what was installed now; held apps that are here now leave the list, a no ends each skipped-by-user) or `RepairProblem` | 6 |
 | `safe_stop` | none | `SafeStopView` (`safe-stop.json`) | 6. Update and uninstall wait for a safe point |
 | `recovery_kit_save` | `id` (a My PCTwin history ID) | `KitSaved` or null (picked nowhere), or `MoveProblem` | 7. Offline recovery kit |
 
@@ -58,3 +58,18 @@ commands and events with their argument names.
 Names (`name`, `missing`, `folder`, `files`, `version`) are shown exactly as they are, never as
 markup or links. Item 3 (consistent capture of running apps) adds no new shape: it shows through
 the existing `move-appdata-open` (close these apps) and the result words.
+
+## Behaviour the screens can rely on
+
+- `repair_offer` lists only what did not finish and that PCTwin itself can retry: an app the
+  person installs themselves, a sign-in or licence left after a good install, an app held for a
+  change after approval, and PCTwin's own lines are never offered. App data waits for
+  `old-laptop`. Finished results are counted in `kept` and never change.
+- `repair_run` retries only the picked lines whose `waitsFor` is empty now (checked again when it
+  runs); everything else is kept exactly as it was. `busy` while a move, rebuild or undo runs.
+- `move-changed` is sent when the rebuild found apps installed, updated or removed on this laptop
+  after approval; those apps were not installed and end `needs-action` until `move_reapprove`.
+- `safe_stop` and `safe-stop` say what PCTwin is in the middle of; `update_install` answers `busy`
+  until it is safe. The Windows installer and uninstaller wait for the same point.
+- `recovery_kit_save` answers `not-moving` until the finishing part (2.7) that keeps each move's
+  record is joined on this branch.

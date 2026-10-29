@@ -3670,6 +3670,7 @@ dependencies = [
  "blake3",
  "getrandom 0.4.3",
  "pctwin-apps",
+ "pctwin-catalogue",
  "pctwin-discovery",
  "pctwin-doctor",
  "pctwin-executor",

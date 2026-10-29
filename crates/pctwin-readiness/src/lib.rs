@@ -21,6 +21,8 @@
 //!   undo closed for good. Both end at the system's own route; none is run here.
 //! - [`cleanup`]: PCTwin's own temporary files, and its model and caches, each asked separately,
 //!   by exact ownership.
+//! - [`projects`]: what a file the person works with needs: told by its content first, then a
+//!   generic reader the `project-files` catalogue names (its linked files and fonts).
 //! - [`kit`]: the offline recovery kit, readable with no account, saying exactly what it holds.
 //! - [`report`]: the shareable report, typed, private things left out unless chosen, and the
 //!   check that refuses text holding anything left out; nothing is sent.
@@ -40,6 +42,7 @@ pub mod goodbye;
 pub mod handover;
 pub mod kit;
 pub mod ledger;
+pub mod projects;
 pub mod repair;
 pub mod report;
 mod store;

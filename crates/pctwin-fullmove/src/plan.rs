@@ -276,6 +276,12 @@ pub struct FullPlan {
     pub old_folders: Vec<(FolderRole, String)>,
     /// This laptop's kind of system, for the compatibility record (`None`: not known).
     pub to: Option<pctwin_record::AppSystem>,
+    /// Each app's state here when the plan was made, by its place in [`Self::apps`] (changes
+    /// during the move: [`crate::drift`]).
+    pub here_then: Vec<(u32, crate::drift::AppHere)>,
+    /// Apps held out of the run because they changed here after approval, by their place in
+    /// [`Self::apps`]: never installed until approved again.
+    pub held: Vec<u32>,
 }
 
 /// What the move needs from the internet (the 2.9 preview).
@@ -420,10 +426,12 @@ impl FullPlan {
             })
             .filter(|e| e.plan.disposition != Disposition::PartOfSystem)
             .collect();
+        let here_then = crate::drift::apps_here(&apps, here.installed);
         let Some((x, digest)) = extras else {
             return Self {
                 apps,
                 to: Some(here.target.system),
+                here_then,
                 ..Self::default()
             };
         };
@@ -453,6 +461,7 @@ impl FullPlan {
                 extras_digest: Some(digest),
                 links: x.links,
                 to: Some(here.target.system),
+                here_then,
                 ..Self::default()
             };
         };
@@ -517,6 +526,8 @@ impl FullPlan {
             links: x.links,
             old_folders: x.folders.iter().map(|f| (f.role, f.path.clone())).collect(),
             to: Some(here.target.system),
+            here_then,
+            held: Vec::new(),
         }
     }
 
@@ -697,6 +708,7 @@ impl FullPlan {
         self.apps
             .iter()
             .enumerate()
+            .filter(|(at, _)| !self.held.contains(&(*at as u32)))
             .filter(|(at, e)| {
                 (e.plan.disposition == Disposition::Install && needs_of(&e.plan).is_none())
                     // An older app here the person chose to update, by a route PCTwin installs from.
