@@ -36,6 +36,8 @@ struct FakeJournal {
     down: bool,
     /// Can be read, but cannot write a new intent durably.
     intents_down: bool,
+    /// Cannot write a new intent once it holds this many entries.
+    intents_down_after: Option<usize>,
     outcomes_down: bool,
     /// Stops the move while the intent is being written.
     revoke_on_intent: Rc<RefCell<Option<Revoker>>>,
@@ -62,7 +64,12 @@ impl IntentJournal for FakeJournal {
     }
 
     fn record_intent(&mut self, intent: &Intent) -> Result<JournalRef, JournalUnavailable> {
-        if self.down || self.intents_down {
+        if self.down
+            || self.intents_down
+            || self
+                .intents_down_after
+                .is_some_and(|n| self.entries.len() >= n)
+        {
             return Err(JournalUnavailable);
         }
         self.entries.push((intent.clone(), None));
@@ -91,6 +98,9 @@ struct FakeAdapters {
     revoke_during: Rc<RefCell<Option<Revoker>>>,
     /// The bytes the installer was given, read from the held file.
     seen: Vec<Vec<u8>>,
+    /// The products the removal adapter was asked to remove, and what it answers.
+    uninstalled: Vec<InstalledProduct>,
+    uninstall_result: Effect,
     /// What the helper's own maker check says, and the bytes it was asked about.
     maker: super::maker::MakerCheck,
     maker_checked: Vec<Vec<u8>>,
@@ -123,6 +133,10 @@ impl Default for FakeAdapters {
             observed: Observed::Unknown,
             revoke_during: Rc::default(),
             seen: Vec::new(),
+            uninstalled: Vec::new(),
+            uninstall_result: Effect::Uninstall(uninstall::UninstallResult::Removed {
+                restart_needed: false,
+            }),
             maker: super::maker::MakerCheck::Approved,
             maker_checked: Vec::new(),
         }
@@ -157,6 +171,15 @@ impl Adapters for FakeAdapters {
             number: 5,
         })
     }
+    fn uninstall(
+        &mut self,
+        _: &UninstallWindowsInstallerProduct,
+        installed: &InstalledProduct,
+        _: &Revoker,
+    ) -> Effect {
+        self.uninstalled.push(installed.clone());
+        self.uninstall_result.clone()
+    }
     fn observe(&mut self, _: &Action) -> Observed {
         self.observed
     }
@@ -172,6 +195,8 @@ fn id(s: &str) -> Id {
 
 fn install_action(handle: u64, scope: InstallScope) -> Action {
     Action::InstallVerifiedPackage(InstallVerifiedPackage {
+        product_code: None,
+        for_move: None,
         artifact: handle,
         sha256: Hex32(sha(PACKAGE)),
         kind: PackageKind::Msi,
@@ -213,6 +238,11 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
+        Self::with(Vec::new())
+    }
+
+    /// The usual plan, and `extra` operations after it.
+    fn with(extra: Vec<PlannedOperation>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let mut staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
             dir.path().to_path_buf(),
@@ -231,7 +261,10 @@ impl Rig {
                 op("setting.hibernate", hibernate()),
                 op("setting.time-zone", time_zone()),
                 op("restore-point", restore_point()),
-            ],
+            ]
+            .into_iter()
+            .chain(extra)
+            .collect(),
         };
         let base = (std::time::Instant::now(), std::time::SystemTime::now());
         let now = Rc::new(Cell::new(Now::at(base.0, base.1)));
@@ -1008,6 +1041,8 @@ fn the_built_in_adapters_claim_nothing_they_cannot_do() {
     let mut a = BuiltInAdapters;
     let stop = Revoker::default();
     let p = InstallVerifiedPackage {
+        product_code: None,
+        for_move: None,
         artifact: h,
         sha256: Hex32(sha(b"x")),
         kind: PackageKind::Msi,
@@ -1613,6 +1648,8 @@ fn the_helpers_own_maker_check_of_a_real_package() {
     let maker = pctwin_maker::windows_maker_of(&msi).unwrap();
     let action =
         |maker: pctwin_maker::facts::WindowsSigner, sha256: [u8; 32]| InstallVerifiedPackage {
+            product_code: None,
+            for_move: None,
             artifact: handle,
             sha256: Hex32(sha256),
             kind: PackageKind::Msi,
@@ -1834,4 +1871,397 @@ fn a_package_part_way_leaves_nothing_when_the_session_closes() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     b.close();
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+/* ---------- Removing an app PCTwin installed (undo, decided 28 October 2026) ---------- */
+
+const CODE: &str = "{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}";
+const OTHER: &str = "{11111111-2222-3333-4444-555555555555}";
+const INSTALL_KEY: Hex32 = Hex32([0x5a; 32]);
+
+fn code(s: &str) -> ProductCode {
+    ProductCode::parse(s).unwrap()
+}
+
+const MOVE: Hex16 = Hex16([0x3c; 16]);
+
+fn product(c: &str) -> InstalledProduct {
+    InstalledProduct {
+        code: code(c),
+        version: ProductVersion::parse("2.0").unwrap(),
+        installed_on: InstallDate::parse("20261028").unwrap(),
+    }
+}
+
+fn removal(c: &str) -> Action {
+    Action::UninstallWindowsInstallerProduct(UninstallWindowsInstallerProduct {
+        product_code: code(c),
+        installed_by: INSTALL_KEY,
+        for_move: MOVE,
+    })
+}
+
+/// A rig whose plan removes `CODE` (and `OTHER`), and whose journal holds, under the install's
+/// key, `recorded` (None: nothing).
+fn removal_rig(recorded: Option<Option<Outcome>>) -> Rig {
+    let mut rig = Rig::with(vec![
+        PlannedOperation {
+            action_id: id("uninstall.0"),
+            action: removal(CODE),
+        },
+        PlannedOperation {
+            action_id: id("uninstall.1"),
+            action: removal(OTHER),
+        },
+    ]);
+    if let Some(outcome) = recorded {
+        rig.journal.entries.push((
+            Intent {
+                idempotency: INSTALL_KEY,
+                plan_generation: 3,
+                plan_digest: Hex32([1; 32]),
+                action_id: id("install.0"),
+                action: install_action(1, InstallScope::Machine),
+            },
+            outcome,
+        ));
+    }
+    rig
+}
+
+fn installed_outcome(c: &str) -> Outcome {
+    Outcome::Installed {
+        restart_needed: false,
+        product: product(c),
+        for_move: MOVE,
+    }
+}
+
+/// Step 2's acceptance: a product the helper's own journal recorded installing is removed,
+/// with the version it recorded, journaled and receipted.
+#[test]
+fn a_product_this_helper_recorded_installing_is_removed() {
+    let mut rig = removal_rig(Some(Some(installed_outcome(CODE))));
+    let req = rig.request("uninstall.0");
+    let again = rig.request("uninstall.0");
+    let mut b = rig.broker();
+    let r = done(b.handle(&req));
+    let second = done(b.handle(&again));
+    drop(b);
+    assert_eq!(
+        r.outcome,
+        Outcome::Uninstall(uninstall::UninstallResult::Removed {
+            restart_needed: false
+        })
+    );
+    assert!(r.recorded && !r.replayed);
+    assert!(second.replayed);
+    assert_eq!(rig.adapters.uninstalled, [product(CODE)]);
+    assert_eq!(rig.authority.asked, 1);
+    // The install's record, this removal's intent, the install's used mark, and the outcome.
+    assert_eq!(rig.journal.entries.len(), 3);
+    assert_eq!(rig.journal.entries[1].0.action, removal(CODE));
+    assert_eq!(rig.journal.entries[1].1, Some(r.outcome.clone()));
+    assert_eq!(
+        rig.journal.entries[2].0.idempotency,
+        uninstall::consumed_key(&INSTALL_KEY)
+    );
+    assert_eq!(rig.journal.entries[2].1, Some(r.outcome));
+}
+
+/// Step 2's acceptance: the broker refuses a removal for any product code the journal did not
+/// record this helper installing, before asking anyone and before anything starts.
+#[test]
+fn a_removal_the_journal_did_not_record_is_refused_before_anything_starts() {
+    let cases: Vec<(&str, Option<Option<Outcome>>, &str)> = vec![
+        ("nothing recorded", None, "uninstall.0"),
+        ("install unfinished", Some(None), "uninstall.0"),
+        (
+            "an install that recorded no product (an installer program)",
+            Some(Some(Outcome::Done {
+                restart_needed: false,
+            })),
+            "uninstall.0",
+        ),
+        (
+            "an install that failed",
+            Some(Some(Outcome::Failed { code: 1603 })),
+            "uninstall.0",
+        ),
+        (
+            "an install found already in place",
+            Some(Some(Outcome::AlreadyInPlace)),
+            "uninstall.0",
+        ),
+        (
+            "an install that recorded another product",
+            Some(Some(installed_outcome(CODE))),
+            "uninstall.1",
+        ),
+        (
+            "an install recorded for another move",
+            Some(Some(Outcome::Installed {
+                restart_needed: false,
+                product: product(CODE),
+                for_move: Hex16([0x99; 16]),
+            })),
+            "uninstall.0",
+        ),
+        (
+            "a record that is a removal, not an install",
+            Some(Some(Outcome::Uninstall(
+                uninstall::UninstallResult::AlreadyGone,
+            ))),
+            "uninstall.0",
+        ),
+    ];
+    for (why, recorded, op) in cases {
+        let mut rig = removal_rig(recorded);
+        let before = rig.journal.entries.len();
+        let req = rig.request(op);
+        let mut b = rig.broker();
+        assert_eq!(
+            denied(b.handle(&req)),
+            Denial::NotInstalledByPctwin,
+            "{why}"
+        );
+        drop(b);
+        assert!(rig.adapters.uninstalled.is_empty(), "{why}");
+        assert_eq!(rig.authority.asked, 0, "{why}");
+        assert_eq!(rig.journal.entries.len(), before, "{why}");
+    }
+    // A journal that cannot be read: nothing is done.
+    let mut rig = removal_rig(Some(Some(installed_outcome(CODE))));
+    rig.journal.down = true;
+    let req = rig.request("uninstall.0");
+    let mut b = rig.broker();
+    assert_eq!(denied(b.handle(&req)), Denial::JournalUnavailable);
+    drop(b);
+    assert!(rig.adapters.uninstalled.is_empty());
+}
+
+/// A removal not in the approved plan, or with its code swapped, is refused like any action.
+#[test]
+fn a_removal_outside_the_plan_is_refused() {
+    let mut rig = removal_rig(Some(Some(installed_outcome(CODE))));
+    let mut req = rig.request("uninstall.0");
+    req.action = Action::UninstallWindowsInstallerProduct(UninstallWindowsInstallerProduct {
+        product_code: code(OTHER),
+        installed_by: INSTALL_KEY,
+        for_move: MOVE,
+    });
+    let mut b = rig.broker();
+    assert_eq!(denied(b.handle(&req)), Denial::NotInPlan);
+    drop(b);
+    assert!(rig.adapters.uninstalled.is_empty());
+}
+
+/// The journal, as the rig's, but unreadable once `down` is set.
+struct Flippy<'a> {
+    inner: &'a mut FakeJournal,
+    down: Rc<Cell<bool>>,
+}
+
+impl IntentJournal for Flippy<'_> {
+    fn lookup(&mut self, key: &Hex32) -> Result<Recorded, JournalUnavailable> {
+        if self.down.get() {
+            return Err(JournalUnavailable);
+        }
+        self.inner.lookup(key)
+    }
+    fn record_intent(&mut self, i: &Intent) -> Result<JournalRef, JournalUnavailable> {
+        self.inner.record_intent(i)
+    }
+    fn record_outcome(&mut self, at: JournalRef, o: &Outcome) -> Result<(), JournalUnavailable> {
+        self.inner.record_outcome(at, o)
+    }
+}
+
+/// The record is checked again after the approval: one no longer readable then stops it.
+#[test]
+fn the_record_is_checked_again_after_the_approval() {
+    let mut rig = removal_rig(Some(Some(installed_outcome(CODE))));
+    let req = rig.request("uninstall.0");
+    let down = Rc::new(Cell::new(false));
+    let flip = Rc::clone(&down);
+    rig.authority.during = Some(Box::new(move || flip.set(true)));
+    let launch = rig.launch();
+    let plan = rig.plan.clone();
+    let staging = rig.staging.take().unwrap();
+    let mut journal = Flippy {
+        inner: &mut rig.journal,
+        down,
+    };
+    let mut b = Broker::new(
+        launch,
+        TOKEN,
+        staging,
+        &mut rig.authority,
+        &mut journal,
+        &mut rig.adapters,
+        &*rig.clock,
+    );
+    b.seal(plan).unwrap();
+    assert_eq!(denied(b.handle(&req)), Denial::JournalUnavailable);
+    drop(b);
+    assert_eq!(rig.authority.asked, 1);
+    assert!(rig.adapters.uninstalled.is_empty());
+}
+
+/// An install that recorded its product hands it back in its receipt, for the app's undo book.
+#[test]
+fn an_install_that_recorded_its_product_says_so_in_its_receipt() {
+    let mut rig = Rig::new();
+    rig.adapters.result = Effect::Installed {
+        restart_needed: true,
+        product: product(CODE),
+        for_move: MOVE,
+    };
+    let req = rig.request("install.app");
+    let mut b = rig.broker();
+    let r = done(b.handle(&req));
+    drop(b);
+    assert_eq!(
+        r.outcome,
+        Outcome::Installed {
+            restart_needed: true,
+            product: product(CODE),
+            for_move: MOVE,
+        }
+    );
+    assert_eq!(rig.journal.entries[0].1, Some(r.outcome.clone()));
+    // The receipt's key is the one a removal names.
+    assert_eq!(rig.journal.entries[0].0.idempotency, r.idempotency);
+    let json = serde_json::to_string(&r.outcome).unwrap();
+    assert_eq!(serde_json::from_str::<Outcome>(&json).unwrap(), r.outcome);
+}
+
+/// A rig whose plan removes `CODE` twice, as two attempts (two undo runs), after its install.
+fn two_attempts() -> Rig {
+    let mut rig = Rig::with(vec![
+        PlannedOperation {
+            action_id: id("uninstall.0.first"),
+            action: removal(CODE),
+        },
+        PlannedOperation {
+            action_id: id("uninstall.0.second"),
+            action: removal(CODE),
+        },
+    ]);
+    rig.journal.entries.push((
+        Intent {
+            idempotency: INSTALL_KEY,
+            plan_generation: 3,
+            plan_digest: Hex32([1; 32]),
+            action_id: id("install.0"),
+            action: install_action(1, InstallScope::Machine),
+        },
+        Some(installed_outcome(CODE)),
+    ));
+    rig
+}
+
+/// F1: a removal that ended uses the install up: a second undo (the app installed again by the
+/// person since, at the same version) is refused, whatever the first one found.
+#[test]
+fn an_install_is_used_once_by_a_removal_that_ended() {
+    for ended in [
+        uninstall::UninstallResult::Removed {
+            restart_needed: false,
+        },
+        uninstall::UninstallResult::AlreadyGone,
+        uninstall::UninstallResult::KeptOtherVersion,
+    ] {
+        let mut rig = two_attempts();
+        rig.adapters.uninstall_result = Effect::Uninstall(ended.clone());
+        let first = rig.request("uninstall.0.first");
+        let second = rig.request("uninstall.0.second");
+        let mut b = rig.broker();
+        assert_eq!(
+            done(b.handle(&first)).outcome,
+            Outcome::Uninstall(ended.clone())
+        );
+        assert_eq!(
+            denied(b.handle(&second)),
+            Denial::AlreadyUndone,
+            "{ended:?}"
+        );
+        drop(b);
+        assert_eq!(rig.adapters.uninstalled.len(), 1, "{ended:?}");
+    }
+}
+
+/// F1: a removal that failed does not use the install up: the next undo tries again.
+#[test]
+fn a_failed_removal_leaves_the_install_for_the_next_try() {
+    let mut rig = two_attempts();
+    rig.adapters.uninstall_result = Effect::Failed {
+        code: 1618,
+        native: NativeText::new(""),
+    };
+    let first = rig.request("uninstall.0.first");
+    let second = rig.request("uninstall.0.second");
+    let mut b = rig.broker();
+    assert_eq!(
+        done(b.handle(&first)).outcome,
+        Outcome::Failed { code: 1618 }
+    );
+    assert_eq!(
+        done(b.handle(&second)).outcome,
+        Outcome::Failed { code: 1618 }
+    );
+    drop(b);
+    assert_eq!(rig.adapters.uninstalled.len(), 2);
+    assert!(
+        rig.journal
+            .entries
+            .iter()
+            .all(|(i, _)| i.idempotency != uninstall::consumed_key(&INSTALL_KEY))
+    );
+}
+
+/// F1 and F6: a removal found in place after a crash also uses the install up.
+#[test]
+fn a_removal_found_in_place_after_a_crash_uses_the_install_up() {
+    let mut rig = two_attempts();
+    let first = rig.request("uninstall.0.first");
+    let second = rig.request("uninstall.0.second");
+    // The first attempt's intent was written, then the helper stopped.
+    let key = {
+        let b = rig.broker();
+        b.idempotency(&first)
+    };
+    rig.journal.entries.push((
+        Intent {
+            idempotency: key,
+            plan_generation: first.plan_generation,
+            plan_digest: first.plan_digest,
+            action_id: first.action_id.clone(),
+            action: first.action.clone(),
+        },
+        None,
+    ));
+    rig.adapters.observed = Observed::Present;
+    rig.staging = Some(Staging::new(
+        crate::broker::staging::HelperFolder::for_tests(rig._dir.path().to_path_buf()),
+    ));
+    let mut b = rig.broker();
+    let r = done(b.handle(&first));
+    assert_eq!(r.outcome, Outcome::AlreadyInPlace);
+    assert!(r.recorded);
+    assert_eq!(denied(b.handle(&second)), Denial::AlreadyUndone);
+    drop(b);
+    assert!(rig.adapters.uninstalled.is_empty());
+}
+
+/// When the used mark cannot be written, the receipt says it was not recorded.
+#[test]
+fn a_used_mark_that_cannot_be_written_is_said() {
+    let mut rig = two_attempts();
+    rig.journal.intents_down_after = Some(2);
+    let first = rig.request("uninstall.0.first");
+    let mut b = rig.broker();
+    let r = done(b.handle(&first));
+    drop(b);
+    assert!(!r.recorded);
 }

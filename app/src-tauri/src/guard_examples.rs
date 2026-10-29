@@ -250,6 +250,8 @@ fn screens() -> Vec<ScreenView> {
                 UndoPlan::Elsewhere,
                 UndoPlan::LeaveAlone,
                 UndoPlan::RemoveYourself,
+                UndoPlan::KeepOtherVersion,
+                UndoPlan::AlreadyGone,
             ]
             .iter()
             .map(|plan| UndoPlanLine {
@@ -307,6 +309,21 @@ fn screens() -> Vec<ScreenView> {
                 UndoLine {
                     name: "i".into(),
                     result: UndoResult::RemoveYourself,
+                    detail: None,
+                },
+                UndoLine {
+                    name: "j".into(),
+                    result: UndoResult::KeptOtherVersion,
+                    detail: None,
+                },
+                UndoLine {
+                    name: "k".into(),
+                    result: UndoResult::RemovedRestart,
+                    detail: None,
+                },
+                UndoLine {
+                    name: "l".into(),
+                    result: UndoResult::NotRemoved,
                     detail: None,
                 },
             ],

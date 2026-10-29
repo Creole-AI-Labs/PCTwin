@@ -427,6 +427,23 @@ pub fn confirms(m: &Manifest, app: &FoundApp) -> Option<Confirmed> {
     }
 }
 
+impl Manifest {
+    /// The one Windows Installer product code this manifest names for its installer (its
+    /// `ProductCode`, or else the one its Apps & Features entries share), checked as a product
+    /// code. Two different codes, or none, name none: the helper then records nothing, and undo
+    /// lists the app for the person instead of removing it.
+    pub fn product_code_of_installer(&self) -> Option<pctwin_helper::broker::actions::ProductCode> {
+        use pctwin_helper::broker::actions::ProductCode;
+        let mut codes = self
+            .product_code
+            .iter()
+            .chain(self.entries.iter().filter_map(|e| e.product_code.as_ref()))
+            .map(|c| ProductCode::parse(c.trim()));
+        let first = codes.next()??;
+        codes.all(|c| c == Some(first)).then_some(first)
+    }
+}
+
 /// The manifest and installer winget wrote into `folder`: exactly one `.yaml` and one other
 /// file. Anything else is refused (PCTwin never picks the first match).
 pub fn downloaded(folder: &Path) -> Result<(PathBuf, PathBuf), String> {
@@ -557,6 +574,47 @@ ManifestType: merged
             Some("PuTTY release 0.85 (64-bit)")
         );
         assert!(!m.several_installers);
+    }
+
+    /// The product code recorded for undo is the manifest's one code, checked; two codes that
+    /// differ, a code that is not one, or none, give none.
+    #[test]
+    fn the_installers_product_code_is_its_one_checked_code() {
+        let m = Manifest::parse(PUTTY).unwrap();
+        assert_eq!(
+            m.product_code_of_installer().unwrap().as_str(),
+            "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}"
+        );
+        // Only the entries name it.
+        let entries_only = PUTTY.replacen(
+            "  ProductCode: '{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}'\n",
+            "",
+            1,
+        );
+        let m = Manifest::parse(&entries_only).unwrap();
+        assert_eq!(m.product_code, None);
+        assert_eq!(
+            m.product_code_of_installer().unwrap().as_str(),
+            "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}"
+        );
+        // The installer and its entry disagree.
+        let two = PUTTY.replacen(
+            "    ProductCode: '{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}'",
+            "    ProductCode: '{11111111-2222-3333-4444-555555555555}'",
+            1,
+        );
+        assert_eq!(
+            Manifest::parse(&two).unwrap().product_code_of_installer(),
+            None
+        );
+        // Not a product code.
+        let bad = PUTTY.replace("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}", "3B0346D3 155D");
+        assert_eq!(
+            Manifest::parse(&bad).unwrap().product_code_of_installer(),
+            None
+        );
+        // None at all.
+        assert_eq!(Manifest::default().product_code_of_installer(), None);
     }
 
     #[test]

@@ -491,6 +491,14 @@
           {
             "name": "a.txt",
             "plan": "remove-yourself"
+          },
+          {
+            "name": "a.txt",
+            "plan": "keep-other-version"
+          },
+          {
+            "name": "a.txt",
+            "plan": "already-gone"
           }
         ],
         "more": 0,
@@ -580,6 +588,27 @@
             "name": "i",
             "result": {
               "kind": "remove-yourself"
+            }
+          },
+          {
+            "detail": null,
+            "name": "j",
+            "result": {
+              "kind": "kept-other-version"
+            }
+          },
+          {
+            "detail": null,
+            "name": "k",
+            "result": {
+              "kind": "removed-restart"
+            }
+          },
+          {
+            "detail": null,
+            "name": "l",
+            "result": {
+              "kind": "not-removed"
             }
           }
         ],

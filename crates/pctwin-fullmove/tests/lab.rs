@@ -205,6 +205,48 @@ fn source_in(root: &Path, item: &Item) -> PathBuf {
     p
 }
 
+fn lab_removable() -> pctwin_fullmove::run::Removable {
+    use pctwin_helper::broker::actions::{
+        Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
+    };
+    pctwin_fullmove::run::Removable {
+        product: InstalledProduct {
+            code: ProductCode::parse("{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}").unwrap(),
+            version: ProductVersion::parse("2.1.0").unwrap(),
+            installed_on: InstallDate::parse("20261028").unwrap(),
+        },
+        installed_by: Hex32([7; 32]),
+    }
+}
+
+/// The administrator helper's removals, as a stand-in: what undo asked it to remove.
+#[derive(Default)]
+struct LabApps {
+    looked: Vec<String>,
+    moves: Vec<[u8; 16]>,
+    removed: Vec<pctwin_fullmove::run::RemovableApp>,
+}
+
+impl undo::AppUndo for LabApps {
+    fn plan(&mut self, app: &pctwin_fullmove::run::RemovableApp) -> UndoPlan {
+        self.looked.push(app.name.clone());
+        UndoPlan::RemoveApp
+    }
+    fn remove(
+        &mut self,
+        for_move: [u8; 16],
+        apps: &[pctwin_fullmove::run::RemovableApp],
+    ) -> Vec<undo::Result> {
+        self.moves.push(for_move);
+        self.removed.extend(apps.iter().cloned());
+        apps.iter()
+            .map(|_| undo::Result::Removed {
+                restart_needed: false,
+            })
+            .collect()
+    }
+}
+
 /// The installer stand-in: reports what a real install that the laptop then showed would report.
 /// Nothing is installed and nothing runs elevated.
 struct FakeInstaller {
@@ -230,6 +272,8 @@ impl Installer for FakeInstaller {
                     result: pctwin_types::ItemResult::done(ItemStatus::Reinstalled).unwrap(),
                     todo: vec![],
                     installed: true,
+                    // As the real chain keeps a Windows Installer app the helper recorded.
+                    removable: Some(Box::new(lab_removable())),
                 }
             })
             .collect()
@@ -593,7 +637,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             Some((item, folder(new.path(), item.place.role).join(stored)))
         }),
     );
-    let done = rebuild(
+    let mut done = rebuild(
         &plan,
         &pctwin_fullmove::run::DataDone {
             files,
@@ -683,8 +727,15 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         .set(APP, "Theme", &RegValue::Sz("forest".into()))
         .unwrap();
 
+    // The app PCTwin installed from a Windows Installer package is kept for undo to remove, not
+    // listed for the person.
+    assert!(done.undo.apps.is_empty(), "{:?}", done.undo.apps);
+    assert_eq!(done.undo.removable.len(), 1);
+    assert_eq!(done.undo.removable[0].name, "Lab Writer");
+    assert_eq!(done.undo.removable[0].removable, lab_removable());
+    let mut lab_apps = LabApps::default();
     // Undo, previewed then done.
-    let preview = undo::preview(&journal, &done.undo, &mut adapter).unwrap();
+    let preview = undo::preview(&journal, &done.undo, &mut adapter, &mut lab_apps).unwrap();
     let plan_of = |name: &str| {
         preview
             .iter()
@@ -698,16 +749,62 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
     );
     assert_eq!(
         plan_of("Lab Writer"),
-        Some(UndoPlan::RemoveYourself),
+        Some(UndoPlan::RemoveApp),
         "{preview:#?}"
     );
-    let lines = undo::undo(&rebuild_rec, &done.undo, &mut adapter, None).unwrap();
+    let lines = undo::undo(
+        &rebuild_rec,
+        &mut done.undo,
+        &mut adapter,
+        None,
+        &mut lab_apps,
+    )
+    .unwrap();
     assert!(
         lines
             .iter()
             .any(|l| matches!(l.result, undo::Result::KeptChanged { kept: 1 })),
         "{lines:#?}"
     );
+    // The app went to the helper's removal, by the very record the install kept, and is said.
+    assert_eq!(lab_apps.looked, ["Lab Writer"]);
+    assert_eq!(lab_apps.removed.len(), 1);
+    assert_eq!(lab_apps.removed[0].removable, lab_removable());
+    assert_eq!(lab_apps.moves, [done.undo.scope]);
+    // Review finding F1: the removal that ended is settled in the book; undo again never asks
+    // for it, and says it is as before.
+    assert_eq!(
+        done.undo.removable[0].settled,
+        Some(pctwin_fullmove::run::Settled::Removed)
+    );
+    let preview = undo::preview(&journal, &done.undo, &mut adapter, &mut lab_apps).unwrap();
+    assert_eq!(
+        preview
+            .iter()
+            .find(|l| l.name == "Lab Writer")
+            .map(|l| l.plan),
+        Some(UndoPlan::AlreadyGone)
+    );
+    let again = undo::undo(
+        &rebuild_rec,
+        &mut done.undo,
+        &mut adapter,
+        None,
+        &mut lab_apps,
+    )
+    .unwrap();
+    assert_eq!(lab_apps.removed.len(), 1);
+    assert_eq!(lab_apps.looked, ["Lab Writer"]);
+    assert!(
+        again
+            .iter()
+            .any(|l| l.name == "Lab Writer" && l.result == undo::Result::AsBefore)
+    );
+    assert!(lines.iter().any(|l| l.name == "Lab Writer"
+        && l.result
+            == undo::Result::Removed {
+                restart_needed: false
+            }));
     assert_eq!(
         get(&mut adapter, APP, "Theme"),
         Some(RegValue::Sz("forest".into())),

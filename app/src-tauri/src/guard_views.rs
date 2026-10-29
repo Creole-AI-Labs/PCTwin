@@ -586,7 +586,8 @@ pctwin_types::listed_enum! {
     pub enum UndoPlan {
         /// Put back as it was.
         PutBack,
-        /// The app is removed; the person's own data is kept.
+        /// PCTwin removes the app (through Windows Installer); it does not touch files the person
+        /// made, and promises nothing about what the app's own uninstaller does.
         RemoveApp,
         /// Kept: it changed since the move.
         KeepChanged,
@@ -596,6 +597,10 @@ pctwin_types::listed_enum! {
         LeaveAlone,
         /// An app PCTwin installed: the person removes it in the system's settings if they want.
         RemoveYourself,
+        /// An app PCTwin installed that is another version now: kept.
+        KeepOtherVersion,
+        /// An app PCTwin installed that is no longer there.
+        AlreadyGone,
     }
 }
 
@@ -630,6 +635,13 @@ pctwin_types::listed_enum! {
         NotDoneYet,
         /// An app PCTwin installed, left for the person to remove in the system's settings.
         RemoveYourself,
+        /// An app PCTwin installed that is another version now: kept.
+        KeptOtherVersion,
+        /// An app PCTwin installed, removed; a restart finishes it.
+        RemovedRestart,
+        /// An app PCTwin installed that could not be removed this time: the person can remove it
+        /// in the system's settings.
+        NotRemoved,
     }
 }
 

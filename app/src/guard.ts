@@ -89,10 +89,10 @@ export const LINE_WHY = ["failed", "laptop-not-connected", "waits-for-another", 
 export type LineWhy = (typeof LINE_WHY)[number];
 export type ReportLine = { line: number; what: LineWhat; laptop: string; why: LineWhy };
 
-export const UNDO_PLANS = ["put-back", "remove-app", "keep-changed", "elsewhere", "leave-alone", "remove-yourself"] as const;
+export const UNDO_PLANS = ["put-back", "remove-app", "keep-changed", "elsewhere", "leave-alone", "remove-yourself", "keep-other-version", "already-gone"] as const;
 export type UndoPlan = (typeof UNDO_PLANS)[number];
 export type UndoPlanLine = { name: string; plan: UndoPlan };
-export const UNDO_RESULTS = ["restored", "removed", "as-before", "kept-changed", "kept-other", "kept-at", "done-elsewhere", "not-done-yet", "remove-yourself"] as const;
+export const UNDO_RESULTS = ["restored", "removed", "as-before", "kept-changed", "kept-other", "kept-at", "done-elsewhere", "not-done-yet", "remove-yourself", "kept-other-version", "removed-restart", "not-removed"] as const;
 export type UndoResultKind = (typeof UNDO_RESULTS)[number];
 export type UndoResult = { kind: Exclude<UndoResultKind, "kept-at"> } | { kind: "kept-at"; at: string };
 export type UndoLine = { name: string; result: UndoResult; detail: string | null };

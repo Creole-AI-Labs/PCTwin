@@ -20,7 +20,9 @@ use pctwin_fullmove::install::{Helper, HelperDown, Machine, WingetInstaller, win
 use pctwin_fullmove::plan::AppEntry;
 use pctwin_fullmove::run::Installer;
 use pctwin_helper::Acted;
-use pctwin_helper::broker::actions::{Action, ApprovedPlan, Hex32};
+use pctwin_helper::broker::actions::{
+    Action, ApprovedPlan, Hex16, Hex32, InstallDate, InstalledProduct, ProductCode, ProductVersion,
+};
 use pctwin_helper::broker::receipt::{Outcome, Receipt};
 use pctwin_helper::broker::restore::RestorePointResult;
 use pctwin_helper::broker::{BrokerRequest, Denial};
@@ -34,6 +36,7 @@ use sha2::Digest;
 
 const CODE: &str = "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}";
 const INSTALLER: &[u8] = b"an msi's bytes, as winget downloaded them";
+const MOVE: [u8; 16] = [0x4d; 16];
 
 fn manifest(code: &str, sha: Option<[u8; 32]>) -> String {
     let sha = sha
@@ -149,6 +152,10 @@ struct FakeHelper {
     /// After an install, Windows' list shows these (the fake machine reads them).
     shows: std::rc::Rc<RefCell<Vec<RawEntry>>>,
     installs_also: Option<RawEntry>,
+    /// What the helper answers for an install (none: done, with no product recorded).
+    install_outcome: Option<Outcome>,
+    /// What Windows' list shows after an install, in place of the app's own entry.
+    shows_after: Option<RawEntry>,
 }
 
 fn receipt(r: &BrokerRequest, outcome: Outcome) -> Receipt {
@@ -221,15 +228,19 @@ impl Helper for FakeHelper {
             ),
             Action::InstallVerifiedPackage(_) => {
                 let mut shows = self.shows.borrow_mut();
-                shows.push(raw("LabWriter", "Lab Writer", "2.1.0", Some(CODE)));
+                shows.push(
+                    self.shows_after
+                        .clone()
+                        .unwrap_or_else(|| raw("LabWriter", "Lab Writer", "2.1.0", Some(CODE))),
+                );
                 if let Some(extra) = &self.installs_also {
                     shows.push(extra.clone());
                 }
                 receipt(
                     request,
-                    Outcome::Done {
+                    self.install_outcome.clone().unwrap_or(Outcome::Done {
                         restart_needed: false,
-                    },
+                    }),
                 )
             }
             _ => receipt(request, Outcome::Failed { code: 1 }),
@@ -282,7 +293,8 @@ fn run_entry(winget: FakeWinget, mut helper: FakeHelper, e: AppEntry) -> Run {
             &mut helper,
             &machine,
             &mut nonce,
-        );
+        )
+        .for_move(MOVE);
         let results = chain.install(&refs, &mut || {});
         let point = chain.asked();
         (results, point)
@@ -472,4 +484,151 @@ fn winget_is_searched_by_the_product_code_for_the_plan() {
     let hints = winget_hints(&[&a], &w, std::path::Path::new("C:\\winget.exe"));
     let got = hints.values().next().cloned().unwrap_or_default();
     assert_eq!(got, vec![("Lab.Writer".to_string(), WingetBy::ProductCode)]);
+}
+
+fn installed(code: &str, version: &str) -> Outcome {
+    installed_for(code, version, MOVE)
+}
+
+fn installed_for(code: &str, version: &str, for_move: [u8; 16]) -> Outcome {
+    Outcome::Installed {
+        restart_needed: false,
+        product: InstalledProduct {
+            code: ProductCode::parse(code).unwrap(),
+            version: ProductVersion::parse(version).unwrap(),
+            installed_on: InstallDate::parse("20261028").unwrap(),
+        },
+        for_move: Hex16(for_move),
+    }
+}
+
+fn good_winget() -> FakeWinget {
+    FakeWinget {
+        manifest: manifest(CODE, Some(sha(INSTALLER))),
+        bytes: INSTALLER.to_vec(),
+        calls: Default::default(),
+    }
+}
+
+/// Step 1's acceptance (uninstall on undo): a Windows Installer install names the manifest's
+/// product code in the plan; when the helper saw its install make that product appear, and
+/// Windows' list agrees (absent before, present after), the app keeps it for undo with the
+/// install's own key from its receipt.
+#[test]
+fn an_msi_install_the_helper_saw_appear_is_kept_for_undo() {
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed(CODE, "2.1.0")),
+            ..FakeHelper::default()
+        },
+    );
+    let Action::InstallVerifiedPackage(p) = &r.helper.started[0].operations[1].action else {
+        panic!()
+    };
+    assert_eq!(p.product_code, ProductCode::parse(CODE));
+    // The install names its move (review finding F3).
+    assert_eq!(p.for_move, Some(Hex16(MOVE)));
+    let done = &r.results[0];
+    assert_eq!(done.result.status(), ItemStatus::Reinstalled);
+    let kept = done.removable.as_deref().expect("kept for undo");
+    assert_eq!(kept.product.code, ProductCode::parse(CODE).unwrap());
+    assert_eq!(kept.product.version.as_str(), "2.1.0");
+    assert_eq!(kept.installed_by, Hex32([1; 32]));
+}
+
+/// Step 1's acceptance: no record unless the helper recorded this very product and Windows'
+/// list shows it absent before and present after; an installer program (EXE) records none.
+#[test]
+fn nothing_is_kept_for_undo_unless_the_helper_and_the_list_agree() {
+    // The helper recorded no product (it could not see one appear).
+    let r = run(good_winget(), FakeHelper::default());
+    assert!(r.results[0].installed);
+    assert_eq!(r.results[0].removable, None);
+    // The helper recorded another product than the plan named.
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed("{11111111-2222-3333-4444-555555555555}", "2.1.0")),
+            ..FakeHelper::default()
+        },
+    );
+    assert_eq!(r.results[0].removable, None);
+    // The helper recorded it for another move (review finding F3).
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed_for(CODE, "2.1.0", [0x99; 16])),
+            ..FakeHelper::default()
+        },
+    );
+    assert!(r.results[0].installed);
+    assert_eq!(r.results[0].removable, None);
+    // The list showed the product before the install.
+    let helper = FakeHelper {
+        install_outcome: Some(installed(CODE, "2.1.0")),
+        ..FakeHelper::default()
+    };
+    helper
+        .shows
+        .borrow_mut()
+        .push(raw("LabWriter", "Lab Writer", "2.0", Some(CODE)));
+    let r = run(good_winget(), helper);
+    assert_eq!(r.results[0].removable, None);
+    // An installer program: the plan names no product code, and nothing is kept, whatever the
+    // helper says.
+    let inno = FakeWinget {
+        manifest: manifest(CODE, Some(sha(INSTALLER)))
+            .replace("InstallerType: msi", "InstallerType: inno"),
+        bytes: INSTALLER.to_vec(),
+        calls: Default::default(),
+    };
+    let r = run(
+        inno,
+        FakeHelper {
+            install_outcome: Some(installed(CODE, "2.1.0")),
+            ..FakeHelper::default()
+        },
+    );
+    let Action::InstallVerifiedPackage(p) = &r.helper.started[0].operations[1].action else {
+        panic!()
+    };
+    assert_eq!(p.product_code, None);
+    assert_eq!(r.results[0].removable, None);
+    // The app is found by its name, but no entry has the product code: nothing kept.
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed(CODE, "2.1.0")),
+            shows_after: Some(raw("LabWriter", "Lab Writer", "2.1.0", None)),
+            ..FakeHelper::default()
+        },
+    );
+    assert!(r.results[0].installed, "{:?}", r.results[0]);
+    assert_eq!(r.results[0].removable, None);
+    // The product code is listed, but hidden from "Installed apps", so the app is not found
+    // installed: nothing kept.
+    let mut hidden = raw("LabWriter", "Lab Writer", "2.1.0", Some(CODE));
+    hidden
+        .values
+        .insert("systemcomponent".into(), RegValue::Number(1));
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(installed(CODE, "2.1.0")),
+            shows_after: Some(hidden),
+            ..FakeHelper::default()
+        },
+    );
+    assert!(!r.results[0].installed, "{:?}", r.results[0]);
+    assert_eq!(r.results[0].removable, None);
+    // A failed install keeps nothing.
+    let r = run(
+        good_winget(),
+        FakeHelper {
+            install_outcome: Some(Outcome::Failed { code: 1603 }),
+            ..FakeHelper::default()
+        },
+    );
+    assert_eq!(r.results[0].removable, None);
 }

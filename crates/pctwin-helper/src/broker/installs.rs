@@ -18,7 +18,7 @@
 //!   (Homebrew's) is never run as root. Otherwise it is not available, and the app sends the
 //!   person to the App Store's own page instead.
 
-use super::actions::{InstallFromMacAppStore, InstallVerifiedPackage, PackageKind};
+use super::actions::{InstallFromMacAppStore, InstallVerifiedPackage, PackageKind, ProductCode};
 use super::staging::{VerifiedArtifact, staged_prefix};
 use super::tool::{ExitMeaning, exe_install, meaning, msiexec_install};
 use super::{Effect, NOT_AVAILABLE, NativeText, Observed};
@@ -69,6 +69,40 @@ pub fn install(package: &VerifiedArtifact, action: &InstallVerifiedPackage) -> E
             code: i64::from(code),
             native: NativeText::new(""),
         },
+    }
+}
+
+/// Whether the product of `action` is to be watched: a Windows Installer package, for a move,
+/// whose manifest named a product code.
+pub fn watches_product(action: &InstallVerifiedPackage) -> bool {
+    action.kind == PackageKind::Msi && action.product_code.is_some() && action.for_move.is_some()
+}
+
+/// An install's effect with its product recorded for undo, for its move, when the install was
+/// done and [`super::uninstall::recorded`] finds this install made the product appear, and the
+/// package itself names it (`package_code`: from the held package's Property table; `before`:
+/// the list read just before the install; `after` reads it again). Anything else is the effect
+/// as it was.
+pub fn with_product(
+    effect: Effect,
+    action: &InstallVerifiedPackage,
+    package_code: Option<ProductCode>,
+    before: Option<&super::uninstall::Products>,
+    after: &mut dyn FnMut() -> Option<super::uninstall::Products>,
+) -> Effect {
+    let Effect::Done { restart_needed } = effect else {
+        return effect;
+    };
+    let Some(for_move) = action.for_move.filter(|_| watches_product(action)) else {
+        return effect;
+    };
+    match super::uninstall::recorded(action.product_code, package_code, before, after().as_ref()) {
+        Some(product) => Effect::Installed {
+            restart_needed,
+            product,
+            for_move,
+        },
+        None => effect,
     }
 }
 
@@ -240,6 +274,8 @@ mod tests {
 
     fn action(kind: PackageKind) -> InstallVerifiedPackage {
         InstallVerifiedPackage {
+            product_code: None,
+            for_move: None,
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind,
@@ -298,6 +334,131 @@ mod tests {
             ),
             Observed::Unknown
         );
+    }
+
+    /// Step 1's acceptance at the helper: the product is recorded only for a Windows Installer
+    /// install that was done and made it appear; an installer program (EXE) records none.
+    #[test]
+    fn only_a_done_msi_install_that_made_its_product_appear_records_it() {
+        use crate::broker::actions::{Hex16, InstallDate, InstalledProduct, ProductVersion};
+        use crate::broker::uninstall::{Listed, Products};
+        let code = ProductCode::parse("{A1B2C3D4-E5F6-4789-9ABC-DEF012345678}").unwrap();
+        let other = ProductCode::parse("{11111111-2222-3333-4444-555555555555}").unwrap();
+        let before = Products::new();
+        let appeared = || {
+            let mut p = Products::new();
+            p.insert(
+                code,
+                Listed {
+                    version: ProductVersion::parse("2.0"),
+                    installed_on: InstallDate::parse("20261028"),
+                },
+            );
+            Some(p)
+        };
+        let done = Effect::Done {
+            restart_needed: true,
+        };
+        let mut msi = action(PackageKind::Msi);
+        msi.product_code = Some(code);
+        msi.for_move = Some(Hex16([3; 16]));
+        let mut looked = 0;
+        let got = with_product(done.clone(), &msi, Some(code), Some(&before), &mut || {
+            looked += 1;
+            appeared()
+        });
+        assert_eq!(
+            got,
+            Effect::Installed {
+                restart_needed: true,
+                product: InstalledProduct {
+                    code,
+                    version: ProductVersion::parse("2.0").unwrap(),
+                    installed_on: InstallDate::parse("20261028").unwrap(),
+                },
+                for_move: Hex16([3; 16]),
+            }
+        );
+        assert_eq!(looked, 1);
+        // The package itself names another code, or none (F4): nothing recorded.
+        for package in [Some(other), None] {
+            assert_eq!(
+                with_product(
+                    done.clone(),
+                    &msi,
+                    package,
+                    Some(&before),
+                    &mut appeared.clone()
+                ),
+                done
+            );
+        }
+        // Not appeared (the list after has nothing new): done, nothing recorded.
+        assert_eq!(
+            with_product(done.clone(), &msi, Some(code), Some(&before), &mut || Some(
+                Products::new()
+            )),
+            done
+        );
+        // Already there before.
+        assert_eq!(
+            with_product(
+                done.clone(),
+                &msi,
+                Some(code),
+                appeared().as_ref(),
+                &mut appeared.clone()
+            ),
+            done
+        );
+        // A failed install records nothing and does not look.
+        let failed = Effect::Failed {
+            code: 1603,
+            native: NativeText::new(""),
+        };
+        let mut looked = 0;
+        assert_eq!(
+            with_product(failed.clone(), &msi, Some(code), Some(&before), &mut || {
+                looked += 1;
+                appeared()
+            }),
+            failed
+        );
+        assert_eq!(looked, 0);
+        // An installer program never records a product, even if its manifest names one.
+        let mut exe = action(PackageKind::Exe(ExeKind::Inno));
+        exe.product_code = Some(code);
+        exe.for_move = Some(Hex16([3; 16]));
+        assert!(!watches_product(&exe));
+        assert_eq!(
+            with_product(
+                done.clone(),
+                &exe,
+                Some(code),
+                Some(&before),
+                &mut appeared.clone()
+            ),
+            done
+        );
+        // A package with no product code named, or not for a move (F3): nothing to watch.
+        let mut unnamed = msi.clone();
+        unnamed.product_code = None;
+        let mut no_move = msi.clone();
+        no_move.for_move = None;
+        for a in [&unnamed, &no_move] {
+            assert!(!watches_product(a));
+            assert_eq!(
+                with_product(
+                    done.clone(),
+                    a,
+                    Some(code),
+                    Some(&before),
+                    &mut appeared.clone()
+                ),
+                done
+            );
+        }
+        assert!(watches_product(&msi));
     }
 
     #[test]
