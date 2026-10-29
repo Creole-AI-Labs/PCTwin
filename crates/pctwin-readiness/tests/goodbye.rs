@@ -250,6 +250,22 @@ fn an_item_accepted_in_the_ledger_leaves_the_list() {
     assert_eq!(of(&c, ExceptionKind::OnlyOnOldLaptop).items, [w.skipped]);
 }
 
+/// An answer agreed to on one plan does not settle the list of the next plan.
+#[test]
+fn an_answer_is_bound_to_the_plan_generation() {
+    let w = world();
+    let c = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
+    let id = of(&c, ExceptionKind::OnlyOnOldLaptop).id;
+    let mut later = c.clone();
+    later.generation += 1;
+    assert_ne!(c.shown(&id), later.shown(&id));
+    let mut later2 = later.clone();
+    assert_eq!(
+        later2.accept(&id, c.shown(&id).unwrap(), T0 + 101),
+        Err(ChecklistError::NotTheWarningShown)
+    );
+}
+
 /// T27-012: a list built from an older scan of the old laptop is not current.
 #[test]
 fn t27_012_a_list_from_an_older_scan_is_stale() {

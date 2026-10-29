@@ -266,6 +266,39 @@ fn t27_025_the_share_preview_strips_private_things_unless_selected() {
     assert_eq!(check_text(&p, "Secret Project Editors club"), Ok(()));
 }
 
+/// A file kept out is kept out by its own name too, as a screen would show it.
+#[test]
+fn a_kept_out_path_is_refused_by_its_last_part() {
+    let mut f = file("ada-to-bea.txt");
+    f.path = pctwin_record::ItemPath::new(vec![
+        pctwin_record::ItemName::from_text("Letters"),
+        pctwin_record::ItemName::from_text("ada-to-bea.txt"),
+    ])
+    .unwrap();
+    let (_, mut l) = ledger(vec![f]);
+    let a = l.lines().next().map(|(id, _)| *id).unwrap();
+    l.accept(
+        receipt(
+            &l,
+            Role::Transfer,
+            a,
+            Some(ItemResult::because(Reason::Unreadable)),
+        ),
+        &Sees(Observed::Matches),
+        T0 + 20,
+    )
+    .unwrap();
+    let p = share_preview(
+        &l,
+        Summary::FinishedWithTasks,
+        &[],
+        None,
+        "1000",
+        Disclosure::default(),
+    );
+    assert_eq!(check_text(&p, "ada-to-bea.txt failed"), Err(Leak::KeptOut));
+}
+
 /// The digest binds a save to exactly the report shown.
 #[test]
 fn the_report_digest_changes_with_what_is_disclosed() {

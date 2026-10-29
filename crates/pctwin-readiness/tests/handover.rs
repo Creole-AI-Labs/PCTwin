@@ -179,6 +179,13 @@ fn every_gate_check_refuses_on_its_own() {
         f.old_now = Some(&stranger);
         assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
 
+        // A list made for another old laptop is not this one's, even with that laptop here.
+        let mut f = F::new(&s, &j);
+        f.expected.laptop = other_laptop();
+        f.now_dev.laptop = other_laptop();
+        f.old_now = Some(&stranger);
+        assert_eq!(preview(action, &f.facts()), Err(Refusal::WrongDevice));
+
         // T27-012: the old laptop changed since the list was made.
         let mut changed = s.record.clone();
         changed.items.push(file("new.txt"));

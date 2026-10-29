@@ -953,13 +953,18 @@ impl Probe for JournalSees<'_> {
 /// disk now: a copy is "done" only when the journal shows it committed (or already there) and not
 /// undone (T27-001). Returns it with how many results were refused.
 fn ledger_of(k: &Kept, j: Option<&Journal>) -> (Ledger, u64) {
+    let probe = j
+        .and_then(|j| JournalProbe::read_moves(j, k.move_id.source).ok())
+        .unwrap_or_default();
+    ledger_with(k, &probe)
+}
+
+/// [`ledger_of`], with the journal as `probe` read.
+fn ledger_with(k: &Kept, probe: &JournalProbe) -> (Ledger, u64) {
     let mut l = Ledger::from_record(&k.record, &k.mover, k.move_id, k.started_at);
     for place in &k.searched {
         l.searched(place);
     }
-    let probe = j
-        .and_then(|j| JournalProbe::read_moves(j, k.move_id.source).ok())
-        .unwrap_or_default();
     let now = store::now().max(k.ended_at);
     let mut refused = 0;
     for r in &k.results {
@@ -985,7 +990,7 @@ fn ledger_of(k: &Kept, j: Option<&Journal>) -> (Ledger, u64) {
             evidence,
             observed_at: k.ended_at,
         };
-        if l.accept(receipt, &JournalSees(&probe), now).is_err() {
+        if l.accept(receipt, &JournalSees(probe), now).is_err() {
             refused += 1;
         }
     }
@@ -2165,6 +2170,13 @@ mod tests {
                     "{action:?} {system:?}"
                 );
                 assert!(!r.can_open, "never opened on the new laptop");
+                let prefix = match system {
+                    Some(SystemKey::Windows) => "windows-",
+                    Some(SystemKey::Macos) => "macos-",
+                    Some(SystemKey::Linux) => "linux-",
+                    None => "unknown-",
+                };
+                assert!(r.route.starts_with(prefix), "{system:?}: {}", r.route);
                 assert!(r.steps.iter().all(|s| is_key(s)), "{:?}", r.steps);
             }
         }
@@ -2407,22 +2419,49 @@ mod tests {
         let photo = k.record.items[0].id;
         let probe =
             JournalProbe::from_moves(&[journal_entry(photo, [5; 32])], &BTreeSet::new(), old());
-        let mut l = Ledger::from_record(&k.record, &k.mover, k.move_id, k.started_at);
-        let r = Receipt {
-            role: Role::Transfer,
-            source: k.move_id.source,
-            target: k.move_id.target,
-            session: k.move_id.session,
-            generation: l.generation(),
-            item: photo,
-            result: Some(ItemResult::done(ItemStatus::Copied).unwrap()),
-            evidence: probe.fingerprint(photo).map(|fingerprint| {
-                pctwin_readiness::ledger::Evidence::VerifiedTransfer { fingerprint }
-            }),
-            observed_at: k.ended_at,
-        };
-        l.accept(r, &JournalSees(&probe), 3_000).unwrap();
+        let (l, refused) = ledger_with(&k, &probe);
+        assert_eq!(refused, 0);
         assert_eq!(l.standing(photo), Some(Standing::Done(ItemStatus::Copied)));
+        assert_eq!(
+            l.line(photo).unwrap().evidence[0].evidence,
+            pctwin_readiness::ledger::Evidence::VerifiedTransfer {
+                fingerprint: [5; 32]
+            }
+        );
+        let groups = after_move(&l, &k);
+        let photos = groups
+            .iter()
+            .find(|g| g.group == AfterKind::Photos)
+            .unwrap();
+        assert_eq!((photos.at_scan, photos.on_new_laptop), (1, 1));
+        // The letter has no result at all: not done. With it done too, the app that still needs
+        // signing in keeps the move from ready.
+        let mut k = kept();
+        k.results[1].status = ItemStatus::Copied;
+        k.results[1].reason = None;
+        let letter = k.record.items[1].id;
+        let mut both = journal_entry(letter, [6; 32]);
+        both.id = 2;
+        let probe = JournalProbe::from_moves(
+            &[journal_entry(photo, [5; 32]), both],
+            &BTreeSet::new(),
+            old(),
+        );
+        let (l, _) = ledger_with(&k, &probe);
+        assert_eq!(headline(&l, &k, None), Headline::FinishedWithTasks);
+        k.lines[0].status = ItemStatus::Reinstalled;
+        k.lines[0].reason = None;
+        k.lines[2].status = ItemStatus::Copied;
+        k.lines[2].reason = None;
+        assert_eq!(headline(&l, &k, None), Headline::DataPreserved);
+        // A settings group that did not finish counts nothing on the new laptop.
+        k.lines[1].status = ItemStatus::Failed;
+        k.lines[1].reason = Some(Reason::NotVerified);
+        let settings = after_move(&l, &k)
+            .into_iter()
+            .find(|g| g.group == AfterKind::Settings)
+            .unwrap();
+        assert_eq!((settings.at_scan, settings.on_new_laptop), (12, 0));
     }
 
     fn journal_entry(item: ItemId, fp: [u8; 32]) -> pctwin_journal::Entry {
