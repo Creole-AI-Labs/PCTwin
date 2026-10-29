@@ -57,7 +57,9 @@ fn install_content_readers() {
 pub(crate) enum Files {
     /// The apps installed on this laptop (their programs' and installers' signatures).
     InstalledHere,
-    /// Installers found among the person's files on the old laptop.
+    /// Installers found among the person's files on the old laptop (read on Windows only, where
+    /// an older copy of the system can hold them; elsewhere nothing makes this source yet).
+    #[cfg_attr(not(windows), allow(dead_code))]
     FoundInstallers,
 }
 
