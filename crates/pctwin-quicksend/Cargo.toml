@@ -16,6 +16,8 @@ pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 pctwin-transfer = { path = "../pctwin-transfer" }
 thiserror = "2.0.21"
+# A note that is one web address is shown with the site it leads to.
+url = "2.5.8"
 tokio = { version = "1.53.2", features = ["macros", "time"] }
 
 [dev-dependencies]

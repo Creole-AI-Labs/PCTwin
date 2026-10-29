@@ -12,6 +12,10 @@
 //! - Both sides get a [`Receipt`]: what arrived and under which name, what was declined, and what
 //!   failed and why. As in a move, an interrupted send continues later with only what is missing.
 
+pub mod note;
+
+pub use note::{Note, NoteError, NoteKind};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -38,6 +42,18 @@ const ACCEPTED: u8 = 36;
 /// An item id in the answer: 32 hex characters.
 const ID_LEN: usize = 32;
 
+/// What this exchange carries, said first: `[40][what]`.
+const WHAT: u8 = 40;
+const WHAT_FILES: u8 = 1;
+const WHAT_NOTE: u8 = 2;
+/// A note: `[41][its text, UTF-8]`.
+const NOTE: u8 = 41;
+/// The receiver took the note (it arrived and passed the checks; not that anyone read it).
+const NOTE_TAKEN: u8 = 42;
+
+/// How long a sender waits for a note to be taken: no person answers it, so not long.
+pub const NOTE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Why a Quick Send did not go ahead.
 #[derive(Debug, thiserror::Error)]
 pub enum QuickError {
@@ -57,6 +73,10 @@ pub enum QuickError {
     Destination(String),
     #[error("the other laptop did not answer the offer in time")]
     NotAnswered,
+    /// The note does not follow the rules (on the sender, before anything is sent; on the
+    /// receiver, refused on arrival).
+    #[error(transparent)]
+    Note(#[from] NoteError),
     #[error("there are more files ({files} so far) than one send can carry")]
     TooMany { files: usize },
     /// The receiving folder has no room for what was offered (keeping [`KEEP_FREE`] spare): the
@@ -328,6 +348,7 @@ pub async fn send_live(
     live: &pctwin_move::Live,
 ) -> Result<Receipt, QuickError> {
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
+    write_what(ch, WHAT_FILES).await?;
     send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
     let Some(accepted) = wait_for_answer(ch, &offered, live).await? else {
@@ -399,15 +420,98 @@ pub struct Incoming {
     version: u16,
 }
 
-/// Receiver: the offer from the other laptop over `ch` (already paired): names and sizes only.
-/// Refused unless it is a Quick Send (everything in it shared, nothing about people).
-pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
+/// What arrived over a Quick Send link.
+pub enum Arrival {
+    /// Files offered, for the person to say where they go.
+    Files(Incoming),
+    /// A note or link, checked, to show with Copy (and Open for a link, only when the person
+    /// chooses it). Nothing was written.
+    Note(Note),
+}
+
+/// Receiver: what the other laptop sends over `ch` (already paired): an offer of files (names
+/// and sizes only, refused unless it is a Quick Send: everything in it shared, nothing about
+/// people), or a note, checked by the same rules the sender used and taken.
+pub async fn receive(ch: &mut impl Channel) -> Result<Arrival, QuickError> {
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
-    let record = receive_inventory(ch, version).await?;
-    if record.items.iter().any(|i| i.owner != Owner::Shared) {
-        return Err(QuickError::NotAQuickSend);
+    match read_what(ch).await? {
+        WHAT_NOTE => {
+            let note = read_note(ch).await?;
+            ch.send(&[NOTE_TAKEN])
+                .await
+                .map_err(|_| TransferError::ConnectionDropped)?;
+            Ok(Arrival::Note(note))
+        }
+        _ => {
+            let record = receive_inventory(ch, version).await?;
+            if record.items.iter().any(|i| i.owner != Owner::Shared) {
+                return Err(QuickError::NotAQuickSend);
+            }
+            Ok(Arrival::Files(Incoming { record, version }))
+        }
     }
-    Ok(Incoming { record, version })
+}
+
+/// Receiver: as [`receive`], for an offer of files only (a note is refused as not one).
+pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
+    match receive(ch).await? {
+        Arrival::Files(incoming) => Ok(incoming),
+        Arrival::Note(_) => Err(QuickError::NotAQuickSend),
+    }
+}
+
+/// Sender: sends `note` over `ch` (already paired) and waits, at most [`NOTE_WAIT`], until the
+/// other laptop says it took it (it arrived and passed its checks; never that it was read).
+pub async fn send_note(ch: &mut impl Channel, note: &Note) -> Result<(), QuickError> {
+    agree_version(ch, MOVE_PROTOCOL).await?;
+    write_what(ch, WHAT_NOTE).await?;
+    let mut msg = Vec::with_capacity(1 + note.text().len());
+    msg.push(NOTE);
+    msg.extend_from_slice(note.text().as_bytes());
+    ch.send(&msg)
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    let taken = tokio::time::timeout(NOTE_WAIT, ch.recv())
+        .await
+        .map_err(|_| QuickError::NotAnswered)?
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    if taken != [NOTE_TAKEN] {
+        return Err(QuickError::BadAnswer);
+    }
+    Ok(())
+}
+
+async fn write_what(ch: &mut impl Channel, what: u8) -> Result<(), QuickError> {
+    ch.send(&[WHAT, what])
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    Ok(())
+}
+
+/// What the exchange carries: files or a note, and nothing else.
+async fn read_what(ch: &mut impl Channel) -> Result<u8, QuickError> {
+    let msg = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    match msg.as_slice() {
+        [WHAT, what @ (WHAT_FILES | WHAT_NOTE)] => Ok(*what),
+        _ => Err(QuickError::NotAQuickSend),
+    }
+}
+
+/// A note as it came: its exact form, its size limit before anything is decoded, then the rules.
+async fn read_note(ch: &mut impl Channel) -> Result<Note, QuickError> {
+    let msg = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    let (kind, body) = msg.split_first().ok_or(QuickError::BadAnswer)?;
+    if *kind != NOTE || body.len() > note::MAX_NOTE_BYTES {
+        return Err(QuickError::BadAnswer);
+    }
+    let text = std::str::from_utf8(body).map_err(|_| QuickError::BadAnswer)?;
+    Ok(Note::arrived(text)?)
 }
 
 impl Incoming {
