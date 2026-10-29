@@ -1,0 +1,40 @@
+[
+  {
+    "findings": [
+      {
+        "cause": "doctor-windows-public-network",
+        "fix": "doctor-windows-public-network-fix",
+        "names": [
+          "Wi-Fi"
+        ],
+        "sure": false
+      },
+      {
+        "cause": "doctor-guest-network",
+        "fix": "doctor-guest-network-fix",
+        "names": [],
+        "sure": false
+      }
+    ],
+    "hotspot": {
+      "suggested": true
+    },
+    "notChecked": [
+      "doctor-probe-hears-itself"
+    ]
+  },
+  {
+    "findings": [
+      {
+        "cause": "doctor-not-connected",
+        "fix": "doctor-not-connected-fix",
+        "names": [],
+        "sure": true
+      }
+    ],
+    "hotspot": {
+      "suggested": false
+    },
+    "notChecked": []
+  }
+]

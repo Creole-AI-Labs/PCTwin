@@ -1,0 +1,772 @@
+[
+  {
+    "afterMove": [
+      {
+        "atScan": 12,
+        "group": "photos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "videos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "music",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "documents",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "other-files",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "apps",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "settings",
+        "onNewLaptop": 10
+      }
+    ],
+    "headline": "ready-for-selected",
+    "id": "1792627200000-0",
+    "more": 9,
+    "notFinished": [
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "copied"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "reinstalled"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "converted"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "needs-action"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "waiting"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "not-reachable"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "no-result-yet"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "skipped-by-user"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "left-out"
+      }
+    ],
+    "notes": [
+      "parental-controls",
+      "not-everywhere",
+      "results-refused",
+      "undo-open"
+    ],
+    "oldLaptopCheckedAt": 1792627200,
+    "others": 120,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    }
+  },
+  {
+    "afterMove": [
+      {
+        "atScan": 12,
+        "group": "photos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "videos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "music",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "documents",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "other-files",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "apps",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "settings",
+        "onNewLaptop": 10
+      }
+    ],
+    "headline": "finished-with-tasks",
+    "id": "1792627200000-0",
+    "more": 9,
+    "notFinished": [
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "copied"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "reinstalled"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "converted"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "needs-action"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "waiting"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "not-reachable"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "no-result-yet"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "skipped-by-user"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "left-out"
+      }
+    ],
+    "notes": [
+      "parental-controls",
+      "not-everywhere",
+      "results-refused",
+      "undo-open"
+    ],
+    "oldLaptopCheckedAt": 1792627200,
+    "others": 120,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    }
+  },
+  {
+    "afterMove": [
+      {
+        "atScan": 12,
+        "group": "photos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "videos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "music",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "documents",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "other-files",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "apps",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "settings",
+        "onNewLaptop": 10
+      }
+    ],
+    "headline": "data-preserved-access-unresolved",
+    "id": "1792627200000-0",
+    "more": 9,
+    "notFinished": [
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "copied"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "reinstalled"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "converted"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "needs-action"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "waiting"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "not-reachable"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "no-result-yet"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "skipped-by-user"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "left-out"
+      }
+    ],
+    "notes": [
+      "parental-controls",
+      "not-everywhere",
+      "results-refused",
+      "undo-open"
+    ],
+    "oldLaptopCheckedAt": 1792627200,
+    "others": 120,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    }
+  },
+  {
+    "afterMove": [
+      {
+        "atScan": 12,
+        "group": "photos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "videos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "music",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "documents",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "other-files",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "apps",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "settings",
+        "onNewLaptop": 10
+      }
+    ],
+    "headline": "handover-unresolved",
+    "id": "1792627200000-0",
+    "more": 9,
+    "notFinished": [
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "copied"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "reinstalled"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "converted"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "needs-action"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "waiting"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "not-reachable"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "no-result-yet"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "skipped-by-user"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "left-out"
+      }
+    ],
+    "notes": [
+      "parental-controls",
+      "not-everywhere",
+      "results-refused",
+      "undo-open"
+    ],
+    "oldLaptopCheckedAt": 1792627200,
+    "others": 120,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    }
+  },
+  {
+    "afterMove": [
+      {
+        "atScan": 12,
+        "group": "photos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "videos",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "music",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "documents",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "other-files",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "apps",
+        "onNewLaptop": 10
+      },
+      {
+        "atScan": 12,
+        "group": "settings",
+        "onNewLaptop": 10
+      }
+    ],
+    "headline": "nothing-moved",
+    "id": "1792627200000-0",
+    "more": 9,
+    "notFinished": [
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "copied"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "reinstalled"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "converted"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "needs-action"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "failed"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "waiting"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "not-reachable"
+      },
+      {
+        "access": "key-not-checked",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "no-result-yet"
+      },
+      {
+        "access": "not-on-new-laptop",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "skipped-by-user"
+      },
+      {
+        "access": "usable",
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "kind": "file",
+        "label": "Letters/ada.txt",
+        "reason": "parts-missing",
+        "standing": "left-out"
+      }
+    ],
+    "notes": [
+      "parental-controls",
+      "not-everywhere",
+      "results-refused",
+      "undo-open"
+    ],
+    "oldLaptopCheckedAt": 1792627200,
+    "others": 120,
+    "search": {
+      "foundEverything": false,
+      "notSearched": [
+        "E:\\"
+      ],
+      "searched": [
+        "Documents",
+        "Pictures"
+      ]
+    },
+    "tally": {
+      "acceptedLoss": 1,
+      "done": 1240,
+      "failed": 2,
+      "leftOut": 12,
+      "needsAction": 6,
+      "noResultYet": 0,
+      "notReachable": 1,
+      "selected": 1250,
+      "skipped": 40,
+      "waiting": 1
+    }
+  }
+]

@@ -17,6 +17,11 @@ mod contract;
 // exercised by their tests only.
 #[allow(dead_code)]
 mod guard;
+// Finishing a move (Task List 2.7): the overview, the before-wipe list, handover and clean-up.
+// The contract comes first; the allowance goes once every command is made real.
+#[allow(dead_code)]
+mod finish;
+mod finish_store;
 // The full move: apps, settings and special categories joined to the move (Phase 2 joining).
 mod fullmove;
 #[cfg(test)]
@@ -285,6 +290,24 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         fullmove::fullmove_undo,
         fullmove::move_appdata_answer,
         moving::move_choose_what,
+        finish::finish_overview,
+        finish::goodbye_list,
+        finish::goodbye_answer,
+        finish::goodbye_keep_until,
+        finish::catchup_arm,
+        finish::catchup_approve,
+        finish::handover_preview,
+        finish::handover_confirm,
+        finish::handover_result,
+        finish::doctor_run,
+        finish::setup_checklist,
+        finish::setup_mark,
+        finish::setup_save,
+        finish::undo_preview,
+        finish::cleanup_preview,
+        finish::cleanup_confirm,
+        finish::report_preview,
+        finish::report_save,
     ]
 }
 
