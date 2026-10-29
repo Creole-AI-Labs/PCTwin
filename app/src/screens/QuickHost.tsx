@@ -432,7 +432,8 @@ export default function QuickHost({
 
   const chooseFolder = () => {
     setFolderFailed(false);
-    qsChooseFolder().then(
+    // On the where-to-save page the folder is chosen for that very question.
+    qsChooseFolder(view.kind === "where" ? promptRef.current : null).then(
       (chosen) => {
         if ("none" in chosen) return;
         setFolder(chosen);

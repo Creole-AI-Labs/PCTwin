@@ -156,6 +156,8 @@ fn now() -> u64 {
 /// A file from a remembered laptop waiting for the person's answer.
 struct Asking {
     connection: String,
+    /// The question's number: Save, Decline and Choose another folder name it.
+    prompt: u64,
     answer: tokio::sync::oneshot::Sender<Answer>,
 }
 
@@ -426,9 +428,12 @@ pub struct KnownIncomingView {
     pub label: String,
     pub files: Vec<OfferedView>,
     pub bytes: u64,
-    /// The folder held for it now ("folder for next time", when one is chosen and still that
-    /// folder); `None`: the screens hold one (Downloads, or Choose another folder).
+    /// The folder this question holds now (the folder for next time when one is chosen and still
+    /// that folder, else the one chosen this session or Downloads); `None`: none could be held,
+    /// so the person chooses one (Choose another folder, naming this question).
     pub folder: Option<FolderView>,
+    /// This question's number: Save, Decline and Choose another folder name it.
+    pub prompt: u64,
 }
 
 /// Files that landed under permission 3.
@@ -648,31 +653,38 @@ pub fn known_clear_next_folder<R: Runtime>(
     st.list(&app)
 }
 
-/// Save, for files from a remembered laptop: they go into the folder held now (the folder for
-/// next time, Downloads, or one chosen), and with `nextTime` that folder becomes this
-/// connection's folder for next time.
+/// Save, on question `prompt` for files from a remembered laptop: they go into the folder that
+/// question holds (the folder for next time, Downloads, or one chosen for it), and with
+/// `nextTime` that folder becomes this connection's folder for next time. A Save for a question
+/// no longer asked does nothing.
 #[tauri::command]
 pub fn known_save_incoming(
     st: State<'_, AppRemembered>,
     qs: State<'_, AppQuickSend>,
+    prompt: u64,
     next_time: bool,
 ) -> Result<(), QsRefusal> {
-    if lock(&qs.folder).is_none() {
+    if !lock(&qs.prompts).contains_key(&prompt) {
         return Err(QsRefusal::Failed);
     }
-    let a = lock(&st.asking).take().ok_or(QsRefusal::NotWaiting)?;
-    a.answer
-        .send(Answer::Save { next_time })
-        .map_err(|_| QsRefusal::NotWaiting)
+    answer_known(&st, prompt, Answer::Save { next_time })
 }
 
-/// Decline, for files from a remembered laptop: nothing is written; the sender is told.
+/// Decline, on question `prompt` for files from a remembered laptop: nothing is written; the
+/// sender is told.
 #[tauri::command]
-pub fn known_decline_incoming(st: State<'_, AppRemembered>) -> Result<(), QsRefusal> {
-    let a = lock(&st.asking).take().ok_or(QsRefusal::NotWaiting)?;
-    a.answer
-        .send(Answer::Decline)
-        .map_err(|_| QsRefusal::NotWaiting)
+pub fn known_decline_incoming(st: State<'_, AppRemembered>, prompt: u64) -> Result<(), QsRefusal> {
+    answer_known(&st, prompt, Answer::Decline)
+}
+
+/// Answers question `prompt`, only while it is the one asked now.
+fn answer_known(st: &RememberedState, prompt: u64, answer: Answer) -> Result<(), QsRefusal> {
+    let mut asking = lock(&st.asking);
+    if asking.as_ref().is_none_or(|a| a.prompt != prompt) {
+        return Err(QsRefusal::NotWaiting);
+    }
+    let a = asking.take().ok_or(QsRefusal::NotWaiting)?;
+    a.answer.send(answer).map_err(|_| QsRefusal::NotWaiting)
 }
 
 /// Sends the offer made on the pick page to a remembered laptop nearby, now (live, over the
@@ -1384,6 +1396,19 @@ async fn receive_files<R: Runtime>(
     }
     // Permission 2: asked every time.
     let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
+    // This question's own folder: the folder for next time, else the one chosen this session or
+    // Downloads, each through the same check as every destination.
+    let held = st
+        .with_book(app, |b| b.next_folder(id))
+        .ok()
+        .flatten()
+        .and_then(|NextFolder(f)| crate::quicksend::held_folder(&f.path, Some(f.identity)))
+        .or_else(|| crate::quicksend::receive_folder(qs, app.path().download_dir().ok()).ok());
+    let (folder, held) = match held {
+        Some((view, held)) => (Some(view), Some(held)),
+        None => (None, None),
+    };
+    let prompt = crate::quicksend::open_prompt(qs, held);
     // One question at a time: another remembered laptop asking meanwhile is declined (its
     // waiting send tries again later).
     let busy = {
@@ -1392,21 +1417,16 @@ async fn receive_files<R: Runtime>(
         if !busy {
             *asking = Some(Asking {
                 connection: id.to_string(),
+                prompt,
                 answer: answer_tx,
             });
         }
         busy
     };
     if busy {
+        crate::quicksend::close_prompt(qs, prompt);
         return incoming.decline(link).await;
     }
-    // The folder for next time, held through the same check as every destination.
-    let folder: Option<FolderView> = st
-        .with_book(app, |b| b.next_folder(id))
-        .ok()
-        .flatten()
-        .and_then(|NextFolder(f)| crate::quicksend::held_folder(qs, &f.path, Some(f.identity)))
-        .map(|(view, _)| view);
     let _ = app.emit(
         INCOMING_EVENT,
         KnownIncomingView {
@@ -1415,18 +1435,26 @@ async fn receive_files<R: Runtime>(
             files: offered(files),
             bytes,
             folder,
+            prompt,
         },
     );
     let answer = tokio::select! {
         a = answer_rx => a.ok(),
         () = tokio::time::sleep(pctwin_quicksend::ANSWER_WAIT) => None,
     };
-    lock(&st.asking).take();
+    {
+        let mut asking = lock(&st.asking);
+        if asking.as_ref().is_some_and(|a| a.prompt == prompt) {
+            asking.take();
+        }
+    }
+    let held = crate::quicksend::take_held(qs, prompt);
+    crate::quicksend::close_prompt(qs, prompt);
     let Some(Answer::Save { next_time }) = answer else {
         return incoming.decline(link).await;
     };
-    let held = crate::quicksend::take_held(qs)
-        .map_err(|_| pctwin_quicksend::QuickError::Destination("no folder was chosen".into()))?;
+    let held =
+        held.map_err(|_| pctwin_quicksend::QuickError::Destination("no folder was chosen".into()))?;
     *lock(&qs.received_into) = Some(crate::quicksend::Known {
         path: held.path.clone(),
         identity: held.identity,

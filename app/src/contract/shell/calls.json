@@ -369,7 +369,12 @@
       "name": "quicksend_folder"
     },
     {
-      "args": [],
+      "args": [
+        [
+          "prompt",
+          1
+        ]
+      ],
       "name": "quicksend_choose_folder"
     },
     {
@@ -519,6 +524,10 @@
     {
       "args": [
         [
+          "prompt",
+          4
+        ],
+        [
           "nextTime",
           true
         ]
@@ -526,7 +535,12 @@
       "name": "known_save_incoming"
     },
     {
-      "args": [],
+      "args": [
+        [
+          "prompt",
+          4
+        ]
+      ],
       "name": "known_decline_incoming"
     },
     {

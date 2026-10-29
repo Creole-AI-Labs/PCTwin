@@ -300,7 +300,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsOfferMissing();
       await qsSend();
       await qsReceive();
-      await qsChooseFolder();
+      await qsChooseFolder(1);
       await qsSaveHere(1);
       await qsDeclineHere(1);
       await qsFolder().catch(() => undefined);
@@ -321,8 +321,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await knownRenewFolder("0011223344556677");
       await knownNextFolder("0011223344556677");
       await knownClearNextFolder("0011223344556677");
-      await knownSaveIncoming(true);
-      await knownDeclineIncoming();
+      await knownSaveIncoming(4, true);
+      await knownDeclineIncoming(4);
       await knownSend("0011223344556677");
       await waitingPrepare(["0011223344556677"], 7);
       await waitingSends();
