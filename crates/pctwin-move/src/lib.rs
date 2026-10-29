@@ -1109,7 +1109,8 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         greeting::wait_for_list(link).await?;
         let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
         let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
-        let rules = rules(steps, table);
+        // An older old laptop cannot read an own folder: none is named for it.
+        let rules = rules(steps, table).for_version(version);
         // The places made after the approval (another person's holding place, a folder the person
         // chose) hold files the preview could not count where they now land. The files are the
         // ones approved (another person's with their place chosen, their files and size shown),

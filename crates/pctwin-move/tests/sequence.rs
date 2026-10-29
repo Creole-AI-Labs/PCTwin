@@ -771,6 +771,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct ByRules {
         rules: LandingRules,
@@ -878,6 +879,7 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Late {
         rules: LandingRules,
@@ -968,6 +970,7 @@ async fn the_movers_journal_names_none_of_another_persons_files() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Held {
         rules: LandingRules,
@@ -1070,6 +1073,7 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
             held: Default::default(),
             left_out: Default::default(),
             chosen: Default::default(),
+            own_folder: None,
         };
         rules.chosen.insert(FolderRole::Pictures);
         struct Chose {
@@ -1336,6 +1340,7 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Mine {
         rules: LandingRules,
@@ -1473,6 +1478,7 @@ async fn a_whole_folder_moved_again_from_the_same_laptop_carries_on_in_its_own_f
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Mine {
         rules: LandingRules,
@@ -1761,6 +1767,7 @@ async fn held_move_stopping_at(w: &mut World, holding: &Path, at: &'static str) 
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Held {
         rules: LandingRules,
@@ -2223,6 +2230,7 @@ async fn held_after_approval(
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     struct Counting {
         rules: LandingRules,

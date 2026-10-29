@@ -842,3 +842,27 @@ fn how_a_file_was_checked_is_kept_through_a_restart() {
     );
     assert_eq!(j.checked_from(early).unwrap(), None);
 }
+
+/// A second old laptop moving here is told apart from the first by the journal (Task List 2.6,
+/// several old laptops into one): every old laptop whose move wrote here, never a Quick Send's.
+#[test]
+fn the_journal_names_the_old_laptops_that_moved_here() {
+    let (_dir, j) = journal();
+    assert!(j.moved_here_from().unwrap().is_empty());
+    j.plan(&planned(1)).unwrap();
+    let other = LaptopId::from_hex("ffeeddccbbaa99887766554433221100").unwrap();
+    j.plan(&PlannedWrite {
+        source_laptop: other,
+        ..planned(2)
+    })
+    .unwrap();
+    let quick = LaptopId::from_hex("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f").unwrap();
+    j.plan(&PlannedWrite {
+        source_laptop: quick,
+        scope: pctwin_journal::Scope::QUICK_SEND,
+        ..planned(3)
+    })
+    .unwrap();
+    let from = j.moved_here_from().unwrap();
+    assert_eq!(from.into_iter().collect::<Vec<_>>(), vec![laptop(), other]);
+}

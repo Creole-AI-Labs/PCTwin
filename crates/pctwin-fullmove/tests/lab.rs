@@ -468,6 +468,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        own_folder: None,
     };
     let mut person = NewPerson {
         rules: rules.clone(),

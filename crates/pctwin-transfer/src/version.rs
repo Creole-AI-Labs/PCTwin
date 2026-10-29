@@ -40,10 +40,18 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// of people, the old laptop sends one bounded, paged message of settings found, its own folders
 /// and the special categories ([`EXTRAS_SINCE`]). With a laptop on 5 or older nothing more is
 /// sent, and the new laptop rebuilds no settings.
+///
+/// Version 7 (29 October 2026, several old laptops into one) lets the new laptop's landing rules
+/// name a folder of the old laptop's own ("From Bea's laptop") that every file of the mover's
+/// lands in ([`OWN_FOLDER_SINCE`]). With a laptop on 6 or older the rules never name one, and its
+/// files land as they always did (a clashing name gets "name (2)").
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 3,
-    newest: 6,
+    newest: 7,
 };
+
+/// The first move protocol version whose landing rules may name the old laptop's own folder.
+pub const OWN_FOLDER_SINCE: u16 = 7;
 
 /// The first move protocol version in which the old laptop sends the full move's extras
 /// (settings found, its folders, the special categories) after the list of people.
