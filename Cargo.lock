@@ -3946,6 +3946,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-known"
+version = "0.1.0"
+dependencies = [
+ "apple-native-keyring-store",
+ "getrandom 0.4.3",
+ "hkdf 0.13.0",
+ "hmac 0.13.0",
+ "keyring-core",
+ "pctwin-gate",
+ "pctwin-pairing",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-native-keyring-store",
+ "wmi",
+ "zeroize",
+]
+
+[[package]]
 name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [
@@ -4107,6 +4129,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "url",
 ]
 
 [[package]]

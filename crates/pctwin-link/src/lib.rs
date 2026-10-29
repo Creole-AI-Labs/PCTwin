@@ -62,6 +62,8 @@ fn now() -> Instant {
 
 /// The keys for extra lanes (see [`Link::take_lane_keys`]).
 pub use pctwin_pairing::{LaneKeys, ResumeKeys};
+
+pub mod known;
 use pctwin_pairing::{
     LaneOpening, MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval,
     ReceiverSession, RotatingSender, SenderChoosing, SenderStatus, Transport,
@@ -640,6 +642,24 @@ impl Link {
         Self {
             transport,
             lanes: Some(lanes),
+            stream,
+            peer,
+            send_timeout,
+            broken: false,
+        }
+    }
+
+    /// A link between remembered connections ([`known`]): no lanes, the same sealing.
+    fn known(
+        transport: Transport,
+        stream: TcpStream,
+        peer: SocketAddr,
+        send_timeout: Duration,
+    ) -> Self {
+        let _ = stream.set_nodelay(true);
+        Self {
+            transport,
+            lanes: None,
             stream,
             peer,
             send_timeout,
