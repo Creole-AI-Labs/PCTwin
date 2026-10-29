@@ -686,7 +686,7 @@ async fn an_app_open_on_the_old_laptop_is_named_and_tried_again_once_closed() {
         let mover = Owner::Person {
             account_id: MOVER.into(),
         };
-        let found = SpecialScan::start(&mover, &old)
+        let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
             .unwrap()
             .wait(&|| false)
             .unwrap();
@@ -801,7 +801,7 @@ async fn staged_app_data_never_outlives_the_move_that_brought_it() {
     let mover = Owner::Person {
         account_id: MOVER.into(),
     };
-    let found = SpecialScan::start(&mover, &old)
+    let found = SpecialScan::start_for(pctwin_special::roots::System::Windows, &mover, &old)
         .unwrap()
         .wait(&|| false)
         .unwrap();

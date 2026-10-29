@@ -21,7 +21,7 @@ use objc2_open_directory::{
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub(crate) fn peer(stream: &UnixStream) -> Result<Caller, Error> {
     let errno = |e: nix::errno::Errno| Error::Io(std::io::Error::from_raw_os_error(e as i32));

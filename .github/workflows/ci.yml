@@ -944,6 +944,18 @@ jobs:
         env:
           PCTWIN_HELPER_OS_ADMIN_TESTS: "1"
         run: cargo test --locked -p pctwin-helper-os -- --ignored --nocapture --test-threads=1
+      # Wi-Fi with its password through the real NetworkManager, the password only on nmcli's
+      # standard input and output (2.4 follow-up). It manages no device here, so the runner's
+      # own network is left alone; the test runs as root, which NetworkManager's check allows.
+      - name: Wi-Fi through the real NetworkManager (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y network-manager jq
+          printf '%s\n' '[main]' 'plugins=keyfile' '[keyfile]' 'unmanaged-devices=*' | sudo tee /etc/NetworkManager/conf.d/99-pctwin-lab.conf
+          sudo systemctl restart NetworkManager
+          bin=$(cargo test --locked -p pctwin-settings --test wifi_nm --no-run --message-format=json | jq -r 'select(.executable != null) | .executable')
+          sudo env PCTWIN_NM_REAL=1 "$bin" --ignored --exact the_real_network_manager_keeps_a_password_given_only_on_standard_input --nocapture
       - name: Move between two accounts (Linux and macOS)
         if: runner.os != 'Windows'
         # /tmp, not the runner's temp folder: that sits in the runner's home, which the two test

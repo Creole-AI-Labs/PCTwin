@@ -298,15 +298,24 @@ fn installed_system(installed: &AppList) -> pctwin_record::AppSystem {
         .unwrap_or(pctwin_record::AppSystem::Windows)
 }
 
-/// The reason an app the plan cannot install itself ends with: the person installs it.
+/// The reason an app the plan cannot install itself ends with: the person installs it. PCTwin
+/// installs from winget (Windows, through the administrator helper) and from apt, dnf, Flatpak
+/// and Snap (Linux, through the system's own tools: [`crate::unix`]); a Mac's routes are the
+/// person's for now.
 pub fn needs_of(plan: &AppPlan) -> Option<Reason> {
     match plan.disposition {
         Disposition::NeedsAction => Some(Reason::ManualInstall),
         Disposition::Install
-            if !plan
-                .routes
-                .iter()
-                .any(|r| matches!(r, Route::Winget { .. })) =>
+            if !plan.routes.iter().any(|r| {
+                matches!(
+                    r,
+                    Route::Winget { .. }
+                        | Route::Apt { .. }
+                        | Route::Dnf { .. }
+                        | Route::Flatpak { .. }
+                        | Route::Snap { .. }
+                )
+            }) =>
         {
             Some(Reason::ManualInstall)
         }
