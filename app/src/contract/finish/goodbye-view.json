@@ -25,7 +25,7 @@
       },
       {
         "canAccept": true,
-        "canMarkDone": false,
+        "canMarkDone": true,
         "count": 1,
         "id": "0000000000000000000000000000000000000000000000000000000000000002",
         "items": [],
@@ -41,7 +41,7 @@
       },
       {
         "canAccept": true,
-        "canMarkDone": true,
+        "canMarkDone": false,
         "count": 1,
         "id": "0000000000000000000000000000000000000000000000000000000000000003",
         "items": [],
@@ -88,7 +88,7 @@
       },
       {
         "canAccept": true,
-        "canMarkDone": false,
+        "canMarkDone": true,
         "count": 1,
         "id": "0000000000000000000000000000000000000000000000000000000000000006",
         "items": [],

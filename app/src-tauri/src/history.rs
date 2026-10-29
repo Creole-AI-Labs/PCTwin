@@ -46,7 +46,35 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Kept {
-    Report { items: Vec<ReportItemStored> },
+    Report {
+        items: Vec<ReportItemStored>,
+    },
+    /// A saved setup profile and app list (R04): what moved of apps and settings, never files.
+    Setup {
+        /// The move it was saved from (its history entry ID).
+        of: String,
+        apps: Vec<SetupLine>,
+        settings: Vec<SetupLine>,
+    },
+}
+
+/// One app or settings group of a saved setup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupLine {
+    pub name: String,
+    pub count: u64,
+    pub status: pctwin_types::ItemStatus,
+}
+
+impl SetupLine {
+    pub fn of(line: &crate::finish_store::KeptLine) -> Self {
+        Self {
+            name: line.name.clone(),
+            count: line.count,
+            status: line.status,
+        }
+    }
 }
 
 /// A report line as kept (the same shape the screens read).
@@ -70,8 +98,9 @@ fn read_index(dir: &Path) -> Vec<Entry> {
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
-    let (moves, sends): (Vec<Entry>, Vec<Entry>) =
-        index.into_iter().partition(|e| e.kind == "move");
+    let (moves, sends): (Vec<Entry>, Vec<Entry>) = index
+        .into_iter()
+        .partition(|e| e.kind == "move" || e.kind == "setup");
     if !sends.is_empty()
         && let Ok(bytes) = serde_json::to_vec(&moves)
         && write_whole(&dir.join("index.json"), &bytes).is_ok()
@@ -117,7 +146,8 @@ pub fn rfc3339(secs: u64) -> String {
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
 }
 
-/// Adds an entry with what it kept. Failing to keep history never fails a move.
+/// Adds an entry with what it kept, and returns its ID. Failing to keep history never fails a
+/// move (`None`).
 pub fn add<R: Runtime>(
     app: &AppHandle<R>,
     kind: &str,
@@ -127,11 +157,9 @@ pub fn add<R: Runtime>(
     state: &str,
     steps_left: u64,
     kept: &Kept,
-) {
-    let Some(dir) = dir_of(app) else { return };
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
+) -> Option<String> {
+    let dir = dir_of(app)?;
+    std::fs::create_dir_all(&dir).ok()?;
     let mut index = read_index(&dir);
     let id = format!(
         "{}-{}",
@@ -141,14 +169,10 @@ pub fn add<R: Runtime>(
             .unwrap_or(0),
         index.len()
     );
-    let Ok(bytes) = serde_json::to_vec(kept) else {
-        return;
-    };
-    if write_whole(&dir.join(format!("{id}.json")), &bytes).is_err() {
-        return;
-    }
+    let bytes = serde_json::to_vec(kept).ok()?;
+    write_whole(&dir.join(format!("{id}.json")), &bytes).ok()?;
     index.push(Entry {
-        id,
+        id: id.clone(),
         kind: kind.to_string(),
         when: now(),
         other: other.and_then(|l| serde_json::to_value(l).ok()),
@@ -161,9 +185,9 @@ pub fn add<R: Runtime>(
         let gone = index.remove(0);
         let _ = std::fs::remove_file(dir.join(format!("{}.json", gone.id)));
     }
-    if let Ok(bytes) = serde_json::to_vec(&index) {
-        let _ = write_whole(&dir.join("index.json"), &bytes);
-    }
+    let bytes = serde_json::to_vec(&index).ok()?;
+    write_whole(&dir.join("index.json"), &bytes).ok()?;
+    Some(id)
 }
 
 /// A move's history state from its outcome.
@@ -225,12 +249,23 @@ pub async fn history_export<R: Runtime>(app: AppHandle<R>) -> Result<Option<Stri
 /// or "PCTwin history (2).csv" and so on when that name is taken. Made with create-new, so a file
 /// that appears in between is not replaced either.
 fn save_new(folder: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    save_new_named(folder, "PCTwin history", "csv", bytes)
+}
+
+/// Writes `bytes` as a new file `base.ext` in `folder`, or `base (2).ext` and so on, never over a
+/// file already there.
+pub fn save_new_named(
+    folder: &std::path::Path,
+    base: &str,
+    ext: &str,
+    bytes: &[u8],
+) -> std::io::Result<std::path::PathBuf> {
     use std::io::Write;
     for n in 1..=999u32 {
         let name = if n == 1 {
-            "PCTwin history.csv".to_string()
+            format!("{base}.{ext}")
         } else {
-            format!("PCTwin history ({n}).csv")
+            format!("{base} ({n}).{ext}")
         };
         let path = folder.join(name);
         match std::fs::OpenOptions::new()

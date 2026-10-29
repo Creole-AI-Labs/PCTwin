@@ -20,9 +20,10 @@ mod deliver;
 #[allow(dead_code)]
 mod guard;
 // Finishing a move (Task List 2.7): the overview, the before-wipe list, handover and clean-up.
-// The contract comes first; the allowance goes once every command is made real.
-#[allow(dead_code)]
 mod finish;
+mod finish_catchup;
+mod finish_cleanup;
+mod finish_doctor;
 mod finish_store;
 // The full move: apps, settings and special categories joined to the move (Phase 2 joining).
 mod fullmove;

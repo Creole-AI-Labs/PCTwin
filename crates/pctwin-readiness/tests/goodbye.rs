@@ -177,11 +177,6 @@ fn t27_011_the_list_names_each_exception_and_resolves_or_accepts_it() {
     for not in [w.moved, w.system, w.online, w.bea] {
         assert!(!only_items.contains(&not));
     }
-    assert!(
-        only.words.starts_with("3 items are only on the old laptop"),
-        "{}",
-        only.words
-    );
     assert_eq!(of(&c, ExceptionKind::KeyNotChecked).items, [w.vault]);
     assert_eq!(of(&c, ExceptionKind::TiedToOldLaptop).items, [w.passkey]);
     let first: BTreeSet<ItemId> = of(&c, ExceptionKind::DoFirstOnOldLaptop)
@@ -249,14 +244,25 @@ fn t27_011_the_list_names_each_exception_and_resolves_or_accepts_it() {
 #[test]
 fn an_item_accepted_in_the_ledger_leaves_the_list() {
     let mut w = world();
-    let (_, d) = w.l.loss_warning(w.failed).unwrap();
+    let d = w.l.loss_warning(w.failed).unwrap();
     w.l.accept_loss(w.failed, d, T0 + 30).unwrap();
     let c = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
     assert_eq!(of(&c, ExceptionKind::OnlyOnOldLaptop).items, [w.skipped]);
-    assert!(
-        of(&c, ExceptionKind::OnlyOnOldLaptop)
-            .words
-            .starts_with("1 item is only")
+}
+
+/// An answer agreed to on one plan does not settle the list of the next plan.
+#[test]
+fn an_answer_is_bound_to_the_plan_generation() {
+    let w = world();
+    let c = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
+    let id = of(&c, ExceptionKind::OnlyOnOldLaptop).id;
+    let mut later = c.clone();
+    later.generation += 1;
+    assert_ne!(c.shown(&id), later.shown(&id));
+    let mut later2 = later.clone();
+    assert_eq!(
+        later2.accept(&id, c.shown(&id).unwrap(), T0 + 101),
+        Err(ChecklistError::NotTheWarningShown)
     );
 }
 
@@ -278,7 +284,7 @@ fn t27_013_licence_steps_are_the_person_s_own() {
     let w = world();
     let mut c = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
     let first = of(&c, ExceptionKind::DoFirstOnOldLaptop);
-    assert!(first.words.contains("PCTwin does not do this for you"));
+    assert!(first.person_can_do());
     let id = first.id;
     let shown = c.shown(&id).unwrap();
     c.person_did_it(&id, shown, T0 + 120).unwrap();
@@ -340,7 +346,7 @@ fn an_unsearched_place_is_on_the_list() {
     let mut c = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
     let e = of(&c, ExceptionKind::NotSearched);
     assert_eq!(e.places, ["USB drive \"Backup\""]);
-    assert!(c.searched_words.contains("PCTwin did not look in"));
+    assert!(w.l.search().not_searched.contains("USB drive \"Backup\""));
     let id = e.id;
     let s = c.shown(&id).unwrap();
     c.accept(&id, s, T0 + 101).unwrap();
@@ -369,14 +375,14 @@ fn the_list_is_saved_and_read_back() {
     // A list from a newer PCTwin is refused.
     let text = std::fs::read_to_string(&p)
         .unwrap()
-        .replacen("\"format\": 1", "\"format\": 2", 1);
+        .replacen("\"format\": 2", "\"format\": 3", 1);
     std::fs::write(&p, text).unwrap();
     assert!(Checklist::load(&p).is_err());
 }
 
-/// One thing of a kind is spoken of as "it".
+/// One thing of a kind is counted as one, and the list carries no words of its own (the screens hold them).
 #[test]
-fn one_thing_is_it() {
+fn one_thing_is_counted_as_one() {
     let failed = file("draft.txt");
     let vault = file("vault.kdbx");
     let passkey = left_out("passkey", LeftOutReason::DeviceBound);
@@ -407,53 +413,40 @@ fn one_thing_is_it() {
         None,
         T0 + 100,
     );
-    assert_eq!(
-        of(&c, ExceptionKind::OnlyOnOldLaptop).words,
-        "1 item is only on the old laptop. Move it, or choose to leave it behind."
-    );
-    assert!(
-        of(&c, ExceptionKind::KeyNotChecked)
-            .words
-            .contains("Check you can open it here")
-    );
-    assert!(
-        of(&c, ExceptionKind::TiedToOldLaptop)
-            .words
-            .contains("Set it up again")
-    );
+    // The words are the screens' (seven languages): the list gives the key and the count.
+    assert_eq!(of(&c, ExceptionKind::OnlyOnOldLaptop).items.len(), 1);
+    assert_eq!(of(&c, ExceptionKind::KeyNotChecked).items.len(), 1);
+    assert_eq!(of(&c, ExceptionKind::TiedToOldLaptop).items.len(), 1);
+    assert!(c.exceptions.iter().all(|e| e.what.is_none()));
     let w = world();
     let many = build(&w, OldLaptop::Scanned(&w.approved), &[], &[], None);
-    assert!(
-        of(&many, ExceptionKind::OnlyOnOldLaptop)
-            .words
-            .contains("Move them, or choose to leave them behind.")
-    );
+    assert_eq!(of(&many, ExceptionKind::OnlyOnOldLaptop).items.len(), 2);
 }
 
 /// D21 (2.5): special-category steps appear on the list, each its own exception, resolved like any
 /// other (a relink the person does is their word; a step on the old laptop first too).
 #[test]
 fn special_category_steps_are_on_the_list_each_on_its_own() {
-    use pctwin_readiness::goodbye::SpecialStep;
+    use pctwin_readiness::goodbye::{SpecialStep, StepWhat};
     let w = world();
     let special = vec![
         SpecialStep {
             kind: ExceptionKind::TiedToOldLaptop,
             place: "Chat app".into(),
             component: "aa".into(),
-            words: "Link Chat app to your phone again on the new laptop.".into(),
+            what: StepWhat::Relink,
         },
         SpecialStep {
             kind: ExceptionKind::TiedToOldLaptop,
             place: "Chat app".into(),
             component: "bb".into(),
-            words: "Set up your security key again.".into(),
+            what: StepWhat::Relink,
         },
         SpecialStep {
             kind: ExceptionKind::DoFirstOnOldLaptop,
             place: "Browser".into(),
             component: "cc".into(),
-            words: "Export your saved passwords from Browser on the old laptop.".into(),
+            what: StepWhat::ExportFirst,
         },
     ];
     let c = Checklist::build(
@@ -473,7 +466,7 @@ fn special_category_steps_are_on_the_list_each_on_its_own() {
         let e = c
             .exceptions
             .iter()
-            .find(|e| e.words == s.words)
+            .find(|e| e.what == Some(s.what) && e.steps == [s.component.clone()])
             .expect("each step is on the list");
         assert_eq!((e.kind, e.places.clone()), (s.kind, vec![s.place.clone()]));
         assert!(e.is_open());

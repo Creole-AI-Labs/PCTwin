@@ -581,6 +581,17 @@ impl Moving {
         Ok((live, scan_stop))
     }
 
+    /// Whether a move is running on this laptop now.
+    pub(crate) fn is_running(&self) -> bool {
+        self.with_run(|_| ()).is_ok()
+    }
+
+    /// A catch-up (2.7) approved by the person on its own screen: the plan waiting now is
+    /// answered, with nothing of its groups left out (the items are chosen by ID instead).
+    pub(crate) fn answer_catch_up(&self, key: &PlanKey, yes: bool) -> Result<(), MoveProblem> {
+        self.answer(key, yes, &[], &[], &[])
+    }
+
     fn with_run<T>(&self, f: impl FnOnce(&mut Run) -> T) -> Result<T, MoveProblem> {
         lock(&self.run)
             .as_mut()
@@ -2360,6 +2371,9 @@ impl<R: Runtime> Steps for AppSteps<R> {
     }
 
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
+        // Checking the old laptop again, or bringing the new one up to date (2.7): only files,
+        // reviewed on their own screen; no app or setting is planned.
+        let catchup = crate::finish_catchup::armed_for(record.source_laptop);
         let mut view = plan_view(record, preview, &self.rules, &self.shown);
         // Too small a laptop: what to leave on the old one, proposed (changed only if accepted).
         let (space, proposed) = space_proposal(record, preview, &self.rules);
@@ -2381,7 +2395,9 @@ impl<R: Runtime> Steps for AppSteps<R> {
         }
         // The full move: every app, setting and special category, planned once, shown on the same
         // screen, and named in what the person approves.
-        self.plan_full(record);
+        if catchup.is_none() {
+            self.plan_full(record);
+        }
         if let Some(full) = &self.full {
             view.rebuild = Some(crate::fullmove::plan_view(full));
             view.fingerprint = crate::fullmove::approved_fingerprint(&view.fingerprint, full);
@@ -2395,14 +2411,23 @@ impl<R: Runtime> Steps for AppSteps<R> {
             }
         }
         let groups = view.groups.iter().map(|g| g.role).collect();
-        let answer = self.moving.wait_for_answer(
-            PlanKey {
-                revision: view.revision,
-                fingerprint: view.fingerprint.clone(),
-            },
-            groups,
-        );
-        let _ = self.app.emit(PLAN_EVENT, view);
+        let key = PlanKey {
+            revision: view.revision,
+            fingerprint: view.fingerprint.clone(),
+        };
+        let answer = self.moving.wait_for_answer(key.clone(), groups);
+        match catchup {
+            None => {
+                let _ = self.app.emit(PLAN_EVENT, view);
+            }
+            Some(purpose) => {
+                crate::finish_catchup::plan_arrived(&self.app, record, &self.named, key);
+                // A check only looks: the list is kept and nothing moves.
+                if purpose == crate::finish::CatchupPurpose::Check {
+                    return Err(Stop::NotApproved);
+                }
+            }
+        }
         // While the person decides, the link is watched: if the old laptop goes, the plan page
         // gives way to "connection lost" instead of offering a move that cannot run.
         let answered = match &self.watch {
@@ -2459,6 +2484,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
     }
 
     fn left_out(&self, record: &Record) -> Vec<ItemId> {
+        // A catch-up sends only the items the person approved, by ID.
+        if let Some(ids) = crate::finish_catchup::left_out(record) {
+            return ids;
+        }
         record
             .items
             .iter()
@@ -2787,6 +2816,7 @@ async fn run_old<R: Runtime>(
         outcome,
         report,
         link_lost: sent.ended == Ended::LinkLost,
+        finish: None,
     })
 }
 
@@ -2796,6 +2826,8 @@ struct Ran {
     outcome: MoveOutcome,
     report: Vec<ReportItem>,
     link_lost: bool,
+    /// The new laptop: what the move leaves for finishing it (2.7), kept with its history entry.
+    finish: Option<crate::finish::Seed>,
 }
 
 /// Which laptop this is in the move, with what that side starts from.
@@ -2937,6 +2969,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
     other: Option<LabelView>,
     redial: &mut D,
 ) -> Result<Ran, MoveError> {
+    let started_at = crate::finish_store::now();
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let NewSide {
         mut table,
@@ -3038,10 +3071,20 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             files,
         ));
     }
+    let finish = crate::finish::seed(
+        app,
+        &received,
+        &steps.rules.mover,
+        &steps.named,
+        &report,
+        outcome.rebuilt.as_ref(),
+        started_at,
+    );
     Ok(Ran {
         outcome,
         report,
         link_lost: received.ended == Ended::LinkLost,
+        finish,
     })
 }
 
@@ -3266,15 +3309,17 @@ fn spawn_run<R: Runtime>(
                 }
             });
             done.store(true, Ordering::Release);
+            crate::finish_catchup::disarm();
             match ran {
                 Ok(Ran {
                     outcome,
                     report,
                     link_lost,
+                    finish,
                 }) => {
                     let (state, left) = crate::history::move_state(&outcome);
                     let new_name = moving.with_run(|run| run.new_name.clone()).ok().flatten();
-                    crate::history::add(
+                    let entry = crate::history::add(
                         &app,
                         "move",
                         (label.as_ref(), new_name.as_ref()),
@@ -3283,6 +3328,11 @@ fn spawn_run<R: Runtime>(
                         left,
                         &crate::history::report_kept(&report),
                     );
+                    // What finishing the move needs, kept under its history entry (2.7). Failing
+                    // to keep it never fails the move.
+                    if let (Some(id), Some(seed)) = (entry, finish) {
+                        crate::finish::keep(&app, &id, seed);
+                    }
                     moving.finish(report);
                     if !link_lost {
                         crate::restart::nothing_left(&app);

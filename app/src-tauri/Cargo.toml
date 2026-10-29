@@ -61,6 +61,8 @@ pctwin-orchestrate = { path = "../../crates/pctwin-orchestrate" }
 pctwin-power = { path = "../../crates/pctwin-power" }
 pctwin-quicksend = { path = "../../crates/pctwin-quicksend" }
 pctwin-record = { path = "../../crates/pctwin-record" }
+# Finishing a move (2.7): the evidence ledger, the before-wipe list, the handover gates.
+pctwin-readiness = { path = "../../crates/pctwin-readiness" }
 pctwin-scan = { path = "../../crates/pctwin-scan" }
 pctwin-session = { path = "../../crates/pctwin-session" }
 # `listed_enum!`: the views the screens are sent, declared with the list of their variants.

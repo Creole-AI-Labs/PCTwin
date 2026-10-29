@@ -434,7 +434,7 @@ fn holds_keys_and_generations() {
     );
     assert!(!l.settled(stranger));
     // A loss accepted, then the item moves after all: no longer a loss.
-    let (_, d) = l.loss_warning(b.id).unwrap();
+    let d = l.loss_warning(b.id).unwrap();
     l.accept_loss(b.id, d, T0 + 21).unwrap();
     assert_eq!(l.tally().accepted_loss, 1);
     l.accept(
@@ -450,8 +450,7 @@ fn holds_keys_and_generations() {
     .unwrap();
     assert_eq!(l.tally().accepted_loss, 0);
     // The warning names the item and its plan: another plan's warning differs.
-    let (w1, d1) = l.loss_warning(s.id).unwrap();
-    assert!(w1.contains("s.txt"));
+    let d1 = l.loss_warning(s.id).unwrap();
     // Moving to the next plan: same laptop, a later revision only.
     let mut next = rec.next_revision();
     next.items.push(file("c.txt"));
@@ -469,7 +468,7 @@ fn holds_keys_and_generations() {
     assert_eq!(l.generation(), 2);
     assert_eq!(l.standing(file("c.txt").id), Some(Standing::NotTested));
     assert_eq!(l.standing(a.id), Some(Standing::Done(ItemStatus::Copied)));
-    let (_, d2) = l.loss_warning(s.id).unwrap();
+    let d2 = l.loss_warning(s.id).unwrap();
     assert_ne!(d1, d2);
     assert_eq!(
         l.accept_loss(s.id, d1, T0 + 30),
@@ -504,10 +503,8 @@ fn what_is_only_on_the_old_laptop_and_the_words_for_it() {
     ];
     let ids: Vec<_> = items.iter().map(|i| i.id).collect();
     let (_, mut l) = ledger(items);
-    assert_eq!(
-        l.source_only_words(),
-        "8 items are only on the old laptop. PCTwin has not looked through it yet."
-    );
+    assert_eq!(l.only_on_old_laptop().len(), 8);
+    assert!(l.search().searched.is_empty());
     assert!(!l.found_everything());
     let give = |l: &mut pctwin_readiness::ledger::Ledger, id, r| {
         l.accept(
@@ -532,15 +529,16 @@ fn what_is_only_on_the_old_laptop_and_the_words_for_it() {
     );
     l.searched("Documents");
     l.searched("Desktop");
-    assert_eq!(
-        l.source_only_words(),
-        "6 items are only on the old laptop, in the places PCTwin looked: Desktop, Documents."
-    );
+    assert!(l.found_everything());
     l.not_searched("Desktop");
-    assert!(l.source_only_words().ends_with(
-        "in the places PCTwin looked: Documents. PCTwin did not look in: Desktop. Check there \
-         yourself before you wipe or give away the old laptop."
-    ));
+    assert_eq!(
+        l.search().searched.iter().collect::<Vec<_>>(),
+        ["Documents"]
+    );
+    assert_eq!(
+        l.search().not_searched.iter().collect::<Vec<_>>(),
+        ["Desktop"]
+    );
     assert!(!l.found_everything());
 }
 

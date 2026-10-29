@@ -16,11 +16,17 @@
 //! - [`goodbye`]: the before-wipe list: what is only on the old laptop, keys, licences, steps not
 //!   finished, places not searched; each resolved by evidence or accepted as a specific loss;
 //!   saved on the new laptop.
-//! - [`handover`]: three separate requests (PCTwin's temporary files, the mover's account,
-//!   erasing the old laptop), each through one gate: exact device, undo closed for good, the list
-//!   clear and current, no other writer, and a fresh confirmation. None is run here.
+//! - [`handover`]: two separate requests (the mover's account, erasing the old laptop), each
+//!   through one gate: exact device, the list clear and current, a fresh confirmation, and then
+//!   undo closed for good. Both end at the system's own route; none is run here.
+//! - [`cleanup`]: PCTwin's own temporary files, and its model and caches, each asked separately,
+//!   by exact ownership.
 //! - [`kit`]: the offline recovery kit, readable with no account, saying exactly what it holds.
-//! - [`report`]: the shareable report, private things left out unless chosen; nothing is sent.
+//! - [`report`]: the shareable report, typed, private things left out unless chosen, and the
+//!   check that refuses text holding anything left out; nothing is sent.
+//!
+//! Every word is a key: the screens hold the words in seven languages. Names the person knows
+//! (their files, apps and places) are data, passed as they are.
 //!
 //! Nothing here changes a file on either laptop or starts a program: the crate's clippy fence
 //! bans every way to write, rename or remove a file, to start a program and to open a network
@@ -29,6 +35,7 @@
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
 pub mod checks;
+pub mod cleanup;
 pub mod goodbye;
 pub mod handover;
 pub mod kit;

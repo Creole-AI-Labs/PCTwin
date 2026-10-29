@@ -212,7 +212,7 @@ pub enum Missing {
     Font {
         family: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        not_checked: Vec<String>,
+        not_checked: Vec<FontNotChecked>,
     },
     /// The file is not whole, or not what it should be.
     Damaged { what: Damage },
@@ -220,6 +220,27 @@ pub enum Missing {
     NotThere,
     /// The person said the task did not work.
     PersonSaidNo,
+}
+
+/// A kind of font file found and not checked (a key and its extension; `name` is the catalogue
+/// row's own name for the kind, as data).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontNotChecked {
+    pub ext: String,
+    pub name: Option<String>,
+    pub why: FontWhy,
+}
+
+/// Why a font file was not checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FontWhy {
+    /// A font by its first bytes whose names PCTwin could not read.
+    NamesUnreadable,
+    /// A kind PCTwin reads, but this one is not whole.
+    Damaged,
+    /// A kind PCTwin does not read.
+    KindNotRead,
 }
 
 /// How a file was found not whole.
@@ -485,9 +506,9 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
     let looked = files.len().min(MAX_FONT_FILES);
     let mut readable = 0u64;
     let mut unread = 0u64;
-    let mut kinds: Vec<String> = Vec::new();
+    let mut kinds: Vec<FontNotChecked> = Vec::new();
     let mut other: Vec<String> = Vec::new();
-    let mut add_kind = |kind: String| {
+    let mut add_kind = |kind: FontNotChecked| {
         if !kinds.contains(&kind) {
             kinds.push(kind);
         }
@@ -504,7 +525,11 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
             if names.is_empty() {
                 // A font by its first bytes whose names could not be read: not checked.
                 unread += 1;
-                add_kind(format!("{UNREADABLE_FONT} (.{})", ext_of(p)));
+                add_kind(FontNotChecked {
+                    ext: ext_of(p),
+                    name: None,
+                    why: FontWhy::NamesUnreadable,
+                });
                 continue;
             }
             readable += 1;
@@ -520,12 +545,16 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
     let reading = rows.read(other, |ext, row| row.extension == *ext);
     for (ext, row) in reading.known {
         unread += 1;
-        if row.readable {
-            // A kind PCTwin reads, but this one is not whole.
-            add_kind(format!("{} {DAMAGED_FONT} (.{ext})", row.name));
-        } else {
-            add_kind(format!("{} (.{ext})", row.name));
-        }
+        add_kind(FontNotChecked {
+            ext: ext.clone(),
+            name: Some(row.name.clone()),
+            // A kind PCTwin reads, but this one is not whole; or a kind it does not read.
+            why: if row.readable {
+                FontWhy::Damaged
+            } else {
+                FontWhy::KindNotRead
+            },
+        });
     }
     // Files no row names are not fonts PCTwin knows of (a settings file, a note): not counted.
     let beyond = (files.len() - looked) as u64;
@@ -547,11 +576,6 @@ pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf
         },
     }
 }
-
-/// The kind shown for a font file whose names could not be read.
-pub const UNREADABLE_FONT: &str = "Font file PCTwin could not read";
-/// Shown after a kind PCTwin reads, for a file of it that is not whole.
-pub const DAMAGED_FONT: &str = "that is damaged";
 
 fn read_at(f: &mut File, at: u64, buf: &mut [u8]) -> std::io::Result<()> {
     f.seek(SeekFrom::Start(at))?;
@@ -822,23 +846,6 @@ pub enum Summary {
     DataPreserved,
     /// Some things still need doing.
     FinishedWithTasks,
-}
-
-impl Summary {
-    pub fn words(&self) -> &'static str {
-        match self {
-            Summary::ReadyForSelectedWork => {
-                "Ready for the work you checked. Only the checks you picked were done."
-            }
-            Summary::DataPreserved => {
-                "Everything you picked is on the new laptop and was checked as it arrived. \
-                 PCTwin has not checked that your work opens: pick a check to try it."
-            }
-            Summary::FinishedWithTasks => {
-                "The move finished, with some things left to do. They are listed below."
-            }
-        }
-    }
 }
 
 /// The whole-move summary from the ledger and the checks of this generation (T27-005): a launched

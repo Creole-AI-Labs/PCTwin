@@ -3687,6 +3687,7 @@ dependencies = [
  "pctwin-pairing",
  "pctwin-power",
  "pctwin-quicksend",
+ "pctwin-readiness",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-scan",
