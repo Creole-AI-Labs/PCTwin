@@ -2811,3 +2811,16 @@ qs-waiting-renew = 续期
 qs-waiting-cancel-title = 取消这次等待中的发送？
 qs-waiting-cancel-body = PCTwin 会删除它的副本，不再发送。已收到文件的电脑会保留它们。你自己的文件保持不变。
 qs-waiting-keep = 保留
+
+# Quick Send more
+qs-session-add-files = 添加文件
+qs-session-send-to = 发送给 { $name }
+qs-session-send-back = 回传文件
+qs-session-end = 结束
+qs-session-ended = 这次发送已结束，不会再收到任何内容。
+qs-sends-waiting = 排队等候
+qs-sends-sending = 正在发送
+qs-sends-paused = 已暂停
+qs-send-pause = 暂停
+qs-send-resume = 继续
+qs-send-cancel = 取消

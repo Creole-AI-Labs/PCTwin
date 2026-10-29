@@ -2964,3 +2964,16 @@ qs-waiting-renew = Renew
 qs-waiting-cancel-title = Cancel this waiting send?
 qs-waiting-cancel-body = PCTwin deletes its copy, and nothing more is sent. Laptops that already have the files keep them. Your own files stay as they are.
 qs-waiting-keep = Keep it
+
+# Quick Send more
+qs-session-add-files = Add files
+qs-session-send-to = Send to { $name }
+qs-session-send-back = Send files back
+qs-session-end = End
+qs-session-ended = This send is over. Nothing more arrives.
+qs-sends-waiting = Waiting its turn
+qs-sends-sending = Sending
+qs-sends-paused = Paused
+qs-send-pause = Pause
+qs-send-resume = Resume
+qs-send-cancel = Cancel

@@ -14,6 +14,7 @@
 
 pub mod note;
 pub mod sealed;
+pub mod session;
 pub mod waiting;
 
 pub use note::{Note, NoteError, NoteKind};

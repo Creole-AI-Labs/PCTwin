@@ -8,7 +8,8 @@
 import { describe, expect, it } from "vitest";
 import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, parseHeadsUp, parseInterrupted, parseReadyNote, parseLabelView, parseMoveOutcome, parseMoveProblem, parseMoveProgress, parseMoveStage, parseNearbyView, parseNewView, parseOldView, parsePeopleHere,
   parseRescueDrive, parsePeopleToPlace, parsePlanView, parsePrivacy, parseFound, parseHistoryEntry, parsePicked, parseOffered, parsePeer, parsePlaceAnswer, parseQsFolder, parseQsIncoming, parseQsProblem, parseQsProgress, parseQsReceipt, parseProblemView, parseReportItem, parseTidied, parseChoiceView,
-  parseQsRefusal, parseQsNote, parseQsNoteSent, parseQsRemember, parseKnownConnection, parseKnownIncoming, parseKnownDelivered, parseWaitingSend } from "../bridge";
+  parseQsRefusal, parseQsNote, parseQsNoteSent, parseQsRemember, parseKnownConnection, parseKnownIncoming, parseKnownDelivered, parseWaitingSend,
+  parseQsSession, parseQsSend, parseQsSessionReceipt } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
 import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem } from "../deliver";
 import { parseAppsOpen, parseDataProgress, parseRebuildStep } from "../fullmove";
@@ -61,6 +62,9 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "known-incoming": parseKnownIncoming,
   "known-delivered": parseKnownDelivered,
   "waiting-send": parseWaitingSend,
+  "qs-session": parseQsSession,
+  "qs-send": parseQsSend,
+  "qs-session-receipt": parseQsSessionReceipt,
   tidied: parseTidied,
   "guard-snapshot": parseSnapshot,
   "work-checks": parseWorkChecks,

@@ -597,6 +597,13 @@ pub async fn quicksend_send<R: Runtime>(
     let laptop = offer.laptop();
     let chosen = lock(&qs.chosen).clone();
     let state = qs.inner().clone();
+    // For offers the other laptop makes back in the same session (Send to).
+    let me = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.account_id)
+        .unwrap_or_default();
+    let journal_at = journal_path(&app).ok_or(MoveProblem::Failed)?;
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
     let known = app
         .state::<crate::remembered::AppRemembered>()
@@ -627,6 +634,14 @@ pub async fn quicksend_send<R: Runtime>(
                         receipt: r.clone(),
                     });
                     let _ = app.emit(RECEIPT_EVENT, view);
+                    // The send stays open: Add files here, Send to from there.
+                    if !stopped {
+                        let sends = crate::sessions::of(&app);
+                        let session = sends.open(&app, None, None);
+                        runtime.block_on(sends.run(&app, &session, &mut link, true, async |l| {
+                            receive_turn(&app, &state, l, &me, &journal_at).await
+                        }));
+                    }
                 }
                 Err(e) => {
                     // No receipt for this send: the missing pieces of an earlier one are never
@@ -740,6 +755,14 @@ pub async fn quicksend_receive<R: Runtime>(
                     view.new_dates = dated.len() as u64;
                     *lock(&state.dated) = dated;
                     let _ = app.emit(RECEIPT_EVENT, view);
+                    // The send stays open: more from there (Add files), Send to from here.
+                    if !stopped {
+                        let sends = crate::sessions::of(&app);
+                        let session = sends.open(&app, None, None);
+                        runtime.block_on(sends.run(&app, &session, &mut link, false, async |l| {
+                            receive_turn(&app, &state, l, &me, &journal_at).await
+                        }));
+                    }
                 }
                 Err(e) => {
                     let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
@@ -748,6 +771,61 @@ pub async fn quicksend_receive<R: Runtime>(
         })
         .map(|_| ())
         .map_err(|_| MoveProblem::Failed)
+}
+
+/// One more offer from the other laptop in an open six-digit session: shown, asked where to save
+/// exactly as the first (Save into the folder held, Choose another folder, or Cancel, which
+/// declines it), then received. `Some(None)`: declined, the session goes on; `None`: the session
+/// is over.
+async fn receive_turn<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &Arc<QuickSend>,
+    link: &mut pctwin_link::Link,
+    me: &str,
+    journal_at: &std::path::Path,
+) -> Option<Option<ReceiptView>> {
+    let incoming = match pctwin_quicksend::receive(link).await.ok()? {
+        pctwin_quicksend::Arrival::Files(incoming) => incoming,
+        // Only files are offered in an open session.
+        pctwin_quicksend::Arrival::Note(_) => return None,
+    };
+    let (answered, answer) = tokio::sync::oneshot::channel();
+    *lock(&state.save) = Some(answered);
+    let live = Live::default();
+    *lock(&state.live) = Some(live.clone());
+    let _ = app.emit(
+        INCOMING_EVENT,
+        IncomingView {
+            files: offered(incoming.files()),
+        },
+    );
+    let saved = wait_for_save(
+        answer,
+        live.control.wait_stopped(),
+        pctwin_quicksend::ANSWER_WAIT,
+    )
+    .await;
+    lock(&state.save).take();
+    let held = match saved.ok().and_then(|()| take_held(state).ok()) {
+        Some(held) => held,
+        None => {
+            incoming.decline(link).await.ok()?;
+            return Some(None);
+        }
+    };
+    *lock(&state.received_into) = Some(Known {
+        path: held.path.clone(),
+        identity: held.identity,
+    });
+    let journal = pctwin_journal::Journal::open(journal_at).ok()?;
+    let done = Arc::new(AtomicBool::new(false));
+    tick(app.clone(), live.clone(), done.clone());
+    let r = incoming
+        .accept_into(link, held.dest, None, &journal, me, &live)
+        .await;
+    done.store(true, Ordering::Release);
+    let r = r.ok()?;
+    Some(Some(receipt_view("receiver", &r, live.control.stopped())))
 }
 
 /// A note or link as the receiving screen shows it: the text exactly as sent (checked to hold

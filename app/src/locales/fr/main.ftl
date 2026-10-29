@@ -3195,3 +3195,16 @@ qs-waiting-renew = Renouveler
 qs-waiting-cancel-title = Annuler cet envoi en attente ?
 qs-waiting-cancel-body = PCTwin supprime sa copie, et rien de plus n'est envoyé. Les ordinateurs qui ont déjà les fichiers les gardent. Vos propres fichiers restent tels quels.
 qs-waiting-keep = Le garder
+
+# Quick Send more
+qs-session-add-files = Ajouter des fichiers
+qs-session-send-to = Envoyer à { $name }
+qs-session-send-back = Renvoyer des fichiers
+qs-session-end = Terminer
+qs-session-ended = Cet envoi est fini. Plus rien n’arrive.
+qs-sends-waiting = En attente de son tour
+qs-sends-sending = Envoi en cours
+qs-sends-paused = En pause
+qs-send-pause = Pause
+qs-send-resume = Reprendre
+qs-send-cancel = Annuler

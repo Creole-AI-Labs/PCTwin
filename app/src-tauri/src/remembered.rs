@@ -292,6 +292,7 @@ impl RememberedState {
     /// it asked is declined, its pending note goes, and its waiting deliveries end.
     fn end_connection<R: Runtime>(&self, app: &AppHandle<R>, id: &str) {
         self.stop_sessions(id);
+        crate::sessions::of(app).end_connection(id);
         {
             let mut asking = lock(&self.asking);
             if asking.as_ref().is_some_and(|a| a.connection == id)
@@ -684,6 +685,11 @@ pub async fn known_send<R: Runtime>(
     id: String,
 ) -> Result<(), QsRefusal> {
     let offer = lock(&qs.offer).take().ok_or(QsRefusal::NotWaiting)?;
+    // A send already open with that laptop: this one waits its turn in it.
+    let sends = crate::sessions::of(&app);
+    if let Some(session) = sends.with_connection(&id) {
+        return sends.queue(&app, &session, offer).map(|_| ());
+    }
     let peer = st.with_book(&app, |b| b.peer_public(&id))?;
     let state = st.inner().clone();
     let live = Live::default();
@@ -709,27 +715,65 @@ pub async fn known_send<R: Runtime>(
             return Err(e);
         }
     };
-    *lock(&qs.live) = Some(live.clone());
-    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    crate::quicksend::tick(app.clone(), live.clone(), done.clone());
+    // A new open send with that laptop: this first offer waits its turn in the list (up to three
+    // laptops at once), then the two take turns (Add files, Send to).
+    let label = st.with_book(&app, |b| b.label(&id)).ok();
+    let open = sends.open(&app, label.as_deref().map(shown_safely), Some(id.clone()));
+    if let Err(e) = sends.queue(&app, &open, offer) {
+        sends.close(&app, &open);
+        state.ended(&id, session);
+        return Err(e);
+    }
     let runtime = tokio::runtime::Handle::current();
     let spawned = std::thread::Builder::new()
         .name("pctwin-knownsend".into())
         .spawn(move || {
-            let sent = runtime.block_on(pctwin_quicksend::send_live(&mut link, offer, &live));
-            done.store(true, std::sync::atomic::Ordering::Release);
+            runtime.block_on(async {
+                if sends.first(&app, &open, &mut link).await {
+                    let qs = app.state::<AppQuickSend>().inner().clone();
+                    let label = label.unwrap_or_default();
+                    sends
+                        .run(&app, &open, &mut link, true, async |l| {
+                            known_turn(&app, &state, &qs, &id, &label, l, &live).await
+                        })
+                        .await;
+                } else {
+                    sends.close(&app, &open);
+                }
+            });
             state.ended(&id, session);
-            match sent {
-                Ok(r) => {
-                    let view = receipt_view("sender", &r, live.control.stopped());
-                    let _ = app.emit(RECEIPT_EVENT, view);
-                }
-                Err(e) => {
-                    let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
-                }
-            }
         });
     spawned.map(|_| ()).map_err(|_| QsRefusal::Failed)
+}
+
+/// One more offer from a remembered laptop in an open send: as any offer from it (permission 3's
+/// folder, or the person asked where to save). `Some(None)`: done (its events already told);
+/// `None`: the session is over.
+async fn known_turn<R: Runtime>(
+    app: &AppHandle<R>,
+    st: &AppRemembered,
+    qs: &crate::quicksend::QuickSend,
+    id: &str,
+    label: &str,
+    link: &mut Link,
+    live: &Live,
+) -> Option<Option<crate::quicksend::ReceiptView>> {
+    let got = receive_or_stop(link, live).await?;
+    if !st.remembered(app, id) || live.control.stopped() {
+        return None;
+    }
+    match got.ok()? {
+        pctwin_quicksend::Arrival::Files(incoming) => {
+            match receive_files(app, st, qs, id, label, incoming, link, live).await {
+                Ok(()) => Some(None),
+                Err(e) => {
+                    let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
+                    None
+                }
+            }
+        }
+        pctwin_quicksend::Arrival::Note(_) => None,
+    }
 }
 
 /* ---------- Commands: waiting sends ---------- */
@@ -1174,8 +1218,21 @@ async fn serve_arrival<R: Runtime>(
         }
         Ok(pctwin_quicksend::Arrival::Files(incoming)) => {
             let ended = receive_files(app, st, &qs, id, &label, incoming, link, live).await;
-            if let Err(e) = ended {
-                let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
+            match ended {
+                Err(e) => {
+                    let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
+                }
+                // The send stays open: more from there, Send to <name> from here.
+                Ok(()) if !live.control.stopped() => {
+                    let sends = crate::sessions::of(app);
+                    let open = sends.open(app, Some(shown_safely(&label)), Some(id.to_string()));
+                    sends
+                        .run(app, &open, link, false, async |l| {
+                            known_turn(app, st, &qs, id, &label, l, live).await
+                        })
+                        .await;
+                }
+                Ok(()) => {}
             }
         }
         Err(_) => {}

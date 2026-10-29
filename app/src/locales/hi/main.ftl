@@ -3086,3 +3086,16 @@ qs-waiting-renew = बढ़ाएँ
 qs-waiting-cancel-title = यह प्रतीक्षा वाला भेजना रद्द करें?
 qs-waiting-cancel-body = PCTwin अपनी कॉपी मिटा देता है, और कुछ और नहीं भेजा जाता। जिन लैपटॉप के पास फ़ाइलें हैं, वे उन्हें रखते हैं। आपकी अपनी फ़ाइलें जैसी हैं वैसी रहती हैं।
 qs-waiting-keep = रहने दें
+
+# Quick Send more
+qs-session-add-files = फ़ाइलें जोड़ें
+qs-session-send-to = { $name } को भेजें
+qs-session-send-back = फ़ाइलें वापस भेजें
+qs-session-end = खत्म करें
+qs-session-ended = यह भेजना खत्म हो गया। अब कुछ और नहीं आएगा।
+qs-sends-waiting = अपनी बारी का इंतज़ार
+qs-sends-sending = भेजा जा रहा है
+qs-sends-paused = रुका हुआ
+qs-send-pause = रोकें
+qs-send-resume = जारी रखें
+qs-send-cancel = रद्द करें

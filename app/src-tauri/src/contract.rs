@@ -1479,6 +1479,59 @@ fn families() -> Vec<(&'static str, Value)> {
         ),
         ("waiting-send", json(waiting_sends())),
         (
+            "qs-session",
+            json([
+                crate::sessions::SessionView {
+                    id: "00112233445566778899aabbccddeeff".into(),
+                    name: Some("Ada's laptop".into()),
+                    ending: false,
+                },
+                crate::sessions::SessionView {
+                    id: "ffeeddccbbaa99887766554433221100".into(),
+                    name: None,
+                    ending: true,
+                },
+            ]),
+        ),
+        (
+            "qs-send",
+            json([
+                crate::sessions::SendView {
+                    id: 1,
+                    session: "00112233445566778899aabbccddeeff".into(),
+                    name: Some("Ada's laptop".into()),
+                    files: 3,
+                    bytes: 4_200_000,
+                    state: pctwin_quicksend::session::SendState::Sending,
+                    paused: false,
+                },
+                crate::sessions::SendView {
+                    id: 2,
+                    session: "ffeeddccbbaa99887766554433221100".into(),
+                    name: None,
+                    files: 1,
+                    bytes: 12,
+                    state: pctwin_quicksend::session::SendState::Waiting,
+                    paused: true,
+                },
+            ]),
+        ),
+        (
+            "qs-session-receipt",
+            json([
+                crate::sessions::SessionReceiptView {
+                    session: "00112233445566778899aabbccddeeff".into(),
+                    send: Some(1),
+                    receipt: qs_receipts().remove(0),
+                },
+                crate::sessions::SessionReceiptView {
+                    session: "ffeeddccbbaa99887766554433221100".into(),
+                    send: None,
+                    receipt: qs_receipts().remove(0),
+                },
+            ]),
+        ),
+        (
             "people-to-place",
             json([crate::moving::PeopleToPlace {
                 people: vec![crate::moving::PersonToPlace {
@@ -1880,6 +1933,13 @@ fn calls() -> Value {
             { "name": "waiting_list", "args": [] },
             { "name": "waiting_renew", "args": [["id", "00112233445566778899aabbccddeeff"], ["days", 7]] },
             { "name": "waiting_cancel", "args": [["id", "00112233445566778899aabbccddeeff"]] },
+            { "name": "quicksend_session_add", "args": [["session", "00112233445566778899aabbccddeeff"]] },
+            { "name": "quicksend_session_end", "args": [["session", "00112233445566778899aabbccddeeff"]] },
+            { "name": "quicksend_sessions", "args": [] },
+            { "name": "quicksend_sends", "args": [] },
+            { "name": "quicksend_send_pause", "args": [["id", 2]] },
+            { "name": "quicksend_send_resume", "args": [["id", 2]] },
+            { "name": "quicksend_send_cancel", "args": [["id", 2]] },
             { "name": "update_check", "args": [] },
             { "name": "update_install", "args": [] },
             { "name": "laptop_name", "args": [] },
@@ -1935,6 +1995,9 @@ fn calls() -> Value {
             "knownDelivered": crate::remembered::DELIVERED_EVENT,
             "knownChanged": crate::remembered::CHANGED_EVENT,
             "waitingChanged": crate::remembered::WAITING_EVENT,
+            "qsSessions": crate::sessions::SESSIONS_EVENT,
+            "qsSends": crate::sessions::SENDS_EVENT,
+            "qsSessionReceipt": crate::sessions::SESSION_RECEIPT_EVENT,
             "guard": crate::guard::EVENT,
             "moveChanged": crate::deliver::changes::EVENT,
             "safeStop": crate::deliver::safe_stop::EVENT,
