@@ -49,7 +49,6 @@ struct Entry {
     base: String,
     path: String,
     why: Why,
-    refuse_parents: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -90,6 +89,7 @@ fn catalogue() -> &'static Catalogue {
 #[derive(Debug, Clone, Default)]
 pub struct Places {
     pub home: Option<PathBuf>,
+    pub documents: Option<PathBuf>,
     pub appdata: Option<PathBuf>,
     pub localappdata: Option<PathBuf>,
     pub programdata: Option<PathBuf>,
@@ -100,28 +100,44 @@ pub struct Places {
 }
 
 impl Places {
-    /// This laptop's, from the system's own settings for the person.
+    /// This laptop's, from the system's own known-folder lookup (on Windows the shell's known
+    /// folders, which follow a Documents moved into OneDrive or onto another drive), never from
+    /// environment variables, which a program can leave out or point anywhere.
     pub fn of_this_system() -> Self {
-        let var = |n: &str| {
-            std::env::var_os(n)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
-        Self {
-            home: var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }),
-            appdata: var("APPDATA"),
-            localappdata: var("LOCALAPPDATA"),
-            programdata: var("ProgramData"),
-            windir: var("windir").or_else(|| var("SystemRoot")),
-            programfiles: var("ProgramFiles"),
-            programfilesx86: var("ProgramFiles(x86)"),
-            root: (!cfg!(windows)).then(|| PathBuf::from("/")),
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::Shell::{
+                FOLDERID_Documents, FOLDERID_LocalAppData, FOLDERID_Profile, FOLDERID_ProgramData,
+                FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_RoamingAppData,
+                FOLDERID_Windows,
+            };
+            let known = dirs_sys::known_folder;
+            Self {
+                home: known(FOLDERID_Profile),
+                documents: known(FOLDERID_Documents),
+                appdata: known(FOLDERID_RoamingAppData),
+                localappdata: known(FOLDERID_LocalAppData),
+                programdata: known(FOLDERID_ProgramData),
+                windir: known(FOLDERID_Windows),
+                programfiles: known(FOLDERID_ProgramFiles),
+                programfilesx86: known(FOLDERID_ProgramFilesX86),
+                root: None,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Self {
+                home: dirs_sys::home_dir(),
+                root: Some(PathBuf::from("/")),
+                ..Self::default()
+            }
         }
     }
 
     fn base(&self, name: &str) -> Option<&Path> {
         match name {
             "home" => self.home.as_deref(),
+            "documents" => self.documents.as_deref(),
             "appdata" => self.appdata.as_deref(),
             "localappdata" => self.localappdata.as_deref(),
             "programdata" => self.programdata.as_deref(),
@@ -188,8 +204,9 @@ fn comparable(path: &Path) -> Vec<String> {
     parts
 }
 
-/// Why `folder` may not be remembered or allowed on `system` with these `places`: it is a
-/// catalogue place, inside one, or (for places that say so) holds one. `None`: it may.
+/// Why `folder` may not be a destination on `system` with these `places`: it is a catalogue
+/// place, inside one, or holds one (a sent folder's paths could reach it). A place whose base
+/// cannot be resolved refuses too: what is there cannot be told. `None`: it may.
 pub fn refused_on(system: &str, folder: &Path, places: &Places) -> Option<FolderProblem> {
     let cat = catalogue();
     if cat.version != 1 || cat.places.is_empty() {
@@ -198,7 +215,7 @@ pub fn refused_on(system: &str, folder: &Path, places: &Places) -> Option<Folder
     let chosen = comparable(folder);
     for entry in cat.places.iter().filter(|e| e.system == system) {
         let Some(base) = places.base(&entry.base) else {
-            continue;
+            return Some(entry.why.problem());
         };
         let mut place = base.to_path_buf();
         for part in entry.path.split('/').filter(|p| !p.is_empty()) {
@@ -206,7 +223,7 @@ pub fn refused_on(system: &str, folder: &Path, places: &Places) -> Option<Folder
         }
         let place = comparable(&place);
         let inside = chosen.starts_with(&place);
-        let holds = entry.refuse_parents && place.starts_with(&chosen);
+        let holds = place.starts_with(&chosen);
         if inside || holds {
             return Some(entry.why.problem());
         }
@@ -240,10 +257,7 @@ impl KnownFolder {
         path: &Path,
         refused: impl Fn(&Path) -> Option<FolderProblem>,
     ) -> Result<(Self, Destination), FolderProblem> {
-        if let Some(problem) = refused(path) {
-            return Err(problem);
-        }
-        let (dest, identity) = open_plain(path).ok_or(FolderProblem::NotPlain)?;
+        let (dest, identity) = destination_with(path, None, refused)?;
         Ok((
             Self {
                 path: path.to_path_buf(),
@@ -264,15 +278,35 @@ impl KnownFolder {
         &self,
         refused: impl Fn(&Path) -> Option<FolderProblem>,
     ) -> Result<Destination, FolderProblem> {
-        if let Some(problem) = refused(&self.path) {
-            return Err(problem);
-        }
-        let (dest, identity) = open_plain(&self.path).ok_or(FolderProblem::NotPlain)?;
-        if identity != self.identity {
-            return Err(FolderProblem::NotTheSame);
-        }
-        Ok(dest)
+        destination_with(&self.path, Some(self.identity), refused).map(|(dest, _)| dest)
     }
+}
+
+/// The one check every place received files may be written to passes, whichever way it was
+/// chosen (the folder for this receive, the one chosen this session, Downloads, the folder for
+/// next time, permission 3's): not a catalogue place nor inside or holding one, a plain folder,
+/// and, when `expect` says what it was, still that very folder. Opened and held for the write.
+pub fn destination(
+    path: &Path,
+    expect: Option<FileId>,
+) -> Result<(Destination, FileId), FolderProblem> {
+    destination_with(path, expect, refused)
+}
+
+/// As [`destination`], with the catalogue check given (tests).
+pub fn destination_with(
+    path: &Path,
+    expect: Option<FileId>,
+    refused: impl Fn(&Path) -> Option<FolderProblem>,
+) -> Result<(Destination, FileId), FolderProblem> {
+    if let Some(problem) = refused(path) {
+        return Err(problem);
+    }
+    let (dest, identity) = open_plain(path).ok_or(FolderProblem::NotPlain)?;
+    if expect.is_some_and(|e| e != identity) {
+        return Err(FolderProblem::NotTheSame);
+    }
+    Ok((dest, identity))
 }
 
 /// Whether `path` is itself a plain folder: not a symbolic link, junction or other reparse point.
@@ -364,6 +398,7 @@ mod tests {
         }
         let known = [
             "home",
+            "documents",
             "appdata",
             "localappdata",
             "programdata",

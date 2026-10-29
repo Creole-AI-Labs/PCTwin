@@ -20,6 +20,11 @@ sha2 = "0.11.0"
 thiserror = "2.0.21"
 zeroize = "1.9.0"
 
+# Where Documents, AppData, Program Files and the rest really are: the system's own known-folder
+# lookup (the shell's known folders on Windows, the account's home elsewhere), never environment
+# variables. Already in the tree under `dirs`.
+dirs-sys = "0.5.0"
+
 [target.'cfg(unix)'.dependencies]
 # Opening a folder without following a link; the key folder checked to be the person's own.
 rustix = { version = "1.1.5", features = ["fs", "process"] }
@@ -31,6 +36,8 @@ keyring-core = "1"
 windows-native-keyring-store = { version = "1.1", default-features = false }
 # This laptop's hardware identity, to tell a restored or copied drive (already used by the journal).
 wmi = "0.18.4"
+# The known folders' ids (`FOLDERID_Documents` and the rest), for `dirs-sys`'s lookup.
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring-core = "1"

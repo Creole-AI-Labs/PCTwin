@@ -19,7 +19,9 @@ pub mod machine;
 pub mod store;
 pub mod swap;
 
-pub use book::{Admitted, Book, BookError, ConnectionInfo, GrantInfo, GrantProblem, NextFolder};
+pub use book::{
+    Admitted, Book, BookError, ConnectionInfo, Device, GrantInfo, GrantProblem, NextFolder,
+};
 pub use folders::{FolderProblem, KnownFolder};
 pub use store::{MemoryStore, SecretStore, StoreError, SystemStore};
 pub use swap::{Pending, Swap, SwapError};

@@ -3951,6 +3951,7 @@ name = "pctwin-known"
 version = "0.1.0"
 dependencies = [
  "apple-native-keyring-store",
+ "dirs-sys",
  "getrandom 0.4.3",
  "hkdf 0.13.0",
  "hmac 0.13.0",
@@ -3964,6 +3965,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "windows-native-keyring-store",
+ "windows-sys 0.61.2",
  "wmi",
  "zeroize",
 ]
@@ -4122,18 +4124,22 @@ name = "pctwin-quicksend"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "getrandom 0.4.3",
  "pctwin-gate",
  "pctwin-journal",
+ "pctwin-known",
  "pctwin-move",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-transfer",
  "serde",
  "serde_json",
+ "snow",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "url",
+ "zeroize",
 ]
 
 [[package]]

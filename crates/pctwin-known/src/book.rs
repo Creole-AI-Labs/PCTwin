@@ -20,6 +20,7 @@
 //!
 //! A connection unused for [`UNUSED_FOR`] expires and is forgotten ([`Book::expire`]).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
-use crate::folders::KnownFolder;
+use crate::folders::{FolderProblem, KnownFolder};
 use crate::store::{SecretStore, StoreError};
 use crate::swap::Pending;
 use crate::{hex, unhex};
@@ -85,6 +86,23 @@ pub enum GrantProblem {
     Expired,
     #[error("today's limit for this connection is reached")]
     OverCap,
+    /// The allowed folder cannot be used now (moved, swapped, or a refused place): nothing was
+    /// counted, and the person is asked instead.
+    #[error("the allowed folder cannot be used now")]
+    Unusable,
+}
+
+/// Whether this laptop is the one a connection was remembered on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Device {
+    /// The same hardware as when it was remembered.
+    Same,
+    /// Other hardware: a restored backup or a copied drive. Its keys are not used.
+    Restored,
+    /// The hardware gave no identity that tells laptops apart (none, all zeros, a maker's example
+    /// value), then or now: PCTwin cannot tell, and says so plainly; never "same device".
+    CannotTell,
 }
 
 /// Permission 3: future sends from one connection into one folder.
@@ -135,8 +153,8 @@ pub struct ConnectionInfo {
     pub last_used: u64,
     /// When it expires unless used before.
     pub expires_at: u64,
-    /// False when this laptop is a restored backup or a copied drive since it was remembered.
-    pub same_device: bool,
+    /// Whether this laptop is the one it was remembered on.
+    pub device: Device,
     pub grant: Option<GrantInfo>,
     pub next_folder: Option<PathBuf>,
 }
@@ -165,6 +183,20 @@ pub struct Book {
     store: Arc<dyn SecretStore>,
     machine: Option<String>,
     file: BookFile,
+    /// The tokens of one window, worked out once (see [`Tokens`]).
+    tokens: Option<Tokens>,
+}
+
+/// Every connection's tokens around one token window, in memory only: worked out from the key
+/// store once per window (or when the connections change), so a hello from any device nearby is
+/// a lookup here and never a read of the key store.
+struct Tokens {
+    window: u64,
+    /// This laptop's own tokens for the window before, this one and the next: the connection
+    /// each names.
+    hints: HashMap<[u8; 8], String>,
+    /// What this laptop announces in this window, per connection.
+    announced: Vec<(String, [u8; 8])>,
 }
 
 fn key_name(id: &str) -> String {
@@ -226,6 +258,7 @@ impl Book {
             store,
             machine,
             file,
+            tokens: None,
         })
     }
 
@@ -261,27 +294,37 @@ impl Book {
             .ok_or(BookError::NotFound)
     }
 
-    fn same_device(&self, c: &Connection) -> bool {
+    fn device(&self, c: &Connection) -> Device {
         match (&c.machine, &self.machine) {
-            (Some(then), Some(now)) => then == now,
-            // Remembered where the system could not say, or cannot say now: never claimed
-            // different, and the screens say only "same device as before".
-            _ => true,
+            (Some(then), Some(now)) if then == now => Device::Same,
+            (Some(_), Some(_)) => Device::Restored,
+            // Remembered where the system could not tell laptops apart, or cannot now.
+            _ => Device::CannotTell,
         }
     }
 
     /// Remember this connection (permission 1), named `label`, at time `now` (seconds since
-    /// 1970). The secrets go to the store first and are read back; only then is the connection
-    /// written to the book. Returns its id.
+    /// 1970). When the person said it `replaces` an earlier connection (the same other laptop,
+    /// paired again: its keys are fresh, so nothing else can tell), that one is forgotten first:
+    /// its keys and every permission. The secrets go to the store first and are read back; only
+    /// then is the connection written to the book. Returns its id.
     pub fn remember(
         &mut self,
         pending: Pending,
         label: &str,
         now: u64,
+        replaces: Option<&str>,
     ) -> Result<String, BookError> {
         let label = label_ok(label)?;
-        if self.file.connections.len() >= MAX_CONNECTIONS {
+        if let Some(old) = replaces {
+            self.find(old)?;
+        }
+        let kept = self.file.connections.len() - usize::from(replaces.is_some());
+        if kept >= MAX_CONNECTIONS {
             return Err(BookError::Full);
+        }
+        if let Some(old) = replaces {
+            self.forget(old)?;
         }
         // The same other laptop remembered again replaces the old connection (and its keys).
         let peer = hex(&pending.peer_public);
@@ -318,6 +361,7 @@ impl Book {
             grant: None,
             next_folder: None,
         });
+        self.tokens = None;
         if let Err(e) = self.save() {
             self.file.connections.retain(|c| c.id != id);
             let _ = self.store.delete(&key_name(&id));
@@ -325,6 +369,23 @@ impl Book {
             return Err(e);
         }
         Ok(id)
+    }
+
+    /// The connections with the same name as `label` (ignoring case and spaces around it): the
+    /// earlier connection a person pairing the same laptop again most likely means to replace.
+    pub fn same_label(&self, label: &str) -> Vec<String> {
+        let label = label.trim().to_lowercase();
+        self.file
+            .connections
+            .iter()
+            .filter(|c| c.label.trim().to_lowercase() == label)
+            .map(|c| c.id.clone())
+            .collect()
+    }
+
+    /// Whether connection `id` is (still) remembered.
+    pub fn has(&self, id: &str) -> bool {
+        self.find(id).is_ok()
     }
 
     /// Forget this connection: its key and pair secret leave the store first, then the
@@ -335,6 +396,7 @@ impl Book {
         self.store.delete(&key_name(id))?;
         self.store.delete(&pair_name(id))?;
         self.file.connections.retain(|c| c.id != id);
+        self.tokens = None;
         self.save()
     }
 
@@ -366,7 +428,7 @@ impl Book {
                 made_at: c.made_at,
                 last_used: c.last_used,
                 expires_at: c.last_used.saturating_add(UNUSED_FOR),
-                same_device: self.same_device(c),
+                device: self.device(c),
                 grant: c.grant.as_ref().map(|g| GrantInfo {
                     folder: g.folder.path.clone(),
                     ends_at: g.ends_at,
@@ -395,7 +457,7 @@ impl Book {
 
     fn check_device(&self, id: &str) -> Result<&Connection, BookError> {
         let c = self.find(id)?;
-        if !self.same_device(c) {
+        if self.device(c) == Device::Restored {
             return Err(BookError::Restored);
         }
         Ok(c)
@@ -429,20 +491,39 @@ impl Book {
         Ok(own < self.peer_public(id)?)
     }
 
-    /// The token this laptop announces for each connection now (one per connection, each in
-    /// its own announcement, so neither a stranger nor another remembered laptop can tell they
-    /// come from one laptop by the tokens). Connections whose keys cannot be read are left out.
-    pub fn announced(&self, now: u64) -> Vec<(String, [u8; 8])> {
+    /// The token this laptop announces for each connection now, one per connection, each in
+    /// its own announcement. The tokens themselves cannot be linked to each other, but every
+    /// announcement from this laptop carries the same addresses and port, so anyone on the
+    /// network can group them by where they come from (and count this laptop's connections);
+    /// they say nothing about who the connections are. Connections whose keys cannot be read
+    /// are left out.
+    pub fn announced(&mut self, now: u64) -> Vec<(String, [u8; 8])> {
+        self.tokens_at(now).announced.clone()
+    }
+
+    /// The tokens of `now`'s window, worked out again only when the window or the connections
+    /// changed.
+    fn tokens_at(&mut self, now: u64) -> &Tokens {
         let window = now / TOKEN_PERIOD;
-        self.file
-            .connections
-            .iter()
-            .filter_map(|c| {
-                let secret = self.pair_secret(&c.id).ok()?;
-                let low = self.low_side(&c.id).ok()?;
-                Some((c.id.clone(), token(&secret, low, window)))
-            })
-            .collect()
+        if let Some(t) = self.tokens.take_if(|t| t.window == window) {
+            return self.tokens.insert(t);
+        }
+        let mut hints = HashMap::new();
+        let mut announced = Vec::new();
+        for c in &self.file.connections {
+            let (Ok(secret), Ok(low)) = (self.pair_secret(&c.id), self.low_side(&c.id)) else {
+                continue;
+            };
+            for w in [window.saturating_sub(1), window, window + 1] {
+                hints.insert(token(&secret, low, w), c.id.clone());
+            }
+            announced.push((c.id.clone(), token(&secret, low, window)));
+        }
+        self.tokens.insert(Tokens {
+            window,
+            hints,
+            announced,
+        })
     }
 
     /// The tokens the other laptop of connection `id` announces around `now` (the window before,
@@ -458,17 +539,10 @@ impl Book {
     }
 
     /// Which connection a laptop that connected here means by `hint` (a token this laptop
-    /// announced around `now`). `None`: nobody this laptop remembers.
-    pub fn lookup(&self, hint: &[u8; 8], now: u64) -> Option<String> {
-        let w = now / TOKEN_PERIOD;
-        self.file.connections.iter().find_map(|c| {
-            let secret = self.pair_secret(&c.id).ok()?;
-            let low = self.low_side(&c.id).ok()?;
-            [w.saturating_sub(1), w, w + 1]
-                .into_iter()
-                .any(|w| token(&secret, low, w) == *hint)
-                .then(|| c.id.clone())
-        })
+    /// announced around `now`). `None`: nobody this laptop remembers. A lookup in memory: the key
+    /// store is read at most once per token window, however many devices say hello.
+    pub fn lookup(&mut self, hint: &[u8; 8], now: u64) -> Option<String> {
+        self.tokens_at(now).hints.get(hint).cloned()
     }
 
     /// The connection was used at `now` (a session with it finished its handshake).
@@ -519,31 +593,43 @@ impl Book {
         self.save()
     }
 
-    /// Whether permission 3 lets a delivery of `bytes` from connection `id` in at `now`, and if
-    /// so counts it against today's caps and says where. Checked again for every delivery.
-    pub fn admit(&mut self, id: &str, bytes: u64, now: u64) -> Result<Admitted, GrantProblem> {
+    /// Whether permission 3 lets a delivery of `bytes` from connection `id` in at `now`: within
+    /// its time and today's caps, and its folder opened by `open` (rechecked for this delivery).
+    /// Only when all of that holds is the delivery counted against today's caps and the quiet
+    /// spell ended; when the folder cannot be used nothing is counted and the person is asked,
+    /// so the first delivery after a quiet spell is still told.
+    pub fn admit_with<T>(
+        &mut self,
+        id: &str,
+        bytes: u64,
+        now: u64,
+        open: impl FnOnce(&KnownFolder) -> Result<T, FolderProblem>,
+    ) -> Result<(Admitted, T), GrantProblem> {
         let c = self.find_mut(id).map_err(|_| GrantProblem::None)?;
         let g = c.grant.as_mut().ok_or(GrantProblem::None)?;
         if now >= g.ends_at {
             return Err(GrantProblem::Expired);
         }
-        if g.day != now / DAY_SECONDS {
-            g.day = now / DAY_SECONDS;
-            g.bytes_today = 0;
-            g.sends_today = 0;
-        }
-        if g.sends_today >= g.daily_sends || g.bytes_today.saturating_add(bytes) > g.daily_bytes {
+        let today = now / DAY_SECONDS;
+        let (bytes_today, sends_today) = if g.day == today {
+            (g.bytes_today, g.sends_today)
+        } else {
+            (0, 0)
+        };
+        if sends_today >= g.daily_sends || bytes_today.saturating_add(bytes) > g.daily_bytes {
             return Err(GrantProblem::OverCap);
         }
-        g.sends_today += 1;
-        g.bytes_today = g.bytes_today.saturating_add(bytes);
+        let opened = open(&g.folder).map_err(|_| GrantProblem::Unusable)?;
+        g.day = today;
+        g.sends_today = sends_today + 1;
+        g.bytes_today = bytes_today.saturating_add(bytes);
         let tell = g
             .last_delivery
             .is_none_or(|last| now.saturating_sub(last) >= QUIET_SPELL);
         g.last_delivery = Some(now);
         let folder = g.folder.clone();
         self.save().map_err(|_| GrantProblem::None)?;
-        Ok(Admitted { folder, tell })
+        Ok((Admitted { folder, tell }, opened))
     }
 
     /// "Use this folder for this connection next time".

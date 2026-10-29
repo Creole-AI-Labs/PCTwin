@@ -1,0 +1,10 @@
+{
+  "about": "Hardware identities that many laptops share, so they cannot tell one laptop from another: firmware left with a maker's example value. A laptop reporting one of these (or no identity, or one that is not 32 hex digits, or one digit repeated, such as all zeros or all F) is a laptop where PCTwin cannot tell if it is the same laptop as before (Security Design Part T). Values are compared as 32 upper-case hex digits, dashes removed.",
+  "version": 1,
+  "values": [
+    "03000200040005000006000700080009",
+    "00020003000400050006000700080009",
+    "12345678123456781234567812345678",
+    "01234567890123456789012345678901"
+  ]
+}

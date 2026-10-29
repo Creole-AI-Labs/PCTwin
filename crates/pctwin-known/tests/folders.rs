@@ -8,12 +8,14 @@ use pctwin_known::{FolderProblem, KnownFolder};
 fn places(home: &Path) -> Places {
     Places {
         home: Some(home.to_path_buf()),
+        // Documents moved off the home folder (into OneDrive, say): found where the system says.
+        documents: Some(home.join("OneDrive/Documents")),
         appdata: Some(home.join("AppData/Roaming")),
         localappdata: Some(home.join("AppData/Local")),
         programdata: Some(home.join("ProgramData")),
         windir: Some(home.join("Windows")),
         programfiles: Some(home.join("Program Files")),
-        programfilesx86: None,
+        programfilesx86: Some(home.join("Program Files (x86)")),
         root: Some(home.join("root")),
     }
 }
@@ -43,7 +45,12 @@ fn startup_autostart_launch_agents_and_key_folders_are_refused() {
         ("windows", ".ssh/inner", FolderProblem::HoldsKeys),
         (
             "windows",
-            "Documents/WindowsPowerShell",
+            "OneDrive/Documents/WindowsPowerShell",
+            FolderProblem::ShellStartUp,
+        ),
+        (
+            "windows",
+            "OneDrive/Documents/PowerShell",
             FolderProblem::ShellStartUp,
         ),
         ("windows", "Windows/System32", FolderProblem::System),
@@ -96,11 +103,79 @@ fn everyday_folders_are_allowed() {
             assert_eq!(refused_on(system, &f, &p), None, "{system} {rel}");
         }
     }
-    // Documents holds the PowerShell profile folder, which a person sees by name before Save.
+}
+
+/// A sent folder `WindowsPowerShell/Microsoft.PowerShell_profile.ps1` saved into Documents
+/// would become the PowerShell profile: Documents (wherever the system keeps it) holds a place
+/// that runs things, so it is refused like every folder holding one.
+#[test]
+fn documents_holds_the_shell_profile_and_is_refused_wherever_it_is() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path();
+    let p = places(home);
+    for rel in ["OneDrive/Documents", "OneDrive"] {
+        assert_eq!(
+            refused_on("windows", &made(home.join(rel)), &p),
+            Some(FolderProblem::ShellStartUp),
+            "{rel}"
+        );
+    }
+    // The plain home/Documents is not the system's Documents here, so it is an everyday folder.
     assert_eq!(
         refused_on("windows", &made(home.join("Documents")), &p),
         None
     );
+}
+
+/// A place the system cannot resolve refuses (it cannot be told what is there), never skipped.
+#[test]
+fn a_place_that_cannot_be_resolved_refuses() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path();
+    let downloads = made(home.join("Downloads"));
+    let mut p = places(home);
+    p.documents = None;
+    assert_eq!(
+        refused_on("windows", &downloads, &p),
+        Some(FolderProblem::ShellStartUp)
+    );
+    let mut p = places(home);
+    p.home = None;
+    for system in ["windows", "macos", "linux"] {
+        assert!(refused_on(system, &downloads, &p).is_some(), "{system}");
+    }
+    // Places another system needs do not matter here.
+    let mut p = places(home);
+    p.programdata = None;
+    assert_eq!(refused_on("linux", &downloads, &p), None);
+}
+
+/// This laptop's places come from the system's own lookup, so every base its catalogue entries
+/// need is found, and the person's own Downloads is allowed while Documents is not.
+#[test]
+fn this_laptop_resolves_every_base_it_needs() {
+    let p = Places::of_this_system();
+    assert!(p.home.is_some());
+    if cfg!(windows) {
+        for (name, base) in [
+            ("documents", &p.documents),
+            ("appdata", &p.appdata),
+            ("localappdata", &p.localappdata),
+            ("programdata", &p.programdata),
+            ("windir", &p.windir),
+            ("programfiles", &p.programfiles),
+            ("programfilesx86", &p.programfilesx86),
+        ] {
+            assert!(base.is_some(), "{name}");
+        }
+        let docs = p.documents.clone().unwrap();
+        assert_eq!(
+            pctwin_known::folders::refused(&docs),
+            Some(FolderProblem::ShellStartUp)
+        );
+    }
+    let temp = tempfile::tempdir().unwrap();
+    assert_eq!(pctwin_known::folders::refused(temp.path()), None);
 }
 
 /// A link to a refused place is that place.
