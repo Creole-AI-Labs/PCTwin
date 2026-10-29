@@ -886,7 +886,6 @@ describe("someone tried wrong codes, and the system's own questions", () => {
     await renderOld();
     await emit("pairing-old", { kind: "locked" });
     expect(heading().textContent).toBe(text("pair-old-locked-title"));
-    expect(heading().textContent).toBe("Someone on this network tried wrong codes.");
     expect(screen.getByText(withText(text("pair-old-locked-body")))).toBeTruthy();
     expect(screen.getByText(withText(text("pair-old-locked-hotspot")))).toBeTruthy();
     // No code is on screen while locked, and nothing restarts by itself.

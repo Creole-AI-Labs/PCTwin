@@ -30,14 +30,14 @@ welcome-start = Empezar un traslado completo
 
 home-quick-send-body = Enviar o recibir archivos
 home-move-body = Traslada tu configuración
-home-restore-body = Recupérala
-home-rescue-body = Salva lo importante
+home-restore-body = Restaurar una configuración guardada
+home-rescue-body = Copiar archivos de un portátil que no arranca
 home-history = Mi historial
 home-history-body = Tus traslados y sus informes
-name-title = Ponle nombre a este portátil.
+name-title = Ponle nombre a este portátil
 name-body = Los demás portátiles cercanos lo encontrarán con este nombre. Puedes cambiarlo más tarde, al emparejar.
 name-use = Usar este nombre
-home-update-title = Hay una nueva versión disponible.
+home-update-title = Hay una nueva versión disponible
 home-update-action = Actualizar ahora
 home-updating = Actualizando. PCTwin se cerrará y se volverá a abrir solo.
 home-update-failed = No se pudo instalar la actualización. PCTwin funciona como antes; se te ofrecerá de nuevo la próxima vez.
@@ -100,7 +100,7 @@ connect-unit-gb = { NUMBER($value, maximumFractionDigits: 1) } GB
 
 ## C02 Put both laptops together
 
-connect-prep-title = Pon los dos portátiles juntos.
+connect-prep-title = Pon los dos portátiles juntos
 connect-prep-body = Conéctalos a la misma Wi-Fi y abre PCTwin en cada uno.
 connect-prep-step-1-title = Usa la misma Wi-Fi
 connect-prep-step-1-body = Copiar archivos no necesita internet.
@@ -116,7 +116,7 @@ connect-prep-continue = Seguir con la vinculación
 ## C06 Meet your other laptop
 
 peer-eyebrow = Tu traslado
-peer-title = Conoce tu otro portátil.
+peer-title = Comprueba los dos portátiles
 peer-body = Los dos portátiles están conectados y listos.
 peer-sending = Envía
 peer-receiving = Recibe
@@ -140,7 +140,7 @@ peer-continue = Comprobar la conexión
 ## C07 Let’s check the connection
 
 check-eyebrow = Tu traslado
-check-title = Comprobemos la conexión.
+check-title = Comprueba la conexión
 check-body = PCTwin comprueba la velocidad, el espacio y la batería para planear el traslado y calcular el tiempo.
 check-measuring = Midiendo la conexión…
 # The value next to it is already formatted, for example "62 MB/s".
@@ -178,7 +178,7 @@ check-before-near-body = Deja los dos portátiles cerca de él mientras se trasl
 
 ## C09 Waiting for your other laptop
 
-reconnect-title = Esperando a tu otro portátil.
+reconnect-title = Esperando a tu otro portátil
 reconnect-body = Se conserva todo lo copiado y comprobado hasta ahora.
 # Added: the title of the saved-progress card (the mockup shows Move paused by connection).
 reconnect-card-title = Traslado en pausa por la conexión
@@ -202,7 +202,7 @@ reconnect-details-body = Solo estos dos portátiles pueden volver a conectarse, 
 
 ## C10 The connection has ended (dialog)
 
-ended-title = La conexión ha terminado.
+ended-title = La conexión ha terminado
 ended-body = Tu traslado está guardado. El código anterior ya no sirve.
 ended-kept-title = Se conserva
 ended-kept-body = El registro de tu traslado y todo lo copiado y comprobado.
@@ -219,7 +219,7 @@ ended-home = Volver al inicio
 pair-back = Atrás
 pair-try-again = Intentar de nuevo
 pair-more-details = Más detalles
-pair-heads-up-title = Tu portátil puede hacerte una pregunta.
+pair-heads-up-title = Tu portátil puede hacerte una pregunta
 pair-heads-up-local-network = Tu Mac te preguntará si PCTwin puede buscar dispositivos en tu red local. Elige Permitir para que tus dos portátiles puedan encontrarse.
 pair-heads-up-firewall = Windows puede preguntarte si PCTwin puede aceptar conexiones. Elige Permitir para que tu portátil nuevo pueda llegar a este.
 pair-heads-up-continue = Continuar
@@ -227,7 +227,7 @@ pair-heads-up-continue = Continuar
 ## C03 Old laptop: show the code
 
 pair-old-eyebrow = Portátil antiguo
-pair-old-title = Conectemos tus portátiles.
+pair-old-title = Conecta tus portátiles
 pair-old-body = En tu portátil nuevo, escribe el código de abajo.
 pair-old-next = Después, elegirás un número que aparece en los dos portátiles.
 pair-old-network = Deja los dos portátiles en la misma Wi-Fi.
@@ -251,27 +251,27 @@ pair-old-steps-title = En tu portátil nuevo
 pair-old-step-1 = Abre PCTwin y elige Mi portátil nuevo.
 pair-old-step-2 = Si aparece una lista, elige el nombre de este portátil.
 pair-old-step-3 = Escribe el código de seis cifras que ves aquí.
-pair-old-wait-title = Ya viene un código nuevo.
+pair-old-wait-title = Espera un código nuevo
 pair-old-wait-body =
     { $seconds ->
         [one] Ese intento no funcionó. Aparecerá un código nuevo en { $seconds } segundo.
         [many] Ese intento no funcionó. Aparecerá un código nuevo en { $seconds } de segundos.
        *[other] Ese intento no funcionó. Aparecerá un código nuevo en { $seconds } segundos.
     }
-pair-old-locked-title = Alguien en esta red probó códigos incorrectos.
+pair-old-locked-title = Alguien en esta red probó códigos incorrectos
 pair-old-locked-body = Tras cinco códigos incorrectos, la vinculación se detuvo para proteger este portátil. No se compartió nada. Si fuiste tú, elige Empezar de nuevo para obtener un código nuevo.
 pair-old-locked-hotspot = Si no sabes quién fue, conecta los dos portátiles al punto de acceso de tu teléfono y luego elige Empezar de nuevo.
 pair-old-start-again = Empezar de nuevo
 pair-old-timed-out = No se eligió ningún número a tiempo, así que aquí tienes un código nuevo.
 pair-old-declined = Los números no coincidían, así que no se compartió nada. Aquí tienes un código nuevo.
 pair-old-left = El portátil nuevo dejó de vincularse antes de elegir un número, así que no se compartió nada. Aquí tienes un código nuevo.
-pair-network-title = Elige tu Wi-Fi.
+pair-network-title = Elige tu Wi-Fi
 pair-network-hint = Elige la red en la que está tu portátil nuevo.
 
 ## C05 Old laptop: match the number
 
 pair-choose-eyebrow = Confirma la conexión
-pair-choose-title = Elige el número que coincide.
+pair-choose-title = Elige el número que coincide
 pair-choose-body = Mira tu portátil nuevo. Elige el número que muestra.
 pair-choose-number = Número { $number }
 pair-choose-confirm = Confirmar estos portátiles
@@ -286,19 +286,19 @@ pair-choose-checking = Comprobando…
 pair-new-eyebrow = Portátil nuevo
 pair-new-searching-title = Buscando tu portátil antiguo…
 pair-new-searching-body = Deja PCTwin abierto en tu portátil antiguo, en la misma Wi-Fi que este.
-pair-new-search-failed-title = No se pudo buscar tu portátil antiguo.
+pair-new-search-failed-title = No se pudo buscar tu portátil antiguo
 pair-new-list-title = ¿Cuál es tu portátil antiguo?
 pair-new-list-body = Elige el nombre que muestra la pantalla de tu portátil antiguo.
 pair-new-same-label = Otro portátil cercano tiene este nombre. Mira la pantalla del portátil antiguo.
 pair-new-needs-update = Este portátil tiene una versión más antigua de PCTwin. Actualiza PCTwin en él y vuelve a buscar.
-pair-new-none-title = No aparece tu portátil antiguo.
+pair-new-none-title = No aparece tu portátil antiguo
 pair-new-none-body = Comprueba que PCTwin esté abierto en tu portátil antiguo y muestre un código, y que los dos portátiles estén en la misma Wi-Fi. Luego busca de nuevo.
 pair-new-search-again = Buscar de nuevo
 pair-old-same-role = Otro portátil cercano también está configurado como el portátil antiguo. Uno de los dos debe ser el portátil nuevo.
 pair-old-switch = Este es el portátil nuevo
 pair-new-none-same-role = ¿El otro portátil también eligió Portátil nuevo? Entonces elige Portátil antiguo en él, o cambia este.
 pair-new-switch = Este es el portátil antiguo
-pair-new-code-title = Escribe el código.
+pair-new-code-title = Escribe el código
 pair-new-code-body = Escribe el código que aparece en { $label }.
 pair-new-code-label = Código de seis cifras
 pair-new-code-hint = Léelo en la pantalla de tu portátil antiguo. Cambia cada minuto.
@@ -306,7 +306,7 @@ pair-new-connect = Conectar
 pair-new-connecting = Conectando…
 pair-new-other-laptop = Elegir otro portátil
 pair-new-number-eyebrow = Confirma la conexión
-pair-new-number-title = Elige este número en tu portátil antiguo.
+pair-new-number-title = Elige este número en tu portátil antiguo
 pair-new-number-tile = Tu número
 pair-new-number-label = Tu número es el { $number }
 pair-new-number-body = Tu portátil antiguo muestra tres números. Elige allí este.
@@ -314,8 +314,8 @@ pair-new-number-waiting = Esperando a tu portátil antiguo…
 
 ## Paired (both laptops)
 
-pair-done-eyebrow = Todo listo
-pair-done-title = Tus portátiles están vinculados.
+pair-done-eyebrow = Vinculados
+pair-done-title = Tus portátiles están vinculados
 pair-done-body = Tus dos portátiles están conectados. Ahora el portátil antiguo busca tus archivos y tú apruebas en el nuevo lo que se mueve. Nada se mueve antes de que lo apruebes.
 pair-done-continue = Continuar
 
@@ -345,7 +345,7 @@ pairing-failed-new = El emparejamiento no funcionó esta vez. No se compartió n
 ## M06 Match people to their profiles (Who’s moving?)
 
 people-eyebrow = Tu traslado
-people-title = Asigna a cada persona su cuenta.
+people-title = Asigna a cada persona su cuenta
 people-body = Elige adónde van los archivos de cada persona en el portátil nuevo.
 people-col-old = Portátil antiguo
 people-col-new = Portátil nuevo
@@ -397,7 +397,7 @@ people-continue = Continuar
 ## M26 Before you leave this laptop (things to do on the old laptop)
 
 before-eyebrow = Tu traslado
-before-title = Antes de dejar este portátil.
+before-title = Antes de dejar este portátil
 before-body = Revisa esto mientras todavía tienes tu portátil antiguo.
 before-licences-title = Licencias de aplicaciones
 before-licences-body = Algunas aplicaciones necesitan que traslades tú su licencia.
@@ -416,7 +416,7 @@ before-continue = Volver al plan del traslado
 ## S11 Get help with this task (a short problem code)
 
 help-eyebrow = Ayuda y privacidad
-help-title = Consigue ayuda con esta tarea.
+help-title = Consigue ayuda con esta tarea
 help-body = Comparte un código corto que muestra a otra persona qué salió mal. Antes, revisa lo que incluye.
 help-making = Creando un código…
 help-code-title = Código del problema
@@ -443,7 +443,7 @@ help-failed = No se pudo crear un código de problema. Inténtalo de nuevo. Si s
 help-try-again = Intentar de nuevo
 help-copy-failed = No se pudo copiar el código. Selecciónalo arriba y cópialo tú.
 help-home-eyebrow = Ayuda
-help-home-title = Ayuda para lo que estás haciendo.
+help-home-title = Problemas frecuentes y qué hacer
 help-home-body = Guías breves para lo que más a menudo se interpone. Funcionan sin internet.
 help-home-more = Más ayuda en getpctwin.com
 help-guide-find-title = Los portátiles no se encuentran
@@ -704,7 +704,7 @@ label-unnamed = Portátil sin nombre
 ## M02 Finding your files
 
 scan-eyebrow = Tu traslado
-scan-title = Buscando tu configuración de siempre.
+scan-title = Buscando tus archivos
 scan-body = Lo que PCTwin encuentra se guarda, así que la búsqueda puede seguir si se detiene.
 scan-progress =
     .aria-label = Buscando en los lugares que elegiste
@@ -747,7 +747,7 @@ scan-continue = Ver lo encontrado
 ## M03 Everything you chose, in view
 
 overview-eyebrow = Tu traslado
-overview-title = Todo lo que elegiste, a la vista.
+overview-title = Lo que encontró PCTwin
 overview-body = Revisa lo que encontró PCTwin antes de que prepare el plan.
 # The metric value next to each label is passed in already formatted.
 overview-size-label = archivos seleccionados
@@ -782,7 +782,7 @@ overview-continue = Continuar
 ## M04 Keep what matters to you
 
 files-eyebrow = Tu traslado
-files-title = Conserva lo que te importa.
+files-title = Elige las carpetas que quieres trasladar
 files-body = Elige carpetas, otros discos y cualquier otro lugar.
 files-search-label = Buscar una carpeta
 files-search-placeholder = Buscar carpetas
@@ -814,7 +814,7 @@ files-continue = Elegir destinos
 ## M05 Give every file a home
 
 dest-eyebrow = Tu traslado
-dest-title = Dale un lugar a cada archivo.
+dest-title = Adónde van tus carpetas
 dest-body = Elige adónde va cada carpeta en el portátil nuevo.
 dest-col-chosen = Lo que elegiste
 dest-col-place = Adónde va
@@ -842,7 +842,7 @@ dest-continue = Revisar el plan
 ## M23 Approve the move you want
 
 plan-eyebrow = Tu traslado
-plan-title = Aprueba el traslado que quieres.
+plan-title = Revisa y aprueba el plan
 plan-body = PCTwin hace solo lo que dice este plan.
 plan-what-title = Lo que elegiste
 # $size is already formatted, for example "120 GB". $count is passed but not shown.
@@ -934,7 +934,7 @@ plan-preview-title = Antes de empezar
 plan-preview-fits = Hay suficiente espacio libre en este portátil.
 plan-preview-fits-about = Debería haber suficiente espacio libre en este portátil. Se cuentan unos { $extra } para las aplicaciones que instala PCTwin y sus datos.
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
-plan-preview-first = Trasladaremos esto primero, para que tu portátil nuevo esté listo antes: { $places }.
+plan-preview-first = Esto se traslada primero, para que puedas usar tu portátil nuevo antes: { $places }.
 plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-short-about = Este portátil necesita unos { $size } más de espacio libre, contando unos { $extra } para las aplicaciones que instala PCTwin y sus datos. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
@@ -1024,8 +1024,8 @@ soon-move-body = Pasa todo de tu portátil antiguo a uno nuevo: tus archivos, ap
 ## X01 Move progress, compact
 
 progress-eyebrow = Tu traslado
-progress-title = Preparando tu nuevo portátil.
-progress-title-old = Enviando tus cosas a tu nuevo portátil.
+progress-title = Trasladando tus cosas a este portátil
+progress-title-old = Enviando tus cosas a tu nuevo portátil
 progress-title-paused = Traslado en pausa
 progress-paired = Vinculados
 progress-percent =
@@ -1057,13 +1057,13 @@ progress-low-battery = A este portátil le queda poca batería. Conéctalo para 
 progress-battery-paused = La batería de este portátil está casi vacía, así que el traslado se ha pausado con seguridad. Conéctalo y luego continúa. No se pierde nada.
 progress-old-safe = Tu portátil antiguo no cambia.
 progress-pause = Pausar el traslado
-progress-compact = Vista reducida
-progress-expand = Ver todo el traslado
+progress-compact = Mostrar menos
+progress-expand = Mostrar todos los elementos
 progress-stop = Parar el traslado
 
 ## X02 Move progress, expanded
 
-progress-all-title = Todo el traslado.
+progress-all-title = Todos los elementos del traslado
 progress-all-body = Cada elemento muestra de dónde viene y cómo va.
 progress-metric-overall = progreso total
 progress-metric-committed = copiado y comprobado
@@ -1091,8 +1091,8 @@ tip-power-cut = Si se va la luz, enciende los dos portátiles y abre PCTwin. Sig
 
 ## F09 Mini panel
 
-mini-title = Tu traslado, aquí cerca.
-mini-title-paused = Traslado en pausa.
+mini-title = Traslado en curso
+mini-title-paused = Traslado en pausa
 mini-what = trasladando los archivos seleccionados
 mini-progress =
     .aria-label = Progreso del traslado
@@ -1100,7 +1100,7 @@ mini-pause = Pausar
 mini-resume = Reanudar
 mini-open = Abrir traslado
 # Used when lane E reuses this panel for a Quick Send.
-mini-title-send = Tus archivos están en camino.
+mini-title-send = Enviando archivos
 mini-what-send = enviando los archivos seleccionados
 mini-open-send = Abrir envío
 mini-progress-send =
@@ -1108,8 +1108,8 @@ mini-progress-send =
 
 ## X05 Paused at a safe point
 
-pause-title = En pausa en un punto seguro.
-pause-title-finishing = Pausando en un punto seguro…
+pause-title = El traslado está en pausa
+pause-title-finishing = Pausando el traslado…
 pause-body = Se conserva todo lo copiado y comprobado. El resto espera.
 pause-finishing = Primero se termina { $name }, para que no quede a medio copiar.
 pause-kept-title = Archivos
@@ -1124,7 +1124,7 @@ pause-waiting-body =
 pause-status-kept = En pausa
 pause-status-waiting = En espera
 pause-note = Pausar no deshace nada. Tu portátil antiguo no cambia.
-pause-resume = Reanudar el traslado guardado
+pause-resume = Reanudar el traslado
 
 ## X10 Stop the remaining move? (danger dialog)
 
@@ -1140,14 +1140,14 @@ cancel-old-title = Portátil antiguo
 cancel-old-body = No cambia.
 cancel-ack = Entiendo que parar no deshace lo que ya se copió
 cancel-stop = Parar y ver el informe
-cancel-keep = Seguir trasladando
+cancel-keep = Continuar el traslado
 
 ## R01 Welcome to your next laptop (outcome)
 
 outcome-eyebrow = Resultado del traslado
-outcome-title = Te damos la bienvenida a tu nuevo portátil.
+outcome-title = El traslado ha terminado
 outcome-body = Esto es lo que pasó con todo lo que aprobaste.
-outcome-title-old = Tus cosas ya están en tu nuevo portátil.
+outcome-title-old = El traslado ha terminado
 outcome-body-old = Esto es lo que pasó con todo lo que enviaste. Este portátil sigue como estaba.
 outcome-files-title = Archivos seleccionados
 outcome-status-partial = Hecho en parte
@@ -1182,7 +1182,7 @@ move-stop = Detener el traslado
 move-before-open = Mientras esperas: antes de dejar este portátil
 move-get-help = Obtener ayuda
 pickup-eyebrow = Tu traslado
-pickup-title = Retoma con seguridad.
+pickup-title = Ordenar el traslado detenido
 pickup-body = Un traslado en este portátil se detuvo a medias, quizá porque se reinició o se quedó sin energía. Primero ordena lo pendiente y luego vuelve a emparejar los portátiles para seguir.
 pickup-unfinished-title = Copias sin terminar
 pickup-unfinished-body =
@@ -1194,7 +1194,7 @@ pickup-unfinished-body =
 pickup-unfinished-badge = Por ordenar
 pickup-tidy = Ordenar
 pickup-tidying = Ordenando. Las copias terminadas se comprueban y se colocan en su sitio; no se cambia nada tuyo.
-pickup-done = Todo en orden. Vuelve a emparejar los portátiles para seguir: lo que ya está aquí se reconoce y no se copia dos veces.
+pickup-done = El orden ha terminado. Vincula de nuevo los portátiles para continuar: lo que ya está aquí se encuentra y no se copia dos veces.
 pickup-failed = Ordenar no funcionó esta vez. No se cambió nada tuyo. Inténtalo de nuevo, o primero cierra PCTwin en este portátil y vuelve a abrirlo.
 pickup-put-in-place = colocados
 pickup-kept = guardados para seguir
@@ -1211,8 +1211,8 @@ pickup-left-for-later =
        *[other] { $count } archivos están en un disco que ahora no está conectado. Conéctalo y vuelve a ordenar.
     }
 pickup-later = Ahora no
-ready-eyebrow = Hola
-ready-title = Tus cosas están listas.
+ready-eyebrow = Desde tu portátil antiguo
+ready-title = Tus cosas están en tus carpetas
 ready-body = Tus cosas del portátil antiguo se trasladaron a este y ya están en tus propias carpetas.
 ready-landed = archivos en tus carpetas
 ready-where-title = Dónde están
@@ -1232,16 +1232,16 @@ ready-failed =
 ready-done = Listo
 move-status-kept = Guardado
 move-wait-eyebrow = Tu traslado
-move-wait-scanning-title = Buscando tus archivos.
+move-wait-scanning-title = Buscando tus archivos
 move-wait-scanning-body = Tu portátil antiguo está revisando tus carpetas. Solo las lee: no se abre, cambia ni borra nada.
 move-found = Encontrado hasta ahora: { $size } de tus cosas.
-move-wait-approval-title = Esperando a tu portátil nuevo.
+move-wait-approval-title = Esperando a tu portátil nuevo
 move-wait-approval-body = Tus archivos están listos. Revisa el plan en el portátil nuevo y apruébalo para empezar.
-move-wait-list-title = Esperando a tu portátil antiguo.
-move-wait-list-body = Tu portátil antiguo está buscando tus cosas y luego allí se elige qué mover. Cuando termine, lo que llega aparecerá aquí para que lo aceptes. Puede tardar unos minutos.
-move-wait-starting-title = Empezando el traslado.
+move-wait-list-title = Esperando a tu portátil antiguo
+move-wait-list-body = Tu portátil antiguo está buscando tus cosas. Después se elige allí qué se traslada. Cuando termine, la lista aparece aquí para que la aceptes. Puede tardar unos minutos.
+move-wait-starting-title = Empezando el traslado
 move-wait-starting-body = El plan está aprobado. La copia empieza en un momento.
-move-wait-admin-title = Esperando a un administrador.
+move-wait-admin-title = Esperando a un administrador
 move-wait-admin-body = Este portátil está pidiendo la aprobación de un administrador para mover también las cosas de las demás personas. Responde en la ventana que abrió el portátil.
 move-others-not-approved = El administrador no lo aprobó, así que esta vez solo se mueven tus cosas. Las de las demás personas se quedan donde están.
 move-others-failed = PCTwin no pudo iniciar lo que necesita para mover las cosas de las demás personas, así que esta vez solo se mueven las tuyas. No se cambió nada suyo.
@@ -1270,12 +1270,12 @@ place-todo =
         [many] Elige adónde van las cosas de { $count } de personas más.
        *[other] Elige adónde van las cosas de { $count } personas más.
     }
-fda-title = Tu Mac mantiene algunas carpetas privadas.
+fda-title = PCTwin necesita permiso para leer algunas carpetas
 fda-body =
     { NUMBER($count) ->
-        [one] No se pudo mirar en { $count } de tus lugares por la configuración de privacidad del Mac. Deja entrar a PCTwin y vuelve a comprobar, para que no falte nada tuyo.
-        [many] No se pudo mirar en { $count } de tus lugares por la configuración de privacidad del Mac. Deja entrar a PCTwin y vuelve a comprobar, para que no falte nada tuyo.
-       *[other] No se pudo mirar en { $count } de tus lugares por la configuración de privacidad del Mac. Deja entrar a PCTwin y vuelve a comprobar, para que no falte nada tuyo.
+        [one] No se pudo leer { $count } lugar por la configuración de privacidad del Mac. Da acceso a PCTwin y vuelve a comprobar, para que no falte ninguno de tus archivos.
+        [many] No se pudieron leer { $count } lugares por la configuración de privacidad del Mac. Da acceso a PCTwin y vuelve a comprobar, para que no falte ninguno de tus archivos.
+       *[other] No se pudieron leer { $count } lugares por la configuración de privacidad del Mac. Da acceso a PCTwin y vuelve a comprobar, para que no falte ninguno de tus archivos.
     }
 fda-step-1 = Abre Configuración del Sistema y luego Privacidad y seguridad.
 fda-step-2 = Elige Acceso total al disco.
@@ -1283,7 +1283,7 @@ fda-step-3 = Activa PCTwin. Es posible que el Mac pida tu contraseña.
 fda-open = Abrir esta configuración
 fda-note = PCTwin solo lee tus carpetas para copiarlas. Nunca cambia nada en este portátil.
 fda-again = Volver a comprobar
-fda-without = Seguir sin ellas
+fda-without = Continuar sin ellos
 password-title = PCTwin: una cuenta nueva
 password-body =
     { $name } ya tiene una cuenta en este portátil.
@@ -1299,12 +1299,12 @@ move-ended-old-title = Tu portátil antiguo
 move-ended-old-body = No se cambió ni se borró nada en él.
 move-ended-old-badge = Sin cambios
 move-ended-next = Para intentarlo de nuevo, vuelve a emparejar los portátiles. Los archivos ya copiados y comprobados se reconocen y no se copian dos veces.
-move-lost-title = Se perdió la conexión con tu otro portátil.
+move-lost-title = Se perdió la conexión con tu otro portátil
 move-lost-body = Los portátiles dejaron de comunicarse, así que el traslado no pudo seguir. Comprueba que los dos estén encendidos, activos y cerca.
-move-not-approved-title = El traslado no empezó.
+move-not-approved-title = El traslado no empezó
 move-not-approved-old = El plan no se aprobó en el portátil nuevo, así que no se copió nada.
 move-not-approved-new = No aprobaste el plan, así que no se copió nada.
-move-failed-title = Algo salió mal.
+move-failed-title = El traslado se detuvo por un error
 move-failed-body = El traslado no pudo seguir. Si vuelve a pasar, Más detalles, abajo, explica qué falló.
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
@@ -1314,13 +1314,13 @@ move-update-here-title = Actualiza PCTwin en este portátil
 move-update-here-body = Este portátil tiene una versión de PCTwin más antigua que el otro, así que no pueden mover archivos juntos. Actualiza PCTwin aquí y vuelve a empezar. No se copió nada.
 move-update-there-title = Actualiza PCTwin en el otro portátil
 move-update-there-body = El otro portátil tiene una versión de PCTwin más antigua que este, así que no pueden mover archivos juntos. Actualiza PCTwin allí y vuelve a empezar. No se copió nada.
-move-refused-title = El traslado no pudo empezar.
+move-refused-title = El traslado no pudo empezar
 move-refused-not-paired = Tus portátiles ya no están emparejados. Vuelve a emparejarlos para empezar el traslado.
 move-refused-busy = Ya hay un traslado en curso en este portátil.
 move-refused-not-moving = No hay ningún traslado en curso en este portátil.
 move-refused-plan-changed = El plan cambió antes de aprobarse. Vuelve a emparejar los portátiles para ver el plan nuevo.
 move-refused-failed = No se pudieron preparar las carpetas de este portátil para el traslado. Vuelve a emparejar los portátiles para intentarlo otra vez.
-drive-problem-title = El traslado necesita tu atención.
+drive-problem-title = El traslado necesita tu atención
 drive-problem-body = Las copias guardadas en { $place } no coincidieron con los originales al comprobarlas PCTwin, varias veces. El disco puede estar fallando, lleno o desconectado, así que la copia allí está en pausa.
 drive-problem-kept-title = Ya copiado y comprobado
 drive-problem-waiting-title = Pendiente de copiar en { $place }
@@ -1438,13 +1438,13 @@ progress-panel-pausing = Pausando
 outcome-metric-size = copiado y comprobado
 outcome-metric-action = necesitan que hagas algo
 progress-percent-unknown = PCTwin todavía está calculando el tamaño de este traslado.
-mini-title-send-paused = Envío en pausa.
+mini-title-send-paused = Envío en pausa
 cancel-ack-hint = Marca la casilla de arriba para activar el botón de parar.
 progress-state-placing = Colocando
 progress-state-existing = Ya estaba
-outcome-stopped-title = Tu traslado se paró.
+outcome-stopped-title = Tu traslado se paró
 outcome-stopped-body = Paraste el traslado. Se conserva lo que se copió y comprobó hasta entonces. El resto no se copió.
-outcome-broke-title = Tu traslado terminó antes de tiempo.
+outcome-broke-title = Tu traslado terminó antes de tiempo
 outcome-broke-body = Algo falló entre los portátiles, así que el traslado no pudo continuar. Se conserva lo que se copió y comprobó hasta entonces. El resto no se copió.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } de { $total } elementos copiados y comprobados.
@@ -1472,8 +1472,8 @@ qs-label-this = Este portátil
 qs-label-other = El otro portátil
 qs-pick-failed = No se pudo abrir el selector. Inténtalo de nuevo.
 qs-pick-too-many = Son más archivos de los que caben en un solo envío. Desmarca algunas carpetas o envíalas por partes.
-qs-problem-lost-title = Se perdió la conexión entre los portátiles.
-qs-problem-failed-title = Esta vez no se pudieron enviar los archivos.
+qs-problem-lost-title = Se perdió la conexión entre los portátiles
+qs-problem-failed-title = Esta vez no se pudieron enviar los archivos
 qs-problem-body = Lo que ya se recibió y comprobó se queda donde está. Vuelve a emparejar los portátiles para intentarlo otra vez.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
@@ -1490,7 +1490,7 @@ qs-tally-badge = Envío cercano
 
 ## Q01 Quick Send home
 
-qs-home-title = Envía archivos a un portátil cercano.
+qs-home-title = Envía archivos a un portátil cercano
 qs-home-body = O recibe archivos de uno.
 qs-send-title = Enviar archivos
 qs-send-body = Elige archivos o carpetas de tu portátil.
@@ -1524,7 +1524,7 @@ qs-choose-continue = Continuar
 
 ## Q12 Send progress
 
-qs-sending-title = Tus archivos están en camino.
+qs-sending-title = Enviando tus archivos
 qs-sending-body = Las copias van directamente al portátil que recibe.
 qs-sending-progress =
     .aria-label = Enviando archivos
@@ -1550,7 +1550,7 @@ qs-sending-needs-action =
     }
 qs-pause = Pausar el envío
 qs-resume = Reanudar
-qs-compact = Vista reducida
+qs-compact = Mostrar menos
 qs-stop = Parar este envío
 qs-sending-complete-title = El envío ha terminado
 
@@ -1573,7 +1573,7 @@ qs-stop-keep = Seguir enviando
 
 ## F08 Your moves, kept on this laptop (history)
 
-history-title = Tus traslados, guardados en este portátil.
+history-title = Tu historial de traslados
 history-body = Abre de nuevo un informe o sigue con un traslado guardado.
 history-row-move = { $from } → { $to }
 history-status-finished = Completado
@@ -1584,7 +1584,7 @@ history-status-steps-left =
        *[other] Completado, te quedan { $count } pasos
     }
 history-status-paused = En pausa
-history-status-stopped = Parado sin riesgo
+history-status-stopped = Detenido
 history-open-report = Informe
 history-undo = Deshacer
 history-continue = Continuar
@@ -1641,14 +1641,14 @@ qs-pair-heads-up-firewall = Windows puede preguntarte si PCTwin puede aceptar co
 qs-pair-new-eyebrow = Recibiendo
 qs-pair-new-searching-title = Buscando el portátil que envía…
 qs-pair-new-searching-body = Deja PCTwin abierto en el portátil que envía, en la misma Wi-Fi que el tuyo.
-qs-pair-new-search-failed-title = No se pudo buscar el portátil que envía.
+qs-pair-new-search-failed-title = No se pudo buscar el portátil que envía
 qs-pair-new-list-title = ¿Qué portátil está enviando?
 qs-pair-new-list-body = Elige el nombre que muestra la pantalla del portátil que envía.
 qs-pair-new-same-label = Otro portátil cercano tiene este nombre. Mira la pantalla del portátil que envía.
-qs-pair-new-none-title = No aparece ningún portátil que envíe.
+qs-pair-new-none-title = No aparece ningún portátil que envíe
 qs-pair-new-none-body = Comprueba que PCTwin esté abierto en el portátil que envía y muestre un código, y que los dos portátiles estén en la misma Wi-Fi. Luego busca de nuevo.
 qs-pair-new-code-hint = Léelo en la pantalla de { $label }. Cambia cada minuto.
-qs-pair-new-number-title = Elige este número en { $label }.
+qs-pair-new-number-title = Elige este número en { $label }
 qs-pair-new-number-body = En { $label } aparecen tres números. Elige allí este.
 qs-pair-new-number-waiting = Esperando a { $label }…
 qs-pairing-code-invalid = El código debe tener seis cifras. Mira la pantalla de { $label } y escríbelo de nuevo.
@@ -1670,11 +1670,11 @@ qs-folder-title = ¿Dónde se guardan los archivos?
 qs-folder-none = PCTwin no puede usar la carpeta de los archivos recibidos. Elige una carpeta para los archivos y luego conecta.
 qs-folder-choose = Elegir una carpeta
 qs-folder-failed = PCTwin no puede guardar archivos en esa carpeta. Elige otra.
-qs-done-sent-title = Tus archivos se enviaron.
-qs-done-here-title = Tus archivos ya están aquí.
-qs-done-partial-title = Algunos archivos no llegaron.
-qs-done-stopped-title = Este envío se detuvo.
-qs-done-empty-title = No se envió nada.
+qs-done-sent-title = Tus archivos se enviaron
+qs-done-here-title = Se recibieron los archivos
+qs-done-partial-title = Algunos archivos no llegaron
+qs-done-stopped-title = Este envío se detuvo
+qs-done-empty-title = No se envió nada
 qs-done-arrived =
     { NUMBER($count) ->
         [one] { $count } archivo · { $size } llegó e igual al original
@@ -1726,7 +1726,7 @@ qs-done-done = Listo
 qs-stop-now = Parar el envío
 qs-stop-finished = Este envío ya terminó.
 qs-route-receiving = Recibiendo
-qs-receiving-title = Los archivos están llegando.
+qs-receiving-title = Recibiendo archivos
 qs-receiving-body = Las copias llegan directamente de { $label }.
 qs-receiving-card = Recibiendo archivos
 qs-receiving-progress =
@@ -1756,9 +1756,9 @@ qs-pair-old-step-2 = Si aparece una lista, elige el nombre de tu portátil.
 qs-pair-old-locked-body = Tras cinco códigos erróneos, la vinculación se detuvo para proteger tu portátil. No se compartió nada. Si fuiste tú, elige Empezar de nuevo para obtener un código nuevo.
 qs-pair-new-needs-update = Tiene una versión antigua de PCTwin. Actualiza PCTwin en él y busca de nuevo.
 qs-pairing-no-network = Tu portátil no está en ninguna red Wi-Fi ni por cable. Conéctalo e inténtalo de nuevo.
-qs-problem-room-title = No hay espacio suficiente en { $folder }.
+qs-problem-room-title = No hay espacio suficiente en { $folder }
 qs-problem-room-body = Estos archivos necesitan { $needed }, y allí se pueden usar { $room }. No se guardó nada. Libera espacio o elige otra carpeta e inténtalo de nuevo.
-qs-done-refused-title = El portátil que recibe no aceptó estos archivos.
+qs-done-refused-title = El portátil que recibe no aceptó estos archivos
 qs-done-refused-body = Puede que no tenga espacio suficiente. No se envió nada.
 
 ## Pantallas de la fase 2 (lista de tareas 2.8): partes comunes
@@ -1771,13 +1771,13 @@ guard-state-awaiting-maker = Esperando al creador de la aplicación o del servic
 guard-state-working = Trabajando
 guard-state-checking = Comprobando lo que se hizo
 guard-state-applying = Poniendo las cosas en su sitio
-guard-state-pause-requested = Se pausará en el próximo punto seguro. Todavía no está en pausa.
-guard-state-paused = En pausa en un punto seguro
+guard-state-pause-requested = Se pausará después del paso actual. Todavía no está en pausa.
+guard-state-paused = En pausa
 guard-state-source-unavailable = El portátil antiguo o el disco no está conectado
 guard-state-blocked = Primero hay que arreglar algo
 guard-state-partial = Hecho en parte
 guard-state-retrying = Intentando de nuevo
-guard-state-reconciling = Comprobando hasta dónde se llegó
+guard-state-reconciling = Comprobando qué se terminó
 guard-state-failed = Esto no funcionó
 guard-state-complete = Listo
 guard-state-cancelled = Detenido. Lo que ya se hizo se conserva.
@@ -1804,7 +1804,7 @@ guard-free-unknown = Espacio libre desconocido
 guard-items-size = { $items } elementos, { $size }
 guard-try-again = Intentar de nuevo
 guard-pause = Pausar
-guard-resume = Seguir
+guard-resume = Reanudar
 guard-check-again = Comprobar de nuevo
 guard-strip-plan = Tu plan
 guard-strip-report = Tu informe
@@ -1815,14 +1815,14 @@ guard-strip-checking = Comprobando
 
 ## X09 comprobación tras un reinicio, y estado no disponible
 
-guard-checking-title = Comprobando hasta dónde se llegó
+guard-checking-title = Comprobando qué se terminó
 guard-checking-body = PCTwin está mirando lo que estaba terminado antes de cerrarse. Tus opciones vuelven en cuanto lo sepa.
 guard-unavailable-title = Estado no disponible
 guard-unavailable-body = PCTwin no puede decir ahora mismo qué está haciendo este traslado. No se muestra nada como hecho hasta que pueda. Vuelve a comprobar en un momento.
 
 ## 2.9 Antes de cambiar nada
 
-guard-changes-title = Antes de cambiar nada
+guard-changes-title = Lo que cambiará el traslado
 guard-changes-body = Esto es todo lo que el traslado cambiará en este portátil, y lo que deshacer puede hacer con cada cosa. Todavía no ha cambiado nada.
 guard-changes-download = Descargar de internet
 guard-changes-download-none = Nada
@@ -1886,7 +1886,7 @@ guard-changed-title =
         [many] { $count } de cosas cambiaron después de que aprobaras
        *[other] { $count } cosas cambiaron después de que aprobaras
     }
-guard-changed-body = Solo estas necesitan que las mires de nuevo. Todo lo demás sigue aprobado y continúa.
+guard-changed-body = Solo hay que revisar estos de nuevo. Todo lo demás sigue aprobado y continúa.
 guard-changed-changed-on-old-laptop = Cambió en el portátil antiguo.
 guard-changed-app-updated = La aplicación se actualizó sola.
 guard-changed-destination-changed = Cambió el lugar al que va.
@@ -1901,25 +1901,25 @@ guard-space-title = Espacio en el portátil nuevo
 guard-space-title-short = Al portátil nuevo le falta espacio
 guard-space-body = PCTwin contó todo lo que llega a cada disco, incluido el espacio para deshacer. No se descarta nada de lo que elegiste para que quepa.
 guard-space-proposal = Lo que PCTwin sugiere para lo que no cabe
-guard-keep-off-leave-in-cloud = Se dejan en su nube, donde están seguros
+guard-keep-off-leave-in-cloud = Se dejan en línea, donde están guardados
 guard-keep-off-offload-drive = Se ponen en tu otro disco
 guard-keep-off-leave-on-old-laptop = Se dejan en el portátil antiguo. Consérvalo hasta que se trasladen.
 guard-offload-title = Tu otro disco
 guard-offload-connected = Conectado
 guard-offload-not-connected = No conectado
 guard-offload-approved = Elegiste este disco. Los archivos que hay en él no están en el portátil nuevo: conéctalo para abrirlos.
-guard-offload-ask = PCTwin puede poner algunas cosas en este disco. Necesita tu sí para este disco en concreto.
+guard-offload-ask = PCTwin puede poner algunas cosas en este disco. Necesita tu aprobación aparte para este disco.
 guard-offload-use = Usar este disco
 guard-space-approve = Aprobar este plan
-guard-safe-in = A salvo en { $provider }
-guard-safe-in-cloud = A salvo en tu nube
+guard-safe-in = Guardado en { $provider }
+guard-safe-in-cloud = Guardado en línea
 guard-safe-in-detail =
     { $count ->
         [one] { $count } archivo está guardado solo en línea. Vuelve cuando inicies sesión en el portátil nuevo.
         [many] { $count } de archivos están guardados solo en línea. Vuelven cuando inicies sesión en el portátil nuevo.
        *[other] { $count } archivos están guardados solo en línea. Vuelven cuando inicies sesión en el portátil nuevo.
     }
-guard-your-cloud = tu nube
+guard-your-cloud = tu almacenamiento en línea
 
 ## M09 conservar una copia de los archivos que solo están en línea
 
@@ -1932,7 +1932,7 @@ guard-local-body =
     }
 guard-local-download = Por descargar en el portátil antiguo
 guard-local-old-space = Espacio en el portátil antiguo
-guard-local-how = PCTwin los baja unos pocos cada vez, los envía y luego vuelve a dejarlos solo en línea en el portátil antiguo.
+guard-local-how = PCTwin los descarga unos pocos cada vez en el portátil antiguo, los envía y luego vuelve a dejarlos solo en línea allí.
 guard-local-paused-metered = En pausa: esta conexión puede cobrar por los datos. Sigue sola con una conexión gratuita, o ahora mismo si lo permites.
 guard-local-paused-no-space = En pausa: el portátil antiguo se ha quedado sin espacio para los próximos archivos. El resto sigue a salvo en { $provider }.
 guard-local-done = Listo. Las copias están en el portátil nuevo.
@@ -1953,8 +1953,8 @@ guard-owners-approve = Aprobar
 
 ## X12 lo que no se terminó
 
-guard-report-title-partial = Casi todo se trasladó. Unas pocas cosas no.
-guard-report-title-done = Todo lo de esta parte se trasladó.
+guard-report-title-partial = Algunas cosas no se trasladaron
+guard-report-title-done = Todo lo de esta parte se trasladó
 guard-report-body-partial = Todo lo de abajo sigue en el portátil antiguo. Inténtalo de nuevo con cada cosa cuando quieras. Lo que ya se trasladó se queda.
 guard-report-body-done = No queda nada por intentar de nuevo.
 guard-line-app = La aplicación { $name }
@@ -1979,7 +1979,7 @@ guard-line-why-not-started = De { $laptop }: el traslado se detuvo antes de empe
 
 guard-permission-title-explain = PCTwin necesita una aprobación de tu sistema
 guard-permission-title-waiting-for-system = Responde a la pregunta de tu sistema
-guard-permission-title-denied = Dijiste que no
+guard-permission-title-denied = No diste tu aprobación
 guard-permission-title-closed-without-answer = La pregunta se cerró sin respuesta
 guard-permission-title-given = Aprobado para este traslado
 guard-permission-title-ended-by-sleep = La aprobación terminó cuando el portátil se suspendió
@@ -1987,12 +1987,12 @@ guard-permission-title-ended-other-session = La aprobación terminó cuando otra
 guard-permission-body-explain = Tu sistema pregunta una sola vez para todo el traslado. Solo la usan los pasos que se indican abajo, y termina con el traslado.
 guard-permission-body-waiting-for-system = La ventana de tu propio sistema está abierta. Escribe allí tu contraseña si la pide.
 guard-permission-body-denied = Solo se dejan fuera los pasos que la necesitaban. Todo lo demás continúa.
-guard-permission-body-closed-without-answer = Cerrarla no es un sí, así que no se hizo nada de lo que la necesita. Pregunta de nuevo, o sigue sin ella.
+guard-permission-body-closed-without-answer = Cerrar la ventana no cuenta como aprobación, así que no se hizo nada de lo que la necesita. Pregunta de nuevo, o continúa sin ella.
 guard-permission-body-given = PCTwin la usa solo para los pasos que se indican abajo, y termina con este traslado.
 guard-permission-body-ended-by-sleep = Después de eso no se hizo nada de lo que la necesita. Pregunta de nuevo para seguir.
 guard-permission-body-ended-other-session = Después de eso no se hizo nada de lo que la necesita. Pregunta de nuevo cuando vuelvas a tu cuenta.
 guard-permission-never-password = PCTwin nunca te pide la contraseña y nunca la ve. Solo la ve tu sistema.
-guard-permission-not-now = Seguir sin ella
+guard-permission-not-now = Continuar sin ella
 guard-permission-ask = Continuar con tu sistema
 guard-permission-ask-again = Preguntar de nuevo
 guard-restore-title = Punto de restauración de Windows
@@ -2007,13 +2007,13 @@ guard-restore-not-made-failed = No se creó: Windows no pudo crear uno.
 
 ## T01 a T04 rescate de un portátil que no arranca
 
-guard-rescue-title-intro = Salva lo importante de un portátil que no arranca
+guard-rescue-title-intro = Copiar archivos de un portátil que no arranca
 guard-rescue-title-pick-drive = Elige el disco que quieres rescatar
 guard-rescue-title-locked = Este disco está bloqueado
 guard-rescue-title-no-system = Este no es el disco de un portátil
 guard-rescue-title-salvage = Esto es lo que se pudo leer
 guard-rescue-body-intro = Saca el disco del portátil antiguo y conéctalo a este con un adaptador o una carcasa para discos.
-guard-rescue-body-pick-drive = Elige el disco del portátil antiguo. El disco al que van las cosas no puede ser el que rescatas.
+guard-rescue-body-pick-drive = Elige el disco del portátil antiguo. El disco al que copias no puede ser el que rescatas.
 guard-rescue-body-locked = Desbloquéalo primero en tu sistema. Después, comprueba de nuevo.
 guard-rescue-body-no-system = Este disco no tiene el sistema de un portátil ni carpetas personales. Si es un disco USB normal, úsalo mejor en el portátil nuevo.
 guard-rescue-body-salvage = Revisa la lista y usa lo que se pudo leer.
@@ -2140,7 +2140,7 @@ guard-undo-result-kept-other-version = Se conservó porque cambió desde el tras
 guard-undo-result-removed-restart = Quitada. Reinicia tu laptop para terminar.
 guard-undo-result-not-removed = No se quitó. Puedes quitarla en la configuración de tu laptop.
 guard-undo-close = Listo
-move-wait-appdata-title = Revisando los datos de tus apps.
+move-wait-appdata-title = Revisando los datos de tus apps
 move-wait-appdata-body = Tus archivos ya están encontrados. PCTwin sigue revisando los datos que guardan tus apps, como el correo y los navegadores. Tarda como mucho diez minutos. No se cambia nada en esta laptop.
 fullmove-special-not-checked = Datos de apps que PCTwin no pudo revisar del todo
 fullmove-group-appdata = Datos de apps que PCTwin copiará: { $count }
@@ -2154,7 +2154,7 @@ fullmove-appdata-waiting = Esperando a la laptop anterior: cierra { $apps } all�
 fullmove-close-title = Cierra estas apps para traer sus datos
 fullmove-close-body = Estas apps siguen abiertas en esta laptop, así que PCTwin no puede copiar sus datos con seguridad. Ciérralas y elige Intentar de nuevo. Si sigues sin ellas, sus datos se quedan aquí.
 fullmove-close-again = Intentar de nuevo
-fullmove-close-without = Seguir sin ellas
+fullmove-close-without = Continuar sin ellas
 fullmove-extras-refused = No se pudieron leer aquí los ajustes y datos de apps de la laptop anterior, así que no se movió ninguno. Siguen en tu laptop anterior.
 fullmove-app-from = PCTwin instala el paquete de winget { $id } de su creador, tras comprobar que es esta app y el mismo creador.
 fullmove-here-older = En esta laptop hay una versión anterior ({ $version }). PCTwin la deja como está.
@@ -2227,7 +2227,7 @@ choose-nothing = Elige al menos una cosa para mover.
 choose-continue = Continuar
 
 ## The new laptop accepts what the old laptop chose (decided 28 October 2026)
-accept-title = { $from } quiere enviarte esto.
+accept-title = ¿Aceptar el traslado desde { $from }?
 accept-body = Se eligió en tu portátil antiguo. Acéptalo y PCTwin lo trae aquí.
 accept-files =
     { $count ->
@@ -2237,9 +2237,9 @@ accept-files =
     }
 accept-apps =
     { $count ->
-        [one] 1 aplicación, instalada para ti
-        [many] { $count } aplicaciones, instaladas para ti
-       *[other] { $count } aplicaciones, instaladas para ti
+        [one] 1 aplicación para instalar
+        [many] { $count } aplicaciones para instalar
+       *[other] { $count } aplicaciones para instalar
     }
 accept-settings = Ajustes y datos de aplicaciones
 accept-fits = Cabe en este portátil.
@@ -2380,7 +2380,7 @@ work-what-database = La base de datos se abre
 work-what-task = Algo que compruebas tú
 work-label-machine-checked = Comprobado por PCTwin
 work-label-person-confirmed = Lo comprobaste tú
-work-label-still-needs-attention = Aún hay que revisarlo
+work-label-still-needs-attention = Falta comprobarlo
 work-state-not-run-yet = Aún no comprobado
 work-state-all-there = Está todo
 work-state-missing = Falta algo
@@ -2401,7 +2401,7 @@ work-problem-wrong-kind = Esa respuesta no corresponde a esta comprobación.
 work-problem-failed = Algo salió mal. Inténtalo de nuevo.
 repair-waits-old-laptop = Necesita el portátil anterior conectado
 repair-waits-internet = Necesita internet
-repair-waits-administrator = Necesita que aceptes el aviso de administrador
+repair-waits-administrator = Necesita la aprobación de un administrador
 repair-waits-installer-tool = Necesita el instalador de aplicaciones del sistema
 repair-waits-space = Necesita más espacio en este portátil
 repair-waits-close-app = Necesita la aplicación cerrada
@@ -2409,10 +2409,10 @@ repair-problem-nothing-to-repair = Nada de lo elegido necesita arreglo.
 repair-problem-stale = La lista cambió. Vuelve a mirarla.
 repair-problem-busy = PCTwin está ocupado con otra cosa. Inténtalo cuando termine.
 repair-problem-failed = Algo salió mal. No se cambió nada más.
-changed-why-app-updated = La aplicación se actualizó después de que dijeras que sí
-changed-why-app-removed = La aplicación se quitó después de que dijeras que sí
+changed-why-app-updated = La aplicación se actualizó después de tu aprobación
+changed-why-app-removed = La aplicación se quitó después de tu aprobación
 changed-why-destination-changed = Cambió la carpeta de destino
-changed-why-project-edited = Se cambió en el portátil anterior después de que dijeras que sí
+changed-why-project-edited = Se cambió en el portátil antiguo después de tu aprobación
 changed-step-install = Instalación
 changed-step-settings = Configuración
 changed-step-app-data = Datos de apps
@@ -2493,7 +2493,7 @@ finish-headline-ready-for-selected-work = Todo lo que elegiste está en este por
 finish-headline-ready-for-selected-work-body = PCTwin encontró en este portátil cada elemento que elegiste y lo comprobó hasta donde puede. Esto no asegura que todas las apps funcionen como antes.
 finish-headline-finished-with-tasks = El traslado terminó, y quedan tareas
 finish-headline-finished-with-tasks-body = Algunas cosas te necesitan a ti, o no se copiaron. Están en esta página.
-finish-headline-data-preserved = Tus cosas están a salvo, pero algunas aún no se pueden abrir
+finish-headline-data-preserved = Todo está aquí, pero algunas cosas necesitan una clave para abrirse
 finish-headline-data-preserved-body = Todo está en este portátil. Hace falta una clave o un código de recuperación para abrir una parte, y PCTwin no pudo comprobarlo aquí.
 finish-headline-handover-unresolved = El portátil antiguo aún no está listo para entregar
 finish-headline-handover-unresolved-body = Este portátil está listo. La lista para despedirte del portátil antiguo aún tiene cosas pendientes.
@@ -2552,7 +2552,7 @@ finish-step-setup = Terminar la configuración
 finish-step-setup-detail = Apps que necesitan que inicies sesión o termines un paso.
 finish-step-goodbye = Antes de dejar el portátil antiguo
 finish-step-goodbye-detail = Lo que aún está solo en el portátil antiguo.
-finish-step-catchup = Ponme al día
+finish-step-catchup = Copiar los cambios recientes
 finish-step-catchup-detail = Copia lo que cambió en el portátil antiguo desde el traslado.
 finish-step-handover = Entregar el portátil antiguo
 finish-step-handover-detail = Quita tu cuenta o borra el portátil antiguo, con las herramientas del propio sistema.
@@ -2625,7 +2625,7 @@ finish-goodbye-blocked-unchecked = El portátil antiguo no se ha revisado desde 
 finish-goodbye-clear = Todo está respondido y el portátil antiguo se revisó. Puedes pedir la entrega. Es un paso aparte.
 finish-goodbye-handover = Entregar el portátil antiguo
 finish-goodbye-check-again = Revisar de nuevo el portátil antiguo
-finish-catchup-title = Ponme al día
+finish-catchup-title = Copiar los cambios recientes
 finish-catchup-body = Mira qué cambió en el portátil antiguo desde el traslado. Tú revisas cada cambio. PCTwin envía solo los que elijas.
 finish-catchup-purpose-check = Solo mirar el portátil antiguo
 finish-catchup-purpose-check-detail = No se copia nada. Tu lista de antes de despedirte se actualiza.
@@ -2710,7 +2710,7 @@ finish-confirm-go = Confirmar y abrir la herramienta del sistema
 finish-confirm-cancel = Volver sin hacer nada
 finish-confirm-needs-tick = El botón funciona cuando marques la casilla de arriba.
 finish-started-title = Sigue los pasos del propio sistema
-finish-started-body = Los pasos de abajo son del sistema, no de PCTwin. PCTwin no dibuja su propia copia.
+finish-started-body = Los pasos de abajo son del sistema, no de PCTwin. PCTwin no muestra su propia versión.
 finish-started-opened = PCTwin abrió la página del sistema.
 finish-started-not-opened = PCTwin no pudo abrir la página del sistema. Ábrela tú y sigue los pasos.
 finish-started-undo-closed = Deshacer ya está cerrado para este traslado.
@@ -2842,8 +2842,8 @@ compat-steps-none = No tienes que hacer nada.
 compat-never-checked = Nadie ha probado esta app todavía. PCTwin lo intentará y te dirá qué pasó.
 compat-checked-on = Revisada el { $date }.
 compat-version = Versión probada: { $version }
-work-strip = ¿Puedo trabajar?
-work-title = ¿Puedo trabajar de verdad?
+work-strip = Comprobación de trabajo
+work-title = Comprueba que puedes trabajar aquí
 work-body = Añade los archivos, las fuentes y las tareas que necesitas en esta laptop. PCTwin revisa lo que puede leer. Tú dices si lo demás funcionó. No se abre ni se ejecuta nada.
 work-empty = Aún no hay comprobaciones. Añade abajo un archivo, una fuente o una tarea.
 work-looked-at = Revisados { $checked } de { $of }.
@@ -2899,14 +2899,14 @@ repair-run =
         [many] Intentar { $count } elementos otra vez
        *[other] Intentar { $count } elementos otra vez
     }
-changed-strip = Cambios desde tu sí
+changed-strip = Cambios desde tu aprobación
 changed-title =
     { $count ->
-        [one] { $count } cosa cambió después de tu sí
-        [many] { $count } cosas cambiaron después de tu sí
-       *[other] { $count } cosas cambiaron después de tu sí
+        [one] { $count } cosa cambió después de tu aprobación
+        [many] { $count } cosas cambiaron después de tu aprobación
+       *[other] { $count } cosas cambiaron después de tu aprobación
     }
-changed-body = Solo esto necesita un sí nuevo. Todo lo demás sigue aprobado.
+changed-body = Solo estos necesitan tu aprobación otra vez. Todo lo demás sigue aprobado.
 changed-affects = Afecta a: { $steps }
 changed-held =
     { $count ->
@@ -2915,7 +2915,7 @@ changed-held =
        *[other] { $count } pasos esperan tu respuesta.
     }
 changed-leave-out = Dejar esto fuera
-changed-approve = Decir sí otra vez
+changed-approve = Aprobar de nuevo
 safe-stop-strip = Actualización
 safe-stop-title = Esperando un momento seguro
 safe-stop-body = PCTwin no se actualiza ni se quita a sí mismo en medio de un traslado. Espera hasta que nada esté a medias.
@@ -2943,11 +2943,11 @@ finish-step-repair =
        *[other] Arreglar estos { $count } elementos
     }
 finish-step-repair-detail = Vuelve a intentar solo lo que no terminó. Lo que funcionó se queda.
-finish-step-work = ¿Puedo trabajar de verdad?
+finish-step-work = Comprueba que puedes trabajar aquí
 finish-step-work-detail = Comprueba que están aquí los archivos, fuentes y tareas que necesitas.
 finish-step-kit = Guardar un kit de recuperación
 finish-step-kit-detail = Guarda un pequeño registro de este traslado en una carpeta que elijas.
-space-box-title = Esta laptop no tiene espacio para todo.
+space-box-title = Esta laptop no tiene espacio para todo
 space-box-choice = { $count ->
         [one] Dejar en tu laptop anterior 1 archivo ({ $size }) que hace más tiempo que no usas
         [many] Dejar en tu laptop anterior { $count } archivos ({ $size }) que hace más tiempo que no usas
@@ -2957,7 +2957,7 @@ space-box-kept = No se borra nada. Se quedan en tu laptop anterior.
 space-box-short = Aun así faltan { $size }. Desmarca algunas carpetas o elige otro lugar para ellas.
 space-box-fits = Si se quedan en tu laptop anterior, todo lo demás cabe.
 finish-handover-check-old = Volver a comprobar la laptop anterior
-finish-handover-check-armed = PCTwin está listo para comprobar la laptop anterior. Abre PCTwin en la laptop anterior y conecta las dos laptops como para un traslado. Luego pulsa Mirar de nuevo.
+finish-handover-check-armed = PCTwin está listo para comprobar el portátil antiguo. Abre PCTwin en el portátil antiguo y conecta los dos portátiles como para un traslado. Luego elige Mirar de nuevo.
 finish-handover-look-again = Mirar de nuevo
 qs-where-title = ¿Dónde se guardan?
 qs-where-body = { $count ->

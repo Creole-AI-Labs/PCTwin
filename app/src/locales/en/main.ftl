@@ -30,14 +30,14 @@ welcome-start = Start a full move
 
 home-quick-send-body = Send or receive files
 home-move-body = Move your setup
-home-restore-body = Bring it back
-home-rescue-body = Save what matters
+home-restore-body = Rebuild from a saved setup
+home-rescue-body = Copy files from a laptop that won’t start
 home-history = My history
 home-history-body = Your moves and their reports
-name-title = Name this laptop.
+name-title = Name this laptop
 name-body = Other laptops nearby will find this one by this name. You can change it later, when you pair.
 name-use = Use this name
-home-update-title = A new version is available.
+home-update-title = A new version is available
 home-update-action = Update now
 home-updating = Updating. PCTwin will close and open again by itself.
 home-update-failed = The update could not be installed. PCTwin works as before; it will offer the update again next time.
@@ -99,7 +99,7 @@ connect-unit-gb = { NUMBER($value, maximumFractionDigits: 1) } GB
 
 ## C02 Put both laptops together
 
-connect-prep-title = Put both laptops together.
+connect-prep-title = Put both laptops together
 connect-prep-body = Connect them to the same Wi-Fi, then open PCTwin on each.
 connect-prep-step-1-title = Join the same Wi-Fi
 connect-prep-step-1-body = Copying files does not need the internet.
@@ -115,7 +115,7 @@ connect-prep-continue = Continue to pairing
 ## C06 Meet your other laptop
 
 peer-eyebrow = Your move
-peer-title = Meet your other laptop.
+peer-title = Check both laptops
 peer-body = Both laptops are connected and ready.
 peer-sending = Sending
 peer-receiving = Receiving
@@ -136,10 +136,10 @@ peer-update-body = Put the same version on both laptops.
 peer-direction-unsupported = This version of PCTwin cannot move between these two systems yet.
 peer-continue = Check the connection
 
-## C07 Let’s check the connection
+## C07 Check the connection
 
 check-eyebrow = Your move
-check-title = Let’s check the connection.
+check-title = Check the connection
 check-body = PCTwin checks speed, space and power to plan the move and estimate the time.
 check-measuring = Measuring the connection…
 # The value next to it is already formatted, for example "62 MB/s".
@@ -177,7 +177,7 @@ check-before-near-body = Keep both laptops close to it while your things move.
 
 ## C09 Waiting for your other laptop
 
-reconnect-title = Waiting for your other laptop.
+reconnect-title = Waiting for your other laptop
 reconnect-body = Everything copied and checked so far is kept.
 # Added: the title of the saved-progress card (the mockup shows Move paused by connection).
 reconnect-card-title = Move paused by connection
@@ -202,7 +202,7 @@ reconnect-details-body = Only these two laptops can reconnect, and each time the
 
 ## C10 The connection has ended (dialog)
 
-ended-title = The connection has ended.
+ended-title = The connection has ended
 ended-body = Your move is saved. The old code no longer works.
 ended-kept-title = Kept
 ended-kept-body = The record of your move and everything copied and checked.
@@ -219,7 +219,7 @@ ended-home = Return home
 pair-back = Back
 pair-try-again = Try again
 pair-more-details = More details
-pair-heads-up-title = Your laptop may ask you a question.
+pair-heads-up-title = Your laptop may ask you a question
 pair-heads-up-local-network = Your Mac will ask whether PCTwin can find devices on your local network. Choose Allow, so your two laptops can find each other.
 pair-heads-up-firewall = Windows may ask whether PCTwin can accept connections. Choose Allow, so your new laptop can reach this one.
 pair-heads-up-continue = Continue
@@ -227,7 +227,7 @@ pair-heads-up-continue = Continue
 ## C03 Old laptop: show the code
 
 pair-old-eyebrow = Old laptop
-pair-old-title = Let’s connect your laptops.
+pair-old-title = Connect your laptops
 pair-old-body = On your new laptop, enter the code below.
 pair-old-next = Next, you’ll match a number shown on both laptops.
 pair-old-network = Keep both laptops on the same Wi-Fi.
@@ -250,26 +250,26 @@ pair-old-steps-title = On your new laptop
 pair-old-step-1 = Open PCTwin and choose My new laptop.
 pair-old-step-2 = If a list appears, choose this laptop’s name.
 pair-old-step-3 = Type the six-digit code shown here.
-pair-old-wait-title = A new code is on its way.
+pair-old-wait-title = Wait for a new code
 pair-old-wait-body =
     { $seconds ->
         [one] That try did not work. A new code appears in { $seconds } second.
        *[other] That try did not work. A new code appears in { $seconds } seconds.
     }
-pair-old-locked-title = Someone on this network tried wrong codes.
+pair-old-locked-title = Someone on this network tried wrong codes
 pair-old-locked-body = After five wrong codes, pairing stopped to keep this laptop safe. Nothing was shared. If it was you, choose Start again for a new code.
 pair-old-locked-hotspot = If you don’t know who it was, connect both laptops to your phone’s hotspot instead, then choose Start again.
 pair-old-start-again = Start again
 pair-old-timed-out = No number was chosen in time, so here is a new code.
 pair-old-declined = The numbers did not match, so nothing was shared. Here is a new code.
 pair-old-left = The new laptop stopped pairing before a number was chosen, so nothing was shared. Here is a new code.
-pair-network-title = Choose your Wi-Fi.
+pair-network-title = Choose your Wi-Fi
 pair-network-hint = Choose the network your new laptop is on.
 
 ## C05 Old laptop: match the number
 
 pair-choose-eyebrow = Confirm the connection
-pair-choose-title = Choose the matching number.
+pair-choose-title = Choose the matching number
 pair-choose-body = Look at your new laptop. Choose the number it shows.
 pair-choose-number = Number { $number }
 pair-choose-confirm = Confirm these laptops
@@ -284,19 +284,19 @@ pair-choose-checking = Checking…
 pair-new-eyebrow = New laptop
 pair-new-searching-title = Looking for your old laptop…
 pair-new-searching-body = Keep PCTwin open on your old laptop, on the same Wi-Fi as this one.
-pair-new-search-failed-title = Could not look for your old laptop.
+pair-new-search-failed-title = Could not look for your old laptop
 pair-new-list-title = Which one is your old laptop?
 pair-new-list-body = Choose the name your old laptop shows on its screen.
 pair-new-same-label = Another laptop nearby has this name. Check the old laptop’s screen.
 pair-new-needs-update = This laptop has an older PCTwin. Update PCTwin on it, then search again.
-pair-new-none-title = No old laptop found.
+pair-new-none-title = No old laptop found
 pair-new-none-body = Check that PCTwin is open on your old laptop and showing a code, and that both laptops are on the same Wi-Fi. Then search again.
 pair-new-search-again = Search again
 pair-old-same-role = Another laptop nearby is also set up as the old laptop. One of the two must be the new laptop.
 pair-old-switch = This is the new laptop
 pair-new-none-same-role = Did the other laptop also choose New laptop? Then choose Old laptop on it, or switch this one.
 pair-new-switch = This is the old laptop
-pair-new-code-title = Enter the code.
+pair-new-code-title = Enter the code
 pair-new-code-body = Type the code shown on { $label }.
 pair-new-code-label = Six-digit code
 pair-new-code-hint = Read it from your old laptop’s screen. It changes every minute.
@@ -304,7 +304,7 @@ pair-new-connect = Connect
 pair-new-connecting = Connecting…
 pair-new-other-laptop = Choose a different laptop
 pair-new-number-eyebrow = Confirm the connection
-pair-new-number-title = Choose this number on your old laptop.
+pair-new-number-title = Choose this number on your old laptop
 pair-new-number-tile = Your number
 pair-new-number-label = Your number is { $number }
 pair-new-number-body = Your old laptop shows three numbers. Choose this one there.
@@ -312,8 +312,8 @@ pair-new-number-waiting = Waiting for your old laptop…
 
 ## Paired (both laptops)
 
-pair-done-eyebrow = All set
-pair-done-title = Your laptops are paired.
+pair-done-eyebrow = Paired
+pair-done-title = Your laptops are paired
 pair-done-body = Your two laptops are connected. Next, your old laptop finds your files, and you approve what moves on the new laptop. Nothing moves before you approve.
 pair-done-continue = Continue
 
@@ -343,7 +343,7 @@ pairing-failed-new = Pairing did not work this time. Nothing was shared. Type th
 ## M06 Match people to their profiles (Who’s moving?)
 
 people-eyebrow = Your move
-people-title = Match people to their profiles.
+people-title = Match people to their profiles
 people-body = Choose where each person’s files go on the new laptop.
 people-col-old = Old laptop
 people-col-new = New laptop
@@ -393,7 +393,7 @@ people-continue = Continue
 ## M26 Before you leave this laptop (things to do on the old laptop)
 
 before-eyebrow = Your move
-before-title = Before you leave this laptop.
+before-title = Before you leave this laptop
 before-body = Check these while you still have your old laptop.
 before-licences-title = App licences
 before-licences-body = Some apps need you to move their licence yourself.
@@ -412,7 +412,7 @@ before-continue = Return to the move plan
 ## S11 Get help with this task (a short problem code)
 
 help-eyebrow = Help and privacy
-help-title = Get help with this task.
+help-title = Get help with this task
 help-body = Share a short code that shows someone what went wrong. Check what it includes first.
 help-making = Making a code…
 help-code-title = Problem code
@@ -439,7 +439,7 @@ help-failed = A problem code could not be made. Try again. If it still does not 
 help-try-again = Try again
 help-copy-failed = The code could not be copied. Select it above and copy it yourself.
 help-home-eyebrow = Help
-help-home-title = Help for the task in front of you.
+help-home-title = Common problems and what to do
 help-home-body = Short guides for the things that most often get in the way. They work without the internet.
 help-home-more = More help on getpctwin.com
 help-guide-find-title = The laptops can’t find each other
@@ -579,7 +579,7 @@ label-unnamed = Unnamed laptop
 ## M02 Finding your files
 
 scan-eyebrow = Your move
-scan-title = Finding your familiar setup.
+scan-title = Finding your files
 scan-body = What PCTwin finds is saved, so the search can carry on if it stops.
 scan-progress =
     .aria-label = Searching the places you chose
@@ -619,7 +619,7 @@ scan-continue = See what was found
 ## M03 Everything you chose, in view
 
 overview-eyebrow = Your move
-overview-title = Everything you chose, in view.
+overview-title = What PCTwin found
 overview-body = Check what PCTwin found before it makes the plan.
 # The metric value next to each label is passed in already formatted.
 overview-size-label = selected files
@@ -651,7 +651,7 @@ overview-continue = Continue
 ## M04 Keep what matters to you
 
 files-eyebrow = Your move
-files-title = Keep what matters to you.
+files-title = Choose the folders to move
 files-body = Choose folders, other drives and any other places.
 files-search-label = Find a folder
 files-search-placeholder = Search folders
@@ -681,7 +681,7 @@ files-continue = Choose destinations
 ## M05 Give every file a home
 
 dest-eyebrow = Your move
-dest-title = Give every file a home.
+dest-title = Where your folders go
 dest-body = Choose where each folder goes on the new laptop.
 dest-col-chosen = What you chose
 dest-col-place = Where it goes
@@ -709,7 +709,7 @@ dest-continue = Review the plan
 ## M23 Approve the move you want
 
 plan-eyebrow = Your move
-plan-title = Approve the move you want.
+plan-title = Check and approve the plan
 plan-body = PCTwin does only what this plan says.
 plan-what-title = What you chose
 # $size is already formatted, for example "120 GB". $count is passed but not shown.
@@ -798,7 +798,7 @@ plan-preview-title = Before you start
 plan-preview-fits = There is enough free space on this laptop.
 plan-preview-fits-about = There should be enough free space on this laptop. This counts about { $extra } for the apps PCTwin installs and their data.
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
-plan-preview-first = We’ll move these first, so your new laptop is ready to use sooner: { $places }.
+plan-preview-first = These move first, so you can start using your new laptop sooner: { $places }.
 plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
 plan-preview-short-about = This laptop needs about { $size } more free space, counting about { $extra } for the apps PCTwin installs and their data. Free some space before you start, or the move stops when the drive is full.
 plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
@@ -879,8 +879,8 @@ soon-move-body = Move everything from your old laptop to a new one: your files, 
 ## X01 Move progress, compact
 
 progress-eyebrow = Your move
-progress-title = Settling you in.
-progress-title-old = Sending your things to your new laptop.
+progress-title = Moving your things to this laptop
+progress-title-old = Sending your things to your new laptop
 progress-title-paused = Move paused
 progress-paired = Paired
 progress-percent =
@@ -910,13 +910,13 @@ progress-low-battery = This laptop is low on battery. Plug it in so the move is 
 progress-battery-paused = This laptop’s battery is almost empty, so the move is paused safely. Plug it in, then carry on. Nothing is lost.
 progress-old-safe = Your old laptop stays unchanged.
 progress-pause = Pause move
-progress-compact = Keep it compact
-progress-expand = See the whole move
+progress-compact = Show less
+progress-expand = Show every item
 progress-stop = Stop the move
 
 ## X02 Move progress, expanded
 
-progress-all-title = See the whole move.
+progress-all-title = Every item in the move
 progress-all-body = Each item shows where it comes from and how it is doing.
 progress-metric-overall = overall progress
 progress-metric-committed = copied and checked
@@ -944,8 +944,8 @@ tip-power-cut = If the power goes off, turn both laptops on and open PCTwin. It 
 
 ## F09 Mini panel
 
-mini-title = Your move, nearby.
-mini-title-paused = Move paused.
+mini-title = Move in progress
+mini-title-paused = Move paused
 mini-what = moving your selected files
 mini-progress =
     .aria-label = Move progress
@@ -953,7 +953,7 @@ mini-pause = Pause
 mini-resume = Resume
 mini-open = Open move
 # Used when lane E reuses this panel for a Quick Send.
-mini-title-send = Your files are on their way.
+mini-title-send = Sending files
 mini-what-send = sending selected files
 mini-open-send = Open send
 mini-progress-send =
@@ -961,8 +961,8 @@ mini-progress-send =
 
 ## X05 Paused at a safe point
 
-pause-title = Paused at a safe point.
-pause-title-finishing = Pausing at a safe point…
+pause-title = The move is paused
+pause-title-finishing = Pausing the move…
 pause-body = Everything copied and checked is kept. The rest waits.
 pause-finishing = Finishing { $name } first, so it is not left half-copied.
 pause-kept-title = Files
@@ -976,7 +976,7 @@ pause-waiting-body =
 pause-status-kept = Paused
 pause-status-waiting = Waiting
 pause-note = Pausing does not undo anything. Your old laptop stays unchanged.
-pause-resume = Resume saved move
+pause-resume = Resume the move
 
 ## X10 Stop the remaining move? (danger dialog)
 
@@ -992,14 +992,14 @@ cancel-old-title = Old laptop
 cancel-old-body = Stays unchanged.
 cancel-ack = I understand stopping does not undo what was copied
 cancel-stop = Stop and view the report
-cancel-keep = Keep moving
+cancel-keep = Continue the move
 
-## R01 Welcome to your next laptop (outcome)
+## R01 The move is finished (outcome)
 
 outcome-eyebrow = Move results
-outcome-title = Welcome to your next laptop.
+outcome-title = The move is finished
 outcome-body = Here is what happened to everything you approved.
-outcome-title-old = Your things are on your new laptop.
+outcome-title-old = The move is finished
 outcome-body-old = Here is what happened to everything you sent. This laptop stays as it was.
 outcome-files-title = Selected files
 outcome-status-partial = Partly done
@@ -1032,7 +1032,7 @@ move-stop = Stop the move
 move-before-open = While you wait: before you leave this laptop
 move-get-help = Get help
 pickup-eyebrow = Your move
-pickup-title = Pick up safely.
+pickup-title = Tidy up the stopped move
 pickup-body = A move on this laptop stopped part way, perhaps because the laptop restarted or lost power. Tidy up first, then pair the laptops again to carry on.
 pickup-unfinished-title = Unfinished copies
 pickup-unfinished-body =
@@ -1043,7 +1043,7 @@ pickup-unfinished-body =
 pickup-unfinished-badge = To tidy
 pickup-tidy = Tidy up
 pickup-tidying = Tidying up. Finished copies are checked and put in place; nothing of yours is changed.
-pickup-done = All tidy. Pair the laptops again to carry on: what is already here is found and not copied twice.
+pickup-done = Tidying up is finished. Pair the laptops again to continue: what is already here is found and not copied twice.
 pickup-failed = Tidying up did not work this time. Nothing of yours was changed. Try again, or close PCTwin on this laptop and open it again first.
 pickup-put-in-place = put in place
 pickup-kept = kept to carry on
@@ -1058,8 +1058,8 @@ pickup-left-for-later =
        *[other] { $count } files are on a drive that is not connected now. Connect it and tidy up again.
     }
 pickup-later = Not now
-ready-eyebrow = Welcome
-ready-title = Your things are ready.
+ready-eyebrow = From your old laptop
+ready-title = Your things are in your folders
 ready-body = Your things from your old laptop were moved to this one, and are now in your own folders.
 ready-landed = files in your folders
 ready-where-title = Where they are
@@ -1077,16 +1077,16 @@ ready-failed =
 ready-done = Done
 move-status-kept = Kept
 move-wait-eyebrow = Your move
-move-wait-scanning-title = Finding your files.
+move-wait-scanning-title = Finding your files
 move-wait-scanning-body = Your old laptop is looking through your folders. It only reads them: nothing is opened, changed or removed.
 move-found = Found so far: { $size } of your things.
-move-wait-approval-title = Waiting for your new laptop.
+move-wait-approval-title = Waiting for your new laptop
 move-wait-approval-body = Your files are ready to go. Check the plan on your new laptop and approve it to start.
-move-wait-list-title = Waiting for your old laptop.
-move-wait-list-body = Your old laptop is finding your things, then its person chooses what moves. When that is done, what is coming appears here for you to accept. This can take a few minutes.
-move-wait-starting-title = Starting the move.
+move-wait-list-title = Waiting for your old laptop
+move-wait-list-body = Your old laptop is finding your things. Then what moves is chosen there. When that is done, the list appears here for you to accept. This can take a few minutes.
+move-wait-starting-title = Starting the move
 move-wait-starting-body = The plan is approved. Copying starts in a moment.
-move-wait-admin-title = Waiting for an administrator.
+move-wait-admin-title = Waiting for an administrator
 move-wait-admin-body = This laptop is asking for an administrator’s approval to move the other people’s things too. Answer the window your laptop opened.
 move-others-not-approved = The administrator did not approve it, so only your things move this time. The other people’s things stay where they are.
 move-others-failed = PCTwin could not start what it needs to move the other people’s things, so only your things move this time. Nothing of theirs was changed.
@@ -1113,11 +1113,11 @@ place-todo =
         [one] Choose where { $count } more person’s things go.
        *[other] Choose where { $count } more people’s things go.
     }
-fda-title = Your Mac is keeping some folders private.
+fda-title = PCTwin needs permission to read some folders
 fda-body =
     { NUMBER($count) ->
-        [one] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
-       *[other] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
+        [one] { $count } place could not be read because of your Mac’s privacy settings. Give PCTwin access, then check again, so none of your files are missed.
+       *[other] { $count } places could not be read because of your Mac’s privacy settings. Give PCTwin access, then check again, so none of your files are missed.
     }
 fda-step-1 = Open System Settings, then Privacy & Security.
 fda-step-2 = Choose Full Disk Access.
@@ -1125,7 +1125,7 @@ fda-step-3 = Switch on PCTwin. Your Mac may ask for your password.
 fda-open = Open these settings
 fda-note = PCTwin only reads your folders to copy them. It never changes anything on this laptop.
 fda-again = Check again
-fda-without = Go on without them
+fda-without = Continue without them
 password-title = PCTwin: a new account
 password-body =
     { $name } now has an account on this laptop.
@@ -1141,12 +1141,12 @@ move-ended-old-title = Your old laptop
 move-ended-old-body = Nothing on it was changed or removed.
 move-ended-old-badge = Unchanged
 move-ended-next = To try again, pair the laptops again. Files already copied and checked are found and not copied twice.
-move-lost-title = The connection to your other laptop was lost.
+move-lost-title = The connection to your other laptop was lost
 move-lost-body = The laptops stopped reaching each other, so the move could not go on. Check that both are switched on, awake and near each other.
-move-not-approved-title = The move did not start.
+move-not-approved-title = The move did not start
 move-not-approved-old = The plan was not approved on the new laptop, so nothing was copied.
 move-not-approved-new = You did not approve the plan, so nothing was copied.
-move-failed-title = Something went wrong.
+move-failed-title = The move stopped because of an error
 move-failed-body = The move could not go on. If it happens again, More details below says what went wrong.
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
@@ -1156,19 +1156,19 @@ move-update-here-title = Update PCTwin on this laptop
 move-update-here-body = This laptop has an older PCTwin than the other laptop, so they can't move files together. Update PCTwin here, then start again. Nothing was copied.
 move-update-there-title = Update PCTwin on the other laptop
 move-update-there-body = The other laptop has an older PCTwin than this one, so they can't move files together. Update PCTwin there, then start again. Nothing was copied.
-move-refused-title = The move could not start.
+move-refused-title = The move could not start
 move-refused-not-paired = Your laptops are no longer paired. Pair them again to start the move.
 move-refused-busy = A move is already running on this laptop.
 move-refused-not-moving = There is no move running on this laptop.
 move-refused-plan-changed = The plan changed before it was approved. Pair the laptops again to see the new plan.
 move-refused-failed = This laptop’s folders could not be made ready for the move. Pair the laptops again to try once more.
-drive-problem-title = The move needs your attention.
+drive-problem-title = The move needs your attention
 drive-problem-body = Copies saved in { $place } did not match the originals when PCTwin checked them, several times. The drive may be failing, full or unplugged, so copying there is paused.
 drive-problem-kept-title = Already copied and checked
 drive-problem-waiting-title = Still to copy to { $place }
 drive-problem-badge = Paused
-drive-problem-fix = Check that the drive is plugged in and has free space, then carry on. Nothing you chose is left out to get past this. You can also stop the move.
-drive-problem-carry-on = Carry on
+drive-problem-fix = Check that the drive is plugged in and has free space, then continue. Nothing you chose is left out to get past this. You can also stop the move.
+drive-problem-carry-on = Continue
 
 ## R02 Your move, item by item (detailed report)
 
@@ -1275,13 +1275,13 @@ progress-panel-pausing = Pausing
 outcome-metric-size = copied and checked
 outcome-metric-action = need your action
 progress-percent-unknown = PCTwin is still working out the size of this move.
-mini-title-send-paused = Send paused.
+mini-title-send-paused = Send paused
 cancel-ack-hint = Tick the box above to turn on the stop button.
 progress-state-placing = Putting in place
 progress-state-existing = Already there
-outcome-stopped-title = Your move was stopped.
+outcome-stopped-title = Your move was stopped
 outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
-outcome-broke-title = Your move ended early.
+outcome-broke-title = Your move ended early
 outcome-broke-body = Something went wrong between the laptops, so the move could not go on. What was copied and checked before then is kept. The rest was not copied.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } of { $total } items copied and checked.
@@ -1308,8 +1308,8 @@ qs-label-this = This laptop
 qs-label-other = The other laptop
 qs-pick-failed = The picker could not open. Try again.
 qs-pick-too-many = That is more files than one send can carry. Untick some folders, or send them in parts.
-qs-problem-lost-title = The connection between the laptops was lost.
-qs-problem-failed-title = The files could not be sent this time.
+qs-problem-lost-title = The connection between the laptops was lost
+qs-problem-failed-title = The files could not be sent this time
 qs-problem-body = Anything already received and checked stays where it is. Pair the laptops again to try once more.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
@@ -1325,7 +1325,7 @@ qs-tally-badge = Nearby send
 
 ## Q01 Quick Send home
 
-qs-home-title = Send files to a laptop nearby.
+qs-home-title = Send files to a laptop nearby
 qs-home-body = Or receive files from one.
 qs-send-title = Send files
 qs-send-body = Choose files or folders on your laptop.
@@ -1359,7 +1359,7 @@ qs-choose-continue = Continue
 
 ## Q12 Send progress
 
-qs-sending-title = Your files are on their way.
+qs-sending-title = Sending your files
 qs-sending-body = Copies go straight to the receiving laptop.
 qs-sending-progress =
     .aria-label = Sending files
@@ -1383,7 +1383,7 @@ qs-sending-needs-action =
     }
 qs-pause = Pause send
 qs-resume = Resume
-qs-compact = Keep compact
+qs-compact = Show less
 qs-stop = Stop this send
 qs-sending-complete-title = The send is complete
 
@@ -1406,7 +1406,7 @@ qs-stop-keep = Keep sending
 
 ## F08 Your moves, kept on this laptop (history)
 
-history-title = Your moves, kept on this laptop.
+history-title = Your move history
 history-body = Open a report again, or carry on with a saved move.
 history-row-move = { $from } → { $to }
 history-status-finished = Completed
@@ -1416,7 +1416,7 @@ history-status-steps-left =
        *[other] Completed, { $count } steps for you
     }
 history-status-paused = Paused
-history-status-stopped = Stopped safely
+history-status-stopped = Stopped
 history-open-report = Report
 history-undo = Undo
 history-continue = Continue
@@ -1472,14 +1472,14 @@ qs-pair-heads-up-firewall = Windows may ask whether PCTwin can accept connection
 qs-pair-new-eyebrow = Receiving
 qs-pair-new-searching-title = Looking for the sending laptop…
 qs-pair-new-searching-body = Keep PCTwin open on the sending laptop, on the same Wi-Fi as yours.
-qs-pair-new-search-failed-title = Could not look for the sending laptop.
+qs-pair-new-search-failed-title = Could not look for the sending laptop
 qs-pair-new-list-title = Which laptop is sending?
 qs-pair-new-list-body = Choose the name the sending laptop shows on its screen.
 qs-pair-new-same-label = Another laptop nearby has this name. Check the sending laptop’s screen.
-qs-pair-new-none-title = No sending laptop found.
+qs-pair-new-none-title = No sending laptop found
 qs-pair-new-none-body = Check that PCTwin is open on the sending laptop and showing a code, and that both laptops are on the same Wi-Fi. Then search again.
 qs-pair-new-code-hint = Read it from the screen on { $label }. It changes every minute.
-qs-pair-new-number-title = Choose this number on { $label }.
+qs-pair-new-number-title = Choose this number on { $label }
 qs-pair-new-number-body = Three numbers are shown on { $label }. Choose this one there.
 qs-pair-new-number-waiting = Waiting for { $label }…
 qs-pairing-code-invalid = That code needs six digits. Check the screen on { $label } and type it again.
@@ -1501,11 +1501,11 @@ qs-folder-title = Where should the files go?
 qs-folder-none = PCTwin cannot use the folder for received files. Choose a folder for the files, then connect.
 qs-folder-choose = Choose a folder
 qs-folder-failed = PCTwin cannot save files in that folder. Choose another one.
-qs-done-sent-title = Your files were sent.
-qs-done-here-title = Your files are here.
-qs-done-partial-title = Some files did not arrive.
-qs-done-stopped-title = This send was stopped.
-qs-done-empty-title = Nothing was sent.
+qs-done-sent-title = Your files were sent
+qs-done-here-title = The files were received
+qs-done-partial-title = Some files did not arrive
+qs-done-stopped-title = This send was stopped
+qs-done-empty-title = Nothing was sent
 qs-done-arrived =
     { NUMBER($count) ->
         [one] { $count } file · { $size } arrived and matched the original
@@ -1552,7 +1552,7 @@ qs-done-done = Done
 qs-stop-now = Stop sending
 qs-stop-finished = This send has already finished.
 qs-route-receiving = Receiving
-qs-receiving-title = Files are arriving.
+qs-receiving-title = Receiving files
 qs-receiving-body = Copies come straight from { $label }.
 qs-receiving-card = Receiving files
 qs-receiving-progress =
@@ -1580,9 +1580,9 @@ qs-pair-old-step-2 = If a list appears, choose your laptop’s name.
 qs-pair-old-locked-body = After five wrong codes, pairing stopped to keep your laptop safe. Nothing was shared. If it was you, choose Start again for a new code.
 qs-pair-new-needs-update = It has an older PCTwin. Update PCTwin on it, then search again.
 qs-pairing-no-network = Your laptop is not on a Wi-Fi or wired network. Connect it, then try again.
-qs-problem-room-title = Not enough room in { $folder }.
+qs-problem-room-title = Not enough room in { $folder }
 qs-problem-room-body = These files need { $needed }, and { $room } can be used there. Nothing was saved. Free up space or choose another folder, then try again.
-qs-done-refused-title = The receiving laptop did not take these files.
+qs-done-refused-title = The receiving laptop did not take these files
 qs-done-refused-body = It may not have enough room. Nothing was sent.
 
 ## Phase 2 screens (Task List 2.8): shared parts
@@ -1595,13 +1595,13 @@ guard-state-awaiting-maker = Waiting for the app’s maker or online service
 guard-state-working = Working
 guard-state-checking = Checking what was done
 guard-state-applying = Putting things in place
-guard-state-pause-requested = Pausing at the next safe point. Not paused yet.
-guard-state-paused = Paused at a safe point
+guard-state-pause-requested = Pausing after the current step. Not paused yet.
+guard-state-paused = Paused
 guard-state-source-unavailable = The old laptop or drive is not connected
 guard-state-blocked = Something needs fixing first
 guard-state-partial = Partly done
 guard-state-retrying = Trying again
-guard-state-reconciling = Checking where things got to
+guard-state-reconciling = Checking what was finished
 guard-state-failed = This did not work
 guard-state-complete = Done
 guard-state-cancelled = Stopped. What was already done is kept.
@@ -1627,7 +1627,7 @@ guard-free-unknown = Free space not known
 guard-items-size = { $items } items, { $size }
 guard-try-again = Try again
 guard-pause = Pause
-guard-resume = Carry on
+guard-resume = Resume
 guard-check-again = Check again
 guard-strip-plan = Your plan
 guard-strip-report = Your report
@@ -1638,14 +1638,14 @@ guard-strip-checking = Checking
 
 ## X09 checking after a restart, and status unavailable
 
-guard-checking-title = Checking where things got to
+guard-checking-title = Checking what was finished
 guard-checking-body = PCTwin is looking at what was finished before it closed. Your choices come back once it knows.
 guard-unavailable-title = Status unavailable
 guard-unavailable-body = PCTwin cannot say right now what this move is doing. Nothing is shown as done until it can. Check again in a moment.
 
-## 2.9 Before we change anything
+## 2.9 What the move will change
 
-guard-changes-title = Before we change anything
+guard-changes-title = What the move will change
 guard-changes-body = This is everything the move will change on this laptop, and what undo can do for each. Nothing has changed yet.
 guard-changes-download = Download from the internet
 guard-changes-download-none = None
@@ -1704,7 +1704,7 @@ guard-changed-title =
         [one] { $count } thing changed after you approved
        *[other] { $count } things changed after you approved
     }
-guard-changed-body = Only these need a fresh look. Everything else stays approved and carries on.
+guard-changed-body = Only these need checking again. Everything else stays approved and continues.
 guard-changed-changed-on-old-laptop = It changed on the old laptop.
 guard-changed-app-updated = The app updated itself.
 guard-changed-destination-changed = The place it goes to changed.
@@ -1719,24 +1719,24 @@ guard-space-title = Space on the new laptop
 guard-space-title-short = The new laptop is short of space
 guard-space-body = PCTwin counted everything that lands on each drive, including room for undo. Nothing you chose is dropped to make it fit.
 guard-space-proposal = What PCTwin suggests for what does not fit
-guard-keep-off-leave-in-cloud = Left in their cloud, where they are safe
+guard-keep-off-leave-in-cloud = Left online, where they are stored now
 guard-keep-off-offload-drive = Put on your other drive
 guard-keep-off-leave-on-old-laptop = Left on the old laptop. Keep it until these are moved.
 guard-offload-title = Your other drive
 guard-offload-connected = Connected
 guard-offload-not-connected = Not connected
 guard-offload-approved = You chose this drive. Files on it are not on the new laptop: connect it to open them.
-guard-offload-ask = PCTwin can put some things on this drive. It needs your yes for this drive on its own.
+guard-offload-ask = PCTwin can put some things on this drive. It needs your approval for this drive separately.
 guard-offload-use = Use this drive
 guard-space-approve = Approve this plan
-guard-safe-in = Safe in { $provider }
-guard-safe-in-cloud = Safe in your cloud
+guard-safe-in = Stored in { $provider }
+guard-safe-in-cloud = Stored online
 guard-safe-in-detail =
     { $count ->
         [one] { $count } file is stored online only. It comes back when you sign in on the new laptop.
        *[other] { $count } files are stored online only. They come back when you sign in on the new laptop.
     }
-guard-your-cloud = your cloud
+guard-your-cloud = your online storage
 
 ## M09 keeping a copy of online-only files
 
@@ -1748,7 +1748,7 @@ guard-local-body =
     }
 guard-local-download = To download on the old laptop
 guard-local-old-space = Room on the old laptop
-guard-local-how = PCTwin brings them down a few at a time, sends them, then makes them online only again on the old laptop.
+guard-local-how = PCTwin downloads them a few at a time on the old laptop, sends them, then sets them back to online only there.
 guard-local-paused-metered = Paused: this connection may charge for data. It carries on by itself on a free connection, or now if you allow it.
 guard-local-paused-no-space = Paused: the old laptop is out of room for the next few files. The rest stay safe in { $provider }.
 guard-local-done = Done. The copies are on the new laptop.
@@ -1769,8 +1769,8 @@ guard-owners-approve = Approve
 
 ## X12 what did not finish
 
-guard-report-title-partial = Most things moved. A few did not.
-guard-report-title-done = Everything in this part moved.
+guard-report-title-partial = Some things did not move
+guard-report-title-done = Everything in this part moved
 guard-report-body-partial = Everything below is still on the old laptop. Try each again when you are ready. What already moved stays.
 guard-report-body-done = Nothing is left to try again.
 guard-line-app = The app { $name }
@@ -1793,7 +1793,7 @@ guard-line-why-not-started = From { $laptop }: the move stopped before it starte
 
 guard-permission-title-explain = PCTwin needs one approval from your system
 guard-permission-title-waiting-for-system = Answer your system’s question
-guard-permission-title-denied = You said no
+guard-permission-title-denied = You did not approve
 guard-permission-title-closed-without-answer = The question was closed without an answer
 guard-permission-title-given = Approved for this move
 guard-permission-title-ended-by-sleep = The approval ended when the laptop went to sleep
@@ -1801,12 +1801,12 @@ guard-permission-title-ended-other-session = The approval ended when someone els
 guard-permission-body-explain = Your system asks once for the whole move. Only the steps listed below use it, and it ends with the move.
 guard-permission-body-waiting-for-system = Your system’s own window is open. Type your password there if it asks.
 guard-permission-body-denied = Only the steps that needed it are left out. Everything else carries on.
-guard-permission-body-closed-without-answer = Closing it is not a yes, so nothing that needs it was done. Ask again, or carry on without it.
+guard-permission-body-closed-without-answer = Closing the window does not count as approval, so nothing that needs it was done. Ask again, or continue without it.
 guard-permission-body-given = PCTwin uses it only for the steps listed below, and it ends with this move.
 guard-permission-body-ended-by-sleep = Nothing that needs it was done after that. Ask again to carry on.
 guard-permission-body-ended-other-session = Nothing that needs it was done after that. Ask again when you are back on your account.
 guard-permission-never-password = PCTwin never asks for your password and never sees it. Only your system does.
-guard-permission-not-now = Carry on without it
+guard-permission-not-now = Continue without it
 guard-permission-ask = Continue to your system
 guard-permission-ask-again = Ask again
 guard-restore-title = Windows restore point
@@ -1821,13 +1821,13 @@ guard-restore-not-made-failed = Not made: Windows could not make one.
 
 ## T01 to T04 rescue from a laptop that will not start
 
-guard-rescue-title-intro = Save what matters from a laptop that will not start
+guard-rescue-title-intro = Copy files from a laptop that will not start
 guard-rescue-title-pick-drive = Choose the drive to rescue
 guard-rescue-title-locked = This drive is locked
 guard-rescue-title-no-system = This is not a laptop’s drive
 guard-rescue-title-salvage = Here is what could be read
 guard-rescue-body-intro = Take the drive out of the old laptop and connect it to this one with a drive adapter or enclosure.
-guard-rescue-body-pick-drive = Choose the old laptop’s drive. The drive things go to cannot be the one you rescue.
+guard-rescue-body-pick-drive = Choose the old laptop’s drive. The drive you copy to cannot be the one you rescue.
 guard-rescue-body-locked = Unlock it in your system first. Then check again.
 guard-rescue-body-no-system = This drive has no laptop system and home folders. If it is an ordinary USB drive, use it on the new laptop instead.
 guard-rescue-body-salvage = Check the list, then use what could be read.
@@ -1951,7 +1951,7 @@ guard-undo-result-kept-other-version = Kept because it changed since the move
 guard-undo-result-removed-restart = Removed. Restart your laptop to finish.
 guard-undo-result-not-removed = Not removed. You can remove it in your laptop’s settings.
 guard-undo-close = Done
-move-wait-appdata-title = Looking at your app data.
+move-wait-appdata-title = Looking at your app data
 move-wait-appdata-body = Your files are found. PCTwin is still looking at the data your apps keep, such as email and browsers. This takes at most ten minutes. Nothing on this laptop is changed.
 fullmove-special-not-checked = App data PCTwin could not fully check
 fullmove-group-appdata = App data PCTwin will copy: { $count }
@@ -1965,7 +1965,7 @@ fullmove-appdata-waiting = Waiting for the old laptop: close { $apps } there.
 fullmove-close-title = Close these apps to bring their data
 fullmove-close-body = These apps are still open on this laptop, so PCTwin cannot copy their data safely. Close them, then choose Try again. If you go on without them, their data stays here.
 fullmove-close-again = Try again
-fullmove-close-without = Go on without them
+fullmove-close-without = Continue without them
 fullmove-extras-refused = Settings and app data from the old laptop could not be read here, so none were moved. They are still on your old laptop.
 fullmove-app-from = PCTwin installs the winget package { $id } from its maker, after checking it is this app and the same maker.
 
@@ -2038,7 +2038,7 @@ choose-nothing = Choose at least one thing to move.
 choose-continue = Continue
 
 ## The new laptop accepts what the old laptop chose (decided 28 October 2026)
-accept-title = { $from } wants to send you this.
+accept-title = Accept the move from { $from }?
 accept-body = This was chosen on your old laptop. Accept it, and PCTwin moves it here.
 accept-files =
     { $count ->
@@ -2047,8 +2047,8 @@ accept-files =
     }
 accept-apps =
     { $count ->
-        [one] 1 app, installed for you
-       *[other] { $count } apps, installed for you
+        [one] 1 app to install
+       *[other] { $count } apps to install
     }
 accept-settings = Settings and app data
 accept-fits = It fits on this laptop.
@@ -2187,7 +2187,7 @@ work-what-database = Database opens
 work-what-task = Something you check yourself
 work-label-machine-checked = Checked by PCTwin
 work-label-person-confirmed = You checked it
-work-label-still-needs-attention = Still needs a look
+work-label-still-needs-attention = Still needs checking
 work-state-not-run-yet = Not checked yet
 work-state-all-there = Everything is there
 work-state-missing = Something is missing
@@ -2208,7 +2208,7 @@ work-problem-wrong-kind = That answer does not fit this check.
 work-problem-failed = Something went wrong. Try again.
 repair-waits-old-laptop = Needs the old laptop connected
 repair-waits-internet = Needs the internet
-repair-waits-administrator = Needs your yes to the administrator prompt
+repair-waits-administrator = Needs an administrator’s approval
 repair-waits-installer-tool = Needs the system's app installer
 repair-waits-space = Needs more room on this laptop
 repair-waits-close-app = Needs the app closed
@@ -2216,10 +2216,10 @@ repair-problem-nothing-to-repair = Nothing picked needs fixing.
 repair-problem-stale = The list changed. Look at it again.
 repair-problem-busy = PCTwin is busy with something else. Try again when it finishes.
 repair-problem-failed = Something went wrong. Nothing else was changed.
-changed-why-app-updated = The app was updated after you said yes
-changed-why-app-removed = The app was removed after you said yes
+changed-why-app-updated = The app was updated after you approved
+changed-why-app-removed = The app was removed after you approved
 changed-why-destination-changed = The folder it goes to changed
-changed-why-project-edited = It was changed on the old laptop after you said yes
+changed-why-project-edited = It was changed on the old laptop after you approved
 changed-step-install = Installing
 changed-step-settings = Settings
 changed-step-app-data = App data
@@ -2292,7 +2292,7 @@ finish-headline-ready-for-selected-work = Everything you picked is on this lapto
 finish-headline-ready-for-selected-work-body = PCTwin found each item you picked on this laptop and checked it as far as it can. This does not promise that every app works as it did before.
 finish-headline-finished-with-tasks = The move is finished, and some tasks are left
 finish-headline-finished-with-tasks-body = Some things need you, or did not copy. They are listed on this page.
-finish-headline-data-preserved = Your things are kept safe, but some cannot be opened yet
+finish-headline-data-preserved = Everything is here, but some of it needs a key to open
 finish-headline-data-preserved-body = Everything is on this laptop. A key or recovery code is needed to open some of it, and PCTwin could not check that here.
 finish-headline-handover-unresolved = The old laptop is not handed over yet
 finish-headline-handover-unresolved-body = This laptop is done. The list for leaving the old laptop still has open things.
@@ -2351,7 +2351,7 @@ finish-step-setup = Finish setting up
 finish-step-setup-detail = Apps that need you to sign in or finish a step.
 finish-step-goodbye = Before you leave the old laptop
 finish-step-goodbye-detail = What is still only on the old laptop.
-finish-step-catchup = Bring me up to date
+finish-step-catchup = Copy recent changes
 finish-step-catchup-detail = Copy what changed on the old laptop since the move.
 finish-step-handover = Hand the old laptop on
 finish-step-handover-detail = Remove your account or erase the old laptop, with the system’s own tools.
@@ -2424,7 +2424,7 @@ finish-goodbye-blocked-unchecked = The old laptop has not been checked since the
 finish-goodbye-clear = Everything is answered and the old laptop was checked. You can ask for a handover. That is a separate step.
 finish-goodbye-handover = Hand the old laptop on
 finish-goodbye-check-again = Check the old laptop again
-finish-catchup-title = Bring me up to date
+finish-catchup-title = Copy recent changes
 finish-catchup-body = See what changed on the old laptop since the move. You review each change. PCTwin sends only the ones you choose.
 finish-catchup-purpose-check = Only look at the old laptop
 finish-catchup-purpose-check-detail = Nothing is copied. Your before-you-leave list is updated.
@@ -2509,7 +2509,7 @@ finish-confirm-go = Confirm and open the system’s tool
 finish-confirm-cancel = Go back and do nothing
 finish-confirm-needs-tick = The button works after you tick the box above.
 finish-started-title = Follow the system’s own steps
-finish-started-body = The steps below are the system’s, not PCTwin’s. PCTwin does not draw its own copy of them.
+finish-started-body = The steps below are the system’s, not PCTwin’s. PCTwin does not show its own version of them.
 finish-started-opened = PCTwin opened the system’s page.
 finish-started-not-opened = PCTwin could not open the system’s page. Open it yourself and follow the steps.
 finish-started-undo-closed = Undo is now closed for this move.
@@ -2638,8 +2638,8 @@ compat-steps-none = No steps from you.
 compat-never-checked = Nobody has tested this app yet. PCTwin will try it and tell you what happened.
 compat-checked-on = Checked on { $date }.
 compat-version = Version tested: { $version }
-work-strip = Can I work?
-work-title = Can I actually work?
+work-strip = Work check
+work-title = Check that you can work here
 work-body = Add the files, fonts and jobs you need on this laptop. PCTwin looks at what it can read. You say whether the rest worked. Nothing is opened or run.
 work-empty = No checks yet. Add a file, a font or a job below.
 work-looked-at = Looked at { $checked } of { $of }.
@@ -2690,13 +2690,13 @@ repair-run =
         [one] Try { $count } item again
        *[other] Try { $count } items again
     }
-changed-strip = Changes since you said yes
+changed-strip = Changes since you approved
 changed-title =
     { $count ->
-        [one] { $count } thing changed after you said yes
-       *[other] { $count } things changed after you said yes
+        [one] { $count } thing changed after you approved
+       *[other] { $count } things changed after you approved
     }
-changed-body = Only these need a fresh yes. Everything else stays approved.
+changed-body = Only these need your approval again. Everything else stays approved.
 changed-affects = Affects: { $steps }
 changed-held =
     { $count ->
@@ -2704,7 +2704,7 @@ changed-held =
        *[other] { $count } steps wait for your answer.
     }
 changed-leave-out = Leave these out
-changed-approve = Say yes again
+changed-approve = Approve again
 safe-stop-strip = Update
 safe-stop-title = Waiting for a safe moment
 safe-stop-body = PCTwin does not update or remove itself in the middle of a move. It waits until nothing is half done.
@@ -2731,11 +2731,11 @@ finish-step-repair =
        *[other] Fix these { $count } items
     }
 finish-step-repair-detail = Try again only what did not finish. What worked stays.
-finish-step-work = Can I actually work?
+finish-step-work = Check that you can work here
 finish-step-work-detail = Check that the files, fonts and jobs you need are here.
 finish-step-kit = Save a recovery kit
 finish-step-kit-detail = Keep a small record of this move in a folder you choose.
-space-box-title = This laptop does not have room for everything.
+space-box-title = This laptop does not have room for everything
 space-box-choice = { $count ->
         [one] Leave 1 file ({ $size }) you have not used for the longest time on your old laptop
        *[other] Leave { $count } files ({ $size }) you have not used for the longest time on your old laptop
@@ -2744,7 +2744,7 @@ space-box-kept = Nothing is deleted. They stay on your old laptop.
 space-box-short = Even then, { $size } is still short. Untick some folders, or choose another place for them.
 space-box-fits = With them left on your old laptop, everything else fits.
 finish-handover-check-old = Check the old laptop again
-finish-handover-check-armed = PCTwin is ready to check the old laptop. Open PCTwin on the old laptop and connect the two laptops as for a move. Then press Look again.
+finish-handover-check-armed = PCTwin is ready to check the old laptop. Open PCTwin on the old laptop and connect the two laptops as for a move. Then choose Look again.
 finish-handover-look-again = Look again
 qs-where-title = Where should these go?
 qs-where-body = { $count ->

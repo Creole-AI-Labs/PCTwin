@@ -30,14 +30,14 @@ welcome-start = पूरा स्थानांतरण शुरू कर�
 
 home-quick-send-body = फ़ाइलें भेजें या पाएँ
 home-move-body = अपना सेटअप ले जाएँ
-home-restore-body = उसे वापस लाएँ
-home-rescue-body = ज़रूरी चीज़ें बचाएँ
+home-restore-body = सहेजे गए सेटअप से दोबारा बनाएँ
+home-rescue-body = ऐसे लैपटॉप से फ़ाइलें कॉपी करें जो चालू नहीं होता
 home-history = मेरा इतिहास
 home-history-body = आपके स्थानांतरण और उनकी रिपोर्ट
-name-title = इस लैपटॉप को नाम दें।
+name-title = इस लैपटॉप को नाम दें
 name-body = पास के दूसरे लैपटॉप इसे इसी नाम से ढूँढेंगे। आप इसे बाद में, जोड़ते समय बदल सकते हैं।
 name-use = यही नाम रखें
-home-update-title = नया संस्करण उपलब्ध है।
+home-update-title = नया संस्करण उपलब्ध है
 home-update-action = अभी अपडेट करें
 home-updating = अपडेट हो रहा है। PCTwin बंद होकर अपने आप फिर से खुलेगा।
 home-update-failed = अपडेट इंस्टॉल नहीं हो सका। PCTwin पहले की तरह काम करता है; अगली बार अपडेट फिर से दिखेगा।
@@ -99,7 +99,7 @@ connect-unit-gb = { NUMBER($value, maximumFractionDigits: 1) } GB
 
 ## C02 Put both laptops together
 
-connect-prep-title = दोनों लैपटॉप पास-पास रखें।
+connect-prep-title = दोनों लैपटॉप पास-पास रखें
 connect-prep-body = दोनों को एक ही Wi-Fi से कनेक्ट करें, फिर हर एक पर PCTwin खोलें।
 connect-prep-step-1-title = एक ही Wi-Fi से कनेक्ट करें
 connect-prep-step-1-body = फ़ाइलें कॉपी करने के लिए इंटरनेट की ज़रूरत नहीं है।
@@ -115,7 +115,7 @@ connect-prep-continue = लैपटॉप जोड़ने के लिए �
 ## C06 Meet your other laptop
 
 peer-eyebrow = आपका स्थानांतरण
-peer-title = अपने दूसरे लैपटॉप से मिलें।
+peer-title = दोनों लैपटॉप जाँचें
 peer-body = दोनों लैपटॉप कनेक्ट हो गए हैं और तैयार हैं।
 peer-sending = भेज रहा है
 peer-receiving = प्राप्त कर रहा है
@@ -139,7 +139,7 @@ peer-continue = कनेक्शन की जाँच करें
 ## C07 Let’s check the connection
 
 check-eyebrow = आपका स्थानांतरण
-check-title = आइए कनेक्शन की जाँच करें।
+check-title = कनेक्शन जाँचें
 check-body = स्थानांतरण की योजना बनाने और समय का अनुमान लगाने के लिए PCTwin गति, स्टोरेज और बिजली की जाँच करता है।
 check-measuring = कनेक्शन मापा जा रहा है…
 # The value next to it is already formatted, for example "62 MB/s".
@@ -177,7 +177,7 @@ check-before-near-body = जब तक आपकी चीज़ें जा �
 
 ## C09 Waiting for your other laptop
 
-reconnect-title = आपके दूसरे लैपटॉप का इंतज़ार है।
+reconnect-title = आपके दूसरे लैपटॉप का इंतज़ार है
 reconnect-body = अब तक कॉपी और जाँची गई हर चीज़ रखी गई है।
 # Added: the title of the saved-progress card (the mockup shows Move paused by connection).
 reconnect-card-title = कनेक्शन के कारण स्थानांतरण रुका हुआ है
@@ -201,7 +201,7 @@ reconnect-details-body = सिर्फ़ ये दो लैपटॉप फ
 
 ## C10 The connection has ended (dialog)
 
-ended-title = कनेक्शन ख़त्म हो गया है।
+ended-title = कनेक्शन ख़त्म हो गया है
 ended-body = आपका स्थानांतरण सहेजा गया है। पुराना कोड अब काम नहीं करता।
 ended-kept-title = रखा गया
 ended-kept-body = आपके स्थानांतरण का रिकॉर्ड और कॉपी व जाँची गई हर चीज़।
@@ -218,7 +218,7 @@ ended-home = होम पर लौटें
 pair-back = वापस
 pair-try-again = फिर से कोशिश करें
 pair-more-details = ज़्यादा जानकारी
-pair-heads-up-title = आपका लैपटॉप आपसे एक सवाल पूछ सकता है।
+pair-heads-up-title = आपका लैपटॉप आपसे एक सवाल पूछ सकता है
 pair-heads-up-local-network = आपका Mac पूछेगा कि क्या PCTwin आपके लोकल नेटवर्क पर डिवाइस ढूँढ सकता है। “अनुमति दें” चुनें, ताकि आपके दोनों लैपटॉप एक-दूसरे को ढूँढ सकें।
 pair-heads-up-firewall = Windows पूछ सकता है कि क्या PCTwin कनेक्शन स्वीकार कर सकता है। “अनुमति दें” चुनें, ताकि आपका नया लैपटॉप इस लैपटॉप तक पहुँच सके।
 pair-heads-up-continue = जारी रखें
@@ -226,7 +226,7 @@ pair-heads-up-continue = जारी रखें
 ## C03 Old laptop: show the code
 
 pair-old-eyebrow = पुराना लैपटॉप
-pair-old-title = आइए आपके लैपटॉप जोड़ें।
+pair-old-title = अपने लैपटॉप जोड़ें
 pair-old-body = अपने नए लैपटॉप पर नीचे दिया गया कोड डालें।
 pair-old-next = इसके बाद, दोनों लैपटॉप पर दिखने वाला एक नंबर मिलाना होगा।
 pair-old-network = दोनों लैपटॉप एक ही Wi-Fi पर रखें।
@@ -249,26 +249,26 @@ pair-old-steps-title = अपने नए लैपटॉप पर
 pair-old-step-1 = PCTwin खोलें और “मेरा नया लैपटॉप” चुनें।
 pair-old-step-2 = अगर कोई सूची दिखे, तो इस लैपटॉप का नाम चुनें।
 pair-old-step-3 = यहाँ दिखाया गया छह अंकों का कोड लिखें।
-pair-old-wait-title = नया कोड आ रहा है।
+pair-old-wait-title = नए कोड की प्रतीक्षा करें
 pair-old-wait-body =
     { $seconds ->
         [one] वह कोशिश काम नहीं आई। नया कोड { $seconds } सेकंड में दिखेगा।
        *[other] वह कोशिश काम नहीं आई। नया कोड { $seconds } सेकंड में दिखेगा।
     }
-pair-old-locked-title = इस नेटवर्क पर किसी ने गलत कोड आज़माए।
+pair-old-locked-title = इस नेटवर्क पर किसी ने गलत कोड आज़माए
 pair-old-locked-body = पाँच गलत कोड के बाद, इस लैपटॉप को सुरक्षित रखने के लिए जोड़ना बंद कर दिया गया। कुछ भी शेयर नहीं हुआ। अगर यह आप थे, तो नया कोड पाने के लिए “फिर से शुरू करें” चुनें।
 pair-old-locked-hotspot = अगर आपको नहीं पता कि यह कौन था, तो दोनों लैपटॉप को अपने फ़ोन के हॉटस्पॉट से कनेक्ट करें, फिर “फिर से शुरू करें” चुनें।
 pair-old-start-again = फिर से शुरू करें
 pair-old-timed-out = समय पर कोई नंबर नहीं चुना गया, इसलिए यह नया कोड है।
 pair-old-declined = नंबर मेल नहीं खाए, इसलिए कुछ भी शेयर नहीं हुआ। यह नया कोड है।
 pair-old-left = नंबर चुने जाने से पहले नए लैपटॉप ने जोड़ना बंद कर दिया, इसलिए कुछ भी शेयर नहीं हुआ। यह नया कोड है।
-pair-network-title = अपना Wi-Fi चुनें।
+pair-network-title = अपना Wi-Fi चुनें
 pair-network-hint = वह नेटवर्क चुनें जिस पर आपका नया लैपटॉप है।
 
 ## C05 Old laptop: match the number
 
 pair-choose-eyebrow = कनेक्शन की पुष्टि करें
-pair-choose-title = मिलता हुआ नंबर चुनें।
+pair-choose-title = मिलता हुआ नंबर चुनें
 pair-choose-body = अपने नए लैपटॉप को देखें। जो नंबर वह दिखाता है, वही चुनें।
 pair-choose-number = नंबर { $number }
 pair-choose-confirm = इन लैपटॉप की पुष्टि करें
@@ -283,19 +283,19 @@ pair-choose-checking = जाँच हो रही है…
 pair-new-eyebrow = नया लैपटॉप
 pair-new-searching-title = आपका पुराना लैपटॉप खोजा जा रहा है…
 pair-new-searching-body = अपने पुराने लैपटॉप पर PCTwin खुला रखें, और उसे उसी Wi-Fi पर रखें जिस पर यह लैपटॉप है।
-pair-new-search-failed-title = आपका पुराना लैपटॉप ढूँढा नहीं जा सका।
+pair-new-search-failed-title = आपका पुराना लैपटॉप ढूँढा नहीं जा सका
 pair-new-list-title = इनमें से आपका पुराना लैपटॉप कौन-सा है?
 pair-new-list-body = वह नाम चुनें जो आपका पुराना लैपटॉप अपनी स्क्रीन पर दिखाता है।
 pair-new-same-label = आस-पास के एक और लैपटॉप का भी यही नाम है। पुराने लैपटॉप की स्क्रीन देखें।
 pair-new-needs-update = इस लैपटॉप पर PCTwin का पुराना संस्करण है। उस पर PCTwin अपडेट करें, फिर दोबारा खोजें।
-pair-new-none-title = कोई पुराना लैपटॉप नहीं मिला।
+pair-new-none-title = कोई पुराना लैपटॉप नहीं मिला
 pair-new-none-body = जाँचें कि आपके पुराने लैपटॉप पर PCTwin खुला है और कोड दिखा रहा है, और दोनों लैपटॉप एक ही Wi-Fi पर हैं। फिर से खोजें।
 pair-new-search-again = फिर से खोजें
 pair-old-same-role = पास का एक और लैपटॉप भी पुराने लैपटॉप के रूप में सेट है। दोनों में से एक नया लैपटॉप होना चाहिए।
 pair-old-switch = यह नया लैपटॉप है
 pair-new-none-same-role = क्या दूसरे लैपटॉप ने भी नया लैपटॉप चुना है? तो उस पर पुराना लैपटॉप चुनें, या इसे बदलें।
 pair-new-switch = यह पुराना लैपटॉप है
-pair-new-code-title = कोड डालें।
+pair-new-code-title = कोड डालें
 pair-new-code-body = { $label } पर दिखाया गया कोड लिखें।
 pair-new-code-label = छह अंकों का कोड
 pair-new-code-hint = इसे अपने पुराने लैपटॉप की स्क्रीन से पढ़ें। यह हर मिनट बदलता है।
@@ -303,7 +303,7 @@ pair-new-connect = कनेक्ट करें
 pair-new-connecting = कनेक्ट हो रहा है…
 pair-new-other-laptop = कोई दूसरा लैपटॉप चुनें
 pair-new-number-eyebrow = कनेक्शन की पुष्टि करें
-pair-new-number-title = अपने पुराने लैपटॉप पर यह नंबर चुनें।
+pair-new-number-title = अपने पुराने लैपटॉप पर यह नंबर चुनें
 pair-new-number-tile = आपका नंबर
 pair-new-number-label = आपका नंबर { $number } है
 pair-new-number-body = आपका पुराना लैपटॉप तीन नंबर दिखाता है। वहाँ यही नंबर चुनें।
@@ -311,8 +311,8 @@ pair-new-number-waiting = आपके पुराने लैपटॉप क
 
 ## Paired (both laptops)
 
-pair-done-eyebrow = सब तैयार
-pair-done-title = आपके लैपटॉप जोड़ दिए गए हैं।
+pair-done-eyebrow = जोड़े गए
+pair-done-title = आपके लैपटॉप जोड़ दिए गए हैं
 pair-done-body = आपके दोनों लैपटॉप जुड़ गए हैं। अब पुराना लैपटॉप आपकी फ़ाइलें ढूँढेगा, और नए लैपटॉप पर आप मंज़ूर करेंगे कि क्या जाएगा। आपकी मंज़ूरी से पहले कुछ नहीं जाता।
 pair-done-continue = आगे बढ़ें
 
@@ -342,7 +342,7 @@ pairing-failed-new = इस बार जोड़ना काम नहीं 
 ## M06 Match people to their profiles (Who’s moving?)
 
 people-eyebrow = आपका स्थानांतरण
-people-title = लोगों को उनके अकाउंट से मिलाएं।
+people-title = लोगों को उनके अकाउंट से मिलाएं
 people-body = चुनें कि नए लैपटॉप पर हर व्यक्ति की फ़ाइलें कहाँ जाएं।
 people-col-old = पुराना लैपटॉप
 people-col-new = नया लैपटॉप
@@ -392,7 +392,7 @@ people-continue = आगे बढ़ें
 ## M26 Before you leave this laptop (things to do on the old laptop)
 
 before-eyebrow = आपका स्थानांतरण
-before-title = इस लैपटॉप को छोड़ने से पहले।
+before-title = इस लैपटॉप को छोड़ने से पहले
 before-body = जब तक पुराना लैपटॉप आपके पास है, ये चीज़ें जाँच लें।
 before-licences-title = ऐप लाइसेंस
 before-licences-body = कुछ ऐप्स का लाइसेंस आपको ख़ुद ले जाना होगा।
@@ -411,7 +411,7 @@ before-continue = स्थानांतरण की योजना पर �
 ## S11 Get help with this task (a short problem code)
 
 help-eyebrow = मदद और निजता
-help-title = इस काम में मदद पाएं।
+help-title = इस काम में मदद पाएं
 help-body = एक छोटा कोड शेयर करें, जिससे किसी को पता चले कि क्या गड़बड़ हुई। पहले देख लें कि उसमें क्या शामिल है।
 help-making = कोड बन रहा है…
 help-code-title = समस्या कोड
@@ -438,7 +438,7 @@ help-failed = समस्या कोड नहीं बन सका। फ�
 help-try-again = फिर से कोशिश करें
 help-copy-failed = कोड कॉपी नहीं हो सका। ऊपर उसे चुनें और ख़ुद कॉपी करें।
 help-home-eyebrow = मदद
-help-home-title = आपके सामने वाले काम के लिए मदद।
+help-home-title = आम समस्याएँ और क्या करें
 help-home-body = जो चीज़ें अक्सर रुकावट बनती हैं, उनके लिए छोटी गाइड। ये बिना इंटरनेट के चलती हैं।
 help-home-more = getpctwin.com पर और मदद
 help-guide-find-title = लैपटॉप एक-दूसरे को नहीं ढूँढ पा रहे
@@ -704,7 +704,7 @@ label-unnamed = बिना नाम का लैपटॉप
 ## M02 Finding your files
 
 scan-eyebrow = आपका स्थानांतरण
-scan-title = आपका जाना-पहचाना सेटअप ढूंढा जा रहा है।
+scan-title = आपकी फ़ाइलें खोजी जा रही हैं
 scan-body = PCTwin जो भी ढूंढता है, वह सहेजा जाता है, ताकि खोज रुकने पर भी आगे जारी रह सके।
 scan-progress =
     .aria-label = आपकी चुनी जगहों में खोज हो रही है
@@ -744,7 +744,7 @@ scan-continue = देखें क्या मिला
 ## M03 Everything you chose, in view
 
 overview-eyebrow = आपका स्थानांतरण
-overview-title = आपकी चुनी हर चीज़, एक नज़र में।
+overview-title = PCTwin को क्या मिला
 overview-body = योजना बनने से पहले देखें कि PCTwin को क्या मिला।
 # The metric value next to each label is passed in already formatted.
 overview-size-label = चुनी गई फ़ाइलें
@@ -776,7 +776,7 @@ overview-continue = आगे बढ़ें
 ## M04 Keep what matters to you
 
 files-eyebrow = आपका स्थानांतरण
-files-title = जो आपके लिए ज़रूरी है, उसे साथ रखें।
+files-title = ले जाने के लिए फ़ोल्डर चुनें
 files-body = फ़ोल्डर, दूसरी ड्राइव और कोई भी दूसरी जगह चुनें।
 files-search-label = फ़ोल्डर ढूंढें
 files-search-placeholder = फ़ोल्डर खोजें
@@ -806,7 +806,7 @@ files-continue = जगहें चुनें
 ## M05 Give every file a home
 
 dest-eyebrow = आपका स्थानांतरण
-dest-title = हर फ़ाइल को उसकी जगह दें।
+dest-title = आपके फ़ोल्डर कहाँ जाएँगे
 dest-body = चुनें कि नए लैपटॉप पर हर फ़ोल्डर कहाँ जाए।
 dest-col-chosen = आपने क्या चुना
 dest-col-place = कहाँ जाएगा
@@ -834,7 +834,7 @@ dest-continue = योजना देखें
 ## M23 Approve the move you want
 
 plan-eyebrow = आपका स्थानांतरण
-plan-title = अपना मनचाहा स्थानांतरण मंज़ूर करें।
+plan-title = योजना जाँचें और मंज़ूर करें
 plan-body = PCTwin सिर्फ़ वही करता है जो इस योजना में लिखा है।
 plan-what-title = आपने क्या चुना
 # $size is already formatted, for example "120 GB". $count is passed but not shown.
@@ -923,7 +923,7 @@ plan-preview-title = शुरू करने से पहले
 plan-preview-fits = इस लैपटॉप में पर्याप्त जगह खाली है।
 plan-preview-fits-about = इस लैपटॉप में पर्याप्त खाली जगह होनी चाहिए। इसमें PCTwin द्वारा इंस्टॉल किए जाने वाले ऐप्स और उनके डेटा के लिए लगभग { $extra } गिना गया है।
 # Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
-plan-preview-first = हम पहले ये भेजेंगे, ताकि आपका नया लैपटॉप जल्दी इस्तेमाल के लिए तैयार हो: { $places }।
+plan-preview-first = ये पहले ले जाए जाएँगे, ताकि आप अपना नया लैपटॉप जल्दी इस्तेमाल कर सकें: { $places }।
 plan-preview-short = इस लैपटॉप को { $size } और खाली जगह चाहिए। शुरू करने से पहले कुछ जगह खाली करें, वरना ड्राइव भरने पर स्थानांतरण रुक जाएगा।
 plan-preview-short-about = इस लैपटॉप को लगभग { $size } और खाली जगह चाहिए, जिसमें PCTwin द्वारा इंस्टॉल किए जाने वाले ऐप्स और उनके डेटा के लिए लगभग { $extra } गिना गया है। शुरू करने से पहले कुछ जगह खाली करें, वरना ड्राइव भरने पर स्थानांतरण रुक जाएगा।
 plan-preview-space-unknown = PCTwin यह नहीं पढ़ सका कि इस लैपटॉप में कितनी जगह खाली है।
@@ -1004,8 +1004,8 @@ soon-move-body = अपने पुराने लैपटॉप से स�
 ## X01 Move progress, compact
 
 progress-eyebrow = आपका स्थानांतरण
-progress-title = आपका नया लैपटॉप तैयार हो रहा है।
-progress-title-old = आपकी चीज़ें आपके नए लैपटॉप पर भेजी जा रही हैं।
+progress-title = आपकी चीज़ें इस लैपटॉप पर ले जाई जा रही हैं
+progress-title-old = आपकी चीज़ें आपके नए लैपटॉप पर भेजी जा रही हैं
 progress-title-paused = स्थानांतरण रुका हुआ है
 progress-paired = जोड़ा गया
 progress-percent =
@@ -1035,13 +1035,13 @@ progress-low-battery = इस लैपटॉप की बैटरी कम �
 progress-battery-paused = इस लैपटॉप की बैटरी लगभग ख़त्म है, इसलिए स्थानांतरण सुरक्षित रूप से रुका है। इसे चार्ज पर लगाएँ, फिर जारी रखें। कुछ भी नहीं खोया।
 progress-old-safe = आपके पुराने लैपटॉप में कुछ नहीं बदलता।
 progress-pause = स्थानांतरण रोकें
-progress-compact = छोटा करें
-progress-expand = पूरा स्थानांतरण देखें
+progress-compact = कम दिखाएँ
+progress-expand = हर आइटम दिखाएँ
 progress-stop = स्थानांतरण बंद करें
 
 ## X02 Move progress, expanded
 
-progress-all-title = पूरा स्थानांतरण देखें।
+progress-all-title = स्थानांतरण का हर आइटम
 progress-all-body = हर आइटम दिखाता है कि वह कहाँ से आ रहा है और उसकी स्थिति क्या है।
 progress-metric-overall = कुल प्रगति
 progress-metric-committed = कॉपी और जाँचा गया
@@ -1069,8 +1069,8 @@ tip-power-cut = अगर बिजली चली जाए, तो दोन�
 
 ## F09 Mini panel
 
-mini-title = आपका स्थानांतरण, आस-पास।
-mini-title-paused = स्थानांतरण रुका हुआ है।
+mini-title = स्थानांतरण जारी है
+mini-title-paused = स्थानांतरण रुका हुआ है
 mini-what = आपकी चुनी फ़ाइलें भेजी जा रही हैं
 mini-progress =
     .aria-label = स्थानांतरण की प्रगति
@@ -1078,7 +1078,7 @@ mini-pause = रोकें
 mini-resume = फिर से शुरू करें
 mini-open = स्थानांतरण खोलें
 # Used when lane E reuses this panel for a Quick Send.
-mini-title-send = आपकी फ़ाइलें रास्ते में हैं।
+mini-title-send = फ़ाइलें भेजी जा रही हैं
 mini-what-send = चुनी गई फ़ाइलें भेजी जा रही हैं
 mini-open-send = भेजना खोलें
 mini-progress-send =
@@ -1086,8 +1086,8 @@ mini-progress-send =
 
 ## X05 Paused at a safe point
 
-pause-title = एक सुरक्षित पड़ाव पर रोका गया।
-pause-title-finishing = सुरक्षित पड़ाव पर रोका जा रहा है…
+pause-title = स्थानांतरण रोका गया है
+pause-title-finishing = स्थानांतरण रोका जा रहा है…
 pause-body = कॉपी और जाँची गई हर चीज़ रखी गई है। बाकी इंतज़ार कर रहा है।
 pause-finishing = पहले { $name } पूरा किया जा रहा है, ताकि वह आधा कॉपी होकर न रह जाए।
 pause-kept-title = फ़ाइलें
@@ -1101,7 +1101,7 @@ pause-waiting-body =
 pause-status-kept = रुका हुआ
 pause-status-waiting = इंतज़ार
 pause-note = रोकने से कुछ भी वापस नहीं होता। आपके पुराने लैपटॉप में कुछ नहीं बदलता।
-pause-resume = सहेजा गया स्थानांतरण फिर से शुरू करें
+pause-resume = स्थानांतरण फिर से शुरू करें
 
 ## X10 Stop the remaining move? (danger dialog)
 
@@ -1122,9 +1122,9 @@ cancel-keep = स्थानांतरण जारी रखें
 ## R01 Welcome to your next laptop (outcome)
 
 outcome-eyebrow = स्थानांतरण के नतीजे
-outcome-title = आपके अगले लैपटॉप पर आपका स्वागत है।
+outcome-title = स्थानांतरण पूरा हो गया
 outcome-body = आपने जो कुछ मंज़ूर किया था, उसके साथ क्या हुआ, यहाँ देखें।
-outcome-title-old = आपकी चीज़ें आपके नए लैपटॉप पर हैं।
+outcome-title-old = स्थानांतरण पूरा हो गया
 outcome-body-old = आपने जो कुछ भेजा, उसके साथ क्या हुआ, यहाँ देखें। यह लैपटॉप जैसा था वैसा ही है।
 outcome-files-title = चुनी गई फ़ाइलें
 outcome-status-partial = कुछ हिस्सा पूरा
@@ -1157,7 +1157,7 @@ move-stop = स्थानांतरण रोकें
 move-before-open = इंतज़ार के दौरान: यह लैपटॉप छोड़ने से पहले
 move-get-help = मदद लें
 pickup-eyebrow = आपका स्थानांतरण
-pickup-title = सुरक्षित रूप से आगे बढ़ें।
+pickup-title = रुके हुए स्थानांतरण को व्यवस्थित करें
 pickup-body = इस लैपटॉप पर एक स्थानांतरण बीच में रुक गया, शायद लैपटॉप फिर से चालू हुआ या बिजली चली गई। पहले व्यवस्थित करें, फिर आगे बढ़ने के लिए लैपटॉप दोबारा जोड़ें।
 pickup-unfinished-title = अधूरी कॉपियाँ
 pickup-unfinished-body =
@@ -1168,7 +1168,7 @@ pickup-unfinished-body =
 pickup-unfinished-badge = व्यवस्थित करना है
 pickup-tidy = व्यवस्थित करें
 pickup-tidying = व्यवस्थित किया जा रहा है। पूरी कॉपियाँ जाँचकर अपनी जगह रखी जाती हैं; आपकी कोई चीज़ नहीं बदलती।
-pickup-done = सब व्यवस्थित है। आगे बढ़ने के लिए लैपटॉप दोबारा जोड़ें: जो यहाँ पहले से है वह पहचाना जाता है और दोबारा कॉपी नहीं होता।
+pickup-done = व्यवस्थित करना पूरा हुआ। जारी रखने के लिए लैपटॉप फिर से जोड़ें: जो पहले से यहाँ है वह मिल जाता है और दो बार कॉपी नहीं होता।
 pickup-failed = इस बार व्यवस्थित करना काम नहीं किया। आपकी कोई चीज़ नहीं बदली। फिर से कोशिश करें, या पहले इस लैपटॉप पर PCTwin बंद करके दोबारा खोलें।
 pickup-put-in-place = जगह पर रखी गईं
 pickup-kept = आगे के लिए रखी गईं
@@ -1183,8 +1183,8 @@ pickup-left-for-later =
        *[other] { $count } फ़ाइलें ऐसी ड्राइव पर हैं जो अभी जुड़ी नहीं है। उसे जोड़कर फिर से व्यवस्थित करें।
     }
 pickup-later = अभी नहीं
-ready-eyebrow = स्वागत है
-ready-title = आपकी चीज़ें तैयार हैं।
+ready-eyebrow = आपके पुराने लैपटॉप से
+ready-title = आपकी चीज़ें आपके फ़ोल्डरों में हैं
 ready-body = आपके पुराने लैपटॉप की चीज़ें इस लैपटॉप पर आ गई हैं, और अब आपके अपने फ़ोल्डरों में हैं।
 ready-landed = फ़ाइलें आपके फ़ोल्डरों में
 ready-where-title = ये कहाँ हैं
@@ -1202,16 +1202,16 @@ ready-failed =
 ready-done = हो गया
 move-status-kept = सुरक्षित
 move-wait-eyebrow = आपका स्थानांतरण
-move-wait-scanning-title = आपकी फ़ाइलें ढूँढी जा रही हैं।
+move-wait-scanning-title = आपकी फ़ाइलें ढूँढी जा रही हैं
 move-wait-scanning-body = आपका पुराना लैपटॉप आपके फ़ोल्डर देख रहा है। वह सिर्फ़ उन्हें पढ़ता है: कुछ भी खोला, बदला या हटाया नहीं जाता।
 move-found = अब तक मिला: आपकी चीज़ों में से { $size }।
-move-wait-approval-title = नए लैपटॉप का इंतज़ार है।
+move-wait-approval-title = नए लैपटॉप का इंतज़ार है
 move-wait-approval-body = आपकी फ़ाइलें तैयार हैं। नए लैपटॉप पर योजना देखें और शुरू करने के लिए उसे मंज़ूर करें।
-move-wait-list-title = पुराने लैपटॉप का इंतज़ार है।
-move-wait-list-body = आपका पुराना लैपटॉप आपकी चीज़ें ढूँढ रहा है, फिर वहीं चुना जाता है कि क्या ले जाना है। उसके बाद जो आ रहा है वह यहाँ दिखेगा, ताकि आप उसे स्वीकार कर सकें। इसमें कुछ मिनट लग सकते हैं।
-move-wait-starting-title = स्थानांतरण शुरू हो रहा है।
+move-wait-list-title = पुराने लैपटॉप का इंतज़ार है
+move-wait-list-body = आपका पुराना लैपटॉप आपकी चीज़ें खोज रहा है। फिर वहीं चुना जाता है कि क्या ले जाना है। यह हो जाने पर सूची यहाँ दिखेगी, ताकि आप उसे स्वीकार करें। इसमें कुछ मिनट लग सकते हैं।
+move-wait-starting-title = स्थानांतरण शुरू हो रहा है
 move-wait-starting-body = योजना मंज़ूर हो गई है। कॉपी करना कुछ ही पल में शुरू होगा।
-move-wait-admin-title = एडमिनिस्ट्रेटर का इंतज़ार है।
+move-wait-admin-title = एडमिनिस्ट्रेटर का इंतज़ार है
 move-wait-admin-body = यह लैपटॉप दूसरे लोगों की चीज़ें भी ले जाने के लिए एडमिनिस्ट्रेटर की मंज़ूरी माँग रहा है। लैपटॉप ने जो विंडो खोली है, उसमें जवाब दें।
 move-others-not-approved = एडमिनिस्ट्रेटर ने मंज़ूरी नहीं दी, इसलिए इस बार सिर्फ़ आपकी चीज़ें जाएँगी। दूसरे लोगों की चीज़ें अपनी जगह रहेंगी।
 move-others-failed = PCTwin दूसरे लोगों की चीज़ें ले जाने के लिए ज़रूरी हिस्सा शुरू नहीं कर सका, इसलिए इस बार सिर्फ़ आपकी चीज़ें जाएँगी। उनकी कोई चीज़ नहीं बदली।
@@ -1238,11 +1238,11 @@ place-todo =
         [one] { $count } और व्यक्ति की चीज़ों की जगह चुनें।
        *[other] { $count } और लोगों की चीज़ों की जगह चुनें।
     }
-fda-title = आपका Mac कुछ फ़ोल्डर निजी रख रहा है।
+fda-title = PCTwin को कुछ फ़ोल्डर पढ़ने की अनुमति चाहिए
 fda-body =
     { NUMBER($count) ->
-        [one] Mac की निजता सेटिंग की वजह से आपकी { $count } जगह देखी नहीं जा सकी। PCTwin को अनुमति दें, फिर दोबारा जाँचें, ताकि आपकी कोई चीज़ न छूटे।
-       *[other] Mac की निजता सेटिंग की वजह से आपकी { $count } जगहें देखी नहीं जा सकीं। PCTwin को अनुमति दें, फिर दोबारा जाँचें, ताकि आपकी कोई चीज़ न छूटे।
+        [one] Mac की निजता सेटिंग की वजह से आपकी { $count } जगह पढ़ी नहीं जा सकी। PCTwin को एक्सेस दें, फिर दोबारा जाँचें, ताकि आपकी कोई फ़ाइल न छूटे।
+       *[other] Mac की निजता सेटिंग की वजह से आपकी { $count } जगहें पढ़ी नहीं जा सकीं। PCTwin को एक्सेस दें, फिर दोबारा जाँचें, ताकि आपकी कोई फ़ाइल न छूटे।
     }
 fda-step-1 = सिस्टम सेटिंग्स खोलें, फिर गोपनीयता और सुरक्षा।
 fda-step-2 = फ़ुल डिस्क एक्सेस चुनें।
@@ -1266,12 +1266,12 @@ move-ended-old-title = आपका पुराना लैपटॉप
 move-ended-old-body = उस पर कुछ भी बदला या हटाया नहीं गया।
 move-ended-old-badge = बिना बदलाव
 move-ended-next = फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें। पहले से कॉपी और जाँची गई फ़ाइलें पहचानी जाती हैं और दोबारा कॉपी नहीं होतीं।
-move-lost-title = आपके दूसरे लैपटॉप से कनेक्शन टूट गया।
+move-lost-title = आपके दूसरे लैपटॉप से कनेक्शन टूट गया
 move-lost-body = लैपटॉप एक-दूसरे तक नहीं पहुँच पाए, इसलिए स्थानांतरण आगे नहीं बढ़ सका। देखें कि दोनों चालू हैं, जागे हुए हैं और पास-पास हैं।
-move-not-approved-title = स्थानांतरण शुरू नहीं हुआ।
+move-not-approved-title = स्थानांतरण शुरू नहीं हुआ
 move-not-approved-old = नए लैपटॉप पर योजना मंज़ूर नहीं हुई, इसलिए कुछ भी कॉपी नहीं हुआ।
 move-not-approved-new = आपने योजना मंज़ूर नहीं की, इसलिए कुछ भी कॉपी नहीं हुआ।
-move-failed-title = कुछ गड़बड़ हो गई।
+move-failed-title = एक त्रुटि की वजह से स्थानांतरण रुक गया
 move-failed-body = स्थानांतरण आगे नहीं बढ़ सका। अगर ऐसा फिर हो, तो नीचे ज़्यादा जानकारी में बताया गया है कि क्या गड़बड़ हुई।
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
@@ -1281,19 +1281,19 @@ move-update-here-title = इस लैपटॉप पर PCTwin अपडेट
 move-update-here-body = इस लैपटॉप पर PCTwin दूसरे लैपटॉप से पुराना है, इसलिए दोनों मिलकर फ़ाइलें नहीं ले जा सकते। यहाँ PCTwin अपडेट करें, फिर से शुरू करें। कुछ भी कॉपी नहीं हुआ।
 move-update-there-title = दूसरे लैपटॉप पर PCTwin अपडेट करें
 move-update-there-body = दूसरे लैपटॉप पर PCTwin इस लैपटॉप से पुराना है, इसलिए दोनों मिलकर फ़ाइलें नहीं ले जा सकते। वहाँ PCTwin अपडेट करें, फिर से शुरू करें। कुछ भी कॉपी नहीं हुआ।
-move-refused-title = स्थानांतरण शुरू नहीं हो सका।
+move-refused-title = स्थानांतरण शुरू नहीं हो सका
 move-refused-not-paired = आपके लैपटॉप अब जुड़े नहीं हैं। स्थानांतरण शुरू करने के लिए उन्हें फिर से जोड़ें।
 move-refused-busy = इस लैपटॉप पर पहले से एक स्थानांतरण चल रहा है।
 move-refused-not-moving = इस लैपटॉप पर कोई स्थानांतरण नहीं चल रहा है।
 move-refused-plan-changed = मंज़ूरी से पहले योजना बदल गई। नई योजना देखने के लिए लैपटॉप फिर से जोड़ें।
 move-refused-failed = इस लैपटॉप के फ़ोल्डर स्थानांतरण के लिए तैयार नहीं हो सके। फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें।
-drive-problem-title = स्थानांतरण को आपका ध्यान चाहिए।
+drive-problem-title = स्थानांतरण को आपका ध्यान चाहिए
 drive-problem-body = PCTwin ने कई बार जाँचा, और { $place } में रखी कॉपियाँ मूल फ़ाइलों से मेल नहीं खाईं। ड्राइव ख़राब, भरी हुई या निकली हुई हो सकती है, इसलिए वहाँ कॉपी करना रुका है।
 drive-problem-kept-title = पहले से कॉपी और जाँचा गया
 drive-problem-waiting-title = { $place } में अभी कॉपी होना बाकी
 drive-problem-badge = रुका हुआ
-drive-problem-fix = देखें कि ड्राइव लगी है और उसमें जगह है, फिर आगे बढ़ें। इससे बचने के लिए आपकी चुनी कोई चीज़ छोड़ी नहीं जाती। आप स्थानांतरण रोक भी सकते हैं।
-drive-problem-carry-on = जारी रखें
+drive-problem-fix = देखें कि ड्राइव लगी है और उसमें खाली जगह है, फिर आगे बढ़ें। इससे बचने के लिए आपकी चुनी कोई चीज़ छोड़ी नहीं जाती। आप स्थानांतरण रोक भी सकते हैं।
+drive-problem-carry-on = आगे बढ़ें
 
 ## R02 Your move, item by item (detailed report)
 
@@ -1400,13 +1400,13 @@ progress-panel-pausing = रोका जा रहा है
 outcome-metric-size = कॉपी और जाँचा गया
 outcome-metric-action = पर आपकी कार्रवाई ज़रूरी
 progress-percent-unknown = PCTwin अभी इस स्थानांतरण का साइज़ पता कर रहा है।
-mini-title-send-paused = भेजना रुका हुआ है।
+mini-title-send-paused = भेजना रुका हुआ है
 cancel-ack-hint = बंद करने का बटन चालू करने के लिए ऊपर वाले बॉक्स पर टिक करें।
 progress-state-placing = जगह पर रखा जा रहा है
 progress-state-existing = पहले से मौजूद
-outcome-stopped-title = आपका स्थानांतरण बंद कर दिया गया।
+outcome-stopped-title = आपका स्थानांतरण बंद कर दिया गया
 outcome-stopped-body = स्थानांतरण आपने बंद किया। उससे पहले जो कॉपी और जाँचा गया था, वह रखा गया है। बाकी कॉपी नहीं हुआ।
-outcome-broke-title = आपका स्थानांतरण समय से पहले खत्म हो गया।
+outcome-broke-title = आपका स्थानांतरण समय से पहले खत्म हो गया
 outcome-broke-body = लैपटॉप के बीच कुछ गड़बड़ हुई, इसलिए स्थानांतरण आगे नहीं चल सका। उससे पहले जो कॉपी और जाँचा गया था, वह रखा गया है। बाकी कॉपी नहीं हुआ।
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $total } में से { $done } आइटम कॉपी और जाँचे गए।
@@ -1433,8 +1433,8 @@ qs-label-this = यह लैपटॉप
 qs-label-other = दूसरा लैपटॉप
 qs-pick-failed = चुनने वाली विंडो नहीं खुल सकी। फिर से कोशिश करें।
 qs-pick-too-many = ये एक बार भेजने में जा सकने वाली फ़ाइलों से ज़्यादा हैं। कुछ फ़ोल्डरों से टिक हटाएँ, या इन्हें हिस्सों में भेजें।
-qs-problem-lost-title = लैपटॉप के बीच कनेक्शन टूट गया।
-qs-problem-failed-title = इस बार फ़ाइलें नहीं भेजी जा सकीं।
+qs-problem-lost-title = लैपटॉप के बीच कनेक्शन टूट गया
+qs-problem-failed-title = इस बार फ़ाइलें नहीं भेजी जा सकीं
 qs-problem-body = जो पहले से मिल चुका और जाँचा जा चुका है, वह अपनी जगह रहता है। फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें।
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
@@ -1450,7 +1450,7 @@ qs-tally-badge = आस-पास भेजना
 
 ## Q01 Quick Send home
 
-qs-home-title = आस-पास के किसी लैपटॉप पर फ़ाइलें भेजें।
+qs-home-title = आस-पास के किसी लैपटॉप पर फ़ाइलें भेजें
 qs-home-body = या किसी लैपटॉप से फ़ाइलें पाएँ।
 qs-send-title = फ़ाइलें भेजें
 qs-send-body = अपने लैपटॉप पर फ़ाइलें या फ़ोल्डर चुनें।
@@ -1484,7 +1484,7 @@ qs-choose-continue = जारी रखें
 
 ## Q12 Send progress
 
-qs-sending-title = आपकी फ़ाइलें रास्ते में हैं।
+qs-sending-title = आपकी फ़ाइलें भेजी जा रही हैं
 qs-sending-body = कॉपियाँ सीधे पाने वाले लैपटॉप पर जाती हैं।
 qs-sending-progress =
     .aria-label = फ़ाइलें भेजी जा रही हैं
@@ -1508,7 +1508,7 @@ qs-sending-needs-action =
     }
 qs-pause = भेजना रोकें
 qs-resume = फिर से शुरू करें
-qs-compact = छोटा करें
+qs-compact = कम दिखाएँ
 qs-stop = यह भेजना बंद करें
 qs-sending-complete-title = भेजना पूरा हुआ
 
@@ -1531,7 +1531,7 @@ qs-stop-keep = भेजना जारी रखें
 
 ## F08 Your moves, kept on this laptop (history)
 
-history-title = आपके स्थानांतरण, इस लैपटॉप पर रखे हुए।
+history-title = आपका स्थानांतरण इतिहास
 history-body = कोई रिपोर्ट फिर से खोलें, या सहेजा गया स्थानांतरण आगे बढ़ाएं।
 history-row-move = { $from } → { $to }
 history-status-finished = पूरा हुआ
@@ -1541,7 +1541,7 @@ history-status-steps-left =
        *[other] पूरा हुआ, आपके लिए { $count } चरण बाकी
     }
 history-status-paused = रुका हुआ
-history-status-stopped = सुरक्षित रूप से बंद
+history-status-stopped = रोका गया
 history-open-report = रिपोर्ट
 history-undo = पहले जैसा करें
 history-continue = आगे बढ़ें
@@ -1597,14 +1597,14 @@ qs-pair-heads-up-firewall = Windows पूछ सकता है कि क्�
 qs-pair-new-eyebrow = प्राप्त हो रहा है
 qs-pair-new-searching-title = भेजने वाले लैपटॉप को खोजा जा रहा है…
 qs-pair-new-searching-body = भेजने वाले लैपटॉप पर PCTwin खुला रखें, उसी Wi-Fi पर जिस पर आपका लैपटॉप है।
-qs-pair-new-search-failed-title = भेजने वाले लैपटॉप को खोजा नहीं जा सका।
+qs-pair-new-search-failed-title = भेजने वाले लैपटॉप को खोजा नहीं जा सका
 qs-pair-new-list-title = कौन-सा लैपटॉप भेज रहा है?
 qs-pair-new-list-body = वह नाम चुनें जो भेजने वाला लैपटॉप अपनी स्क्रीन पर दिखाता है।
 qs-pair-new-same-label = पास के किसी दूसरे लैपटॉप का भी यही नाम है। भेजने वाले लैपटॉप की स्क्रीन देखें।
-qs-pair-new-none-title = भेजने वाला कोई लैपटॉप नहीं मिला।
+qs-pair-new-none-title = भेजने वाला कोई लैपटॉप नहीं मिला
 qs-pair-new-none-body = जाँचें कि भेजने वाले लैपटॉप पर PCTwin खुला है और कोड दिखा रहा है, और दोनों लैपटॉप एक ही Wi-Fi पर हैं। फिर से खोजें।
 qs-pair-new-code-hint = इसे { $label } की स्क्रीन से पढ़ें। यह हर मिनट बदलता है।
-qs-pair-new-number-title = { $label } पर यह नंबर चुनें।
+qs-pair-new-number-title = { $label } पर यह नंबर चुनें
 qs-pair-new-number-body = { $label } पर तीन नंबर दिखते हैं। वहाँ यह नंबर चुनें।
 qs-pair-new-number-waiting = { $label } का इंतज़ार है…
 qs-pairing-code-invalid = कोड में छह अंक होने चाहिए। { $label } की स्क्रीन देखें और कोड फिर से लिखें।
@@ -1626,11 +1626,11 @@ qs-folder-title = फ़ाइलें कहाँ जाएँ?
 qs-folder-none = PCTwin प्राप्त फ़ाइलों वाले फ़ोल्डर का उपयोग नहीं कर सकता। फ़ाइलों के लिए कोई फ़ोल्डर चुनें, फिर जोड़ें।
 qs-folder-choose = फ़ोल्डर चुनें
 qs-folder-failed = PCTwin उस फ़ोल्डर में फ़ाइलें नहीं सहेज सकता। कोई दूसरा फ़ोल्डर चुनें।
-qs-done-sent-title = आपकी फ़ाइलें भेज दी गईं।
-qs-done-here-title = आपकी फ़ाइलें आ गई हैं।
-qs-done-partial-title = कुछ फ़ाइलें नहीं पहुँचीं।
-qs-done-stopped-title = यह भेजना बंद किया गया।
-qs-done-empty-title = कुछ भी नहीं भेजा गया।
+qs-done-sent-title = आपकी फ़ाइलें भेज दी गईं
+qs-done-here-title = फ़ाइलें मिल गईं
+qs-done-partial-title = कुछ फ़ाइलें नहीं पहुँचीं
+qs-done-stopped-title = यह भेजना बंद किया गया
+qs-done-empty-title = कुछ भी नहीं भेजा गया
 qs-done-arrived =
     { NUMBER($count) ->
         [one] { $count } फ़ाइल · { $size } पहुँची और मूल से मेल खाई
@@ -1677,7 +1677,7 @@ qs-done-done = हो गया
 qs-stop-now = भेजना बंद करें
 qs-stop-finished = यह भेजना पहले ही पूरा हो चुका है।
 qs-route-receiving = प्राप्त हो रहा है
-qs-receiving-title = फ़ाइलें आ रही हैं।
+qs-receiving-title = फ़ाइलें आ रही हैं
 qs-receiving-body = कॉपियाँ सीधे { $label } से आती हैं।
 qs-receiving-card = फ़ाइलें प्राप्त हो रही हैं
 qs-receiving-progress =
@@ -1705,9 +1705,9 @@ qs-pair-old-step-2 = अगर कोई सूची दिखे, तो अ�
 qs-pair-old-locked-body = पाँच गलत कोड के बाद, आपके लैपटॉप को सुरक्षित रखने के लिए जोड़ना बंद हो गया। कुछ भी शेयर नहीं हुआ। अगर यह आप थे, तो नए कोड के लिए “फिर से शुरू करें” चुनें।
 qs-pair-new-needs-update = उस पर PCTwin का पुराना संस्करण है। उस पर PCTwin अपडेट करें, फिर से खोजें।
 qs-pairing-no-network = आपका लैपटॉप किसी Wi-Fi या तार वाले नेटवर्क पर नहीं है। उसे जोड़ें, फिर से कोशिश करें।
-qs-problem-room-title = { $folder } में पर्याप्त जगह नहीं है।
+qs-problem-room-title = { $folder } में पर्याप्त जगह नहीं है
 qs-problem-room-body = इन फ़ाइलों को { $needed } चाहिए, और वहाँ { $room } इस्तेमाल हो सकता है। कुछ भी सहेजा नहीं गया। जगह खाली करें या कोई दूसरा फ़ोल्डर चुनें, फिर से कोशिश करें।
-qs-done-refused-title = पाने वाले लैपटॉप ने ये फ़ाइलें नहीं लीं।
+qs-done-refused-title = पाने वाले लैपटॉप ने ये फ़ाइलें नहीं लीं
 qs-done-refused-body = हो सकता है उस पर पर्याप्त जगह न हो। कुछ भी नहीं भेजा गया।
 
 ## चरण 2 की स्क्रीन (कार्य सूची 2.8): साझा हिस्से
@@ -1720,13 +1720,13 @@ guard-state-awaiting-maker = ऐप बनाने वाले या ऑन�
 guard-state-working = काम हो रहा है
 guard-state-checking = जो किया गया, उसकी जाँच हो रही है
 guard-state-applying = चीज़ें अपनी जगह रखी जा रही हैं
-guard-state-pause-requested = अगले सुरक्षित मोड़ पर रुकेगा। अभी रुका नहीं है।
-guard-state-paused = सुरक्षित मोड़ पर रुका हुआ
+guard-state-pause-requested = मौजूदा चरण के बाद रुकेगा। अभी रुका नहीं है।
+guard-state-paused = रुका हुआ
 guard-state-source-unavailable = पुराना लैपटॉप या ड्राइव जुड़ा नहीं है
 guard-state-blocked = पहले कुछ ठीक करना होगा
 guard-state-partial = आंशिक रूप से हो गया
 guard-state-retrying = फिर से कोशिश हो रही है
-guard-state-reconciling = जाँच हो रही है कि काम कहाँ तक पहुँचा
+guard-state-reconciling = जाँच हो रही है कि क्या पूरा हुआ
 guard-state-failed = यह नहीं हो पाया
 guard-state-complete = हो गया
 guard-state-cancelled = रोक दिया गया। जो पहले हो चुका था, वह रखा गया है।
@@ -1752,7 +1752,7 @@ guard-free-unknown = खाली जगह पता नहीं है
 guard-items-size = { $items } आइटम, { $size }
 guard-try-again = फिर से कोशिश करें
 guard-pause = रोकें
-guard-resume = जारी रखें
+guard-resume = फिर से शुरू करें
 guard-check-again = फिर से जाँच करें
 guard-strip-plan = आपकी योजना
 guard-strip-report = आपकी रिपोर्ट
@@ -1763,14 +1763,14 @@ guard-strip-checking = जाँच
 
 ## X09 रीस्टार्ट के बाद जाँच, और स्थिति उपलब्ध नहीं
 
-guard-checking-title = जाँच हो रही है कि काम कहाँ तक पहुँचा
+guard-checking-title = जाँच हो रही है कि क्या पूरा हुआ
 guard-checking-body = PCTwin देख रहा है कि बंद होने से पहले क्या पूरा हो चुका था। पता चलते ही आपके विकल्प वापस आ जाएँगे।
 guard-unavailable-title = स्थिति उपलब्ध नहीं है
 guard-unavailable-body = PCTwin अभी नहीं बता सकता कि यह स्थानांतरण क्या कर रहा है। जब तक वह बता नहीं पाता, कुछ भी पूरा हुआ नहीं दिखाया जाएगा। थोड़ी देर में फिर से जाँच करें।
 
 ## 2.9 कुछ भी बदलने से पहले
 
-guard-changes-title = कुछ भी बदलने से पहले
+guard-changes-title = स्थानांतरण क्या बदलेगा
 guard-changes-body = यह वह सब है जो स्थानांतरण इस लैपटॉप पर बदलेगा, और हर चीज़ के लिए पूर्ववत करना क्या कर सकता है। अभी कुछ नहीं बदला है।
 guard-changes-download = इंटरनेट से डाउनलोड
 guard-changes-download-none = कुछ नहीं
@@ -1829,7 +1829,7 @@ guard-changed-title =
         [one] आपकी मंज़ूरी के बाद { $count } चीज़ बदल गई
        *[other] आपकी मंज़ूरी के बाद { $count } चीज़ें बदल गईं
     }
-guard-changed-body = सिर्फ़ इन्हें दोबारा देखना ज़रूरी है। बाकी सब मंज़ूर रहता है और आगे बढ़ता है।
+guard-changed-body = सिर्फ़ इन्हें दोबारा जाँचना है। बाकी सब मंज़ूर रहता है और जारी रहता है।
 guard-changed-changed-on-old-laptop = यह पुराने लैपटॉप पर बदल गया।
 guard-changed-app-updated = ऐप ने खुद को अपडेट कर लिया।
 guard-changed-destination-changed = जहाँ यह जाना है, वह जगह बदल गई।
@@ -1844,24 +1844,24 @@ guard-space-title = नए लैपटॉप पर जगह
 guard-space-title-short = नए लैपटॉप पर जगह कम है
 guard-space-body = PCTwin ने हर ड्राइव पर आने वाली हर चीज़ गिनी, पूर्ववत करने के लिए ज़रूरी जगह समेत। जगह में आने के लिए आपकी चुनी हुई कोई चीज़ नहीं छोड़ी जाती।
 guard-space-proposal = जो नहीं आ पा रहा, उसके लिए PCTwin का सुझाव
-guard-keep-off-leave-in-cloud = उनके क्लाउड में छोड़े गए, जहाँ वे सुरक्षित हैं
+guard-keep-off-leave-in-cloud = ऑनलाइन छोड़े गए, जहाँ वे अभी रखे हैं
 guard-keep-off-offload-drive = आपकी दूसरी ड्राइव पर रखे गए
 guard-keep-off-leave-on-old-laptop = पुराने लैपटॉप पर छोड़े गए। इनके स्थानांतरित होने तक उसे संभालकर रखें।
 guard-offload-title = आपकी दूसरी ड्राइव
 guard-offload-connected = जुड़ी है
 guard-offload-not-connected = जुड़ी नहीं है
 guard-offload-approved = आपने यह ड्राइव चुनी है। इस पर रखी फ़ाइलें नए लैपटॉप पर नहीं हैं: उन्हें खोलने के लिए इसे जोड़ें।
-guard-offload-ask = PCTwin कुछ चीज़ें इस ड्राइव पर रख सकता है। इसके लिए उसे इस ड्राइव पर आपकी अलग से हाँ चाहिए।
+guard-offload-ask = PCTwin कुछ चीज़ें इस ड्राइव पर रख सकता है। इसके लिए इस ड्राइव की अलग मंज़ूरी चाहिए।
 guard-offload-use = यह ड्राइव इस्तेमाल करें
 guard-space-approve = यह योजना मंज़ूर करें
-guard-safe-in = { $provider } में सुरक्षित
-guard-safe-in-cloud = आपके क्लाउड में सुरक्षित
+guard-safe-in = { $provider } में रखी हैं
+guard-safe-in-cloud = ऑनलाइन रखी हैं
 guard-safe-in-detail =
     { $count ->
         [one] { $count } फ़ाइल सिर्फ़ ऑनलाइन रखी है। नए लैपटॉप पर साइन इन करने पर यह वापस आ जाएगी।
        *[other] { $count } फ़ाइलें सिर्फ़ ऑनलाइन रखी हैं। नए लैपटॉप पर साइन इन करने पर वे वापस आ जाएँगी।
     }
-guard-your-cloud = आपका क्लाउड
+guard-your-cloud = आपकी ऑनलाइन स्टोरेज
 
 ## M09 सिर्फ़ ऑनलाइन रखी फ़ाइलों की कॉपी रखना
 
@@ -1873,7 +1873,7 @@ guard-local-body =
     }
 guard-local-download = पुराने लैपटॉप पर डाउनलोड करने के लिए
 guard-local-old-space = पुराने लैपटॉप पर जगह
-guard-local-how = PCTwin उन्हें थोड़ी-थोड़ी करके नीचे लाता है, भेजता है, और फिर पुराने लैपटॉप पर उन्हें दोबारा सिर्फ़ ऑनलाइन कर देता है।
+guard-local-how = PCTwin पुराने लैपटॉप पर उन्हें थोड़ी-थोड़ी करके डाउनलोड करता है, भेजता है, और फिर वहाँ उन्हें दोबारा सिर्फ़ ऑनलाइन कर देता है।
 guard-local-paused-metered = रुका हुआ: इस कनेक्शन पर डेटा का पैसा लग सकता है। मुफ़्त कनेक्शन पर यह अपने आप जारी रहेगा, या आप अनुमति दें तो अभी।
 guard-local-paused-no-space = रुका हुआ: पुराने लैपटॉप पर अगली कुछ फ़ाइलों के लिए जगह नहीं बची। बाकी { $provider } में सुरक्षित रहती हैं।
 guard-local-done = हो गया। कॉपियाँ नए लैपटॉप पर हैं।
@@ -1894,8 +1894,8 @@ guard-owners-approve = मंज़ूर करें
 
 ## X12 जो पूरा नहीं हुआ
 
-guard-report-title-partial = ज़्यादातर चीज़ें स्थानांतरित हो गईं। कुछ नहीं हुईं।
-guard-report-title-done = इस हिस्से की सारी चीज़ें स्थानांतरित हो गईं।
+guard-report-title-partial = कुछ चीज़ें स्थानांतरित नहीं हुईं
+guard-report-title-done = इस हिस्से की सारी चीज़ें स्थानांतरित हो गईं
 guard-report-body-partial = नीचे दी हर चीज़ अभी पुराने लैपटॉप पर है। तैयार हों तो हर एक को फिर से आज़माएँ। जो पहले ही स्थानांतरित हो चुका है, वह वहीं रहेगा।
 guard-report-body-done = फिर से आज़माने के लिए कुछ नहीं बचा।
 guard-line-app = ऐप { $name }
@@ -1918,7 +1918,7 @@ guard-line-why-not-started = { $laptop } से: स्थानांतरण 
 
 guard-permission-title-explain = PCTwin को आपके सिस्टम से एक मंज़ूरी चाहिए
 guard-permission-title-waiting-for-system = अपने सिस्टम के सवाल का जवाब दें
-guard-permission-title-denied = आपने मना कर दिया
+guard-permission-title-denied = आपने मंज़ूरी नहीं दी
 guard-permission-title-closed-without-answer = सवाल बिना जवाब के बंद कर दिया गया
 guard-permission-title-given = इस स्थानांतरण के लिए मंज़ूर
 guard-permission-title-ended-by-sleep = लैपटॉप के स्लीप में जाने पर मंज़ूरी खत्म हो गई
@@ -1926,7 +1926,7 @@ guard-permission-title-ended-other-session = किसी और के सा�
 guard-permission-body-explain = आपका सिस्टम पूरे स्थानांतरण के लिए एक ही बार पूछता है। इसे सिर्फ़ नीचे दिए चरण इस्तेमाल करते हैं, और यह स्थानांतरण के साथ खत्म हो जाती है।
 guard-permission-body-waiting-for-system = आपके सिस्टम की अपनी विंडो खुली है। अगर वह माँगे तो पासवर्ड वहीं डालें।
 guard-permission-body-denied = सिर्फ़ वही चरण छोड़े जाएँगे जिन्हें इसकी ज़रूरत थी। बाकी सब आगे बढ़ता है।
-guard-permission-body-closed-without-answer = इसे बंद करना हाँ नहीं है, इसलिए जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। फिर से माँगें, या इसके बिना आगे बढ़ें।
+guard-permission-body-closed-without-answer = विंडो बंद करना मंज़ूरी नहीं माना जाता, इसलिए जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। फिर से माँगें, या इसके बिना आगे बढ़ें।
 guard-permission-body-given = PCTwin इसे सिर्फ़ नीचे दिए चरणों के लिए इस्तेमाल करता है, और यह इस स्थानांतरण के साथ खत्म हो जाती है।
 guard-permission-body-ended-by-sleep = इसके बाद जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। आगे बढ़ने के लिए फिर से माँगें।
 guard-permission-body-ended-other-session = इसके बाद जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। अपने अकाउंट पर लौटने पर फिर से माँगें।
@@ -1946,13 +1946,13 @@ guard-restore-not-made-failed = नहीं बनाया गया: Windows 
 
 ## T01 से T04 ऐसे लैपटॉप से रेस्क्यू जो चालू नहीं होता
 
-guard-rescue-title-intro = जो लैपटॉप चालू नहीं होता, उससे ज़रूरी चीज़ें बचाएँ
+guard-rescue-title-intro = ऐसे लैपटॉप से फ़ाइलें कॉपी करें जो चालू नहीं होता
 guard-rescue-title-pick-drive = बचाने के लिए ड्राइव चुनें
 guard-rescue-title-locked = यह ड्राइव लॉक है
 guard-rescue-title-no-system = यह किसी लैपटॉप की ड्राइव नहीं है
 guard-rescue-title-salvage = जो पढ़ा जा सका, वह यह है
 guard-rescue-body-intro = पुराने लैपटॉप से ड्राइव निकालें और ड्राइव एडेप्टर या एन्क्लोज़र से उसे इस लैपटॉप से जोड़ें।
-guard-rescue-body-pick-drive = पुराने लैपटॉप की ड्राइव चुनें। जिस ड्राइव पर चीज़ें जानी हैं, वह वही नहीं हो सकती जिसे आप बचा रहे हैं।
+guard-rescue-body-pick-drive = पुराने लैपटॉप की ड्राइव चुनें। जिस ड्राइव पर आप कॉपी करते हैं, वह वही नहीं हो सकती जिसे आप बचा रहे हैं।
 guard-rescue-body-locked = पहले इसे अपने सिस्टम में अनलॉक करें। फिर दोबारा जाँचें।
 guard-rescue-body-no-system = इस ड्राइव पर लैपटॉप का सिस्टम और होम फ़ोल्डर नहीं हैं। अगर यह आम USB ड्राइव है, तो इसे नए लैपटॉप पर इस्तेमाल करें।
 guard-rescue-body-salvage = सूची देखें, फिर जो पढ़ा जा सका उसे इस्तेमाल करें।
@@ -2076,7 +2076,7 @@ guard-undo-result-kept-other-version = रखा गया, क्योंक�
 guard-undo-result-removed-restart = हटाया गया। पूरा करने के लिए अपना लैपटॉप फिर से चालू करें।
 guard-undo-result-not-removed = नहीं हटाया गया। आप इसे अपने लैपटॉप की सेटिंग्स में हटा सकते हैं।
 guard-undo-close = हो गया
-move-wait-appdata-title = आपके ऐप डेटा को देखा जा रहा है।
+move-wait-appdata-title = आपके ऐप डेटा को देखा जा रहा है
 move-wait-appdata-body = आपकी फ़ाइलें मिल गई हैं। PCTwin अभी आपके ऐप्स का रखा डेटा देख रहा है, जैसे ईमेल और ब्राउज़र। इसमें ज़्यादा से ज़्यादा दस मिनट लगते हैं। इस लैपटॉप पर कुछ नहीं बदलता।
 fullmove-special-not-checked = ऐप डेटा जिसे PCTwin पूरी तरह जाँच नहीं सका
 fullmove-group-appdata = ऐप डेटा जिसे PCTwin कॉपी करेगा: { $count }
@@ -2160,7 +2160,7 @@ choose-nothing = ले जाने के लिए कम से कम ए�
 choose-continue = आगे बढ़ें
 
 ## The new laptop accepts what the old laptop chose (decided 28 October 2026)
-accept-title = { $from } आपको यह भेजना चाहता है।
+accept-title = { $from } से स्थानांतरण स्वीकार करें?
 accept-body = यह आपके पुराने लैपटॉप पर चुना गया। स्वीकार करें, और PCTwin इसे यहाँ ले आएगा।
 accept-files =
     { $count ->
@@ -2169,8 +2169,8 @@ accept-files =
     }
 accept-apps =
     { $count ->
-        [one] 1 ऐप, आपके लिए इंस्टॉल होगा
-       *[other] { $count } ऐप, आपके लिए इंस्टॉल होंगे
+        [one] 1 ऐप इंस्टॉल होगा
+       *[other] { $count } ऐप इंस्टॉल होंगे
     }
 accept-settings = सेटिंग और ऐप डेटा
 accept-fits = यह इस लैपटॉप पर आ जाएगा।
@@ -2309,7 +2309,7 @@ work-what-database = डेटाबेस खुलता है
 work-what-task = कुछ जो आप खुद जाँचते हैं
 work-label-machine-checked = PCTwin ने जाँचा
 work-label-person-confirmed = आपने जाँचा
-work-label-still-needs-attention = अभी भी देखना है
+work-label-still-needs-attention = अभी जाँच बाकी है
 work-state-not-run-yet = अभी जाँचा नहीं
 work-state-all-there = सब कुछ है
 work-state-missing = कुछ कम है
@@ -2330,7 +2330,7 @@ work-problem-wrong-kind = यह जवाब इस जाँच के लि�
 work-problem-failed = कुछ गलत हो गया। फिर से कोशिश करें।
 repair-waits-old-laptop = पुराना लैपटॉप जुड़ा होना चाहिए
 repair-waits-internet = इंटरनेट चाहिए
-repair-waits-administrator = एडमिनिस्ट्रेटर संकेत पर आपकी हाँ चाहिए
+repair-waits-administrator = एडमिनिस्ट्रेटर की मंज़ूरी चाहिए
 repair-waits-installer-tool = सिस्टम का ऐप इंस्टॉलर चाहिए
 repair-waits-space = इस लैपटॉप पर और जगह चाहिए
 repair-waits-close-app = ऐप बंद होना चाहिए
@@ -2338,10 +2338,10 @@ repair-problem-nothing-to-repair = चुनी गई किसी चीज़
 repair-problem-stale = सूची बदल गई। इसे फिर से देखें।
 repair-problem-busy = PCTwin किसी और काम में व्यस्त है। उसके पूरा होने पर फिर से कोशिश करें।
 repair-problem-failed = कुछ गलत हो गया। और कुछ नहीं बदला गया।
-changed-why-app-updated = आपकी हाँ के बाद ऐप अपडेट हुआ
-changed-why-app-removed = आपकी हाँ के बाद ऐप हटाया गया
+changed-why-app-updated = आपकी मंज़ूरी के बाद ऐप अपडेट हुआ
+changed-why-app-removed = आपकी मंज़ूरी के बाद ऐप हटाया गया
 changed-why-destination-changed = जिस फ़ोल्डर में यह जाता है वह बदल गया
-changed-why-project-edited = आपकी हाँ के बाद पुराने लैपटॉप पर इसे बदला गया
+changed-why-project-edited = आपकी मंज़ूरी के बाद इसे पुराने लैपटॉप पर बदला गया
 changed-step-install = इंस्टॉल करना
 changed-step-settings = सेटिंग
 changed-step-app-data = ऐप डेटा
@@ -2414,7 +2414,7 @@ finish-headline-ready-for-selected-work = आपकी चुनी हुई �
 finish-headline-ready-for-selected-work-body = PCTwin को आपकी चुनी हुई हर चीज़ इस लैपटॉप पर मिली और उसने जहाँ तक हो सका जाँची। इसका यह मतलब नहीं कि हर ऐप पहले जैसा चलेगा।
 finish-headline-finished-with-tasks = स्थानांतरण पूरा हुआ, कुछ काम बाकी हैं
 finish-headline-finished-with-tasks-body = कुछ चीज़ों में आपकी ज़रूरत है, या वे कॉपी नहीं हुईं। वे इसी पेज पर सूचीबद्ध हैं।
-finish-headline-data-preserved = आपकी चीज़ें सुरक्षित हैं, पर कुछ अभी खुल नहीं सकतीं
+finish-headline-data-preserved = सब कुछ यहाँ है, पर कुछ को खोलने के लिए चाबी चाहिए
 finish-headline-data-preserved-body = सब कुछ इस लैपटॉप पर है। कुछ चीज़ें खोलने के लिए कुंजी या रिकवरी कोड चाहिए, और PCTwin उसे यहाँ जाँच नहीं सका।
 finish-headline-handover-unresolved = पुराना लैपटॉप अभी सौंपा नहीं गया
 finish-headline-handover-unresolved-body = यह लैपटॉप तैयार है। पुराना लैपटॉप छोड़ने की सूची में अभी कुछ बातें खुली हैं।
@@ -2473,7 +2473,7 @@ finish-step-setup = सेटअप पूरा करें
 finish-step-setup-detail = वे ऐप जिनमें आपको साइन इन करना है या कोई चरण पूरा करना है।
 finish-step-goodbye = पुराना लैपटॉप छोड़ने से पहले
 finish-step-goodbye-detail = जो अभी सिर्फ़ पुराने लैपटॉप पर है।
-finish-step-catchup = मुझे अपडेट करें
+finish-step-catchup = हाल के बदलाव कॉपी करें
 finish-step-catchup-detail = स्थानांतरण के बाद पुराने लैपटॉप पर जो बदला, उसे कॉपी करें।
 finish-step-handover = पुराना लैपटॉप सौंपें
 finish-step-handover-detail = सिस्टम के अपने टूल से अपना खाता हटाएँ या पुराना लैपटॉप मिटाएँ।
@@ -2546,7 +2546,7 @@ finish-goodbye-blocked-unchecked = स्थानांतरण के बा�
 finish-goodbye-clear = सबका जवाब दे दिया गया है और पुराना लैपटॉप जाँचा गया है। आप सौंपने का अनुरोध कर सकते हैं। वह अलग चरण है।
 finish-goodbye-handover = पुराना लैपटॉप सौंपें
 finish-goodbye-check-again = पुराना लैपटॉप फिर से जाँचें
-finish-catchup-title = मुझे अपडेट करें
+finish-catchup-title = हाल के बदलाव कॉपी करें
 finish-catchup-body = देखें कि स्थानांतरण के बाद पुराने लैपटॉप पर क्या बदला। हर बदलाव आप देखते हैं। PCTwin सिर्फ़ वही भेजता है जो आप चुनें।
 finish-catchup-purpose-check = सिर्फ़ पुराने लैपटॉप को देखें
 finish-catchup-purpose-check-detail = कुछ कॉपी नहीं होता। छोड़ने से पहले की आपकी सूची अपडेट होती है।
@@ -2631,7 +2631,7 @@ finish-confirm-go = पुष्टि करें और सिस्टम �
 finish-confirm-cancel = वापस जाएँ और कुछ न करें
 finish-confirm-needs-tick = ऊपर का बॉक्स टिक करने पर बटन काम करेगा।
 finish-started-title = सिस्टम के अपने चरण अपनाएँ
-finish-started-body = नीचे के चरण सिस्टम के हैं, PCTwin के नहीं। PCTwin उनकी अपनी कोई कॉपी नहीं बनाता।
+finish-started-body = नीचे के चरण सिस्टम के हैं, PCTwin के नहीं। PCTwin उनका अपना कोई रूप नहीं दिखाता।
 finish-started-opened = PCTwin ने सिस्टम का पेज खोल दिया।
 finish-started-not-opened = PCTwin सिस्टम का पेज नहीं खोल सका। उसे खुद खोलें और चरणों का पालन करें।
 finish-started-undo-closed = इस स्थानांतरण का पहले जैसा करना अब बंद है।
@@ -2760,8 +2760,8 @@ compat-steps-none = आपको कुछ नहीं करना है।
 compat-never-checked = इस ऐप को अभी तक किसी ने जाँचा नहीं है। PCTwin इसे आज़माएगा और बताएगा कि क्या हुआ।
 compat-checked-on = { $date } को जाँचा गया।
 compat-version = जाँचा गया संस्करण: { $version }
-work-strip = क्या मैं काम कर सकता हूँ?
-work-title = क्या मैं सच में काम कर सकता हूँ?
+work-strip = काम की जाँच
+work-title = जाँचें कि आप यहाँ काम कर सकते हैं
 work-body = इस लैपटॉप पर जिन फ़ाइलों, फ़ॉन्ट और कामों की आपको ज़रूरत है, उन्हें जोड़ें। PCTwin वही देखता है जो वह पढ़ सकता है। बाकी के लिए आप बताते हैं कि चला या नहीं। कुछ खोला या चलाया नहीं जाता।
 work-empty = अभी कोई जाँच नहीं है। नीचे कोई फ़ाइल, फ़ॉन्ट या काम जोड़ें।
 work-looked-at = { $of } में से { $checked } देखे गए।
@@ -2812,13 +2812,13 @@ repair-run =
         [one] { $count } आइटम फिर आज़माएँ
        *[other] { $count } आइटम फिर आज़माएँ
     }
-changed-strip = आपकी हाँ के बाद के बदलाव
+changed-strip = आपकी मंज़ूरी के बाद के बदलाव
 changed-title =
     { $count ->
-        [one] आपकी हाँ के बाद { $count } चीज़ बदली
-       *[other] आपकी हाँ के बाद { $count } चीज़ें बदलीं
+        [one] आपकी मंज़ूरी के बाद { $count } चीज़ बदली
+       *[other] आपकी मंज़ूरी के बाद { $count } चीज़ें बदलीं
     }
-changed-body = सिर्फ़ इन्हें नई हाँ चाहिए। बाकी सब मंज़ूर ही रहता है।
+changed-body = सिर्फ़ इन्हें फिर से आपकी मंज़ूरी चाहिए। बाकी सब मंज़ूर रहता है।
 changed-affects = असर: { $steps }
 changed-held =
     { $count ->
@@ -2826,7 +2826,7 @@ changed-held =
        *[other] { $count } चरण आपके जवाब का इंतज़ार कर रहे हैं।
     }
 changed-leave-out = इन्हें छोड़ दें
-changed-approve = फिर हाँ कहें
+changed-approve = फिर से मंज़ूर करें
 safe-stop-strip = अपडेट
 safe-stop-title = सुरक्षित पल का इंतज़ार
 safe-stop-body = PCTwin स्थानांतरण के बीच में खुद को अपडेट या हटाता नहीं है। वह तब तक रुकता है जब तक कुछ भी अधूरा न हो।
@@ -2853,11 +2853,11 @@ finish-step-repair =
        *[other] इन { $count } आइटम को ठीक करें
     }
 finish-step-repair-detail = सिर्फ़ वही फिर आज़माएँ जो पूरा नहीं हुआ। जो चला वह वैसा ही रहता है।
-finish-step-work = क्या मैं सच में काम कर सकता हूँ?
+finish-step-work = जाँचें कि आप यहाँ काम कर सकते हैं
 finish-step-work-detail = देखें कि आपको जिन फ़ाइलों, फ़ॉन्ट और कामों की ज़रूरत है वे यहाँ हैं।
 finish-step-kit = रिकवरी किट सहेजें
 finish-step-kit-detail = इस स्थानांतरण का एक छोटा रिकॉर्ड अपने चुने फ़ोल्डर में रखें।
-space-box-title = इस लैपटॉप पर सब कुछ रखने की जगह नहीं है।
+space-box-title = इस लैपटॉप पर सब कुछ रखने की जगह नहीं है
 space-box-choice = { $count ->
         [one] जो { $count } फ़ाइल ({ $size }) आपने सबसे लंबे समय से इस्तेमाल नहीं की, उसे पुराने लैपटॉप पर छोड़ दें
        *[other] जो { $count } फ़ाइलें ({ $size }) आपने सबसे लंबे समय से इस्तेमाल नहीं कीं, उन्हें पुराने लैपटॉप पर छोड़ दें
@@ -2866,7 +2866,7 @@ space-box-kept = कुछ भी मिटाया नहीं जाता�
 space-box-short = फिर भी { $size } की कमी है। कुछ फ़ोल्डरों से निशान हटाएँ, या उनके लिए कोई दूसरी जगह चुनें।
 space-box-fits = उन्हें पुराने लैपटॉप पर छोड़ने से बाकी सब आ जाता है।
 finish-handover-check-old = पुराने लैपटॉप को दोबारा जाँचें
-finish-handover-check-armed = PCTwin पुराने लैपटॉप को जाँचने के लिए तैयार है। पुराने लैपटॉप पर PCTwin खोलें और दोनों लैपटॉप को वैसे ही जोड़ें जैसे ले जाने के लिए जोड़ते हैं। फिर दोबारा देखें दबाएँ।
+finish-handover-check-armed = PCTwin पुराने लैपटॉप को जाँचने के लिए तैयार है। पुराने लैपटॉप पर PCTwin खोलें और दोनों लैपटॉप को वैसे ही जोड़ें जैसे ले जाने के लिए जोड़ते हैं। फिर दोबारा देखें चुनें।
 finish-handover-look-again = दोबारा देखें
 qs-where-title = इन्हें कहाँ रखें?
 qs-where-body = { $count ->

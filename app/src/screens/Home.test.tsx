@@ -75,10 +75,10 @@ describe("F01 Home: Returning and First use", () => {
   it("offers four cards in the mockup's order, each a title and one plain line, Quick Send filled", () => {
     home();
     expect(cards().map((c) => [c.querySelector("strong")?.textContent, c.querySelector("small")?.textContent])).toEqual([
-      ["Quick Send", "Send or receive files"],
-      ["Start a full move", "Move your setup"],
-      ["Restore setup", "Bring it back"],
-      ["Rescue a laptop", "Save what matters"],
+      [text("welcome-quick-send"), text("home-quick-send-body")],
+      [text("welcome-start"), text("home-move-body")],
+      [text("welcome-restore"), text("home-restore-body")],
+      [text("welcome-rescue"), text("home-rescue-body")],
     ]);
     expect(cards()[0].classList.contains("filled")).toBe(true);
     expect(cards().slice(1).some((c) => c.classList.contains("filled"))).toBe(false);
