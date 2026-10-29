@@ -8,8 +8,9 @@ import { labelShownSafely } from "../pairing";
 import History, { type ExportResult } from "./History";
 import Report from "./Report";
 import UndoHost from "./UndoHost";
+import FinishHost from "./FinishHost";
 
-type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "undo" };
+type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "undo" } | { kind: "finish"; id: string };
 
 /**
  * F08 My PCTwin history, from what the app recorded on this laptop when each move ended (never from
@@ -62,6 +63,16 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       />
     );
   }
+  if (view.kind === "finish") {
+    return (
+      <FinishHost
+        id={view.id}
+        onBack={() => {
+          setView({ kind: "list" });
+        }}
+      />
+    );
+  }
   if (view.kind === "report") {
     return (
       <Report
@@ -85,6 +96,9 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
         );
       }}
       onContinue={() => undefined}
+      onFinish={(id) => {
+        setView({ kind: "finish", id });
+      }}
       onUndo={(undoId) => {
         fullmoveUndo(undoId).then(
           () => {

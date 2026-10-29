@@ -21,7 +21,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * documents) that the plan held, with how many arrived copied and checked, counted the way the
  * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
-export default function Outcome({ outcome, onReport, onHome, onUndo, old = false }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void; /** This is the old laptop: it sent, it is not where the person arrives. */ old?: boolean }) {
+export default function Outcome({ outcome, onReport, onHome, onUndo, onFinish, old = false }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void; onUndo?: () => void; /** Finish your move (2.7): on the new laptop only. */ onFinish?: () => void; /** This is the old laptop: it sent, it is not where the person arrives. */ old?: boolean }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   // A move that ended early on its own (something went wrong between the laptops) never says the person stopped it.
@@ -116,6 +116,11 @@ export default function Outcome({ outcome, onReport, onHome, onUndo, old = false
         {onHome && (
           <Button variant="quiet" onClick={onHome}>
             {l10n.getString("outcome-home")}
+          </Button>
+        )}
+        {onFinish && (
+          <Button variant="secondary" onClick={onFinish}>
+            {l10n.getString("finish-title")}
           </Button>
         )}
         <Button variant="primary" onClick={onReport}>

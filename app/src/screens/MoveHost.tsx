@@ -61,6 +61,7 @@ import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
 import { AppDataComing, CloseApps, Rebuilding } from "./FullMoveParts";
 import UndoHost from "./UndoHost";
+import FinishHost from "./FinishHost";
 import type { DataProgress, RebuildStep } from "../fullmove";
 import StopMove from "./StopMove";
 
@@ -90,6 +91,8 @@ type View =
   | { kind: "rebuilding"; step: RebuildStep | null }
   /** Undo of the full move's apps and settings, through the flow guard (R05, R06). */
   | { kind: "undo"; outcome: MoveOutcome }
+  /** Finishing the move (2.7), from the outcome on the new laptop: the newest move. */
+  | { kind: "finish"; outcome: MoveOutcome }
   /** The new laptop: the old laptop's app data coming, before the files. */
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
@@ -158,13 +161,14 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "close-apps":
       return "moving";
     case "undo":
+    case "finish":
       return "finished";
   }
 }
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
-  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo") return view;
+  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved" || view.kind === "undo" || view.kind === "finish") return view;
   // After the files, the full move sets up apps and settings: only its own steps, the outcome or a problem move the page on.
   if (view.kind === "rebuilding") {
     if (event.kind === "rebuild") return { kind: "rebuilding", step: event.step };
@@ -662,6 +666,13 @@ export default function MoveHost({
             );
           }}
           onHome={onHome}
+          onFinish={
+            old
+              ? undefined
+              : () => {
+                  setView({ kind: "finish", outcome: view.outcome });
+                }
+          }
           onUndo={
             view.outcome.rebuilt?.canUndo
               ? () => {
@@ -695,6 +706,15 @@ export default function MoveHost({
       return (
         <UndoHost
           onClosed={() => {
+            setView({ kind: "outcome", outcome: view.outcome });
+          }}
+        />
+      );
+    case "finish":
+      return (
+        <FinishHost
+          id={null}
+          onBack={() => {
             setView({ kind: "outcome", outcome: view.outcome });
           }}
         />
