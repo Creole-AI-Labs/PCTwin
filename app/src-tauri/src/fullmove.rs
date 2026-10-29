@@ -1328,7 +1328,8 @@ pub fn fullmove_undo<R: Runtime>(
 }
 
 fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
-    let _undoing = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Undoing);
+    // The preview changes nothing: the safe-stop gate is held only once the person presses Undo
+    // (below), so an update or uninstall is not kept waiting by a preview left open.
     let book = &mut book;
     let guard = app.state::<AppGuard>();
     let state = app.state::<AppFullMove>();
@@ -1442,6 +1443,17 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
                             more: 0,
                         },
                     );
+                    // Held from the press until the undo has ended, once nothing else is going
+                    // on; "Fix these" and a fresh approval are spent from now (they would put
+                    // back what this takes away).
+                    let Some(_undoing) = crate::deliver::repair::undo_starts(
+                        crate::deliver::safe_stop::gate(),
+                        crate::deliver::repair::store(),
+                        until,
+                    ) else {
+                        close();
+                        return;
+                    };
                     let rebuild = Rebuild::new(&journal, &state.keys.install, &state.keys.setting);
                     let home = book
                         .home
@@ -1463,6 +1475,8 @@ fn run_undo<R: Runtime>(app: &AppHandle<R>, epoch: u64, mut book: UndoBook) {
                     if let Some(folder) = books_folder(app) {
                         let _ = crate::undo_books::save(&folder, book);
                     }
+                    // Anything kept while it ran no longer describes this laptop either.
+                    crate::deliver::repair::spend();
                     let (lines, more) = bounded(lines);
                     publish(
                         app,

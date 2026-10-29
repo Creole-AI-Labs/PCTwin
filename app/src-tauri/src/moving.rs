@@ -3109,6 +3109,8 @@ pub async fn move_begin<R: Runtime>(
         approve,
     };
     let (live, scan_stop) = moving.begin()?;
+    // A new move changes this laptop: the last move's "Fix these" and fresh approval are spent.
+    crate::deliver::repair::spend();
     // Until the move is over, a restart opens PCTwin again at sign-in (src/restart.rs).
     crate::restart::while_moving(&app);
     let Some((link, paired)) = pairing.take_link().await else {

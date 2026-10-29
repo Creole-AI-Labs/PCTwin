@@ -23,7 +23,7 @@ use pctwin_types::ItemResult;
 use serde::Serialize;
 use tauri::{AppHandle, Runtime};
 
-use super::repair::{Kept, RepairDone, RepairProblem, merge, offer, run_part, with_kept};
+use super::repair::{Kept, RepairDone, RepairProblem, Store, merge, offer, run_part, with_kept};
 use crate::guard_views::{bounded, name};
 
 pctwin_types::listed_enum! {
@@ -148,7 +148,7 @@ pub fn decline(k: &mut Kept) {
         }
     }
     k.last.drift.clear();
-    k.generation = k.generation.wrapping_add(1);
+    k.bump();
 }
 
 /// The person said yes: the plan as it is now. With this laptop's apps `installed_now`, each held
@@ -172,7 +172,7 @@ pub fn approve_now(k: &mut Kept, installed_now: &pctwin_record::AppList) -> Vec<
         .retain(|l| !(l.kind == Kind::App && here_now.contains(&l.title)));
     k.last.plan.held.retain(|at| !release.contains(at));
     k.last.drift.clear();
-    k.generation = k.generation.wrapping_add(1);
+    k.bump();
     release
 }
 
@@ -184,20 +184,42 @@ pub async fn move_reapprove<R: Runtime>(
     generation: u64,
     approve: bool,
 ) -> Result<RepairDone, RepairProblem> {
-    tauri::async_runtime::spawn_blocking(move || reapprove(&app, generation, approve))
-        .await
-        .map_err(|_| RepairProblem::Failed)?
+    tauri::async_runtime::spawn_blocking(move || {
+        reapprove(
+            super::repair::store(),
+            super::safe_stop::gate(),
+            generation,
+            approve,
+            crate::fullmove::installs_here(),
+            crate::fullmove::installed_here,
+            |part, me, files| run_part(&app, part, me, files),
+        )
+    })
+    .await
+    .map_err(|_| RepairProblem::Failed)?
 }
 
-fn reapprove<R: Runtime>(
-    app: &AppHandle<R>,
+/// The fresh answer `approve` for the held steps of `generation` in `store`, with `installs`,
+/// this laptop's apps now (`installed_now`, for the signed-in person) and `part` to install what
+/// is released.
+pub fn reapprove(
+    store: &Store,
+    gate: &'static super::safe_stop::SafeStop,
     generation: u64,
     approve: bool,
+    installs: bool,
+    installed_now: impl FnOnce(&str) -> pctwin_record::AppList,
+    part: impl FnOnce(
+        &pctwin_fullmove::plan::FullPlan,
+        &str,
+        Vec<(String, String)>,
+    ) -> Result<(Vec<crate::fullmove::RebuiltLine>, Option<String>), RepairProblem>,
 ) -> Result<RepairDone, RepairProblem> {
-    if !super::safe_stop::gate().view().safe {
-        return Err(RepairProblem::Busy);
-    }
-    let me = with_kept(|k| {
+    // Held before anything is looked at: no undo, move or retry can start until it ends.
+    let _answering = gate
+        .try_hold(super::safe_stop::BusyWith::Rebuilding)
+        .ok_or(RepairProblem::Busy)?;
+    let me = store.with(|k| {
         let k = k.as_ref().ok_or(RepairProblem::NothingToRepair)?;
         if k.generation != generation {
             return Err(RepairProblem::Stale);
@@ -207,7 +229,6 @@ fn reapprove<R: Runtime>(
         }
         Ok(k.last.me.clone())
     })?;
-    let installs = crate::fullmove::installs_here();
     let done = |k: &Kept, fixed: u64, undo_id: Option<String>| {
         let o = offer(k, installs);
         RepairDone {
@@ -219,15 +240,24 @@ fn reapprove<R: Runtime>(
             undo_id,
         }
     };
+    // The results it answers for, still kept as they were (not spent, not changed meanwhile).
+    let same = |k: &mut Option<Kept>, generation: u64| {
+        k.as_mut()
+            .filter(|k| k.generation == generation)
+            .map(|_| ())
+            .ok_or(RepairProblem::Stale)
+    };
     if !approve {
-        return with_kept(|k| {
+        return store.with(|k| {
+            same(k, generation)?;
             let k = k.as_mut().ok_or(RepairProblem::Failed)?;
             decline(k);
             Ok(done(k, 0, None))
         });
     }
-    let installed_now = crate::fullmove::installed_here(&me);
-    let (part, files, wanted) = with_kept(|k| {
+    let installed_now = installed_now(&me);
+    let (plan, files, wanted, approved) = store.with(|k| {
+        same(k, generation)?;
         let k = k.as_mut().ok_or(RepairProblem::Failed)?;
         let release = approve_now(k, &installed_now);
         let titles: Vec<Title> = release
@@ -246,16 +276,20 @@ fn reapprove<R: Runtime>(
             super::repair::part_plan(&k.last.plan, &picked),
             k.last.files.clone(),
             wanted,
+            k.generation,
         ))
     })?;
     if wanted.is_empty() {
-        return with_kept(|k| Ok(done(k.as_ref().ok_or(RepairProblem::Failed)?, 0, None)));
+        return store.with(|k| Ok(done(k.as_ref().ok_or(RepairProblem::Failed)?, 0, None)));
     }
-    let (new, undo_id) = run_part(app, &part, &me, files)?;
-    with_kept(|k| {
+    let (new, undo_id) = part(&plan, &me, files)?;
+    store.with(|k| {
+        // Merged only into the results this answer made: if they were spent or changed while it
+        // ran, its own results stay in its own undo record and nothing is merged.
+        same(k, approved)?;
         let k = k.as_mut().ok_or(RepairProblem::Failed)?;
         let fixed = merge(&mut k.last.lines, &new, &wanted);
-        k.generation = k.generation.wrapping_add(1);
+        k.bump();
         Ok(done(k, fixed, undo_id))
     })
 }
@@ -280,6 +314,9 @@ mod tests {
         }
     }
 
+    /// A version the program never hands out in a test run.
+    const G: u64 = 1 << 40;
+
     fn kept() -> Kept {
         let mut plan = crate::deliver::repair::tests::plan_with(&[
             ("Writer", true),
@@ -288,7 +325,7 @@ mod tests {
         ]);
         plan.held = vec![0, 1];
         Kept {
-            generation: 5,
+            generation: G,
             last: Last {
                 plan,
                 me: "1001".into(),
@@ -325,7 +362,7 @@ mod tests {
     #[test]
     fn what_changed_after_approval_is_shown_with_its_held_steps() {
         let v = view(&kept()).unwrap();
-        assert_eq!(v.generation, 5);
+        assert_eq!(v.generation, G);
         assert_eq!(v.held, 4);
         let whys: Vec<AfterWhy> = v.lines.iter().map(|l| l.why).collect();
         assert_eq!(
@@ -355,7 +392,7 @@ mod tests {
         assert_eq!(k.last.lines[1].status, ItemStatus::SkippedByUser);
         assert_eq!(k.last.lines[2].status, ItemStatus::Reinstalled);
         assert!(k.last.drift.is_empty());
-        assert_eq!(k.generation, 6);
+        assert_ne!(k.generation, G, "a new version");
     }
 
     /// Yes: the plan as it is now. An app here now is the person's and left as it is; one that is
@@ -393,6 +430,89 @@ mod tests {
         );
         assert_eq!(k.last.plan.held, [0]);
         assert!(k.last.drift.is_empty());
-        assert_eq!(k.generation, 6);
+        assert_ne!(k.generation, G, "a new version");
+    }
+
+    fn empty() -> AppList {
+        AppList {
+            found: vec![],
+            not_read: vec![],
+        }
+    }
+
+    /// Fresh-context review F1: a fresh approval is never answered from results an undo or a new
+    /// move spent, and one whose results were spent while it installed merges nothing.
+    #[test]
+    fn a_fresh_approval_never_acts_on_spent_results() {
+        use crate::deliver::safe_stop::{BusyWith, SafeStop};
+        let gate: &'static SafeStop = Box::leak(Box::new(SafeStop::new()));
+        let store = Store::new();
+        store.with(|k| *k = Some(kept()));
+        store.spend();
+        let mut ran = false;
+        for approve in [true, false] {
+            let r = reapprove(
+                &store,
+                gate,
+                G,
+                approve,
+                true,
+                |_| empty(),
+                |_, _, _| {
+                    ran = true;
+                    Ok((vec![], None))
+                },
+            );
+            assert_eq!(r, Err(RepairProblem::NothingToRepair));
+        }
+        assert!(!ran);
+        // Spent while it installed: nothing merged, nothing brought back.
+        store.with(|k| *k = Some(kept()));
+        let r = reapprove(
+            &store,
+            gate,
+            G,
+            true,
+            true,
+            |_| empty(),
+            |part, _, _| {
+                assert!(gate.try_hold(BusyWith::Undoing).is_none(), "held first");
+                assert_eq!(part.to_install().len(), 2);
+                store.spend();
+                Ok((
+                    vec![line("Writer", ItemStatus::Reinstalled)],
+                    Some("u".into()),
+                ))
+            },
+        );
+        assert_eq!(r, Err(RepairProblem::Stale));
+        assert!(store.with(|k| k.is_none()));
+        // Busy: refused before anything is looked at.
+        store.with(|k| *k = Some(kept()));
+        let undo = gate.hold(BusyWith::Undoing);
+        let r = reapprove(
+            &store,
+            gate,
+            G,
+            false,
+            true,
+            |_| empty(),
+            |_, _, _| Ok((vec![], None)),
+        );
+        assert_eq!(r, Err(RepairProblem::Busy));
+        drop(undo);
+        // Nothing changed meanwhile: the answer is merged.
+        let done = reapprove(
+            &store,
+            gate,
+            G,
+            true,
+            true,
+            |_| empty(),
+            |_, _, _| Ok((vec![line("Writer", ItemStatus::Reinstalled)], None)),
+        )
+        .unwrap();
+        assert_eq!(done.fixed, 1);
+        assert!(gate.view().safe);
     }
 }

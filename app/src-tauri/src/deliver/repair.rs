@@ -13,8 +13,17 @@
 //! Not retried here, and said: an app the person installs themselves (their step, not a
 //! failure), an app held because it changed after approval (that needs a fresh approval first:
 //! [`super::changes`]), and app data (it comes from the old laptop again: `old-laptop`).
+//!
+//! The kept results describe this laptop as that rebuild left it, and nothing else. They are
+//! spent ([`spend`]) the moment anything else changes the laptop under them: an undo (when the
+//! person presses Undo, and again when it ends) and a new move. A retry, or a fresh approval,
+//! takes the safe-stop gate before anything else (no undo can start while it runs), and merges
+//! its results only if the very results it started from are still kept: every version number is
+//! new for the life of the program ([`Kept::bump`]), so a spent result can never come back under
+//! an old number.
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use pctwin_fullmove::drift::Drift;
 use pctwin_fullmove::plan::{FullPlan, Kind, Title, needs_of};
@@ -126,30 +135,107 @@ pub struct Kept {
     pub last: Last,
 }
 
-fn kept() -> MutexGuard<'static, Option<Kept>> {
-    static KEPT: OnceLock<Mutex<Option<Kept>>> = OnceLock::new();
-    KEPT.get_or_init(|| Mutex::new(None))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+/// A version number never handed out before in this run of the program.
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+impl Kept {
+    /// `last`, under a new version.
+    pub fn new(last: Last) -> Self {
+        Self {
+            generation: next_generation(),
+            last,
+        }
+    }
+
+    /// The kept results changed: a new version, so an answer for the old one is refused.
+    pub fn bump(&mut self) {
+        self.generation = next_generation();
+    }
+}
+
+/// Where the last rebuild is kept.
+#[derive(Default)]
+pub struct Store {
+    kept: Mutex<Option<Kept>>,
+}
+
+impl Store {
+    pub const fn new() -> Self {
+        Self {
+            kept: Mutex::new(None),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Option<Kept>> {
+        self.kept.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Runs `f` on the kept rebuild.
+    pub fn with<T>(&self, f: impl FnOnce(&mut Option<Kept>) -> T) -> T {
+        f(&mut self.lock())
+    }
+
+    /// Keeps `last` as the last rebuild; what changed after approval, for the screens.
+    pub fn remember(&self, last: Last) -> Option<super::changes::ChangesView> {
+        self.with(|k| {
+            let kept = Kept::new(last);
+            let view = super::changes::view(&kept);
+            *k = Some(kept);
+            view
+        })
+    }
+
+    /// Something else changed this laptop: the kept results no longer describe it, and nothing
+    /// is retried or approved again from them.
+    pub fn spend(&self) {
+        *self.lock() = None;
+    }
+}
+
+/// The program's one store.
+pub fn store() -> &'static Store {
+    static STORE: Store = Store::new();
+    &STORE
 }
 
 /// Runs `f` on the kept rebuild.
 pub fn with_kept<T>(f: impl FnOnce(&mut Option<Kept>) -> T) -> T {
-    f(&mut kept())
+    store().with(f)
 }
 
 /// Keeps `last` as the last rebuild, and tells the screens of anything that changed after
 /// approval.
 pub fn remember<R: Runtime>(app: &AppHandle<R>, last: Last) {
-    let view = with_kept(|k| {
-        let generation = k.as_ref().map_or(1, |k| k.generation.wrapping_add(1));
-        let kept = Kept { generation, last };
-        let view = super::changes::view(&kept);
-        *k = Some(kept);
-        view
-    });
-    if let Some(v) = view {
+    if let Some(v) = store().remember(last) {
         let _ = app.emit(super::changes::EVENT, v);
+    }
+}
+
+/// The kept results are spent: an undo is starting or has ended, or a new move is starting.
+pub fn spend() {
+    store().spend();
+}
+
+/// The person pressed Undo: waits (until `until`) for nothing else to be going on, holds the gate
+/// for the undo, and only then spends the kept results (a retry that was running has merged its
+/// own by then). `None`: something else kept going until `until`.
+pub fn undo_starts(
+    gate: &'static super::safe_stop::SafeStop,
+    store: &Store,
+    until: std::time::Instant,
+) -> Option<super::safe_stop::Hold> {
+    loop {
+        if let Some(h) = gate.try_hold(super::safe_stop::BusyWith::Undoing) {
+            store.spend();
+            return Some(h);
+        }
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -308,11 +394,6 @@ pub fn run_part<R: Runtime>(
     Ok((lines, view.undo_id))
 }
 
-/// Whether nothing else is going on (no move, no rebuild, no undo).
-fn free() -> bool {
-    super::safe_stop::gate().view().safe
-}
-
 /// What "Fix these" can try again for the last move.
 #[tauri::command]
 pub fn repair_offer() -> RepairOffer {
@@ -335,22 +416,39 @@ pub async fn repair_run<R: Runtime>(
     generation: u64,
     lines: Vec<u32>,
 ) -> Result<RepairDone, RepairProblem> {
-    tauri::async_runtime::spawn_blocking(move || run(&app, generation, &lines))
-        .await
-        .map_err(|_| RepairProblem::Failed)?
+    tauri::async_runtime::spawn_blocking(move || {
+        run(
+            store(),
+            super::safe_stop::gate(),
+            generation,
+            &lines,
+            crate::fullmove::installs_here(),
+            |part, me, files| run_part(&app, part, me, files),
+        )
+    })
+    .await
+    .map_err(|_| RepairProblem::Failed)?
 }
 
-fn run<R: Runtime>(
-    app: &AppHandle<R>,
+/// The retry of `picked` of the offer `generation` in `store`, with `installs` (the prerequisites,
+/// checked again now), run by `part`.
+pub fn run(
+    store: &Store,
+    gate: &'static super::safe_stop::SafeStop,
     generation: u64,
     picked: &[u32],
+    installs: bool,
+    part: impl FnOnce(
+        &FullPlan,
+        &str,
+        Vec<(String, String)>,
+    ) -> Result<(Vec<RebuiltLine>, Option<String>), RepairProblem>,
 ) -> Result<RepairDone, RepairProblem> {
-    if !free() {
-        return Err(RepairProblem::Busy);
-    }
-    // The prerequisites, checked again now.
-    let installs = crate::fullmove::installs_here();
-    let (part, me, files, wanted) = with_kept(|k| {
+    // Held before anything is looked at: no undo, move or other retry can start until it ends.
+    let _retrying = gate
+        .try_hold(super::safe_stop::BusyWith::Rebuilding)
+        .ok_or(RepairProblem::Busy)?;
+    let (plan, me, files, wanted) = store.with(|k| {
         let k = k.as_ref().ok_or(RepairProblem::NothingToRepair)?;
         if k.generation != generation {
             return Err(RepairProblem::Stale);
@@ -373,11 +471,16 @@ fn run<R: Runtime>(
             wanted,
         ))
     })?;
-    let (new, undo_id) = run_part(app, &part, &me, files)?;
-    with_kept(|k| {
-        let k = k.as_mut().ok_or(RepairProblem::Failed)?;
+    let (new, undo_id) = part(&plan, &me, files)?;
+    store.with(|k| {
+        // Merged only into the very results it started from: if they were spent or changed while
+        // it ran, its own results stay in its own undo record and nothing is merged.
+        let k = k
+            .as_mut()
+            .filter(|k| k.generation == generation)
+            .ok_or(RepairProblem::Stale)?;
         let fixed = merge(&mut k.last.lines, &new, &wanted);
-        k.generation = k.generation.wrapping_add(1);
+        k.bump();
         let o = offer(k, installs);
         Ok(RepairDone {
             generation: o.generation,
@@ -663,5 +766,139 @@ pub(crate) mod tests {
         // A line already finished is never counted as fixed again.
         let fixed = merge(&mut lines, &new[..1], &picked);
         assert_eq!(fixed, 0);
+    }
+
+    use crate::deliver::safe_stop::{BusyWith, SafeStop};
+
+    fn gate() -> &'static SafeStop {
+        Box::leak(Box::new(SafeStop::new()))
+    }
+
+    fn keep(store: &Store) -> u64 {
+        store.remember(last());
+        store.with(|k| k.as_ref().unwrap().generation)
+    }
+
+    fn writer_fixed() -> Vec<RebuiltLine> {
+        vec![line(Kind::App, "Writer", ItemStatus::Reinstalled, None)]
+    }
+
+    /// Fresh-context review F1: results an undo or a new move spent are never retried, and a
+    /// version number is never handed out twice, so an old offer cannot match new results.
+    #[test]
+    fn a_retry_never_runs_from_spent_results() {
+        let store = Store::new();
+        let gate = gate();
+        let g = keep(&store);
+        store.spend();
+        let mut ran = false;
+        let r = run(&store, gate, g, &[0], true, |_, _, _| {
+            ran = true;
+            Ok((writer_fixed(), None))
+        });
+        assert_eq!(r, Err(RepairProblem::NothingToRepair));
+        assert!(!ran);
+        let again = keep(&store);
+        assert!(again > g, "a new version, never an old one again");
+        let r = run(&store, gate, g, &[0], true, |_, _, _| {
+            ran = true;
+            Ok((writer_fixed(), None))
+        });
+        assert_eq!(r, Err(RepairProblem::Stale));
+        assert!(!ran);
+    }
+
+    /// Fresh-context review F1 and F7: the gate is held before anything is looked at, and a retry
+    /// whose results were spent or replaced while it ran merges nothing into them.
+    #[test]
+    fn a_retry_that_outlived_its_results_merges_nothing() {
+        let store = Store::new();
+        let gate = gate();
+        let g = keep(&store);
+        let r = run(&store, gate, g, &[0], true, |_, _, _| {
+            assert!(gate.try_hold(BusyWith::Undoing).is_none(), "held first");
+            store.spend();
+            Ok((writer_fixed(), Some("retry".into())))
+        });
+        assert_eq!(r, Err(RepairProblem::Stale));
+        assert!(store.with(|k| k.is_none()), "spent results never come back");
+        // A new move's results kept while it ran: never merged into.
+        let g = keep(&store);
+        let r = run(&store, gate, g, &[0], true, |_, _, _| {
+            store.remember(last());
+            Ok((writer_fixed(), None))
+        });
+        assert_eq!(r, Err(RepairProblem::Stale));
+        let writer = store.with(|k| k.as_ref().unwrap().last.lines[0].status);
+        assert_eq!(writer, ItemStatus::Failed);
+        assert!(gate.view().safe, "the hold ended with the retry");
+    }
+
+    /// The retry itself: run while nothing else is, merged into the results it started from.
+    #[test]
+    fn a_retry_merges_into_the_results_it_started_from() {
+        let store = Store::new();
+        let gate = gate();
+        let g = keep(&store);
+        let o = store.with(|k| offer(k.as_ref().unwrap(), true));
+        let at = |t: &str| {
+            o.lines
+                .iter()
+                .find(|l| l.title == Title::Name(t.into()))
+                .unwrap()
+                .line
+        };
+        let picked = [at("Writer"), at("Writer settings")];
+        let done = run(&store, gate, g, &picked, true, |part, me, _| {
+            assert_eq!(me, "1001");
+            assert_eq!(part.groups.len(), 1);
+            Ok((writer_fixed(), Some("retry".into())))
+        })
+        .unwrap();
+        assert_eq!(done.fixed, 1);
+        assert_eq!(done.undo_id.as_deref(), Some("retry"));
+        assert!(done.generation > g);
+        assert_eq!(
+            store.with(|k| k.as_ref().unwrap().generation),
+            done.generation
+        );
+        // While anything else runs, nothing is retried.
+        let undo = gate.hold(BusyWith::Undoing);
+        let mut ran = false;
+        let r = run(&store, gate, done.generation, &[0], true, |_, _, _| {
+            ran = true;
+            Ok((vec![], None))
+        });
+        assert_eq!(r, Err(RepairProblem::Busy));
+        assert!(!ran);
+        drop(undo);
+    }
+
+    /// Fresh-context review F1 and F8: Undo, once pressed, waits for a retry that is running,
+    /// holds the gate, and only then spends the kept results (the retry merged its own first).
+    #[test]
+    fn undo_spends_the_kept_results_once_it_holds_the_gate() {
+        let store: &'static Store = Box::leak(Box::new(Store::new()));
+        let gate = gate();
+        keep(store);
+        let retry = gate.hold(BusyWith::Rebuilding);
+        let running = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert!(
+                store.with(|k| k.is_some()),
+                "not spent while the retry still runs"
+            );
+            drop(retry);
+        });
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let undo = undo_starts(gate, store, until).expect("the retry ended");
+        running.join().unwrap();
+        assert!(store.with(|k| k.is_none()), "spent from the press");
+        assert_eq!(gate.view().busy, vec![BusyWith::Undoing]);
+        drop(undo);
+        // Something that keeps going: the undo does not start.
+        let other = gate.hold(BusyWith::Moving);
+        assert!(undo_starts(gate, store, std::time::Instant::now()).is_none());
+        drop(other);
     }
 }
