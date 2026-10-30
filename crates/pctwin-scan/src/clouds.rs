@@ -521,19 +521,16 @@ pub fn seen_on_this_laptop(home: &Path) -> Vec<Seen> {
             .ok()
             .and_then(|o| crate::census::sid_from_whoami(&String::from_utf8_lossy(&o.stdout)));
         if let Some(sid) = sid
-            && let Ok(out) = pctwin_types::process::quiet(system32.join("reg.exe"))
-                .args([
+            && let Ok(out) = crate::census::reg_query(
+                &system32,
+                &[
                     "query",
                     r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager",
                     "/s",
-                ])
-                .stdin(std::process::Stdio::null())
-                .output()
+                ],
+            )
         {
-            seen.extend(sync_roots_from_reg(
-                &String::from_utf8_lossy(&out.stdout),
-                &sid,
-            ));
+            seen.extend(sync_roots_from_reg(&out, &sid));
         }
     } else if cfg!(target_os = "macos") {
         if let Ok(entries) = std::fs::read_dir(home.join("Library/CloudStorage")) {

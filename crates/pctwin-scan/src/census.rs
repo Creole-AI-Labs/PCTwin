@@ -852,9 +852,16 @@ fn windows_facts() -> CensusFacts {
     let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
     let system32 = Path::new(&system_root).join("System32");
-    let (profiles_root, profile_entries) = reg_profile_list(&system32)
-        .map(|out| profile_list_from_reg(&out, &system_drive, &system_root))
-        .unwrap_or_default();
+    let (profiles_root, profile_entries) = reg_query(
+        &system32,
+        &[
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList",
+            "/s",
+        ],
+    )
+    .map(|out| profile_list_from_reg(&out, &system_drive, &system_root))
+    .unwrap_or_default();
 
     let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
         Get-LocalUser | ForEach-Object { $_.SID.Value + [char]9 + [int]$_.Enabled + [char]9 + \
@@ -898,26 +905,41 @@ fn windows_facts() -> CensusFacts {
     }
 }
 
-/// `reg query` writes in the console's code page, which is not UTF-8 on most laptops: a profile
-/// folder named `Jürgen` or `张伟` would come back garbled. Switching the code page to UTF-8
-/// first keeps every name intact.
+/// The system's own `reg` tool with `args` (read only), its output as text. `reg` writes in the
+/// console's code page, which is not UTF-8 on most laptops: a folder named `Jürgen`, `Adébáyọ̀` or
+/// `张伟` would come back as question marks. The code page is switched to UTF-8 first, so every
+/// name and path is read intact. The one way the scan reads the registry as text (the founder,
+/// 30 October 2026: no name ever shows as "???").
 #[cfg(windows)]
-fn reg_profile_list(system32: &Path) -> Result<String, String> {
+pub(crate) fn reg_query(system32: &Path, args: &[&str]) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
+    // Every argument is PCTwin's own fixed text or a registry key it names; none holds a quote.
+    if args.iter().any(|a| a.contains('"')) {
+        return Err("a quote in a registry query".into());
+    }
     let chcp = system32.join("chcp.com");
     let reg = system32.join("reg.exe");
+    let quoted: Vec<String> = args.iter().map(|a| format!("\"{a}\"")).collect();
     let mut cmd = pctwin_types::process::quiet(system32.join("cmd.exe"));
     cmd.raw_arg(format!(
-        r#"/d /c ""{}" 65001 >nul & "{}" query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" /s""#,
+        r#"/d /c ""{}" 65001 >nul & "{}" {}""#,
         chcp.display(),
-        reg.display()
+        reg.display(),
+        quoted.join(" ")
     ));
+    cmd.stdin(std::process::Stdio::null());
     run(cmd)
 }
 
 #[cfg(not(windows))]
-fn reg_profile_list(_system32: &Path) -> Result<String, String> {
-    Err("the Windows profile list exists only on Windows".into())
+pub(crate) fn reg_query(_system32: &Path, _args: &[&str]) -> Result<String, String> {
+    Err("the registry exists only on Windows".into())
+}
+
+/// Windows' own `System32` folder, from where Windows says it is.
+pub(crate) fn system32() -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    Path::new(&root).join("System32")
 }
 
 fn mac_facts() -> CensusFacts {

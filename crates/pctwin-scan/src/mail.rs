@@ -385,15 +385,7 @@ fn app_data_bases(home: &Path) -> Vec<PathBuf> {
 }
 
 fn reg(args: &[&str]) -> Option<String> {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    let out = pctwin_types::process::quiet(Path::new(&root).join(r"System32\reg.exe"))
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    crate::census::reg_query(&crate::census::system32(), args).ok()
 }
 
 /// MAPI profile stores of every Office version, and the older Messaging key.

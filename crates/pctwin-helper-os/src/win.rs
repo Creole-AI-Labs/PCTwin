@@ -748,9 +748,19 @@ fn listed_profile(sid: &str) -> Result<std::path::PathBuf, Error> {
     Sid::parse(sid)?;
     let key = format!(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
     let system = system_folder(SystemFolder::Windows)?;
-    let out = clean_command(&system.join("System32").join("reg.exe"))?
-        .args(["query", &key, "/v", "ProfileImagePath"])
-        .output()?;
+    // `reg` writes in the console's code page: switched to UTF-8 first, so a folder named in any
+    // language (`Adébáyọ̀`, `张伟`) is read intact, never as question marks (30 October 2026).
+    let system32 = system.join("System32");
+    let mut command = clean_command(&system32.join("cmd.exe"))?;
+    {
+        use std::os::windows::process::CommandExt;
+        command.raw_arg(format!(
+            r#"/d /c ""{}" 65001 >nul & "{}" query "{key}" /v ProfileImagePath""#,
+            system32.join("chcp.com").display(),
+            system32.join("reg.exe").display(),
+        ));
+    }
+    let out = command.stdin(std::process::Stdio::null()).output()?;
     let text = String::from_utf8_lossy(&out.stdout);
     let value = text
         .lines()

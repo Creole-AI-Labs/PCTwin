@@ -104,10 +104,13 @@ export type HistoryEntry = { id: string; kind: "move"; when: string; from: strin
  */
 export function shownSafely(name: string): string {
   const hidden = (c: number) =>
-    c <= 0x1f || (c >= 0x7f && c <= 0x9f) || c === 0x61c || c === 0x200e || c === 0x200f || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
+    c <= 0x1f || (c >= 0x7f && c <= 0x9f) || c === 0x61c || c === 0x200e || c === 0x200f || (c >= 0x202a && c <= 0x202e);
   let out = "";
   for (const ch of name) {
     const c = ch.codePointAt(0) ?? 0;
+    // The isolates only fence text off, and translations put them around names: removed, never
+    // shown (the founder, 30 October 2026).
+    if (c >= 0x2066 && c <= 0x2069) continue;
     out += hidden(c) ? `[U+${c.toString(16).toUpperCase().padStart(4, "0")}]` : ch;
   }
   return out;

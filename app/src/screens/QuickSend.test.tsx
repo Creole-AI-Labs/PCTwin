@@ -608,7 +608,8 @@ describe("names from another laptop are shown safely", () => {
 
   it("a name that reorders itself shows its hidden characters as codes, and its real type apart", () => {
     expect(shownSafely("invoice\u202Efdp.exe")).toBe("invoice[U+202E]fdp.exe");
-    expect(shownSafely("a\u2067b\u0000c")).toBe("a[U+2067]b[U+0000]c");
+    // An isolate only fences text off: removed, never shown as a code (founder, 30 October 2026).
+    expect(shownSafely("a\u2067b\u0000c")).toBe("ab[U+0000]c");
     expect(fileName("Docs/invoice\u202Efdp.exe")).toBe("invoice[U+202E]fdp.exe");
     expect(extensionOf("Docs/invoice\u202Efdp.exe")).toBe("exe");
     expect(extensionOf("Docs/notes")).toBeNull();

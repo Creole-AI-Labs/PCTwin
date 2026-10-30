@@ -569,8 +569,13 @@ describe("names that change text direction (third review, finding 10)", () => {
     // The Name part marks them itself too, whatever view it is given.
     const { container } = render(wrap(<Name>{"a\u202Eb"}</Name>));
     expect(container.textContent).toBe("a\uFFFDb");
-    for (const c of ["\u061C", "\u200E", "\u200F", "\u202A", "\u202B", "\u202C", "\u202D", "\u202E", "\u2066", "\u2067", "\u2068", "\u2069"]) {
+    for (const c of ["\u061C", "\u200E", "\u200F", "\u202A", "\u202B", "\u202C", "\u202D", "\u202E"]) {
       expect(shownName(`a${c}b`)).toBe("a\uFFFDb");
     }
+    // The isolates a translation puts around a name are removed, never drawn as a mark.
+    for (const c of ["\u2066", "\u2067", "\u2068", "\u2069"]) {
+      expect(shownName(`a${c}b`)).toBe("ab");
+    }
+    expect(shownName("\u2068Blue Heron\u2069")).toBe("Blue Heron");
   });
 });

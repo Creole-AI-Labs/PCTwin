@@ -451,7 +451,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
   if (peer && !help && intro !== "done" && (view.kind !== "end" || versionsDiffer)) {
     const naming: Naming = {
       system: (s) => l10n.getString(`move-peer-system-${s}`),
-      thisLaptop: l10n.getString("qs-label-this"),
+      // Each person sees "Your laptop" and the other laptop by its own name (founder, 30 October 2026).
+      thisLaptop: l10n.getString("qs-label-yours"),
       otherLaptop: l10n.getString("qs-label-other"),
     };
     const greeted: Greeted = { ...peer, otherLabel: peer.other ? labelText(l10n, peer.other) : null };

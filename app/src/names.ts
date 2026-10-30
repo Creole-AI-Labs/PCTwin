@@ -7,15 +7,21 @@
  * still isolated for direction where it is drawn (`<bdi>`).
  */
 
-/** The characters that only change text direction: marks, embeddings, overrides and isolates. */
-const DIRECTION_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** The characters that change text direction: marks, embeddings and overrides. */
+const DIRECTION_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E]/g;
+/**
+ * The isolates (U+2066 to U+2069): removed, never shown. They only fence text off and cannot
+ * reorder what is outside them, and translation libraries put them around every name they insert,
+ * so marking them drew "\uFFFD" around ordinary laptop names (the founder, 30 October 2026).
+ */
+const ISOLATES = /[\u2066-\u2069]/g;
 
 /** The mark shown in place of a direction character. */
 export const MARK = "\uFFFD";
 
 /** A name as it is shown: every direction character replaced by a visible mark. */
 export function shownName(name: string): string {
-  return name.replace(DIRECTION_CONTROLS, MARK);
+  return name.replace(ISOLATES, "").replace(DIRECTION_CONTROLS, MARK);
 }
 
 /** Every piece of text in `v` (objects and lists, to any depth) as it is shown. */

@@ -194,15 +194,13 @@ pub fn facts_from_clouds(home: PathBuf, found: Vec<FoundCloud>) -> Facts {
 }
 
 /// Every `name` value under `key` and its subkeys, with the subkey it is in, read with the
-/// system's own `reg` tool.
+/// system's own `reg` tool (as UTF-8: [`crate::census::reg_query`]).
 pub(crate) fn registry_values(key: &str, name: &str) -> Vec<(String, PathBuf)> {
-    let Ok(out) = pctwin_types::process::quiet("reg")
-        .args(["query", key, "/s", "/v", name])
-        .output()
-    else {
+    let system32 = crate::census::system32();
+    let Ok(out) = crate::census::reg_query(&system32, &["query", key, "/s", "/v", name]) else {
         return Vec::new();
     };
-    parse_reg_values(&String::from_utf8_lossy(&out.stdout), name)
+    parse_reg_values(&out, name)
 }
 
 /// Reads `    UserFolder    REG_SZ    C:\Users\Ada\OneDrive` lines from `reg query` output, each
@@ -458,6 +456,26 @@ fn other_device(path: &Path, home: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder name in any language is read from the registry intact, never as question marks
+    /// (the founder, 30 October 2026): a test key of PCTwin's own, removed at the end.
+    #[cfg(windows)]
+    #[test]
+    fn registry_paths_in_any_language_are_read_intact() {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
+        let key = format!(r"Software\PCTwinLab\names-{}", std::process::id());
+        let (made, _) = RegKey::predef(HKEY_CURRENT_USER)
+            .create_subkey(&key)
+            .unwrap();
+        let path = r"C:\Users\Adébáyọ̀ 张伟 Jürgen\Documents";
+        made.set_value("PCTwinFolder", &path).unwrap();
+        let found = registry_values(&format!(r"HKCU\{key}"), "PCTwinFolder");
+        let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(&key);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].1, PathBuf::from(path));
+        assert!(!found[0].1.display().to_string().contains('?'));
+    }
 
     fn facts(home: &Path) -> Facts {
         Facts {
