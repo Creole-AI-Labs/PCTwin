@@ -1880,7 +1880,23 @@
      }
     },
     "store": "vscode-marketplace"
-   }
+   },
+   "recent": [
+    {
+     "root": "config",
+     "path": "Code/User/globalStorage/state.vscdb",
+     "key": "history.recentlyOpenedPathsList"
+    }
+   ],
+   "documents": [
+    {
+     "ending": ".code-workspace",
+     "at": [
+      "folders/*/path",
+      "folders/*/uri"
+     ]
+    }
+   ]
   },
   {
    "app": "jetbrains",

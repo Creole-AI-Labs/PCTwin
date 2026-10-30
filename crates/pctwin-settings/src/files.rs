@@ -29,7 +29,7 @@ use crate::apps::{parse_version, path_matches};
 use crate::catalogue::{
     AppEntry, AppFile, Catalogue, FileFormat, MacroRoot, Rule, System, Table, Writer,
 };
-use crate::classify::{Ctx, Fate, Why, classify};
+use crate::classify::{Ctx, Fate, InsideHome, Why, classify};
 
 /// The largest settings file read ([`pctwin_types::limits`]).
 pub use pctwin_types::limits::SETTINGS_FILE_BYTES as MAX_FILE;
@@ -333,15 +333,19 @@ impl Walker<'_, '_> {
         });
     }
 
-    /// Expands placeholders (`$USER_HOME$/x` to the old home) before a path is judged.
+    /// Expands placeholders (`$USER_HOME$/x` to the old home) before a path is judged, in the
+    /// old system's own separators (JetBrains writes `/` on Windows too).
     fn expand(&self, s: &str) -> Option<String> {
+        let home = self.ctx.home_old.trim_end_matches(['/', '\\']);
+        let windows = home.as_bytes().get(1) == Some(&b':');
         self.macros.iter().find_map(|(m, root)| match root {
             MacroRoot::Home => s.strip_prefix(m.as_str()).map(|rest| {
-                format!(
-                    "{}{}",
-                    self.ctx.home_old.trim_end_matches(['/', '\\']),
-                    rest
-                )
+                let rest = if windows {
+                    rest.replace('/', "\\")
+                } else {
+                    rest.to_string()
+                };
+                format!("{home}{rest}")
             }),
         })
     }
@@ -418,7 +422,18 @@ impl Walker<'_, '_> {
             _ => None,
         };
         let judged = expanded.clone().map(SettingValue::Text).unwrap_or(sv);
-        match classify(&self.store, name, &judged, &self.ctx.classify) {
+        // A path is only ever pointed inside the person's home on the new laptop.
+        let inside = InsideHome {
+            inner: self.ctx.classify.paths,
+            home: self.ctx.home_new,
+        };
+        let cctx = Ctx {
+            paths: &inside,
+            same_screens: self.ctx.classify.same_screens,
+            hints: self.ctx.classify.hints,
+            facts: self.ctx.classify.facts,
+        };
+        match classify(&self.store, name, &judged, &cctx) {
             Fate::Copy(_) => Leaf::Keep,
             Fate::Rewritten(SettingValue::Text(n)) => {
                 self.rewritten += 1;
@@ -909,4 +924,134 @@ pub fn rewrite_recent_list(json: &str, ctx: &FileCtx<'_>) -> Result<(String, Vec
     let v: Value = serde_json::from_str(json).map_err(json_why)?;
     let v = w.value(v, "", "recent", 0).ok_or(Why::Kind)?;
     Ok((serde_json::to_string(&v).map_err(|_| Why::Kind)?, w.left))
+}
+
+/// Whether the value stored under `key` in the file at `rel` (inside `root`) is a list of recent
+/// files or workspaces the catalogue names: the private-data role, which reads such stores, asks
+/// this before handing the value to [`rewrite_recent_list`].
+pub fn recent_list_for(cat: &Catalogue, root: SettingsRoot, rel: &str, key: &str) -> bool {
+    cat.apps
+        .iter()
+        .flat_map(|a| &a.recent)
+        .any(|r| r.root == root && r.key == key && path_matches(&r.path, rel))
+}
+
+/// A document of the person's with its folder paths pointed at their new places.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Document {
+    pub bytes: Vec<u8>,
+    pub rewritten: usize,
+    /// Paths left as the person wrote them, and why.
+    pub left: Vec<Left>,
+}
+
+/// Why a path in a document was not changed though it moved: it is written in more than one
+/// spelling, so changing it by its text alone could change something else.
+pub const SPELLED_TWICE: &str =
+    "this place is written in more than one way in the file: change it there yourself";
+
+/// The person's own document (a VS Code `.code-workspace`, by the endings the catalogue names)
+/// with the folder paths at the catalogue's fields pointed at where the move put them, inside
+/// the person's home on the new laptop. It is the person's file, so nothing in it is removed: a
+/// relative path moves with the file, and a path that did not move, or points at another
+/// computer, stays as written and is reported. Only the path's own text is replaced, so comments
+/// and layout stay. `None` when the catalogue names no such document.
+pub fn rewrite_document(
+    cat: &Catalogue,
+    name: &str,
+    bytes: &[u8],
+    ctx: &FileCtx<'_>,
+) -> Option<Result<Document, Why>> {
+    let lower = name.to_ascii_lowercase();
+    let doc = cat.apps.iter().flat_map(|a| &a.documents).find(|d| {
+        lower.len() > d.ending.len() && lower.ends_with(&d.ending.to_ascii_lowercase())
+    })?;
+    Some(rewrite_doc(&doc.at, name, bytes, ctx))
+}
+
+fn rewrite_doc(
+    at: &[String],
+    name: &str,
+    bytes: &[u8],
+    ctx: &FileCtx<'_>,
+) -> Result<Document, Why> {
+    if u64::try_from(bytes.len()).map_or(true, |n| n > MAX_FILE) {
+        return Err(Why::TooLarge);
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+    nesting::check(text, Syntax::Jsonc).map_err(|_| Why::TooDeep)?;
+    let clean = strip_jsonc(text.trim_start_matches('\u{feff}')).ok_or(Why::Kind)?;
+    let v: Value = serde_json::from_str(&clean).map_err(json_why)?;
+    // Every text at one of the document's path fields.
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    fn walk(
+        v: &Value,
+        path: &str,
+        key: &str,
+        at: &[String],
+        out: &mut Vec<(String, String, String)>,
+    ) {
+        let join = |k: &str| {
+            if path.is_empty() {
+                k.to_string()
+            } else {
+                format!("{path}/{k}")
+            }
+        };
+        match v {
+            Value::Object(m) => m.iter().for_each(|(k, c)| walk(c, &join(k), k, at, out)),
+            Value::Array(a) => a
+                .iter()
+                .enumerate()
+                .for_each(|(i, c)| walk(c, &join(&i.to_string()), key, at, out)),
+            Value::String(s) if at.iter().any(|p| path_matches(p, path)) => {
+                out.push((path.to_string(), key.to_string(), s.clone()))
+            }
+            _ => {}
+        }
+    }
+    walk(&v, "", "", at, &mut found);
+    let no_tables = BTreeMap::new();
+    let mut w = Walker {
+        tables: &no_tables,
+        ctx,
+        store: name.to_string(),
+        rules: Vec::new(),
+        default: Rule::Copy,
+        macros: BTreeMap::new(),
+        rewritten: 0,
+        left: Vec::new(),
+        equivalent: false,
+    };
+    let mut changes: Vec<(String, String, String)> = Vec::new();
+    for (path, key, old) in &found {
+        match w.judge(key, &Value::String(old.clone())) {
+            Leaf::Keep => {}
+            Leaf::Replace(Value::String(new)) => changes.push((path.clone(), old.clone(), new)),
+            Leaf::Replace(_) => w.leave(path, Why::Kind),
+            Leaf::Remove(why) => w.leave(path, why),
+        }
+    }
+    let mut out = text.to_string();
+    let mut rewritten = 0;
+    for (path, old, new) in &changes {
+        let lit = serde_json::to_string(old).map_err(|_| Why::Kind)?;
+        let same_value = found.iter().filter(|(_, _, s)| s == old).count();
+        // Every place this text is written must be one of the path fields being changed.
+        if text.matches(&lit).count() != same_value
+            || changes.iter().filter(|(_, o, _)| o == old).count() != same_value
+        {
+            w.leave(path, Why::Unreadable(SPELLED_TWICE.into()));
+            continue;
+        }
+        if out.contains(&lit) {
+            out = out.replace(&lit, &serde_json::to_string(new).map_err(|_| Why::Kind)?);
+        }
+        rewritten += 1;
+    }
+    Ok(Document {
+        bytes: out.into_bytes(),
+        rewritten,
+        left: w.left,
+    })
 }

@@ -729,6 +729,32 @@ pub struct AppEntry {
     /// Its add-ons, carried as a list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extensions: Option<ExtensionList>,
+    /// Stored values that are lists of recent files or workspaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<RecentList>,
+    /// Kinds of the person's own documents that name folders by their path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub documents: Vec<PathDocument>,
+}
+
+/// A stored value that is a list of recent files or workspaces, by the file that holds it and
+/// its key there (VS Code's `history.recentlyOpenedPathsList` in its state database, which the
+/// private-data role reads and hands to [`crate::files::rewrite_recent_list`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecentList {
+    pub root: SettingsRoot,
+    pub path: String,
+    pub key: String,
+}
+
+/// A kind of the person's own document, by its file ending, whose fields at `at` (`/`-separated
+/// patterns) are folder paths ([`crate::files::rewrite_document`]): a VS Code `.code-workspace`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathDocument {
+    pub ending: String,
+    pub at: Vec<String>,
 }
 
 /// A found setting that must not move for a given app, and why (the catalogue enriching the

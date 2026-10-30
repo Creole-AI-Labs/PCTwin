@@ -23,6 +23,15 @@ fn folders() -> FolderMap {
     ])
 }
 
+/// The person's home on each system.
+fn home(s: System) -> &'static str {
+    match s {
+        System::Windows => "C:\\Users\\ada",
+        System::Mac => "/Users/ada",
+        _ => "/home/ada",
+    }
+}
+
 struct Env {
     map: FolderMap,
     running: BTreeSet<String>,
@@ -50,8 +59,8 @@ impl Env {
             },
             from,
             to,
-            home_old: "/home/ada",
-            home_new: "/home/ada",
+            home_old: home(from),
+            home_new: home(to),
             running: &self.running,
             versions: &self.versions,
             folder_renames: &self.renames,

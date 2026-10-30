@@ -160,6 +160,22 @@ impl Relocate for FolderMap {
     }
 }
 
+/// A folder map that only ever points inside the person's own home on the new laptop: a new
+/// place anywhere else (another person's folder, the system's, another drive, the home itself)
+/// is no place at all, so the setting is left out with its reason rather than pointed there.
+pub struct InsideHome<'a> {
+    pub inner: &'a dyn Relocate,
+    pub home: &'a str,
+}
+
+impl Relocate for InsideHome<'_> {
+    fn new_path(&self, old: &str) -> Option<String> {
+        self.inner
+            .new_path(old)
+            .filter(|n| crate::value::inside(n, &[self.home.to_string()]))
+    }
+}
+
 /// Where the move's files really are now (gap 5 of the complications audit, 28 October 2026):
 /// every file that arrived, as (its full path on the old laptop, its full path where it is
 /// stored here), and `there`, which says whether a full path here is really there now. A path
@@ -707,18 +723,28 @@ fn path_in(t: &str) -> Option<PathHit> {
             let win = decoded[1..].replace('/', "\\");
             return full_path(&win).then(|| PathHit {
                 path: win,
-                rebuild: Box::new(|n: &str| {
-                    let unix = format!("/{}", n.replace('\\', "/"));
-                    crate::value::file_uri(&unix).unwrap_or_default()
-                }),
+                rebuild: Box::new(uri_of),
             });
         }
         return full_path(&decoded).then(|| PathHit {
             path: decoded,
-            rebuild: Box::new(|n: &str| crate::value::file_uri(n).unwrap_or_default()),
+            rebuild: Box::new(uri_of),
         });
     }
     None
+}
+
+/// A full path as a `file://` address, in the new laptop's own spelling: `file:///C%3A/...` for
+/// a Windows path, `file:///home/...` otherwise (a path moved between systems takes the form of
+/// where it is now, never the old system's).
+fn uri_of(n: &str) -> String {
+    let b = n.as_bytes();
+    let unix = if b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        format!("/{}", n.replace('\\', "/"))
+    } else {
+        n.to_string()
+    };
+    crate::value::file_uri(&unix).unwrap_or_default()
 }
 
 /// Whether PCTwin may write the text `t` to the key `name` in `store`, checked again on the new

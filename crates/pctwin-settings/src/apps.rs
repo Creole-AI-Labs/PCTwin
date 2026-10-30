@@ -57,6 +57,28 @@ pub fn check_entry(a: &AppEntry) -> Result<(), String> {
             }
         }
     }
+    if a.recent.len() > 16
+        || a.recent.iter().any(|r| {
+            !pattern_ok(&r.path) || r.key.is_empty() || r.key.len() > 128 || !text_ok(&r.key)
+        })
+    {
+        return Err("a recent list is a plain file and key".into());
+    }
+    if a.documents.len() > 16
+        || a.documents.iter().any(|d| {
+            let e = d.ending.as_bytes();
+            !(2..=32).contains(&e.len())
+                || e[0] != b'.'
+                || !e[1..]
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                || d.at.is_empty()
+                || d.at.len() > 16
+                || d.at.iter().any(|p| !pattern_ok(p))
+        })
+    {
+        return Err("a document kind is a file ending and plain field patterns".into());
+    }
     if let Some(x) = &a.extensions {
         if x.places.is_empty()
             || x.places.len() > 8
