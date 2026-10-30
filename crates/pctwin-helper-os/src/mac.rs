@@ -604,14 +604,7 @@ fn os_services_provider(mtm: objc2::MainThreadMarker) -> bool {
     let provider = unsafe {
         builder.add_method(
             objc2::sel!(sendFiles:userData:error:),
-            finder_send_files
-                as extern "C-unwind" fn(
-                    &AnyObject,
-                    objc2::runtime::Sel,
-                    &objc2_app_kit::NSPasteboard,
-                    Option<&NSString>,
-                    *mut *mut NSString,
-                ),
+            finder_send_files as extern "C-unwind" fn(_, _, _, _, _),
         );
         let class = builder.register();
         let provider: objc2::rc::Retained<AnyObject> = objc2::msg_send![class, new];

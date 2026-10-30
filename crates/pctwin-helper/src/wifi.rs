@@ -26,6 +26,8 @@ pub const FOLDER_PREFIX: &str = "pctwin-helper-wifi-";
 pub const MAX_PROFILE: u64 = pctwin_types::limits::WIFI_PROFILE_BYTES;
 
 /// A folder removed with everything in it when dropped (also on failure).
+/// Used on Windows only (the export there); elsewhere only by the tests.
+#[cfg_attr(not(windows), allow(dead_code))]
 struct Folder(PathBuf);
 
 impl Drop for Folder {
@@ -72,6 +74,8 @@ pub fn take_profiles(folder: &Path) -> Vec<Secret> {
 }
 
 /// A fresh private folder in `parent` (a random name; never one that exists).
+/// Used on Windows only (the export there); elsewhere only by the tests.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn fresh_folder(parent: &Path) -> Result<Folder, Refusal> {
     for _ in 0..8 {
         let token = pctwin_helper_os::random_token().map_err(|_| Refusal::Unreadable)?;
