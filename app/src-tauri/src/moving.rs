@@ -3126,6 +3126,9 @@ async fn run_old<R: Runtime>(
         special.as_ref(),
         sweep.links,
         choice.apps,
+        // The settings catalogue's rows go only to a new laptop that reads them (move protocol
+        // 9): an older one refuses a field it does not know.
+        link.greeting().version >= pctwin_transfer::CATALOGUE_SINCE,
         wifi_held
             .as_ref()
             .map(pctwin_fullmove::wifi::WifiHeld::listed),

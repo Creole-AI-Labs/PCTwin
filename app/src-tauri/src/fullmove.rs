@@ -169,12 +169,16 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// `settings`: whether the person chose to bring their apps, settings and app data (when not, none
 /// of the settings found are sent).
 ///
+/// `catalogue`: whether the new laptop reads the settings catalogue's rows (move protocol 9);
+/// they are read here (only read) and carried when it does and the person brings their settings.
+///
 /// `wifi`: the saved Wi-Fi networks found here, by name, and which were ticked and read (move
 /// protocol 8; `None`: not offered). Never a password.
 pub fn extras_here(
     special: Option<&pctwin_fullmove::extras::SpecialFound>,
     links: u64,
     settings: bool,
+    catalogue: bool,
     wifi: Option<&[pctwin_fullmove::wifi::WifiListed]>,
 ) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
@@ -190,6 +194,12 @@ pub fn extras_here(
     let mut x = pctwin_fullmove::extras::here(folders);
     x.with_special(special);
     x.links = links;
+    if settings
+        && catalogue
+        && let Some(c) = pctwin_fullmove::extras::catalogue_here()
+    {
+        x.with_catalogue(c);
+    }
     if !settings {
         // "Apps, settings and app data" unticked: none of it comes, so nothing of it is counted
         // either (found in the two-copy test, 29 October 2026).
@@ -1175,6 +1185,7 @@ pub fn rebuild_full<R: Runtime>(
             let empty = FullPlan {
                 settings: Default::default(),
                 groups: Vec::new(),
+                catalogue: Vec::new(),
                 ..plan.clone()
             };
             let mut none = NoSettings;
@@ -1199,6 +1210,13 @@ pub fn rebuild_full<R: Runtime>(
                         pctwin_types::ItemResult::because(Reason::NotVerified),
                     )
                 })
+                .chain(plan.catalogue_steps().into_iter().map(|(group, n)| {
+                    (
+                        group.to_string(),
+                        n,
+                        pctwin_types::ItemResult::because(Reason::FinishByHand),
+                    )
+                }))
                 .collect();
             done
         }
@@ -1217,7 +1235,12 @@ pub fn rebuild_full<R: Runtime>(
     }
     for (label, count, r) in &done.settings {
         lines.push(RebuiltLine {
-            title: Title::Name(name(label)),
+            // A catalogue group by its key (translated on the screens), a found group's label as
+            // it is.
+            title: match pctwin_fullmove::plan::settings_title(label) {
+                Title::Name(n) => Title::Name(name(&n)),
+                k => k,
+            },
             kind: Kind::Settings,
             count: *count,
             status: r.status(),
@@ -1422,6 +1445,12 @@ fn land_data(
         scope,
         actor: actor.clone(),
         system: pctwin_special::roots::System::here(),
+        // Where each component goes here is decided here, for data from the old laptop's kind
+        // of system (never taken from the old laptop).
+        from: plan.from.map_or(
+            pctwin_special::roots::System::here(),
+            pctwin_fullmove::extras::roots_system,
+        ),
         // An app's settings files the catalogue describes are put right as they land: this
         // system's keyboard shortcuts, paths pointed at where the moved files really are.
         fix: plan.from.map(|from| pctwin_fullmove::fixups::FixCtx {

@@ -163,7 +163,9 @@ impl LinuxInstaller<'_> {
 
     /// The first route this laptop can take for `e`.
     fn step_for(&self, e: &AppEntry) -> Option<Step> {
-        e.plan.routes.iter().find_map(|r| match r {
+        // Only the routes this chain installs from ([`Route::chain`]).
+        let ours = |r: &&Route| r.chain() == Some(pctwin_apps::routes::Chain::LinuxPackages);
+        e.plan.routes.iter().filter(ours).find_map(|r| match r {
             Route::Apt { package } | Route::Dnf { package }
                 if self.tools.pkcon.is_some() && plain_name(package) =>
             {

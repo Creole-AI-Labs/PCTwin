@@ -29,8 +29,9 @@
 //! 4. **Undo** puts the settings back and keeps one the person changed; apps PCTwin installed are
 //!    listed for the person to remove.
 //!
-//! What the engine does not do yet is written as tests too, marked `#[ignore]` with the reason
-//! (see the `*_settings_cross_*`, `*_app_data_*` and `*_mac_installs_*` tests).
+//! What the engine does not do yet is written as a test too, marked `#[ignore]` with the reason:
+//! undoing landed app data on a Mac or Linux laptop
+//! (`undo_removes_landed_app_data_on_mac_and_linux`).
 // Tests make files to test on.
 #![allow(clippy::disallowed_methods)]
 
@@ -783,23 +784,26 @@ fn person_changes_speed(b: Kind, adapter: &mut SettingsAdapter, tools: &Settings
     }
 }
 
-/// A catalogue row's value on the new laptop now, read through its own place there.
+/// A catalogue row's value on the new laptop now, as the system shows it to the person (read
+/// through the row's own place there and decoded, as the executor and undo read it). Undo's
+/// promise is this value: putting the theme back to light on a Mac may leave the "switch
+/// automatically" choice written as off where it was not set, which means the same.
 fn read_row(
     adapter: &mut SettingsAdapter,
     b: Kind,
     id: &str,
-) -> Vec<Option<pctwin_settings::codec::Native>> {
+) -> Option<pctwin_recipe::SettingValue> {
     let cat = Catalogue::starter().unwrap();
     let row = cat
         .settings
         .iter()
         .find(|r| r.id.as_str() == id)
         .unwrap_or_else(|| panic!("the catalogue has {id}"));
-    let place = row
-        .places
-        .get(&b.settings())
-        .unwrap_or_else(|| panic!("{id} has a place on {b:?}"));
-    adapter.store.mechanisms().read(place).unwrap()
+    assert!(
+        row.places.contains_key(&b.settings()),
+        "{id} has a place on {b:?}"
+    );
+    adapter.store.read(id).unwrap()
 }
 
 /// Whether the lab app's own setting is on the new laptop.
@@ -913,6 +917,8 @@ struct NewPerson {
     installed: AppList,
     folders: Vec<(FolderRole, String)>,
     casks: Option<CaskIndex>,
+    /// What each catalogue row holds on this laptop now (`None`: it could not be read).
+    now: BTreeMap<String, Option<Option<pctwin_recipe::SettingValue>>>,
     plan: Option<FullPlan>,
     sink: Option<Sink>,
     staging: PathBuf,
@@ -944,7 +950,7 @@ impl Steps for NewPerson {
             MOVER,
             Some((&x, pctwin_fullmove::extras::digest(&bytes))),
             &here,
-            &mut |_, _| Some(None),
+            &mut |_, key| self.now.get(key).cloned().unwrap_or(Some(None)),
         );
         // App data that copies, as proposed; no secret is ticked.
         self.sink = Some(Sink::new(plan.choice(&[]), self.staging.clone()));
@@ -966,8 +972,8 @@ impl Steps for NewPerson {
 
 /* ---------- The move ---------- */
 
-/// What a direction is held to beyond what the engine does today (each an engine gap: the
-/// ignored tests set them).
+/// What a direction is held to: everything ([`Strict::all`]), or one part of it (the tests named
+/// for that part).
 #[derive(Clone, Copy, Default)]
 struct Strict {
     /// The settings catalogue's rows cross, and undo puts them back keeping the person's edit.
@@ -977,6 +983,20 @@ struct Strict {
     data: bool,
     /// On a Mac, the same maker's edition is installed from its cask.
     mac_installs: bool,
+    /// Undo removes landed app data on a Mac or Linux laptop too.
+    unix_data_undo: bool,
+}
+
+impl Strict {
+    /// Everything this direction is held to.
+    fn all(b: Kind) -> Self {
+        Strict {
+            settings: true,
+            data: true,
+            mac_installs: b == Kind::Mac,
+            unix_data_undo: false,
+        }
+    }
 }
 
 async fn cross_move(a: Kind, b: Kind, strict: Strict) {
@@ -1050,6 +1070,18 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         special.lines
     );
     extras.with_special(Some(&special));
+    // The settings catalogue's rows, read only with A's own tools (move protocol 9).
+    let mut old_store = Store::new(
+        Catalogue::starter().unwrap(),
+        Mechanisms {
+            system: a.settings(),
+            user: (a == Kind::Windows).then(|| Box::new(old_hive.clone()) as Box<dyn Hive>),
+            machine: None,
+            runner: (a != Kind::Windows).then(|| Box::new(old_tools.clone()) as Box<dyn Runner>),
+            localtime: None,
+        },
+    );
+    extras.with_catalogue(old_store.capture());
     let extras_bytes = extras.encode();
     let apps_by_id: BTreeMap<String, String> = special
         .lines
@@ -1087,6 +1119,35 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         chosen: Default::default(),
         own_folder: None,
     };
+    let (new_tools, new_hive) = new_settings(b);
+    let mut adapter = SettingsAdapter {
+        store: Store::new(
+            Catalogue::starter().unwrap(),
+            Mechanisms {
+                system: b.settings(),
+                user: new_hive.map(|h| Box::new(h) as Box<dyn Hive>),
+                machine: None,
+                runner: (b != Kind::Windows)
+                    .then(|| Box::new(new_tools.clone()) as Box<dyn Runner>),
+                localtime: None,
+            },
+        ),
+        platform: Platform {
+            os: b.os(),
+            arch: Arch::X86_64,
+        },
+    };
+    // What each catalogue row holds here now, as the executor reads it (by the row's ID).
+    let now: BTreeMap<String, Option<Option<pctwin_recipe::SettingValue>>> = Catalogue::starter()
+        .unwrap()
+        .settings
+        .iter()
+        .map(|r| {
+            let id = r.id.as_str().to_string();
+            let v = adapter.store.read(&id).ok();
+            (id, v)
+        })
+        .collect();
     let mut person = NewPerson {
         b,
         rules: rules.clone(),
@@ -1094,6 +1155,7 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         installed: AppList::default(),
         folders: vec![(FolderRole::Documents, new_docs.display().to_string())],
         casks: (b == Kind::Mac).then(casks),
+        now,
         plan: None,
         sink: None,
         staging: staging.clone(),
@@ -1330,6 +1392,7 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
             scope,
             actor: actor.clone(),
             system: b.special(),
+            from: a.special(),
             fix: Some(pctwin_fullmove::fixups::FixCtx {
                 from: a.settings(),
                 to: b.settings(),
@@ -1351,24 +1414,6 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         }
     }
 
-    let (new_tools, new_hive) = new_settings(b);
-    let mut adapter = SettingsAdapter {
-        store: Store::new(
-            Catalogue::starter().unwrap(),
-            Mechanisms {
-                system: b.settings(),
-                user: new_hive.map(|h| Box::new(h) as Box<dyn Hive>),
-                machine: None,
-                runner: (b != Kind::Windows)
-                    .then(|| Box::new(new_tools.clone()) as Box<dyn Runner>),
-                localtime: None,
-            },
-        ),
-        platform: Platform {
-            os: b.os(),
-            arch: Arch::X86_64,
-        },
-    };
     adapter.store.remember(plan.settings.book()).unwrap();
     let theme_before = read_row(&mut adapter, b, "appearance.theme");
     let speed_before = read_row(&mut adapter, b, "pointer.speed");
@@ -1563,10 +1608,21 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         assert_eq!(read_row(&mut adapter, b, "appearance.theme"), theme_before);
     }
     if strict.data {
-        assert!(
-            !code_here.exists(),
-            "{a:?} to {b:?}: undo removed the app data that landed"
-        );
+        if cfg!(windows) || strict.unix_data_undo {
+            assert!(
+                !code_here.exists(),
+                "{a:?} to {b:?}: undo removed the app data that landed"
+            );
+        } else {
+            // Undoing landed app data is built for Windows (pctwin-special's land.rs): on a Mac
+            // or Linux it is said not done, and nothing is removed.
+            assert!(code_here.exists());
+            assert!(
+                lines.iter().any(|l| l.name.contains("Code")
+                    && matches!(l.result, undo::Result::NotDoneYet { .. })),
+                "{lines:#?}"
+            );
+        }
     }
     // The old laptop's settings are as they were.
     match a {
@@ -1599,18 +1655,14 @@ macro_rules! direction {
     ($main:ident, $settings:ident, $data:ident, $a:expr, $b:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn $main() {
-            cross_move($a, $b, Strict::default()).await;
+            cross_move($a, $b, Strict::all($b)).await;
         }
 
-        /// Engine gap: no setting crosses between systems in a full move. The settings
-        /// catalogue's rows (theme, pointer speed) are counted as "handled by a row" and never
-        /// planned (`pctwin-settings/src/generic.rs` `plan_found`, `covered`), the old laptop's
-        /// extras carry only found settings (`pctwin-fullmove/src/extras.rs` `Extras::settings`),
-        /// and nothing in the full move captures or maps the rows (`Store::capture`,
-        /// `map::plan` are not called from `pctwin-fullmove`). Windows' own tree is not even
-        /// found (`discover_registry` skips Microsoft's).
+        /// The settings catalogue's rows (theme, pointer speed) cross between the two systems:
+        /// read by row on the old laptop into the extras (move protocol 9), mapped by
+        /// `map::plan`, applied through the executor and journal; undo puts them back and keeps
+        /// the person's own change (was an engine gap until 31 October 2026).
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        #[ignore = "engine gap: catalogue settings never cross between systems in a full move"]
         async fn $settings() {
             cross_move(
                 $a,
@@ -1623,14 +1675,11 @@ macro_rules! direction {
             .await;
         }
 
-        /// Engine gap: the old laptop plans app data for its own system only
-        /// (`pctwin-fullmove/src/extras.rs` `special_with`: `plan_within(.., system, system, ..)`),
-        /// so a component crosses as `Same` at A's root, which B does not have: it is never
-        /// `Translated` to B's place, and the catalogue's file rules never reach it on landing.
-        /// On Mac and Linux, undoing landed app data is not built either
-        /// (`pctwin-special/src/land.rs` `undo_landing`).
+        /// App data lands placed for the new laptop, decided there from its own catalogue
+        /// (`data::placed_here`), its settings files put right for it (`fixups`); undo removes it
+        /// on Windows and says "not done" on a Mac or Linux (was an engine gap until 31 October
+        /// 2026).
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-        #[ignore = "engine gap: app data is planned for the old laptop's own system, never placed for the new one"]
         async fn $data() {
             cross_move(
                 $a,
@@ -1688,12 +1737,10 @@ direction!(
     Kind::Mac
 );
 
-/// Engine gap: on a Mac, an app whose only route is a Homebrew cask (or the App Store) is never
-/// handed to the Mac installer: `pctwin-fullmove/src/plan.rs` `needs_of` counts only winget,
-/// apt, dnf, Flatpak and snap routes as ones PCTwin installs from, so `to_install` leaves it out
-/// and it ends needs-action, though `MacInstaller` is built and wired in the app.
+/// On a Mac, the same maker's edition is installed from its cask: whether a route is one PCTwin
+/// installs from is decided in one place (`Route::chain`), which the plan and every installer
+/// read (was an engine gap until 31 October 2026).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "engine gap: a cask route is never handed to the Mac installer (needs_of)"]
 async fn windows_to_mac_installs_the_same_makers_edition_from_its_cask() {
     cross_move(
         Kind::Windows,
@@ -1707,13 +1754,43 @@ async fn windows_to_mac_installs_the_same_makers_edition_from_its_cask() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "engine gap: a cask route is never handed to the Mac installer (needs_of)"]
 async fn linux_to_mac_installs_the_same_makers_edition_from_its_cask() {
     cross_move(
         Kind::Linux,
         Kind::Mac,
         Strict {
             mac_installs: true,
+            ..Strict::default()
+        },
+    )
+    .await;
+}
+
+/// Engine gap: undoing app data that landed is built for Windows only
+/// (`pctwin-special/src/land.rs` `remove_placed`): on a Mac or Linux it is said "not done this
+/// time" and nothing is removed. The gate's move-aside-then-check removal for those systems
+/// (`pctwin_gate::Destination::check_copy`, `remove_checked`), with its journal record and the
+/// Mac's Trash, is not yet joined to the app data landing.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "engine gap: undo of landed app data is built for Windows only"]
+async fn undo_removes_landed_app_data_on_mac_and_linux() {
+    let here = if cfg!(target_os = "macos") {
+        Kind::Mac
+    } else {
+        Kind::Linux
+    };
+    let from = if here == Kind::Mac {
+        Kind::Linux
+    } else {
+        Kind::Mac
+    };
+    cross_move(
+        from,
+        here,
+        Strict {
+            data: true,
+            unix_data_undo: true,
             ..Strict::default()
         },
     )

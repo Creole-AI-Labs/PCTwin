@@ -341,6 +341,8 @@ pub fn receive_with(
                 permission: Permission::OwnFolders,
             },
             system: pctwin_special::roots::System::here(),
+            // The old laptop is a Mac (its mail is carried raw and written out here).
+            from: pctwin_special::roots::System::Mac,
             fix: None,
         },
         &MailOut {

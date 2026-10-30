@@ -588,6 +588,8 @@ impl MacInstaller<'_> {
             .plan
             .routes
             .iter()
+            // Only the routes this chain installs from ([`Route::chain`]).
+            .filter(|r| r.chain() == Some(pctwin_apps::routes::Chain::MacCask))
             .filter_map(|r| match r {
                 Route::Cask {
                     token,

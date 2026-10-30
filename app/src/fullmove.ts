@@ -8,7 +8,22 @@ import { CHANGE_ACTIONS, UNDO_PROMISES, type ChangeAction, type UndoPromise } fr
 import { ITEM_STATUSES, parseResult, type ItemStatus, type Reason } from "./move";
 
 /** PCTwin's own lines, by key. */
-export const OWN_TITLES = ["fullmove-special-not-yet", "fullmove-special-not-checked", "fullmove-extras-refused", "fullmove-left-by-person"] as const;
+export const OWN_TITLES = [
+  "fullmove-special-not-yet",
+  "fullmove-special-not-checked",
+  "fullmove-extras-refused",
+  "fullmove-left-by-person",
+  "fullmove-settings-appearance",
+  "fullmove-settings-accessibility",
+  "fullmove-settings-desktop",
+  "fullmove-settings-pointer",
+  "fullmove-settings-keyboard",
+  "fullmove-settings-display",
+  "fullmove-settings-apps",
+  "fullmove-settings-time",
+  "fullmove-settings-devices",
+  "fullmove-settings-other",
+] as const;
 export type Title = { kind: "name"; value: string } | { kind: "key"; value: (typeof OWN_TITLES)[number] };
 
 export const CHANGE_KINDS = ["app", "settings", "special", "wifi"] as const;

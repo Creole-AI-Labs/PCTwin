@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use pctwin_apps::routes::{self, AppPlan, Disposition, Flag, Here, Hints, Route, Target, WingetBy};
+use pctwin_apps::routes::{
+    self, AppPlan, Chain, Disposition, Flag, Here, Hints, Route, Target, WingetBy,
+};
 use pctwin_recipe::SettingValue;
 use pctwin_record::{AppList, FolderRole, FoundApp, FoundWhere, Owner, Record};
 use pctwin_settings::System;
@@ -17,6 +19,7 @@ use pctwin_settings::catalogue::Catalogue;
 use pctwin_settings::classify::{Ctx, FolderMap};
 use pctwin_settings::found::Discovery;
 use pctwin_settings::generic::{FoundPlan, plan_found};
+use pctwin_settings::map::{Action as MapAction, Planned};
 use pctwin_types::Reason;
 
 use crate::extras::{Extras, NotMovedCount, SpecialLine, SpecialStep, count_not_moved};
@@ -87,6 +90,156 @@ pub const LEFT_BY_PERSON: &str = "fullmove-left-by-person";
 
 /// App data places 2.5 could not fully check, as one line.
 pub const SPECIAL_NOT_CHECKED: &str = "fullmove-special-not-checked";
+
+/// The groups the settings catalogue's rows are shown in, by the first part of a row's ID
+/// (`appearance.theme` is shown with the appearance settings), each one of PCTwin's own lines by
+/// its key. A row of a group not named here is shown with [`SETTINGS_OTHER`].
+pub const SETTINGS_GROUPS: [(&str, &str); 9] = [
+    ("appearance", "fullmove-settings-appearance"),
+    ("accessibility", "fullmove-settings-accessibility"),
+    ("desktop", "fullmove-settings-desktop"),
+    ("pointer", "fullmove-settings-pointer"),
+    ("keyboard", "fullmove-settings-keyboard"),
+    ("display", "fullmove-settings-display"),
+    ("apps", "fullmove-settings-apps"),
+    ("time", "fullmove-settings-time"),
+    ("devices", "fullmove-settings-devices"),
+];
+/// The group of a catalogue row no [`SETTINGS_GROUPS`] entry names.
+pub const SETTINGS_OTHER: &str = "fullmove-settings-other";
+
+/// The key of the group a catalogue row (`id`) is shown in.
+pub fn settings_group(id: &str) -> &'static str {
+    let first = id.split('.').next().unwrap_or(id);
+    SETTINGS_GROUPS
+        .iter()
+        .find(|(p, _)| *p == first)
+        .map_or(SETTINGS_OTHER, |(_, k)| k)
+}
+
+/// How a settings line's label is shown: one of the catalogue's groups by its key, or a found
+/// setting's label (the app or part of the system it belongs to) exactly as it is.
+pub fn settings_title(label: &str) -> Title {
+    SETTINGS_GROUPS
+        .iter()
+        .map(|(_, k)| *k)
+        .chain([SETTINGS_OTHER])
+        .find(|k| *k == label)
+        .map_or_else(|| Title::Name(label.to_string()), Title::Key)
+}
+
+/// Whether a catalogue row's planned action changes this laptop (through the executor).
+pub fn applies(p: &Planned) -> bool {
+    matches!(p.action, MapAction::Apply(_))
+}
+
+/// Whether a catalogue row's planned action is the person's step (a choice, a system page, an
+/// administrator's change, a setting that waits): said on the plan, never done for them.
+pub fn needs_person(p: &Planned) -> bool {
+    matches!(
+        p.action,
+        MapAction::Guided(Some(_))
+            | MapAction::NeedsChoice { .. }
+            | MapAction::Handoff(_)
+            | MapAction::Privileged(_)
+            | MapAction::OptIn(_)
+            | MapAction::Wait(_)
+    )
+}
+
+/// The old laptop's folders pointed at this laptop's: a file inside one of them is where the
+/// move puts it (its place there, written as this laptop writes paths); anything else did not
+/// move. A setting that points at a file is written only once the file is really there
+/// ([`pctwin_settings::Store`] checks again as it writes).
+struct FoldersHere(Vec<(String, String)>);
+
+impl pctwin_settings::map::PathMap for FoldersHere {
+    fn arrival(&self, old_path: &str) -> pctwin_settings::map::Arrival {
+        use pctwin_settings::map::Arrival;
+        for (old, new) in &self.0 {
+            let old = old.trim_end_matches(['\\', '/']);
+            let Some(rest) = old_path.strip_prefix(old) else {
+                continue;
+            };
+            if !rest.is_empty() && !rest.starts_with(['\\', '/']) {
+                continue;
+            }
+            let sep = if new.starts_with('/') { '/' } else { '\\' };
+            let mut at = new.trim_end_matches(['\\', '/']).to_string();
+            for part in rest.split(['\\', '/']).filter(|p| !p.is_empty()) {
+                if part == ".." || part == "." {
+                    return Arrival::NotMoved;
+                }
+                at.push(sep);
+                at.push_str(part);
+            }
+            return Arrival::Arrived(at);
+        }
+        Arrival::NotMoved
+    }
+}
+
+/// The settings catalogue's rows the old laptop read (`capture`), planned between its system and
+/// this one: what is here now is read through `current` (by the row's ID, as the executor reads
+/// it), and the person's folders there point at theirs here. Returns the rows that change this
+/// laptop or need the person, and how many rows could not be planned at all (a capture this
+/// catalogue cannot read: said as not read, never silent).
+fn plan_catalogue(
+    cat: &Catalogue,
+    capture: &pctwin_settings::map::Capture,
+    here: &NewLaptop<'_>,
+    old_folders: &[crate::extras::OldFolder],
+    mover: &str,
+    found: &FoundPlan,
+    current: &mut dyn FnMut(&FoundPlan, &str) -> Option<Option<SettingValue>>,
+) -> (Vec<Planned>, u64) {
+    use pctwin_settings::map::{Choices, People, Reading, Target as Now};
+    let mut now = Now::default();
+    for row in &cat.settings {
+        let reading = match current(found, row.id.as_str()) {
+            Some(Some(v)) => Reading::Value(v),
+            Some(None) => Reading::NotSet,
+            None => Reading::Unreadable("it could not be read here".into()),
+        };
+        now.current.insert(row.id.clone(), reading);
+    }
+    now.roots = here.folders.iter().map(|(_, p)| p.clone()).collect();
+    let files = FoldersHere(
+        old_folders
+            .iter()
+            .filter_map(|f| {
+                let to = here.folders.iter().find(|(r, _)| *r == f.role)?;
+                Some((f.path.clone(), to.1.clone()))
+            })
+            .collect(),
+    );
+    // The extras are the person's own (the old laptop reads only the signed-in mover's
+    // settings), and they land for the person signed in here (the executor's actor).
+    let mapped = [(mover.to_string(), mover.to_string())];
+    let people = People {
+        old_account: mover,
+        new_account: mover,
+        mapped: &mapped,
+    };
+    match pctwin_settings::map::plan(
+        cat,
+        capture,
+        here.system,
+        &now,
+        &files,
+        &Choices::new(),
+        &people,
+    ) {
+        Ok(p) => (
+            p.settings
+                .into_iter()
+                .filter(|p| applies(p) || needs_person(p))
+                .collect(),
+            0,
+        ),
+        Err(_) => (Vec::new(), capture.readings.len() as u64),
+    }
+}
 
 /// One change on the approval screen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -187,22 +340,13 @@ pub fn special_reason(step: SpecialStep) -> Option<Reason> {
     }
 }
 
-/// What undo can do for an app PCTwin installs by `plan`'s first route PCTwin installs from:
-/// on Windows (winget) undo removes a Windows Installer package it installed, still that version;
-/// a Linux package tool's install, and anything else, the person removes (undo lists it).
+/// What undo can do for an app PCTwin installs by `plan`'s first route PCTwin installs from
+/// ([`Route::chain`]): on Windows (winget) undo removes a Windows Installer package it installed,
+/// still that version; a Linux package tool's install, an app placed from a cask, and anything
+/// else, the person removes (undo lists it).
 pub fn install_promise(plan: &AppPlan) -> Promise {
-    let first = plan.routes.iter().find(|r| {
-        matches!(
-            r,
-            Route::Winget { .. }
-                | Route::Apt { .. }
-                | Route::Dnf { .. }
-                | Route::Flatpak { .. }
-                | Route::Snap { .. }
-        )
-    });
-    match first {
-        Some(Route::Winget { .. }) => Promise::RemovesIfPackage,
+    match plan.routes.iter().find_map(Route::chain) {
+        Some(Chain::Winget) => Promise::RemovesIfPackage,
         _ => Promise::RemoveYourself,
     }
 }
@@ -273,7 +417,8 @@ impl AppEntry {
 
     /// The first route PCTwin itself installs from (a winget package), if any.
     pub fn winget(&self) -> Option<&str> {
-        self.plan.routes.iter().find_map(|r| match r {
+        let ours = |r: &&Route| r.chain() == Some(Chain::Winget);
+        self.plan.routes.iter().filter(ours).find_map(|r| match r {
             Route::Winget { id, .. } => Some(id.as_str()),
             _ => None,
         })
@@ -370,6 +515,11 @@ pub struct FullPlan {
     /// The old laptop's saved Wi-Fi networks, by name, as its extras listed them (move protocol
     /// 8): which its person ticked and which were read. Never a password.
     pub wifi: Vec<crate::wifi::WifiListed>,
+    /// The settings catalogue's rows the old laptop read, as planned between its system and this
+    /// one ([`pctwin_settings::map::plan`]): each one this laptop changes (applied through the
+    /// executor, journaled, undone like any other setting) and each one that is the person's
+    /// step. Rows that change nothing here are left out.
+    pub catalogue: Vec<Planned>,
 }
 
 /// What the move needs from the internet (the 2.9 preview).
@@ -459,18 +609,9 @@ fn installed_system(installed: &AppList) -> pctwin_record::AppSystem {
 pub fn needs_of(plan: &AppPlan) -> Option<Reason> {
     match plan.disposition {
         Disposition::NeedsAction => Some(Reason::ManualInstall),
-        Disposition::Install
-            if !plan.routes.iter().any(|r| {
-                matches!(
-                    r,
-                    Route::Winget { .. }
-                        | Route::Apt { .. }
-                        | Route::Dnf { .. }
-                        | Route::Flatpak { .. }
-                        | Route::Snap { .. }
-                )
-            }) =>
-        {
+        // No route an install chain of PCTwin's own takes ([`Route::chain`], the one place that
+        // is decided): the person's step.
+        Disposition::Install if !plan.routes.iter().any(|r| r.chain().is_some()) => {
             Some(Reason::ManualInstall)
         }
         _ => None,
@@ -575,10 +716,46 @@ impl FullPlan {
         };
         let settings = plan_found(&cat, x.system, here.system, &found, &ctx);
         let mut not_moved = x.not_moved.clone();
+        let mut add = |n: NotMovedCount| match not_moved.iter_mut().find(|m| m.group == n.group) {
+            Some(m) => m.count += n.count,
+            None => not_moved.push(n),
+        };
         for n in count_not_moved(&settings.not_moved) {
-            match not_moved.iter_mut().find(|m| m.group == n.group) {
-                Some(m) => m.count += n.count,
-                None => not_moved.push(n),
+            add(n);
+        }
+        // The settings catalogue's rows, as the old laptop read them, between the two systems.
+        let (catalogue, unread) = match &x.catalogue {
+            Some(capture) => {
+                plan_catalogue(&cat, capture, here, &x.folders, mover, &settings, current)
+            }
+            // An older old laptop read no rows: the found settings a row covers are not moved,
+            // and said so (never silent).
+            None => (Vec::new(), settings.by_catalogue as u64),
+        };
+        if unread > 0 {
+            add(NotMovedCount {
+                group: crate::extras::NotMovedGroup::NotRead,
+                count: unread,
+            });
+        }
+        if let Some(capture) = &x.catalogue {
+            // A row with a value there that this system has no place for: another system's.
+            let other = capture
+                .readings
+                .iter()
+                .filter(|(id, r)| {
+                    matches!(r, pctwin_settings::map::Reading::Value(_))
+                        && cat.row(id.as_str()).is_some_and(|row| {
+                            !row.places.contains_key(&here.system)
+                                || row.not_applicable.contains(&here.system)
+                        })
+                })
+                .count() as u64;
+            if other > 0 {
+                add(NotMovedCount {
+                    group: crate::extras::NotMovedGroup::SystemOwn,
+                    count: other,
+                });
             }
         }
         not_moved.sort_by_key(|n| n.group);
@@ -593,6 +770,12 @@ impl FullPlan {
             let g = groups.entry(m.label.as_str()).or_default();
             g.0 += 1;
             g.1 |= replaces;
+        }
+        for p in catalogue.iter().filter(|p| applies(p)) {
+            let g = groups.entry(settings_group(p.id.as_str())).or_default();
+            g.0 += 1;
+            // What is set here now is replaced (kept for undo); otherwise it is added.
+            g.1 |= p.before.is_some();
         }
         let groups = groups
             .into_iter()
@@ -628,6 +811,7 @@ impl FullPlan {
             here_then,
             held: Vec::new(),
             wifi: x.wifi.clone().unwrap_or_default(),
+            catalogue,
         }
     }
 
@@ -680,12 +864,35 @@ impl FullPlan {
         }
         for g in &self.groups {
             out.push(Change {
-                title: Title::Name(g.label.clone()),
+                title: settings_title(&g.label),
                 kind: Kind::Settings,
                 action: g.action,
                 undo: Promise::CanReverse,
                 count: g.count,
                 needs: None,
+                special: None,
+                files: 0,
+                category: None,
+                notes: Vec::new(),
+                secret: None,
+                update: None,
+                source: None,
+                note: None,
+                undo_if_updated: None,
+                tested: None,
+                choices: Vec::new(),
+            });
+        }
+        // The catalogue's rows that are the person's step (a system page, a choice, an
+        // administrator's change), one line per group: said, never done for them.
+        for (group, count) in self.catalogue_steps() {
+            out.push(Change {
+                title: Title::Key(group),
+                kind: Kind::Settings,
+                action: Action::LeaveAlone,
+                undo: Promise::MustKeep,
+                count,
+                needs: Some(Reason::FinishByHand),
                 special: None,
                 files: 0,
                 category: None,
@@ -903,7 +1110,54 @@ impl FullPlan {
     /// Whether the move changes anything here beyond the files (so the administrator prompt and
     /// the restore point are asked for once).
     pub fn changes_anything(&self) -> bool {
-        !self.to_install().is_empty() || !self.settings.moves.is_empty()
+        !self.to_install().is_empty() || self.settings_to_apply() > 0
+    }
+
+    /// How many settings this laptop changes: the found ones that move and the catalogue's rows
+    /// applied here.
+    pub fn settings_to_apply(&self) -> usize {
+        self.settings.moves.len() + self.catalogue.iter().filter(|p| applies(p)).count()
+    }
+
+    /// The catalogue's rows that are the person's step, counted by group (in group order).
+    pub fn catalogue_steps(&self) -> Vec<(&'static str, u64)> {
+        let mut by: BTreeMap<&'static str, u64> = BTreeMap::new();
+        for p in self.catalogue.iter().filter(|p| needs_person(p)) {
+            *by.entry(settings_group(p.id.as_str())).or_default() += 1;
+        }
+        by.into_iter().collect()
+    }
+
+    /// The executor recipes for every setting this laptop changes, each with the label it is
+    /// shown and undone under: the found settings by their app or part of the system, the
+    /// catalogue's rows by their group.
+    pub fn setting_recipes(
+        &self,
+        os: pctwin_recipe::Os,
+    ) -> Result<Vec<(String, pctwin_recipe::Recipe)>, pctwin_settings::map::PlanError> {
+        let mut out = self.settings.recipes(os, 1)?;
+        let revision = Catalogue::starter().map(|c| c.revision).unwrap_or(1);
+        for p in self.catalogue.iter().filter(|p| applies(p)) {
+            if let Some(r) = p.recipe(os, revision)? {
+                out.push((settings_group(p.id.as_str()).to_string(), r));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Each setting's executor key and the label it is shown and undone under.
+    pub fn setting_labels(&self) -> BTreeMap<String, String> {
+        self.settings
+            .moves
+            .iter()
+            .map(|m| (m.key.clone(), m.label.clone()))
+            .chain(self.catalogue.iter().filter(|p| applies(p)).map(|p| {
+                (
+                    p.id.as_str().to_string(),
+                    settings_group(p.id.as_str()).into(),
+                )
+            }))
+            .collect()
     }
 
     /// The app data to bring: every component that copies, and the secrets at `picked` (lines of
@@ -1557,5 +1811,139 @@ mod tests {
             here(&windows("Google Chrome")),
             Here::Present { .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod one_source_tests {
+    use super::*;
+    use pctwin_apps::routes::Card;
+
+    fn plan(routes: Vec<Route>) -> AppPlan {
+        AppPlan {
+            disposition: Disposition::Install,
+            stand_in: None,
+            routes,
+            flags: vec![],
+            card: Card {
+                name: "Painter".into(),
+                version: None,
+                maker: None,
+                web: None,
+                licence_key: false,
+                sign_in: false,
+                registration: vec![],
+                why: None,
+                choices: vec![],
+                trail: None,
+            },
+        }
+    }
+
+    fn cask() -> Route {
+        Route::Cask {
+            token: "painter".into(),
+            version: "1".into(),
+            url: "https://example.com/p.dmg".into(),
+            sha256: None,
+            auto_updates: false,
+            app: "Painter.app".into(),
+        }
+    }
+
+    /// Engine gap closed (31 October 2026): an app whose route is a cask is one PCTwin installs
+    /// (the Mac's chain places it), never "the person's step"; the App Store alone, or the
+    /// maker's page, stays the person's. The plan and the chains read the same rule.
+    #[test]
+    fn a_route_is_installable_exactly_when_a_chain_installs_from_it() {
+        assert_eq!(needs_of(&plan(vec![cask()])), None);
+        assert_eq!(
+            needs_of(&plan(vec![Route::MacAppStore { adam_id: 1 }])),
+            Some(Reason::ManualInstall)
+        );
+        assert_eq!(
+            needs_of(&plan(vec![Route::SignInPage {
+                url: "https://example.com/".into()
+            }])),
+            Some(Reason::ManualInstall)
+        );
+        // The App Store first, then a cask: the cask is the chain's.
+        assert_eq!(
+            needs_of(&plan(vec![Route::MacAppStore { adam_id: 1 }, cask()])),
+            None
+        );
+        assert_eq!(
+            install_promise(&plan(vec![cask()])),
+            Promise::RemoveYourself
+        );
+        let winget = Route::Winget {
+            id: "Lab.Painter".into(),
+            by: WingetBy::Row,
+        };
+        assert_eq!(
+            install_promise(&plan(vec![winget.clone()])),
+            Promise::RemovesIfPackage
+        );
+        for r in [cask(), winget] {
+            assert_eq!(
+                needs_of(&plan(vec![r.clone()])).is_none(),
+                r.chain().is_some(),
+                "{r:?}"
+            );
+        }
+    }
+
+    /// The catalogue's groups are PCTwin's own lines (translated on the screens); a found
+    /// setting's label is shown as it is.
+    #[test]
+    fn catalogue_groups_are_own_lines_and_found_labels_are_names() {
+        assert_eq!(
+            settings_group("appearance.theme"),
+            "fullmove-settings-appearance"
+        );
+        assert_eq!(
+            settings_group("pointer.natural-scroll"),
+            "fullmove-settings-pointer"
+        );
+        assert_eq!(settings_group("future.row"), SETTINGS_OTHER);
+        assert_eq!(
+            settings_title("fullmove-settings-keyboard"),
+            Title::Key("fullmove-settings-keyboard")
+        );
+        assert_eq!(
+            settings_title("PCTwinLabVendor"),
+            Title::Name("PCTwinLabVendor".into())
+        );
+    }
+
+    /// A file inside a folder the old laptop named is where the move puts it here, written as
+    /// this laptop writes paths; a file outside, or a path that climbs out, did not move.
+    #[test]
+    fn a_file_in_a_moved_folder_points_at_its_place_here() {
+        use pctwin_settings::map::{Arrival, PathMap};
+        let m = FoldersHere(vec![
+            (
+                r"C:\Users\ada\Pictures".into(),
+                "/Users/ada/Pictures".into(),
+            ),
+            ("/home/ada/Pictures".into(), r"D:\Users\ada\Pictures".into()),
+        ]);
+        assert_eq!(
+            m.arrival(r"C:\Users\ada\Pictures\beach\sea.jpg"),
+            Arrival::Arrived("/Users/ada/Pictures/beach/sea.jpg".into())
+        );
+        assert_eq!(
+            m.arrival("/home/ada/Pictures/sea.jpg"),
+            Arrival::Arrived(r"D:\Users\ada\Pictures\sea.jpg".into())
+        );
+        assert_eq!(
+            m.arrival(r"C:\Users\ada\PicturesOld\x.jpg"),
+            Arrival::NotMoved
+        );
+        assert_eq!(
+            m.arrival(r"C:\Users\ada\Pictures\..\x.jpg"),
+            Arrival::NotMoved
+        );
+        assert_eq!(m.arrival("/etc/x.jpg"), Arrival::NotMoved);
     }
 }

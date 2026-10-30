@@ -1553,16 +1553,50 @@ pub enum Placement {
 /// Where `report`'s data goes when moving from `from` to `to`.
 pub fn placement(report: &FolderReport, from: System, to: System) -> Placement {
     let f = &report.folder;
-    if from == to || f.root == RootKind::HomeDot {
+    place_by_row(f.root, &f.rel, report.row.as_ref(), from, to)
+}
+
+/// Where data found in `folder` of `root` on a laptop of `from` goes on a laptop of `to`, as
+/// the new laptop decides it from its own catalogue (never the old laptop's word, decided 31
+/// October 2026): between laptops of the same kind, and in the home's hidden folders every
+/// system keeps alike, the same place; otherwise the place the one row about that folder names
+/// for `to` (`elsewhere`), and with no such row (or two, which would be ambiguous), kept aside.
+pub fn placement_of(
+    root: RootKind,
+    folder: &str,
+    from: System,
+    to: System,
+    catalogue: &Catalogue<SpecialRow>,
+) -> Placement {
+    let named: Vec<&SpecialRow> = catalogue
+        .rows()
+        .iter()
+        .filter(|r| {
+            r.system.covers(from) && r.root == root && r.folder.eq_ignore_ascii_case(folder)
+        })
+        .collect();
+    let row = match named.as_slice() {
+        [one] => Some(*one),
+        _ => None,
+    };
+    place_by_row(root, folder, row, from, to)
+}
+
+/// The one rule both [`placement`] and [`placement_of`] follow.
+fn place_by_row(
+    root: RootKind,
+    folder: &str,
+    row: Option<&SpecialRow>,
+    from: System,
+    to: System,
+) -> Placement {
+    if from == to || root == RootKind::HomeDot {
         return Placement::Same {
-            root: f.root,
-            folder: f.rel.clone(),
+            root,
+            folder: folder.to_string(),
         };
     }
-    report
-        .row
-        .as_ref()
-        .and_then(|r| r.elsewhere.iter().find(|p| p.system == to))
+    row.and_then(|r| r.elsewhere.iter().find(|p| p.system == to))
         .map_or(Placement::PreservedOnly, |p| Placement::Translated {
             root: p.root,
             folder: p.folder.clone(),

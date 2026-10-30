@@ -80,13 +80,15 @@ async fn sent_by(ours: Versions) -> Vec<u8> {
 }
 
 #[test]
-fn this_release_speaks_versions_three_to_eight() {
+fn this_release_speaks_versions_three_to_nine() {
     // 3 sends the list in pages (PAGED_FROM), kept for a laptop one version behind; 4 adds Hold
     // (HOLD_SINCE); 5 adds the apps (APPS_SINCE); 6 the full move's extras (EXTRAS_SINCE); 7 the
     // old laptop's own folder in the landing rules (OWN_FOLDER_SINCE); 8 saved Wi-Fi networks
-    // (WIFI_SINCE). 2 was never released, and its one-document list had no memory bounds.
+    // (WIFI_SINCE); 9 the settings catalogue's rows in the extras (CATALOGUE_SINCE). 2 was never
+    // released, and its one-document list had no memory bounds.
     assert_eq!(MOVE_PROTOCOL.oldest(), 3);
-    assert_eq!(MOVE_PROTOCOL.newest(), 8);
+    assert_eq!(MOVE_PROTOCOL.newest(), 9);
+    assert_eq!(pctwin_transfer::CATALOGUE_SINCE, 9);
     assert_eq!(pctwin_transfer::WIFI_SINCE, 8);
     assert_eq!(pctwin_transfer::OWN_FOLDER_SINCE, 7);
     assert_eq!(pctwin_transfer::APPS_SINCE, 5);
@@ -119,10 +121,15 @@ fn a_range_must_start_at_one_or_later_and_not_run_backwards() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_laptops_on_this_release_agree_on_version_eight() {
+async fn two_laptops_on_this_release_agree_on_version_nine() {
     let (a, b) = agree(MOVE_PROTOCOL, MOVE_PROTOCOL).await;
+    assert_eq!(a.unwrap(), 9);
+    assert_eq!(b.unwrap(), 9);
+    // A laptop on the release before (3 to 8) is spoken to on 8: no catalogue rows cross.
+    let (a, b) = agree(MOVE_PROTOCOL, v(3, 8)).await;
     assert_eq!(a.unwrap(), 8);
     assert_eq!(b.unwrap(), 8);
+    const { assert!(8 < pctwin_transfer::CATALOGUE_SINCE) };
     // A laptop on the release before (3 to 7) is spoken to on 7: no Wi-Fi networks cross.
     let (a, b) = agree(MOVE_PROTOCOL, v(3, 7)).await;
     assert_eq!(a.unwrap(), 7);
@@ -225,9 +232,9 @@ async fn the_message_form_is_fixed_for_every_release() {
     // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33, 35).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
-    // A later laptop that speaks versions 1 to 9 still agrees with this one on 8, and one that
+    // A later laptop that speaks versions 1 to 10 still agrees with this one on 9, and one that
     // speaks 1 to 4 on 4.
-    assert_eq!(receive(&[kind, 0, 1, 0, 9]).await.unwrap(), 8);
+    assert_eq!(receive(&[kind, 0, 1, 0, 10]).await.unwrap(), 9);
     assert_eq!(receive(&[kind, 0, 1, 0, 4]).await.unwrap(), 4);
 }
 
@@ -317,6 +324,6 @@ async fn a_laptop_that_never_answers_is_given_up_on() {
         tokio::time::sleep(VERSION_WAIT - Duration::from_secs(1)).await;
         agree_version(&mut y, MOVE_PROTOCOL).await
     });
-    assert_eq!(a.unwrap(), 8);
-    assert_eq!(b.unwrap(), 8);
+    assert_eq!(a.unwrap(), 9);
+    assert_eq!(b.unwrap(), 9);
 }

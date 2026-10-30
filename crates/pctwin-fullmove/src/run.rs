@@ -487,7 +487,7 @@ fn apply_settings(
         point: None,
         stopped: Some(why),
     };
-    if plan.settings.moves.is_empty() {
+    if plan.settings_to_apply() == 0 {
         return SettingsRun {
             lines: Vec::new(),
             recipes: Vec::new(),
@@ -496,7 +496,7 @@ fn apply_settings(
         };
     }
     let os = os_of(settings_system(settings.platform().os));
-    let labelled = match plan.settings.recipes(os, 1) {
+    let labelled = match plan.setting_recipes(os) {
         Ok(r) => r,
         Err(e) => return fail_all(e.to_string()),
     };
@@ -740,14 +740,14 @@ pub fn rebuild(
     };
     // The restore point's answer: asked now, before the first setting, if no install asked for it
     // already; with no setting to change and nothing installed, nobody is asked for anything.
-    let point = if plan.settings.moves.is_empty() {
+    let point = if plan.settings_to_apply() == 0 {
         installer.asked()
     } else {
         Some(installer.restore_point())
     };
     let (apps, here) = app_lines(plan, &to_install, installed);
     // Settings.
-    let total = plan.settings.moves.len() as u64;
+    let total = plan.settings_to_apply() as u64;
     let mut done = 0u64;
     let settings_point = point.clone().unwrap_or(RestorePoint::NotMade {
         why: "nothing needed one".into(),
@@ -768,7 +768,7 @@ pub fn rebuild(
     // A run that could not start says so for every group; one that stopped part way already
     // said "not verified" for each group it did not reach.
     let mut settings_lines =
-        if ran.lines.is_empty() && !plan.groups.is_empty() && !plan.settings.moves.is_empty() {
+        if ran.lines.is_empty() && !plan.groups.is_empty() && plan.settings_to_apply() > 0 {
             plan.groups
                 .iter()
                 .map(|g| {
@@ -782,6 +782,14 @@ pub fn rebuild(
         } else {
             ran.lines
         };
+    // The catalogue's rows that are the person's step: said as theirs, never done for them.
+    settings_lines.extend(plan.catalogue_steps().into_iter().map(|(group, n)| {
+        (
+            group.to_string(),
+            n,
+            ItemResult::because(Reason::FinishByHand),
+        )
+    }));
     // Each setting whose file is not where it would point: left as it was, said so.
     settings_lines.extend(
         not_landed
@@ -860,12 +868,7 @@ pub fn rebuild(
             ItemResult::because(Reason::FinishByHand),
         ));
     }
-    let labels = plan
-        .settings
-        .moves
-        .iter()
-        .map(|m| (m.key.clone(), m.label.clone()))
-        .collect();
+    let labels = plan.setting_labels();
     let (listed, removable) = installed_apps(&apps);
     let undo = UndoBook {
         scope: scope.0,
