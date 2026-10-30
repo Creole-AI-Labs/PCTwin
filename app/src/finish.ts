@@ -422,7 +422,7 @@ export function parseDoctorView(v: unknown): DoctorView | null {
 
 /* ---------- Finish your setup, saved setup ---------- */
 
-export const SETUP_WHATS = ["sign-in", "licence-key", "set-up-again", "download-from-maker", "permission", "restart", "finish-by-hand", "parts-missing", "export-first", "relink", "look-at-it"] as const;
+export const SETUP_WHATS = ["sign-in", "licence-key", "set-up-again", "download-from-maker", "permission", "restart", "finish-by-hand", "parts-missing", "export-first", "relink", "look-at-it", "screens"] as const;
 export type SetupWhat = (typeof SETUP_WHATS)[number];
 
 export const SETUP_MARKS = ["open", "machine-checked", "you-did-it"] as const;

@@ -2417,6 +2417,7 @@ finish-setup-parts-missing = Some parts of { $name } did not arrive. Send them a
 finish-setup-export-first = Export from { $name } on the old laptop first
 finish-setup-relink = Link { $name } to your account again
 finish-setup-look-at-it = Look at { $name } and check it is right
+finish-setup-screens = Check the text size and screen layout in this laptop’s display settings
 finish-setup-mark-open = Not done
 finish-setup-mark-machine-checked = PCTwin checked
 finish-setup-mark-you-did-it = You said it is done

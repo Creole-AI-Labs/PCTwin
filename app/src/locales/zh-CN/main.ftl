@@ -2284,6 +2284,7 @@ finish-setup-parts-missing = { $name } 的一些部分没有送达。请重新�
 finish-setup-export-first = 先在旧笔记本电脑上从 { $name } 导出
 finish-setup-relink = 重新将 { $name } 关联到你的账户
 finish-setup-look-at-it = 查看 { $name }，确认没有问题
+finish-setup-screens = 在这台电脑的显示设置中检查文字大小和屏幕布局
 finish-setup-mark-open = 未完成
 finish-setup-mark-machine-checked = PCTwin 已检查
 finish-setup-mark-you-did-it = 你说已完成

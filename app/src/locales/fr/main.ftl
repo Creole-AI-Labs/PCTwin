@@ -2628,6 +2628,7 @@ finish-setup-parts-missing = Certaines parties de { $name } ne sont pas arrivée
 finish-setup-export-first = Exportez d’abord depuis { $name } sur l’ancien ordinateur portable
 finish-setup-relink = Reliez { $name } à votre compte à nouveau
 finish-setup-look-at-it = Regardez { $name } et vérifiez que tout est correct
+finish-setup-screens = Vérifiez la taille du texte et la disposition des écrans dans les paramètres d’affichage de cet ordinateur
 finish-setup-mark-open = Pas fait
 finish-setup-mark-machine-checked = PCTwin a vérifié
 finish-setup-mark-you-did-it = Vous avez dit que c’est fait

@@ -607,6 +607,9 @@ keys! {
         ExportFirst,
         Relink,
         LookAtIt,
+        /// The new laptop's screens: text size and layout are set again by the person (a saved
+        /// arrangement fits only the exact screens it was saved for; `pctwin_settings`).
+        Screens,
     }
 }
 
@@ -1714,6 +1717,8 @@ fn setup_view(m: &Move) -> SetupView {
             push(SetupWhat::SetUpAgain, name, false);
         }
     }
+    // Every move lands on other screens: their text size and layout are the person's step.
+    push(SetupWhat::Screens, String::new(), false);
     let saved = store::load::<Vec<(String, String)>>(&m.folder, "setups.json")
         .unwrap_or_default()
         .into_iter()

@@ -73,6 +73,12 @@
         "mark": "machine-checked",
         "name": "Mail",
         "what": "look-at-it"
+      },
+      {
+        "id": "000000000000000000000000000000000000000000000000000000000000000c",
+        "mark": "you-did-it",
+        "name": "Mail",
+        "what": "screens"
       }
     ]
   }

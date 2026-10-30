@@ -2539,6 +2539,7 @@ finish-setup-parts-missing = { $name } के कुछ हिस्से न�
 finish-setup-export-first = पहले पुराने लैपटॉप पर { $name } से एक्सपोर्ट करें
 finish-setup-relink = { $name } को अपने खाते से फिर से जोड़ें
 finish-setup-look-at-it = { $name } को देखें और जाँचें कि सब ठीक है
+finish-setup-screens = इस लैपटॉप की डिस्प्ले सेटिंग में टेक्स्ट का आकार और स्क्रीन की व्यवस्था जाँचें
 finish-setup-mark-open = पूरा नहीं हुआ
 finish-setup-mark-machine-checked = PCTwin ने जाँचा
 finish-setup-mark-you-did-it = आपने कहा कि हो गया
