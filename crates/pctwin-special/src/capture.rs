@@ -451,6 +451,35 @@ fn run(
         return Err(CaptureError::AwaitingClose { by });
     }
     let unconfirmed = holding == Holding::CannotTell;
+    if component.evidence.contains(&Evidence::CarriedRaw) {
+        // Carried as it is: each file read steady, nothing inside it opened here (a database
+        // and its log included: the new laptop's parser process reads them together).
+        let (files, mut evidence) = steady_copy(base, work, &component.members, stop)?;
+        // Steady together, not only one by one: a database and its log copied at two moments
+        // would not belong together.
+        if generation(base, &component.members) != gen_now {
+            remove_written(work, &files);
+            return Err(CaptureError::KeptChanging);
+        }
+        let partial = evidence
+            .iter()
+            .any(|e| matches!(e, Evidence::HashMismatch | Evidence::MissingPart { .. }));
+        evidence.dedup();
+        return Ok(Capture {
+            component: component.id,
+            method: Method::SteadyCopy,
+            preservation: if partial {
+                Preservation::Partial
+            } else {
+                Preservation::Captured
+            },
+            generation: gen_now,
+            files,
+            folded: Vec::new(),
+            evidence,
+            closed_unconfirmed: unconfirmed,
+        });
+    }
     let shapes: Vec<Shape> = paths.iter().map(|p| shape_of(p)).collect();
     // Each database, with the log or journal SQLite keeps beside it by its own naming rule.
     let dbs: Vec<String> = component

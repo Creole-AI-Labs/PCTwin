@@ -804,6 +804,21 @@ pub enum DataWhy {
     Beside { folder: String },
     /// It landed in `folder`, but the app needs a step before it can use it.
     Placed { folder: String },
+    /// Mail kept only on the old Mac: `messages` messages written as mailbox files in `folder`;
+    /// the person imports them in their mail app (never claimed imported).
+    MailReady { messages: u64, folder: String },
+    /// `messages` messages written in `folder`, but `missing` of them had attachments that were
+    /// not on the old laptop, `failed` could not be written, or some of the mail did not arrive.
+    MailPartsMissing {
+        messages: u64,
+        missing: u64,
+        failed: u64,
+        folder: String,
+    },
+    /// `accounts` mail accounts keep their mail on their server: the person signs in here.
+    MailSignIn { accounts: u64 },
+    /// PCTwin could not look inside the old Mac's mail (Full Disk Access is off there).
+    MailNoAccess,
 }
 
 /// How one component ended.
@@ -904,6 +919,10 @@ pub fn land_all(
             out.push(needs("its record did not arrive", DataWhy::NotWhole));
             continue;
         };
+        // Apple Mail's raw files are never landed as they are: [`convert_mail`] writes them out.
+        if r.root == RootKind::MacMail {
+            continue;
+        }
         let whole = arrived_whole(a, r.capture.files.iter().map(|f| f.rel.as_str()));
         if !whole || r.component.secret != secret {
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
@@ -916,24 +935,56 @@ pub fn land_all(
 
 /// Whether a component arrived whole: nothing about it was refused, and every file its record
 /// names (`wanted`) arrived checked. Anything less ends "needs action", never landed as whole.
-fn arrived_whole<'w>(a: &Arrived, wanted: impl IntoIterator<Item = &'w str>) -> bool {
+pub(crate) fn arrived_whole<'w>(a: &Arrived, wanted: impl IntoIterator<Item = &'w str>) -> bool {
     !a.refused
         && wanted
             .into_iter()
             .all(|rel| a.files.get(rel).copied() == Some(true))
 }
 
-struct NewLaptopOf<'a, 'r> {
-    n: &'a Landing<'a>,
-    rec: &'r pctwin_journal::Recorder<'r, pctwin_journal::Imports>,
-    stop: &'a Stop,
-    made: &'a MadeFolders,
-    seal: PlanSeal,
-    root: RootRef,
+pub(crate) struct NewLaptopOf<'a, 'r> {
+    pub(crate) n: &'a Landing<'a>,
+    pub(crate) rec: &'r pctwin_journal::Recorder<'r, pctwin_journal::Imports>,
+    pub(crate) stop: &'a Stop,
+    pub(crate) made: &'a MadeFolders,
+    pub(crate) seal: PlanSeal,
+    pub(crate) root: RootRef,
 }
 
 impl NewLaptopOf<'_, '_> {
     fn land(&self, id: &str, r: &Record, step: u32, secret: bool, work: &Path) -> Landed {
+        match self.applied(id, r, step, secret, work) {
+            Some(applied) => {
+                let why = why_of(&applied);
+                Landed {
+                    id: id.into(),
+                    app: r.app.clone(),
+                    result: applied.result,
+                    effect: applied.landed.as_ref().map(|l| l.effect),
+                    words: applied.words,
+                    why,
+                }
+            }
+            None => Landed {
+                id: id.into(),
+                app: r.app.clone(),
+                result: ItemResult::because(Reason::FinishByHand),
+                effect: None,
+                words: "it was not landed".into(),
+                why: Some(DataWhy::NotLanded),
+            },
+        }
+    }
+
+    /// Lands `r` (its files in `work`) through 2.5's own landing; `None`: it was not tried.
+    pub(crate) fn applied(
+        &self,
+        id: &str,
+        r: &Record,
+        step: u32,
+        secret: bool,
+        work: &Path,
+    ) -> Option<api::Applied> {
         let p = Planned {
             app: r.app.clone(),
             component: r.component.clone(),
@@ -979,27 +1030,13 @@ impl NewLaptopOf<'_, '_> {
                 .map(Grant::Ordinary)
         };
         let Ok(grant) = grant else {
-            return Landed {
-                id: id.into(),
-                app: r.app.clone(),
-                result: ItemResult::because(Reason::FinishByHand),
-                effect: None,
-                words: "it was not landed".into(),
-                why: Some(DataWhy::NotLanded),
-            };
+            return None;
         };
         let (Some(item), Ok(recipe)) = (
             id.get(..32).and_then(|h| ItemId::from_hex(h).ok()),
             RecipeId::new("pctwin.special.land"),
         ) else {
-            return Landed {
-                id: id.into(),
-                app: r.app.clone(),
-                result: ItemResult::because(Reason::FinishByHand),
-                effect: None,
-                words: "it was not landed".into(),
-                why: Some(DataWhy::NotLanded),
-            };
+            return None;
         };
         let planned = PlannedEffect {
             scope: self.n.scope,
@@ -1022,7 +1059,7 @@ impl NewLaptopOf<'_, '_> {
             stop: self.stop,
             made: self.made,
         };
-        let applied = api::apply(
+        Some(api::apply(
             &laptop,
             grant,
             &approved,
@@ -1032,16 +1069,7 @@ impl NewLaptopOf<'_, '_> {
             work,
             Conflict::KeepBoth,
             now,
-        );
-        let why = why_of(&applied);
-        Landed {
-            id: id.into(),
-            app: r.app.clone(),
-            result: applied.result,
-            effect: applied.landed.as_ref().map(|l| l.effect),
-            words: applied.words,
-            why,
-        }
+        ))
     }
 }
 

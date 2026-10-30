@@ -120,3 +120,10 @@ path = "fuzz_targets/game_formats.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "mail_kinds"
+path = "fuzz_targets/mail_kinds.rs"
+test = false
+doc = false
+bench = false

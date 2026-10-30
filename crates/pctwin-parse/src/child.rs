@@ -191,6 +191,13 @@ pub fn answer<R: Read, W: Write>(
             whole(&mut file, size, pctwin_special::mail::MAX_MESSAGE)
                 .and_then(|b| pctwin_special::mail::emlx_facts(seal, &b)),
         ),
+        Request::MailKinds { size, log } => Answer::MailKinds(
+            whole(&mut file, size, pctwin_special::content::MAX_DB).and_then(|db| {
+                let log = whole(&mut file, log, pctwin_special::content::MAX_LOG)?;
+                let log = (!log.is_empty()).then_some(log);
+                pctwin_special::applemail::mail_kinds(seal, &db, log.as_deref())
+            }),
+        ),
         Request::AddOn { size } => Answer::AddOn(
             whole(&mut file, size, 1024 * 1024)
                 .is_ok_and(|b| pctwin_special::content::add_on_manifest(seal, &b)),

@@ -296,6 +296,38 @@ impl Rebuilt {
     }
 }
 
+/// How a line converted on this laptop ended: each mailbox written and each account left to its
+/// server ([`DataDone::mail`]); a line whose folder could not be looked into on the old laptop
+/// needs the person (never "no mail"); one with nothing written did not arrive.
+fn converted_lines(s: &crate::extras::SpecialLine, data: &DataDone) -> Vec<SpecialDone> {
+    use pctwin_special::category::Note;
+    if s.notes.contains(&Note::MailNoAccess) {
+        return vec![SpecialDone {
+            title: Title::Name(s.name.clone()),
+            result: ItemResult::because(Reason::Permission),
+            why: Some(crate::data::DataWhy::MailNoAccess),
+            sites: false,
+        }];
+    }
+    if data.mail.is_empty() {
+        return vec![SpecialDone {
+            title: Title::Name(s.name.clone()),
+            result: ItemResult::because(Reason::FinishByHand),
+            why: Some(crate::data::DataWhy::DidNotArrive),
+            sites: false,
+        }];
+    }
+    data.mail
+        .iter()
+        .map(|l| SpecialDone {
+            title: Title::Name(l.title.clone()),
+            result: l.result,
+            why: l.why.clone(),
+            sites: false,
+        })
+        .collect()
+}
+
 /// An executor adapter for the move: settings through `inner`, the restore point already asked,
 /// and `applied` told after each setting written.
 struct MoveAdapter<'a> {
@@ -529,6 +561,9 @@ pub struct DataDone {
     /// move's own record of what landed where, by which a setting that points at a moved file is
     /// pointed at it ([`pctwin_settings::generic::FoundPlan::point_at_landed`]).
     pub files: Vec<(String, String)>,
+    /// How the mail converted here ended ([`crate::mailout::convert_mail`]), mailbox by mailbox:
+    /// these lines stand for the plan's converted line.
+    pub mail: Vec<crate::mailout::MailLine>,
 }
 
 /// The move's own record of what landed where, for [`DataDone::files`]: each file on this laptop
@@ -749,7 +784,10 @@ pub fn rebuild(
         .special
         .iter()
         .enumerate()
-        .map(|(at, s)| {
+        .flat_map(|(at, s)| {
+            if s.step == crate::extras::SpecialStep::Convert {
+                return converted_lines(s, data);
+            }
             let (result, why) = match special_reason(s.step) {
                 Some(reason) => (ItemResult::because(reason), None),
                 // A secret not ticked stays on the old laptop, by the person's choice.
@@ -775,12 +813,12 @@ pub fn rebuild(
                         .unwrap_or_else(not_arrived)
                 }
             };
-            SpecialDone {
+            vec![SpecialDone {
                 title: Title::Name(s.name.clone()),
                 result,
                 why,
                 sites: s.sites,
-            }
+            }]
         })
         .collect();
     if plan.extras_refused {
@@ -907,5 +945,73 @@ mod tests {
         book.removable = kept;
         let json = serde_json::to_string(&book).unwrap();
         assert_eq!(serde_json::from_str::<UndoBook>(&json).unwrap(), book);
+    }
+}
+
+#[cfg(test)]
+mod mail_tests {
+    use super::*;
+    use crate::data::DataWhy;
+    use crate::extras::{SpecialLine, SpecialStep};
+    use pctwin_special::category::Note;
+
+    fn line(notes: Vec<Note>, ids: Vec<String>) -> SpecialLine {
+        SpecialLine {
+            name: "Apple Mail".into(),
+            step: SpecialStep::Convert,
+            files: ids.len() as u64,
+            secret: false,
+            parts: ids.iter().map(|_| "Mailboxes".to_string()).collect(),
+            ids,
+            sites: false,
+            category: pctwin_special::category::Category::Email,
+            notes,
+            bytes: 0,
+        }
+    }
+
+    /// Mail PCTwin could not look into on the old Mac needs the person, with why; it is never a
+    /// line that says nothing was there.
+    #[test]
+    fn mail_that_could_not_be_looked_into_needs_the_person() {
+        let got = converted_lines(
+            &line(vec![Note::MailNoAccess], vec![]),
+            &DataDone::default(),
+        );
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].result, ItemResult::because(Reason::Permission));
+        assert_eq!(got[0].why, Some(DataWhy::MailNoAccess));
+    }
+
+    #[test]
+    fn a_converted_line_is_its_mailboxes_or_did_not_arrive() {
+        let l = line(vec![Note::MailImport], vec!["a".into()]);
+        let none = converted_lines(&l, &DataDone::default());
+        assert_eq!(none.len(), 1);
+        assert_eq!(none[0].result.status(), ItemStatus::NeedsAction);
+        assert_eq!(none[0].why, Some(DataWhy::DidNotArrive));
+        let done = DataDone {
+            mail: vec![
+                crate::mailout::MailLine {
+                    title: "On My Mac/Trips".into(),
+                    result: ItemResult::done(ItemStatus::Converted).unwrap(),
+                    why: Some(DataWhy::MailReady {
+                        messages: 2,
+                        folder: "Documents/Mail from Ada".into(),
+                    }),
+                },
+                crate::mailout::MailLine {
+                    title: "Apple Mail".into(),
+                    result: ItemResult::because(Reason::SignIn),
+                    why: Some(DataWhy::MailSignIn { accounts: 1 }),
+                },
+            ],
+            ..DataDone::default()
+        };
+        let got = converted_lines(&l, &done);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].title, Title::Name("On My Mac/Trips".into()));
+        assert_eq!(got[0].result.status(), ItemStatus::Converted);
+        assert_eq!(got[1].result.status(), ItemStatus::NeedsAction);
     }
 }

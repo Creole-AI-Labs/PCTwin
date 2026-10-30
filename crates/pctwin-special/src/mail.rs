@@ -164,6 +164,9 @@ pub struct MailboxExport {
     pub partial: u32,
     /// Messages that could not be written (unreadable, damaged, too large).
     pub failed: u32,
+    /// The written file was read back and holds exactly as many messages as were written.
+    #[serde(default)]
+    pub checked: bool,
 }
 
 impl MailboxExport {
@@ -173,6 +176,9 @@ impl MailboxExport {
         let wrote = self.written + self.partial;
         if wrote == 0 {
             ItemResult::because(Reason::Unreadable)
+        } else if !self.checked {
+            // Written, but the file read back does not hold what was written: never "converted".
+            ItemResult::because(Reason::NotVerified)
         } else if self.partial == 0 && self.failed == 0 {
             ItemResult::done(ItemStatus::Converted)
                 .unwrap_or(ItemResult::because(Reason::NotVerified))
@@ -205,38 +211,93 @@ pub fn export_mailboxes(
     read: Reader<'_>,
     deadline: Instant,
 ) -> std::io::Result<MailExport> {
+    export_from(
+        &[MailSource {
+            dir: dir.to_path_buf(),
+            label: String::new(),
+        }],
+        out,
+        read,
+        deadline,
+    )
+}
+
+/// One folder of saved messages to write out, and the name its mailboxes are shown under (an
+/// account's; empty: none). Folders with the same name write into the same mailboxes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailSource {
+    pub dir: PathBuf,
+    pub label: String,
+}
+
+/// [`export_mailboxes`] over several folders: each mailbox is named `<label>/<mailbox>`, and
+/// every written file is read back and its messages counted before it is called written
+/// ([`MailboxExport::checked`]).
+pub fn export_from(
+    sources: &[MailSource],
+    out: &Path,
+    read: Reader<'_>,
+    deadline: Instant,
+) -> std::io::Result<MailExport> {
     let mut found: std::collections::BTreeMap<String, Vec<PathBuf>> = Default::default();
     let mut cut = false;
     let mut count = 0usize;
+    for source in sources {
+        walk(source, &mut found, &mut cut, &mut count);
+    }
+    write_all(found, cut, out, read, deadline)
+}
+
+/// Finds every saved message under `source`, by mailbox.
+fn walk(
+    source: &MailSource,
+    found: &mut std::collections::BTreeMap<String, Vec<PathBuf>>,
+    cut: &mut bool,
+    count: &mut usize,
+) {
+    let dir = source.dir.as_path();
     let mut stack = vec![(dir.to_path_buf(), 0usize)];
     while let Some((d, depth)) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&d) else {
-            cut = true;
+            *cut = true;
             continue;
         };
         for e in entries.flatten() {
             let Ok(m) = std::fs::symlink_metadata(e.path()) else {
-                cut = true;
+                *cut = true;
                 continue;
             };
             match guard::kind_of(&m) {
                 Kind::Folder if depth < MAX_DEPTH => stack.push((e.path(), depth + 1)),
-                Kind::Folder => cut = true,
+                Kind::Folder => *cut = true,
                 Kind::File if is_message(&e.path()) => {
-                    if count == MAX_MESSAGES {
-                        cut = true;
+                    if *count == MAX_MESSAGES {
+                        *cut = true;
                         continue;
                     }
-                    count += 1;
-                    found
-                        .entry(mailbox_of(dir, &e.path()))
-                        .or_default()
-                        .push(e.path());
+                    *count += 1;
+                    let mailbox = mailbox_of(dir, &e.path());
+                    let name = if source.label.is_empty() {
+                        mailbox
+                    } else {
+                        format!("{}/{mailbox}", source.label)
+                    };
+                    found.entry(name).or_default().push(e.path());
                 }
                 _ => {}
             }
         }
     }
+}
+
+/// Writes each mailbox `found` as one mbox file in `out`, each file read back after.
+fn write_all(
+    found: std::collections::BTreeMap<String, Vec<PathBuf>>,
+    cut: bool,
+    out: &Path,
+    read: Reader<'_>,
+    deadline: Instant,
+) -> std::io::Result<MailExport> {
     let mut result = MailExport {
         not_all_looked_at: cut,
         ..Default::default()
@@ -249,6 +310,7 @@ pub fn export_mailboxes(
             written: 0,
             partial: 0,
             failed: 0,
+            checked: false,
         };
         let path = out.join(format!("{}.mbox", file_name(&name, n)));
         let mut w: Option<std::io::BufWriter<std::fs::File>> = None;
@@ -291,10 +353,31 @@ pub fn export_mailboxes(
             w.into_inner()
                 .map_err(std::io::IntoInnerError::into_error)?
                 .sync_all()?;
+            // Read back from the drive: as many messages as were written, or not "written".
+            b.checked = envelopes(&path).ok() == Some(u64::from(b.written + b.partial));
         }
         result.mailboxes.push(b);
     }
     Ok(result)
+}
+
+/// How many messages an mbox file holds: its lines that start with the envelope's `From `
+/// (every such line inside a message was marked with `>` when it was written).
+pub fn envelopes(path: &Path) -> std::io::Result<u64> {
+    use std::io::BufRead;
+    let mut r = std::io::BufReader::new(std::fs::File::open(path)?);
+    let mut line = Vec::new();
+    let mut n = 0u64;
+    loop {
+        line.clear();
+        // A line is read in full whatever its length; only its start is looked at.
+        if r.read_until(b'\n', &mut line)? == 0 {
+            return Ok(n);
+        }
+        if line.starts_with(b"From ") {
+            n += 1;
+        }
+    }
 }
 
 /// Whether a file is a saved message, by its first bytes.
@@ -605,8 +688,15 @@ mod tests {
             written,
             partial,
             failed,
+            checked: true,
         };
         assert_eq!(b(3, 0, 0).result().status(), ItemStatus::Converted);
+        // A file whose messages did not count back right is never converted.
+        let unchecked = MailboxExport {
+            checked: false,
+            ..b(3, 0, 0)
+        };
+        assert_eq!(unchecked.result(), ItemResult::because(Reason::NotVerified));
         for (w, p, f) in [(3, 0, 1), (3, 1, 0), (0, 1, 0)] {
             assert_eq!(
                 b(w, p, f).result(),

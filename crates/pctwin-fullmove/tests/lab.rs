@@ -644,6 +644,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         &plan,
         &pctwin_fullmove::run::DataDone {
             files,
+            mail: Vec::new(),
             ..Default::default()
         },
         &mut installer,

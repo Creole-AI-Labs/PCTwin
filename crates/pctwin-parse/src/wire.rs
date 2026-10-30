@@ -83,6 +83,9 @@ pub enum Request {
     AddOn { size: u64 },
     /// One saved Apple Mail message's facts (2.5 mail).
     Emlx { size: u64 },
+    /// Which kind of account each Apple Mail account folder is (2.5 mail): `size` bytes of the
+    /// received mail index, then `log` bytes of its write-ahead log.
+    MailKinds { size: u64, log: u64 },
     /// What a browser's file holds (2.5 browsers): `size` bytes of the file, then `second` bytes
     /// of a second one (a database's log, or a manifest's messages; none when 0).
     Browser {
@@ -113,9 +116,9 @@ impl Request {
             | Request::Emlx { size }
             | Request::GameRecord { size, .. } => size,
             Request::SaveManifest { wanted, size } => wanted.saturating_add(size),
-            Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
-                size.saturating_add(log)
-            }
+            Request::DatabaseFacts { size, log, .. }
+            | Request::DatabaseSnapshot { size, log }
+            | Request::MailKinds { size, log } => size.saturating_add(log),
             Request::Browser { size, second, .. } => size.saturating_add(second),
         }
     }
@@ -162,6 +165,7 @@ pub enum Answer {
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
     Emlx(Result<pctwin_special::mail::EmlxFacts, ContentError>),
+    MailKinds(Result<Vec<pctwin_special::applemail::AccountScheme>, ContentError>),
     Browser(Result<pctwin_special::browser_read::Found, ContentError>),
     GameRecord(Result<pctwin_special::gamefmt::Tree, ContentError>),
     SaveManifest(Result<pctwin_special::gamefmt::ManifestRead, ContentError>),
@@ -187,6 +191,7 @@ impl Answer {
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
                 | (Answer::Emlx(_), Request::Emlx { .. })
+                | (Answer::MailKinds(_), Request::MailKinds { .. })
                 | (Answer::Browser(_), Request::Browser { .. })
                 | (Answer::GameRecord(_), Request::GameRecord { .. })
                 | (Answer::SaveManifest(_), Request::SaveManifest { .. })

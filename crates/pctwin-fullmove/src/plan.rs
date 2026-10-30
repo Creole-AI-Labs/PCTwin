@@ -162,7 +162,8 @@ pub fn older_here(plan: &AppPlan) -> Option<String> {
 /// move yet, so it is never claimed copied.
 pub fn special_reason(step: SpecialStep) -> Option<Reason> {
     match step {
-        SpecialStep::Copy => None,
+        // Carried and written by PCTwin: how it ended comes from what was written.
+        SpecialStep::Copy | SpecialStep::Convert => None,
         SpecialStep::SignIn | SpecialStep::Relink => Some(Reason::SignIn),
         SpecialStep::ExportFirst | SpecialStep::NotYet | SpecialStep::LookAtIt => {
             Some(Reason::FinishByHand)
@@ -194,7 +195,8 @@ pub fn install_promise(plan: &AppPlan) -> Promise {
 pub fn special_promise(step: SpecialStep) -> Promise {
     match step {
         // App data PCTwin places: removed again, each file only while it is what PCTwin wrote.
-        SpecialStep::Copy => Promise::CanReverse,
+        // Files PCTwin writes here (mailbox files written for the person): removed the same way.
+        SpecialStep::Copy | SpecialStep::Convert => Promise::CanReverse,
         // The person signs in or relinks: the maker governs it.
         SpecialStep::SignIn | SpecialStep::Relink => Promise::NeedsYouMaker,
         // Nothing PCTwin changes: left as it is.
@@ -665,7 +667,16 @@ impl FullPlan {
             });
         }
         for (at, s) in self.special.iter().enumerate() {
-            let needs = special_reason(s.step);
+            // Mail the old Mac would not let PCTwin look into: the person turns on access there
+            // first; nothing of it moves, so nothing is left to undo.
+            let no_access = s
+                .notes
+                .contains(&pctwin_special::category::Note::MailNoAccess);
+            let needs = if no_access {
+                Some(Reason::Permission)
+            } else {
+                special_reason(s.step)
+            };
             out.push(Change {
                 title: Title::Name(s.name.clone()),
                 kind: Kind::Special,
@@ -674,7 +685,11 @@ impl FullPlan {
                 } else {
                     Action::Merge
                 },
-                undo: special_promise(s.step),
+                undo: if no_access {
+                    Promise::MustKeep
+                } else {
+                    special_promise(s.step)
+                },
                 count: 0,
                 needs,
                 special: Some(s.step),
@@ -831,9 +846,19 @@ impl FullPlan {
             .filter(|s| s.step == SpecialStep::Copy)
             .map(|s| s.files)
             .fold(0, u64::saturating_add);
+        // What is converted here is staged as it arrived and written out again beside it: about
+        // twice its size, until the staged copy is removed.
+        let converted: u64 = self
+            .special
+            .iter()
+            .filter(|s| s.step == SpecialStep::Convert)
+            .map(|s| s.bytes.saturating_mul(2))
+            .fold(0, u64::saturating_add);
         RoomNeeded {
             installs,
-            app_data: files.saturating_mul(APP_DATA_FILE),
+            app_data: files
+                .saturating_mul(APP_DATA_FILE)
+                .saturating_add(converted),
         }
     }
 
@@ -848,7 +873,8 @@ impl FullPlan {
     pub fn choice(&self, picked: &[u32]) -> crate::data::Choice {
         let mut c = crate::data::Choice::default();
         for (at, s) in self.special.iter().enumerate() {
-            if s.step != SpecialStep::Copy {
+            // What copies, and what is carried to be converted here.
+            if !matches!(s.step, SpecialStep::Copy | SpecialStep::Convert) {
                 continue;
             }
             if s.secret {
@@ -1221,6 +1247,8 @@ mod tests {
     fn every_special_step_has_an_honest_undo_explanation() {
         use SpecialStep::*;
         assert_eq!(special_promise(Copy), Promise::CanReverse);
+        assert_eq!(special_promise(Convert), Promise::CanReverse);
+        assert_eq!(special_reason(Convert), None);
         assert_eq!(special_promise(SignIn), Promise::NeedsYouMaker);
         assert_eq!(special_promise(Relink), Promise::NeedsYouMaker);
         for step in [ExportFirst, NotYet, LookAtIt] {
@@ -1326,6 +1354,8 @@ mod tests {
             sites: false,
             category: Default::default(),
             notes: Vec::new(),
+            bytes: 0,
+            parts: Vec::new(),
         };
         plan.special = vec![
             special("Mail", SpecialStep::SignIn),

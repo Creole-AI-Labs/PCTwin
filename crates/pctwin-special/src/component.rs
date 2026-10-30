@@ -108,6 +108,9 @@ pub enum Evidence {
     /// The app keeps an account with a service (sessions were found): what the service holds
     /// comes back by signing in.
     ServiceAccount,
+    /// Carried as it is and read only on the new laptop, in its parser process: nothing in it is
+    /// opened on the old laptop, a database included (Apple Mail's raw message files and index).
+    CarriedRaw,
     /// The bytes were read and no protected or special shape was found. Detection is advisory:
     /// this is not proof the file holds no secret.
     NoSpecialShape,
@@ -178,6 +181,9 @@ impl Evidence {
             }
             Evidence::ModelData => "AI model files".into(),
             Evidence::BrowsingData => "bookmarks or the history of pages visited".into(),
+            Evidence::CarriedRaw => {
+                "carried as it is and read only on the new laptop".into()
+            }
             Evidence::MissingPart { what } => format!("a part it needs is missing: {what}"),
             Evidence::LinksOutside { folders } => format!(
                 "it uses files kept in {} other folder(s); add them to the move?",

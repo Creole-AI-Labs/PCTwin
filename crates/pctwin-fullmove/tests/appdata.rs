@@ -477,6 +477,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             .collect(),
         home: Some(new.display().to_string()),
         files: Vec::new(),
+        mail: Vec::new(),
     };
     let mut settings = pctwin_settings::SettingsAdapter {
         store: pctwin_settings::Store::new(

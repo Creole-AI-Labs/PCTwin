@@ -391,6 +391,17 @@ pub trait ContentReader: Sync {
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError>;
     /// One saved Apple Mail message's facts ([`crate::mail::emlx_facts`]).
     fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError>;
+    /// Which kind of account each Apple Mail account folder is, from the received mail index
+    /// and its log ([`crate::applemail::mail_kinds`]). A reader that does not know it reads
+    /// nothing (and every account folder is then kept as mail on this laptop only).
+    fn mail_kinds(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+    ) -> Result<Vec<crate::applemail::AccountScheme>, ContentError> {
+        let _ = (db, log);
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
     /// What a browser's file holds (2.5 browsers, [`crate::browser_read`]): `second` is a
     /// database's log or a manifest's messages. A reader that does not know it reads nothing.
     fn browser(
@@ -464,6 +475,13 @@ impl ContentReader for InThisProcess {
     fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
         crate::mail::emlx_facts(self.0, bytes)
     }
+    fn mail_kinds(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+    ) -> Result<Vec<crate::applemail::AccountScheme>, ContentError> {
+        crate::applemail::mail_kinds(self.0, db, log)
+    }
     fn browser(
         &self,
         what: crate::browser_read::BrowserRead,
@@ -489,6 +507,18 @@ pub fn emlx_facts_of(bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentErro
         return Err(ContentError::TooLarge);
     }
     reader()?.emlx(bytes)
+}
+
+/// Which kind of account each Apple Mail account folder is, read in the parser process from the
+/// received mail index and its log.
+pub fn mail_kinds_of(
+    db: &[u8],
+    log: Option<&[u8]>,
+) -> Result<Vec<crate::applemail::AccountScheme>, ContentError> {
+    if db.len() as u64 > MAX_DB || log.is_some_and(|l| l.len() as u64 > MAX_LOG) {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.mail_kinds(db, log)
 }
 
 /// The capture's consistent copy of a database, made in the parser process from the bytes of
@@ -681,7 +711,11 @@ pub fn apply_log(_: InChild, db: &mut Vec<u8>, log: &[u8]) -> Result<(), Content
 
 /// The database's pages with its log laid over, ready for SQLite to read from memory (legacy
 /// mode: the log is in already), or why not.
-fn image_of(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError> {
+pub(crate) fn image_of(
+    seal: InChild,
+    db: &[u8],
+    log: Option<&[u8]>,
+) -> Result<Vec<u8>, ContentError> {
     if db.len() as u64 > MAX_DB || log.is_some_and(|l| l.len() as u64 > MAX_LOG) {
         return Err(ContentError::TooLarge);
     }
@@ -702,7 +736,7 @@ fn image_of(seal: InChild, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, Con
 }
 
 /// SQLite reading `image` from memory, read-only.
-fn memory_db(image: &[u8]) -> Result<rusqlite::Connection, ContentError> {
+pub(crate) fn memory_db(image: &[u8]) -> Result<rusqlite::Connection, ContentError> {
     let damaged = |e: &dyn std::fmt::Display| ContentError::Damaged(e.to_string());
     let mut c = rusqlite::Connection::open_in_memory().map_err(|e| damaged(&e))?;
     if !image.is_empty() {
