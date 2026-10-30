@@ -32,11 +32,22 @@ export const SPECIAL_NOTES = [
   "models-checked-not-run",
   "tool-settings-review",
   "secret-tick-each",
+  "open-archive-in-mail-app",
+  "local-only-folders-export",
+  "bookmarks-file",
+  "history-own-import",
+  "pages-and-add-ons-listed",
+  "open-pages-by-sync",
+  "saves-in-launcher-cloud",
+  "save-may-not-work-here",
+  "store-protected-saves",
+  "mod-programs-held",
+  "launcher-verify",
 ] as const;
 export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };
 
 /** What the person does about a forgotten-things place (2.5). */
-export const PLACE_STEPS = ["copy", "install", "locate-verify", "add-again"] as const;
+export const PLACE_STEPS = ["copy", "install", "locate-verify", "add-again", "open-in-mail-app"] as const;
 export type PlaceStep = (typeof PLACE_STEPS)[number];
 
 /** One place the forgotten-things finder found: `kind` has words `forgotten-kind-<kind>` when the screens know it, else `name` is shown. */

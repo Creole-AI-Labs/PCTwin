@@ -93,8 +93,36 @@ fn made_seeds() -> Vec<Vec<u8>> {
         b.resize(1536, 0);
         b
     });
+    // A launcher's records (Valve's text key-values, JSON) and a save list in the Ludusavi
+    // manifest format after the games asked about (2.5 games).
+    seeds.push(
+        b"\"libraryfolders\" { \"0\" { \"path\" \"C:\\Steam\" \"apps\" { \"7\" \"1\" } } }"
+            .to_vec(),
+    );
+    seeds.push(br#"{"DisplayName":"A","InstallLocation":"D:\A","List":[1,true,null]}"#.to_vec());
+    let mut list = WANTED.to_vec();
+    list.extend_from_slice(
+        b"---
+\"A: B\":
+  files:
+    <winAppData>/A/*.sav:
+      tags:
+        - save
+      when:
+        - os: windows
+  steam:
+    id: 1
+'C''d':
+  cloud:
+    steam: true
+",
+    );
+    seeds.push(list);
     seeds
 }
+
+/// The games a save list is read for, at the start of every save list seed.
+const WANTED: &[u8] = br#"{"names":["a"],"steam":[1],"gog":[]}"#;
 
 /// Real signed programs and packages from this laptop (Windows only), up to `most`, each at most
 /// 4 MiB: the deep parts of the signature reader (CMS, X.509, the compound file).
@@ -217,7 +245,7 @@ fn every_reader_survives_mutated_files() {
     let mut rng = Rng(seed);
     let mut seeds = made_seeds();
     seeds.extend(real_seeds(40));
-    let kinds: [fn(u64) -> Request; 7] = [
+    let kinds: [fn(u64) -> Request; 10] = [
         |size| Request::Installer { size },
         |size| Request::OldCopy { size },
         |size| Request::Font { size },
@@ -228,6 +256,21 @@ fn every_reader_survives_mutated_files() {
             size,
             log: 0,
             millis: 2000,
+        },
+        |size| Request::GameRecord {
+            size,
+            format: pctwin_special::gamefmt::RecordFormat::Vdf,
+        },
+        |size| Request::GameRecord {
+            size,
+            format: pctwin_special::gamefmt::RecordFormat::Json,
+        },
+        |size| {
+            let wanted = size.min(WANTED.len() as u64);
+            Request::SaveManifest {
+                wanted,
+                size: size - wanted,
+            }
         },
     ];
     let mut runs = 0u64;

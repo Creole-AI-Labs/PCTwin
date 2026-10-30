@@ -9,7 +9,7 @@ import KnownReceiveHost from "./screens/QsKnownIncoming";
 import { NoteInHost } from "./screens/QsNote";
 import WaitingHost from "./screens/QsWaiting";
 import ThingsReady from "./screens/ThingsReady";
-import { setTrayLabels, type WindowMode } from "./native";
+import { setFileWords, setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
@@ -231,6 +231,13 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     document.documentElement.lang = language;
     document.documentElement.dir = directionOf(language);
     void setTrayLabels(l10n.getString("tray-show"), l10n.getString("tray-send"), l10n.getString("tray-quit")).catch(() => undefined);
+    void setFileWords({
+      bookmarksFile: l10n.getString("browser-file-bookmarks"),
+      listsFile: l10n.getString("browser-file-lists"),
+      bookmarksTitle: l10n.getString("browser-file-bookmarks-title"),
+      addOns: l10n.getString("browser-file-add-ons"),
+      openPages: l10n.getString("browser-file-open-pages"),
+    }).catch(() => undefined);
   }, [language, l10n]);
 
   // A new screen starts at the top and moves keyboard focus to its heading area.

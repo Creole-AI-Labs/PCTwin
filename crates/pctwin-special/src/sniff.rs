@@ -71,6 +71,9 @@ pub enum Shape {
     },
     /// An mbox mail file.
     Mbox,
+    /// One saved message in the Apple Mail format (`emlx`): a line with the message's length in
+    /// bytes, the message itself, then the app's own notes about it.
+    Emlx,
     /// GGUF model weights.
     Gguf,
     /// Safetensors model weights.
@@ -277,6 +280,9 @@ fn text_shape(head: &[u8]) -> Option<Shape> {
     if t.starts_with("From ") && mbox_like(t) {
         return Some(Shape::Mbox);
     }
+    if emlx_like(t) {
+        return Some(Shape::Emlx);
+    }
     if t.starts_with('{') || t.starts_with('[') && json_like(t) {
         return Some(Shape::Json);
     }
@@ -346,6 +352,19 @@ fn mbox_like(t: &str) -> bool {
             !k.is_empty() && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         })
     })
+}
+
+fn emlx_like(t: &str) -> bool {
+    // A first line of only digits (the message's length), then mail headers.
+    match t.split_once('\n') {
+        Some((first, rest)) => {
+            let n = first.trim_end_matches([' ', '\r']);
+            (1..=12).contains(&n.len())
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && mbox_like(&format!("-\n{rest}"))
+        }
+        None => false,
+    }
 }
 
 /// Key material in PEM or OpenSSH armour.
@@ -680,6 +699,15 @@ mod tests {
             Shape::Mbox
         );
         assert_eq!(of(b"From here to there, a story."), Shape::Text);
+        assert_eq!(
+            of(b"57        \nFrom: a@example.org\nSubject: hi\n\nbody\n<?xml version=\"1.0\"?>"),
+            Shape::Emlx
+        );
+        // A number alone, or a number before plain words, is not a message.
+        assert_eq!(of(b"57\n"), Shape::Text);
+        assert_eq!(of(b"57\nsome words here\n"), Shape::Text);
+        assert_eq!(of(b"5x7\nFrom: a@example.org\n"), Shape::Text);
+        assert_eq!(of(b"1234567890123\nFrom: a@example.org\n"), Shape::Text);
     }
 
     #[test]

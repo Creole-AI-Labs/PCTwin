@@ -1092,7 +1092,34 @@ fn classify_within(
             continue;
         }
         let one = vec![f.rel.clone()];
+        // A file in the Mozilla LZ4 format: whether it is a browser's session (read in the
+        // parser process), or `Some(None)` when it could not be read.
+        let moz = if f.shape == Shape::Binary {
+            crate::browser::moz_session(&f.path)
+        } else {
+            None
+        };
         match &f.shape {
+            // A browser's session keeps the open pages' sign-ins and cookies: never moved as data
+            // (T25-021); its pages are listed for the person instead (`crate::browser`).
+            Shape::Binary if moz == Some(Some(true)) => {
+                sessions = true;
+                b.push(
+                    one,
+                    Custody::MachineBound,
+                    false,
+                    vec![Evidence::SessionStore],
+                )
+            }
+            // One that could not be read stays unknown, never portable.
+            Shape::Binary if moz == Some(None) => b.push(
+                one,
+                Custody::Unresolved,
+                false,
+                vec![Evidence::Unreadable {
+                    why: "a compressed browser file that could not be read".into(),
+                }],
+            ),
             Shape::DpapiBlob => b.push(
                 one,
                 Custody::MachineBound,
@@ -1164,10 +1191,19 @@ fn classify_within(
                 c.preserve = true;
                 b.components.push(c);
             }
+            // An archive the mail app opens as a file of its own: the person opens it there.
             Shape::OutlookData {
                 server_cache: false,
+            } => b.push(
+                one,
+                Custody::Portable,
+                false,
+                vec![Evidence::MailStore, Evidence::MailArchive],
+            ),
+            // Saved messages one per file (emlx) merge with the rest of the folder's mail below.
+            Shape::Mbox | Shape::Emlx => {
+                b.push(one, Custody::Portable, false, vec![Evidence::MailStore])
             }
-            | Shape::Mbox => b.push(one, Custody::Portable, false, vec![Evidence::MailStore]),
             Shape::LmdbData => b.push(one, Custody::Portable, false, vec![Evidence::LiveStore]),
             Shape::Json => match json.get(&f.rel) {
                 Some(Ok(j)) if j.machine_bound_key => b.push(

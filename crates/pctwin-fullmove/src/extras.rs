@@ -456,7 +456,11 @@ pub fn special_with(
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
     );
-    let plan = pctwin_special::api::plan_within(owner, home, apps, system, system, &cat, deadline);
+    let mut plan =
+        pctwin_special::api::plan_within(owner, home, apps, system, system, &cat, deadline);
+    // Games (2.5): saves the shipped rows and the person's own save list name, found by their
+    // places; the app data holding them is marked as games, other save places join the plan.
+    games_of(system, owner, home, documents, &mut plan, deadline);
     // One line per app and step (an app's many components with the same step are one line, with
     // their files counted), in the order found.
     let mut lines: Vec<SpecialLine> = Vec::new();
@@ -526,6 +530,44 @@ pub fn special_with(
         planned: plan.components,
     }
 }
+
+/// Adds the games 2.5 finds to `plan` (read only, within the scan's time and its own).
+fn games_of(
+    system: pctwin_special::roots::System,
+    owner: &pctwin_record::Owner,
+    home: &std::path::Path,
+    documents: Option<&std::path::Path>,
+    plan: &mut pctwin_special::api::Plan,
+    deadline: std::time::Instant,
+) {
+    let docs = documents
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| home.join("Documents"));
+    // This program's own folder values, only where they lie in this person's home (another
+    // person's folders come from their home's plain layout).
+    let env = |v: &str| {
+        std::env::var_os(v)
+            .map(std::path::PathBuf::from)
+            .filter(|p| local_folder(p) && p.starts_with(home))
+    };
+    // Saves among the person's own files move with them.
+    let moving = |p: &std::path::Path| p.starts_with(&docs);
+    let until = deadline.min(std::time::Instant::now() + GAMES_TIME);
+    let _ = pctwin_special::games::plan_games(
+        plan,
+        owner,
+        home,
+        Some(docs.clone()),
+        system,
+        system,
+        &env,
+        &moving,
+        until,
+    );
+}
+
+/// The most time finding games takes.
+pub const GAMES_TIME: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The forgotten-things finder for the person with home folder `home` (read only), with the
 /// places the plan already takes (`planned`: a place inside a proposed component's folder moves

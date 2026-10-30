@@ -20,6 +20,8 @@
 //!   fix-ups, cross-system places, stricter exceptions); with no rows everything is classified;
 //! - [`capture`]: consistent capture (SQLite's online backup from a steady snapshot; stores only
 //!   while their app is closed), on the old laptop, read-only;
+//! - [`mail`]: saved Apple Mail messages written as mbox files (read in the parser process) for
+//!   a move to another system, each mailbox with an honest result;
 //! - [`live`]: which files in the person's own folders an app keeps open while it runs (a
 //!   catalogue of kinds, each by ending and shape), so they are copied only once it is closed;
 //! - [`land`]: landing through the safety gate and the journal, never over an existing folder,
@@ -34,10 +36,16 @@
 //! - [`handoff`]: the person's step for each component, pages and apps opened as the person, the
 //!   app's own export tool only from a signed row and only if the maker check passes.
 //!
+//! - [`browser`] and [`browser_read`]: a browser's bookmarks written as the standard bookmarks
+//!   file any browser imports, and its add-ons and open pages listed for the person (2.5
+//!   browsers; read only in the parser process).
+//!
 //! **Never**: no app-bound encryption, DPAPI or keychain is bypassed; no cookie, session or token
 //! is copied; nothing is sent, connected, launched or run as a check; the old laptop is only read.
 
 pub mod api;
+pub mod browser;
+pub mod browser_read;
 pub mod capture;
 pub mod catalogue;
 pub mod category;
@@ -50,6 +58,10 @@ pub mod guard;
 pub mod handoff;
 pub mod land;
 pub mod live;
+pub mod mail;
 pub mod roots;
 pub mod select;
 pub mod sniff;
+// Games and launchers (Task List 2.5; plan section 8).
+pub mod gamefmt;
+pub mod games;

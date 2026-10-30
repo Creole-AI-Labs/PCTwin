@@ -81,6 +81,23 @@ pub enum Request {
     DatabaseSnapshot { size: u64, log: u64 },
     /// Whether a `manifest.json` is a WebExtension's.
     AddOn { size: u64 },
+    /// One saved Apple Mail message's facts (2.5 mail).
+    Emlx { size: u64 },
+    /// What a browser's file holds (2.5 browsers): `size` bytes of the file, then `second` bytes
+    /// of a second one (a database's log, or a manifest's messages; none when 0).
+    Browser {
+        size: u64,
+        second: u64,
+        what: pctwin_special::browser_read::BrowserRead,
+    },
+    /// A game launcher's install record, as a tree of names and texts (2.5 games).
+    GameRecord {
+        size: u64,
+        format: pctwin_special::gamefmt::RecordFormat,
+    },
+    /// The entries a save list in the Ludusavi manifest format holds for some games (2.5
+    /// games): `wanted` bytes of the games asked about (JSON), then `size` bytes of the list.
+    SaveManifest { wanted: u64, size: u64 },
 }
 
 impl Request {
@@ -92,10 +109,14 @@ impl Request {
             | Request::Archive { size }
             | Request::Database { size }
             | Request::Json { size }
-            | Request::AddOn { size } => size,
+            | Request::AddOn { size }
+            | Request::Emlx { size }
+            | Request::GameRecord { size, .. } => size,
+            Request::SaveManifest { wanted, size } => wanted.saturating_add(size),
             Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
                 size.saturating_add(log)
             }
+            Request::Browser { size, second, .. } => size.saturating_add(second),
         }
     }
 
@@ -140,6 +161,10 @@ pub enum Answer {
     /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
+    Emlx(Result<pctwin_special::mail::EmlxFacts, ContentError>),
+    Browser(Result<pctwin_special::browser_read::Found, ContentError>),
+    GameRecord(Result<pctwin_special::gamefmt::Tree, ContentError>),
+    SaveManifest(Result<pctwin_special::gamefmt::ManifestRead, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -161,6 +186,10 @@ impl Answer {
                     Request::DatabaseSnapshot { .. }
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
+                | (Answer::Emlx(_), Request::Emlx { .. })
+                | (Answer::Browser(_), Request::Browser { .. })
+                | (Answer::GameRecord(_), Request::GameRecord { .. })
+                | (Answer::SaveManifest(_), Request::SaveManifest { .. })
                 | (Answer::Failed(_), _)
         )
     }

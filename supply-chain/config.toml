@@ -972,6 +972,11 @@ criteria = "safe-to-deploy"
 version = "0.4.34"
 criteria = "safe-to-deploy"
 
+[[exemptions.lz4_flex]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Not reviewed yet: new in 2.5 browsers (30 October 2026), MIT. pctwin-special decodes a Mozilla session file's LZ4 block with it, only in the locked-down parser process, with default features off and the safe decoder only (safe-decode and checked-decode: forbid(unsafe_code) on the decoder; no frame format, no twox-hash). Exempted so cargo vet passes; review before the Phase 2 release."
+
 [[exemptions.mach2]]
 version = "0.7.0"
 criteria = "safe-to-deploy"

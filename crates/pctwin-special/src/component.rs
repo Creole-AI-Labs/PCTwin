@@ -53,6 +53,9 @@ pub enum Evidence {
     StructuredData,
     /// A mail store by its format (mbox, maildir, an Outlook data file).
     MailStore,
+    /// A mail archive the mail app opens as a file of its own (an Outlook data file): it moves,
+    /// and the person opens it in the mail app on the new laptop.
+    MailArchive,
     /// A mail program's copy of a server mailbox (an Outlook offline cache): the mail is on the
     /// server, but whether every item reached it cannot be read from the file.
     ServerMailCache,
@@ -112,6 +115,18 @@ pub enum Evidence {
     Unreadable { why: String },
     /// A signed catalogue row adds knowledge (a native route, an exception, a friendly name).
     Catalogue { row: String },
+    /// A browser's bookmarks, written as the standard bookmarks file any browser imports, and its
+    /// add-ons and open pages listed for the person, for each of these profile folders (2.5
+    /// browsers, [`crate::browser`]).
+    ForAnotherBrowser { profiles: Vec<String> },
+    /// What was written for another browser: counts only (the lists are the person's own).
+    WrittenForAnotherBrowser {
+        bookmarks: u32,
+        add_ons: u32,
+        pages: u32,
+        /// Bookmarks or pages left out (past a limit, or not a page on the web).
+        left_out: u32,
+    },
 }
 
 impl Evidence {
@@ -125,6 +140,7 @@ impl Evidence {
             Evidence::LiveStore => "a store the app writes while it runs".into(),
             Evidence::StructuredData => "a settings or data file".into(),
             Evidence::MailStore => "saved mail".into(),
+            Evidence::MailArchive => "a mail archive your mail app opens".into(),
             Evidence::ServerMailCache => {
                 "a copy of mail kept on a server; anything never sent to the server may exist only here"
                     .into()
@@ -177,6 +193,18 @@ impl Evidence {
             Evidence::NoSpecialShape => "a data file".into(),
             Evidence::Unreadable { why } => format!("it could not be read ({why})"),
             Evidence::Catalogue { row } => format!("known: {row}"),
+            Evidence::ForAnotherBrowser { .. } => {
+                "your bookmarks as a file any browser can import, and a list of your add-ons and open pages"
+                    .into()
+            }
+            Evidence::WrittenForAnotherBrowser {
+                bookmarks,
+                add_ons,
+                pages,
+                left_out,
+            } => format!(
+                "{bookmarks} bookmark(s), {add_ons} add-on(s) and {pages} open page(s) written; {left_out} left out"
+            ),
         }
     }
 }

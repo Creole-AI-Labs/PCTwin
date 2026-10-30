@@ -389,6 +389,19 @@ pub trait ContentReader: Sync {
     fn snapshot(&self, db: &[u8], log: Option<&[u8]>) -> Result<Vec<u8>, ContentError>;
     /// Whether a `manifest.json` is a WebExtension's: JSON with a numeric `manifest_version`.
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError>;
+    /// One saved Apple Mail message's facts ([`crate::mail::emlx_facts`]).
+    fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError>;
+    /// What a browser's file holds (2.5 browsers, [`crate::browser_read`]): `second` is a
+    /// database's log or a manifest's messages. A reader that does not know it reads nothing.
+    fn browser(
+        &self,
+        what: crate::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<crate::browser_read::Found, ContentError> {
+        let _ = (what, bytes, second);
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
 }
 
 static READER: OnceLock<&'static dyn ContentReader> = OnceLock::new();
@@ -448,6 +461,34 @@ impl ContentReader for InThisProcess {
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
         Ok(add_on_manifest(self.0, bytes))
     }
+    fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
+        crate::mail::emlx_facts(self.0, bytes)
+    }
+    fn browser(
+        &self,
+        what: crate::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<crate::browser_read::Found, ContentError> {
+        crate::browser_read::read(self.0, what, bytes, second)
+    }
+}
+
+/// What a browser's file holds, read in the parser process (2.5 browsers).
+pub fn browser_of(
+    what: crate::browser_read::BrowserRead,
+    bytes: &[u8],
+    second: Option<&[u8]>,
+) -> Result<crate::browser_read::Found, ContentError> {
+    reader()?.browser(what, bytes, second)
+}
+
+/// One saved Apple Mail message's facts, read in the parser process.
+pub fn emlx_facts_of(bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
+    if bytes.len() as u64 > crate::mail::MAX_MESSAGE {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.emlx(bytes)
 }
 
 /// The capture's consistent copy of a database, made in the parser process from the bytes of

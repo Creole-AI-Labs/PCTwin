@@ -25,6 +25,11 @@ export function TitleText({ title }: { title: Title }) {
   return title.kind === "name" ? <Name>{title.value}</Name> : <>{l10n.getString(title.value)}</>;
 }
 
+/** What the person is told because of a change's special category (2.5), each in its words. */
+export function specialNotes(c: Pick<ChangeView, "notes">, l10n: ReturnType<typeof useLocalization>["l10n"]): string[] {
+  return c.notes.map((n) => l10n.getString(`special-note-${n.note}`));
+}
+
 /** What a change still needs from the person, or what it does, in words; an app made for Intel Macs says it needs Rosetta after that. */
 function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
   const what = changeWhat(c, l10n);
@@ -34,7 +39,7 @@ function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l
 function changeWhat(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
   if (c.note?.note === "sites") return l10n.getString("fullmove-step-sites");
   if (c.note?.note === "older-here") return l10n.getString("fullmove-here-older", { version: shownName(c.note.version) });
-  if (c.special) return l10n.getString(`fullmove-step-${c.special}`);
+  if (c.special) return [l10n.getString(`fullmove-step-${c.special}`), ...specialNotes(c, l10n)].join(" ");
   if (c.kind === "settings") {
     return [l10n.getString("fullmove-settings-count", { count: c.count }), l10n.getString(c.action === "replace" ? "fullmove-settings-replace" : "fullmove-settings-merge")].join(" ");
   }

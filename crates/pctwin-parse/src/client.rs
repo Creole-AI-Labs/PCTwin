@@ -654,6 +654,35 @@ impl pctwin_special::content::ContentReader for Parser {
             Err(e) => Err(ContentError::Damaged(e.to_string())),
         }
     }
+    fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
+        let request = Request::Emlx {
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::Emlx(facts)) => facts,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn browser(
+        &self,
+        what: pctwin_special::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<pctwin_special::browser_read::Found, ContentError> {
+        let second = second.unwrap_or_default();
+        let request = Request::Browser {
+            size: bytes.len() as u64,
+            second: second.len() as u64,
+            what,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes), Source::Bytes(second)]) {
+            Ok(Answer::Browser(found)) => found,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
 }
 
 /// Several parser processes taking requests in turn, for readers that work on several threads
@@ -709,5 +738,72 @@ impl pctwin_special::content::ContentReader for Pool {
 
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
         self.one().add_on_manifest(bytes)
+    }
+    fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
+        self.one().emlx(bytes)
+    }
+
+    fn browser(
+        &self,
+        what: pctwin_special::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<pctwin_special::browser_read::Found, ContentError> {
+        self.one().browser(what, bytes, second)
+    }
+}
+
+/// Game launchers' records and save lists (2.5 games), read in the parser process.
+impl pctwin_special::games::GameReader for Parser {
+    fn record(
+        &self,
+        format: pctwin_special::gamefmt::RecordFormat,
+        bytes: &[u8],
+    ) -> Result<pctwin_special::gamefmt::Tree, ContentError> {
+        let request = Request::GameRecord {
+            size: bytes.len() as u64,
+            format,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::GameRecord(tree)) => tree,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn save_manifest(
+        &self,
+        bytes: &[u8],
+        wanted: &pctwin_special::gamefmt::Wanted,
+    ) -> Result<pctwin_special::gamefmt::ManifestRead, ContentError> {
+        let wanted =
+            serde_json::to_vec(wanted).map_err(|e| ContentError::Damaged(e.to_string()))?;
+        let request = Request::SaveManifest {
+            wanted: wanted.len() as u64,
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(&wanted), Source::Bytes(bytes)]) {
+            Ok(Answer::SaveManifest(read)) => read,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+}
+
+impl pctwin_special::games::GameReader for Pool {
+    fn record(
+        &self,
+        format: pctwin_special::gamefmt::RecordFormat,
+        bytes: &[u8],
+    ) -> Result<pctwin_special::gamefmt::Tree, ContentError> {
+        self.one().record(format, bytes)
+    }
+
+    fn save_manifest(
+        &self,
+        bytes: &[u8],
+        wanted: &pctwin_special::gamefmt::Wanted,
+    ) -> Result<pctwin_special::gamefmt::ManifestRead, ContentError> {
+        self.one().save_manifest(bytes, wanted)
     }
 }

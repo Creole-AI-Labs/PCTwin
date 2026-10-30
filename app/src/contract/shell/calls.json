@@ -33,6 +33,31 @@
     {
       "args": [
         [
+          "bookmarksFile",
+          "Bookmarks.html"
+        ],
+        [
+          "listsFile",
+          "Open pages and add-ons.html"
+        ],
+        [
+          "bookmarksTitle",
+          "Bookmarks"
+        ],
+        [
+          "addOns",
+          "Add-ons"
+        ],
+        [
+          "openPages",
+          "Open pages"
+        ]
+      ],
+      "name": "set_file_words"
+    },
+    {
+      "args": [
+        [
           "network",
           "Wi-Fi"
         ]

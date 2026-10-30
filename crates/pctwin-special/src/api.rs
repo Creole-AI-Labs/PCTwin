@@ -173,6 +173,22 @@ pub fn plan_within(
                 notes: crate::category::notes_for(r, c),
             });
         }
+        // A browser's bookmarks for another browser, and its add-ons and open pages listed
+        // (2.5 browsers): kept in PCTwin's own folder of things brought over.
+        if let Some((c, notes)) = crate::browser::planned(r) {
+            components.push(Planned {
+                app: app.clone(),
+                why: why_words(&c),
+                step: Step::None,
+                proposed: true,
+                component: c,
+                base: r.folder.path(),
+                placement: Placement::PreservedOnly,
+                root: r.folder.root,
+                category: Category::Browser,
+                notes,
+            });
+        }
         // One line per reason in this app's folder, with how many.
         let mut by_why: std::collections::BTreeMap<&'static str, (String, usize)> =
             std::collections::BTreeMap::new();
@@ -258,6 +274,24 @@ pub fn capture_planned(
     stop: &Stop,
     now: Now,
 ) -> Result<Capture, CaptureError> {
+    if crate::browser::is_conversion(&p.component) {
+        return match grant {
+            Grant::Ordinary(g) => crate::browser::capture(
+                g,
+                approved,
+                &p.component,
+                &p.base,
+                &p.app,
+                work,
+                holders,
+                stop,
+                now,
+            ),
+            Grant::Secret(_) => Err(CaptureError::Denied(
+                "a secret permission is only for secrets",
+            )),
+        };
+    }
     match grant {
         Grant::Ordinary(g) => {
             capture::capture(g, approved, &p.component, &p.base, work, holders, stop, now)
@@ -456,8 +490,15 @@ fn finished(
     words: String,
 ) -> Applied {
     let outcome = outcome_of(p, capture, landed.as_ref());
+    // A browser's bookmarks written for another browser: `converted` once the file landed and
+    // read back as written; the person's import stays their step (its note), never assumed.
+    let result = if crate::browser::is_conversion(&p.component) {
+        crate::browser::result_of(&outcome)
+    } else {
+        outcome.result(p.component.custody)
+    };
     Applied {
-        result: outcome.result(p.component.custody),
+        result,
         outcome,
         landed,
         words,

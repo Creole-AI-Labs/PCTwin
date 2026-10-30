@@ -127,7 +127,8 @@ pub fn answer_in_memory(
 }
 
 /// Installs the real parser process as this test program's reader of files' contents
-/// (`pctwin_special::content`), once.
+/// (`pctwin_special::content`) and of game launchers' records (`pctwin_special::games`), once.
 pub fn install_readers() {
     pctwin_special::content::install_reader(parser());
+    pctwin_special::games::install_reader(parser());
 }

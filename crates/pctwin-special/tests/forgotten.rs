@@ -44,6 +44,10 @@ fn known_places_are_found_counted_and_said_with_their_step() {
     put(&fonts.join("Synthetic Sans.ttf"), &[0, 1, 0, 0, 9, 9]);
     put(&fonts.join("Synthetic Serif.otf"), b"OTTO1234");
     put(&docs.join("My Games/Quest/save1.dat"), b"slot");
+    put(
+        &docs.join("Outlook Files/archive.pst"),
+        b"!BDN\0\0\0\0SM\x17\0",
+    );
     // Present but empty: nothing to say.
     std::fs::create_dir_all(home.join("AppData/Roaming/Microsoft/UProof")).unwrap();
     let programs = t.path().join("Programs x86");
@@ -78,6 +82,10 @@ fn known_places_are_found_counted_and_said_with_their_step() {
     let saves = by("game-saves");
     assert!(saves.moving);
     assert_eq!(saves.step, PlaceStep::Copy);
+    // A mail archive copies with the documents, and the person opens it in the mail app.
+    let archives = by("mail-archives");
+    assert!(archives.moving);
+    assert_eq!(archives.step, PlaceStep::OpenInMailApp);
     let library = by("game-library");
     assert_eq!(library.step, PlaceStep::LocateVerify);
     assert_eq!(library.bytes, 100);

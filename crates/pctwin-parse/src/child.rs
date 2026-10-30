@@ -187,9 +187,48 @@ pub fn answer<R: Read, W: Write>(
                 }
             }
         }
+        Request::Emlx { size } => Answer::Emlx(
+            whole(&mut file, size, pctwin_special::mail::MAX_MESSAGE)
+                .and_then(|b| pctwin_special::mail::emlx_facts(seal, &b)),
+        ),
         Request::AddOn { size } => Answer::AddOn(
             whole(&mut file, size, 1024 * 1024)
                 .is_ok_and(|b| pctwin_special::content::add_on_manifest(seal, &b)),
+        ),
+        Request::Browser { size, second, what } => {
+            use pctwin_special::browser_read::BrowserRead;
+            let most = match what {
+                BrowserRead::Places => pctwin_special::content::MAX_DB,
+                BrowserRead::PropertyList => pctwin_special::browser_read::MAX_PLIST as u64,
+                BrowserRead::Json | BrowserRead::Session => {
+                    pctwin_special::content::MAX_JSON as u64
+                }
+            };
+            let most_second = match what {
+                BrowserRead::Places => pctwin_special::content::MAX_LOG,
+                _ => pctwin_special::content::MAX_JSON as u64,
+            };
+            Answer::Browser(whole(&mut file, size, most).and_then(|b| {
+                let s = whole(&mut file, second, most_second)?;
+                let s = (!s.is_empty()).then_some(s);
+                pctwin_special::browser_read::read(seal, what, &b, s.as_deref())
+            }))
+        }
+        Request::GameRecord { size, format } => Answer::GameRecord(
+            whole(&mut file, size, pctwin_special::gamefmt::MAX_RECORD)
+                .and_then(|b| pctwin_special::gamefmt::record_tree(seal, format, &b)),
+        ),
+        Request::SaveManifest { wanted, size } => Answer::SaveManifest(
+            whole(&mut file, wanted, pctwin_special::gamefmt::MAX_WANTED)
+                .and_then(|w| {
+                    serde_json::from_slice::<pctwin_special::gamefmt::Wanted>(&w)
+                        .map_err(|e| pctwin_special::content::ContentError::Damaged(e.to_string()))
+                })
+                .and_then(|w| {
+                    // The list is read line by line as it comes, never held whole.
+                    let mut lines = std::io::BufReader::new(&mut file);
+                    pctwin_special::gamefmt::save_manifest(seal, &mut lines, size, &w)
+                }),
         ),
         Request::DatabaseFacts { size, log, millis } => {
             let until = std::time::Instant::now() + request.own_time();

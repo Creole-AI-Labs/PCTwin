@@ -5,6 +5,7 @@ const COMMANDS: &[&str] = &[
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
+    "set_file_words",
     "pairing_old_start",
     "pairing_old_pick",
     "pairing_old_decline",

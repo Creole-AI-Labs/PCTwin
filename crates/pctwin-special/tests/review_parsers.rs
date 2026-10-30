@@ -164,6 +164,9 @@ impl ContentReader for Watching {
     fn add_on_manifest(&self, b: &[u8]) -> Result<bool, ContentError> {
         OWN.add_on_manifest(b)
     }
+    fn emlx(&self, b: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
+        OWN.emlx(b)
+    }
 }
 static WATCHING: Watching = Watching;
 
