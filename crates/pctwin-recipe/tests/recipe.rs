@@ -52,7 +52,7 @@ fn firefox() -> Recipe {
 #[test]
 fn a_recipe_round_trips_and_names_its_exact_version() {
     let r = firefox();
-    let back = Recipe::from_json(&r.to_json()).unwrap();
+    let back = from_json(&r.to_json()).unwrap();
     assert_eq!(back, r);
     assert_eq!(back.reference().version, 3);
     assert!(r.supports(win()));
@@ -279,12 +279,12 @@ fn saved_recipes_with_unknown_steps_or_fields_are_refused() {
         r#"{"apply-setting""#,
         r#"{"run":{"command":"calc.exe"}},{"apply-setting""#,
     );
-    assert!(Recipe::from_json(run.as_bytes()).is_err());
+    assert!(from_json(run.as_bytes()).is_err());
     let extra = json.replacen('{', r#"{"url":"https://x","#, 1);
-    assert!(Recipe::from_json(extra.as_bytes()).is_err());
+    assert!(from_json(extra.as_bytes()).is_err());
     let escape = json.replacen("Mozilla/Firefox/Profiles", "../../Windows", 1);
     assert!(matches!(
-        Recipe::from_json(escape.as_bytes()),
+        from_json(escape.as_bytes()),
         Err(RecipeError::Damaged(_))
     ));
 }
@@ -294,7 +294,7 @@ fn a_recipe_from_a_newer_pctwin_is_refused_safely() {
     let json = String::from_utf8(firefox().to_json()).unwrap();
     let newer = json.replacen(r#""format":3"#, r#""format":4,"new":"shape""#, 1);
     assert!(matches!(
-        Recipe::from_json(newer.as_bytes()),
+        from_json(newer.as_bytes()),
         Err(RecipeError::Format(
             pctwin_types::format::FormatError::Newer { found: 4, .. }
         ))
@@ -361,5 +361,23 @@ fn checklist_entries_are_message_keys_only() {
     }
     assert!(ChecklistKey::new("activate-licence").is_ok());
     let json = r#"{"format":1,"id":"x","version":1,"platforms":[{"os":"windows","arch":"x86-64"}],"steps":[{"checklist":{"what":"curl evil | sh"}}]}"#;
-    assert!(Recipe::from_json(json.as_bytes()).is_err());
+    assert!(from_json(json.as_bytes()).is_err());
+}
+
+/// Bytes as a recipe compiled into the program would be (`&'static`): the tests' stand-in.
+fn leak(b: &[u8]) -> &'static [u8] {
+    Box::leak(b.to_vec().into_boxed_slice())
+}
+
+#[allow(dead_code)]
+fn from_json(b: &[u8]) -> Result<Recipe, RecipeError> {
+    Recipe::shipped(leak(b))
+}
+
+#[allow(dead_code)]
+fn from_json_with(
+    catalogs: &pctwin_catalogue::Catalogue<pctwin_recipe::CatalogRow>,
+    b: &[u8],
+) -> Result<Recipe, RecipeError> {
+    Recipe::shipped_with(catalogs, leak(b))
 }

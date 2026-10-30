@@ -16,6 +16,13 @@
 //!   never by writing them into a command or a file by hand.
 //! - Every recipe is checked ([`Recipe::validate`]) when it is made and again when it is read, and
 //!   every saved recipe carries [`FORMAT`] under the shared format rule.
+//! - A recipe read from bytes is trusted only two ways ([`Recipe::shipped`],
+//!   [`Recipe::signed`]): bytes compiled into the program (`&'static`, covered by the program's
+//!   own signature), or bytes from anywhere else with a minisign (Ed25519) signature by a
+//!   privileged key, the same check signed catalogues use ([`pctwin_catalogue::TrustedKeys`]),
+//!   bound to the recipe's ID and version ([`recipe_comment`]) and never older than a version of
+//!   it already accepted ([`pctwin_catalogue::RollbackMarks`]). A recipe built in code
+//!   ([`Recipe::new`]) is trusted as code. There is no way to read unsigned outside bytes.
 //! - Every recipe says whether removing its app is a safe way to undo installing it, and what
 //!   else removing it touches ([`UndoDeclaration`]; System Design S14, "Apps, imports and source
 //!   policy", and S02-P06). One that says nothing is never removed by undo.
@@ -76,6 +83,19 @@ pub enum RecipeError {
     BadText,
     #[error("the checklist key {0:?} is not allowed (lowercase letters, digits and `-` only)")]
     BadChecklistKey(String),
+    /// A recipe from outside the program carries no signature by a trusted key, or its bytes
+    /// were changed after signing.
+    #[error("this recipe is not signed by a trusted key")]
+    NotSigned,
+    /// Recipes reach the administrator helper: only a privileged key may sign them.
+    #[error("this recipe needs a privileged key")]
+    NeedsPrivilegedKey,
+    #[error("this recipe's signature is for another recipe or version")]
+    SignedForSomethingElse,
+    #[error("this recipe (version {found}) is older than the one already used ({in_use})")]
+    Older { found: u32, in_use: u32 },
+    #[error("the record of recipe versions already accepted could not be read or written")]
+    MarkUnavailable,
     /// The recipe installs from a catalog no row maps to an adapter yet: this app is found, not
     /// yet supported (the rest of a file of recipes still reads).
     #[error("PCTwin cannot install from the catalog {0:?} yet")]
@@ -628,18 +648,77 @@ impl Recipe {
         serde_json::to_vec(self).unwrap_or_default()
     }
 
-    /// Reads a saved recipe with the shipped `package-catalogs` rows.
-    pub fn from_json(bytes: &[u8]) -> Result<Self, RecipeError> {
-        Self::from_json_with(shipped_catalogs(), bytes)
+    /// A recipe compiled into the program (`include_bytes!`), read with the shipped
+    /// `package-catalogs` rows: covered by the program's own signature, so not signed again.
+    pub fn shipped(bytes: &'static [u8]) -> Result<Self, RecipeError> {
+        Self::read_json(shipped_catalogs(), bytes)
     }
 
-    /// Reads a saved recipe: the format first (a newer one is refused safely), then every
-    /// step's catalog ID through `catalogs` (one with no row: [`RecipeError::NotYetSupported`]),
-    /// then every field.
-    pub fn from_json_with(
+    /// [`Recipe::shipped`] with these `package-catalogs` rows.
+    pub fn shipped_with(
+        catalogs: &Catalogue<CatalogRow>,
+        bytes: &'static [u8],
+    ) -> Result<Self, RecipeError> {
+        Self::read_json(catalogs, bytes)
+    }
+
+    /// A recipe from outside the program, with the shipped `package-catalogs` rows: its
+    /// signature is checked first, before anything in it is read, against `keys`, which must be
+    /// privileged; the signature must name the recipe's ID and the version its bytes hold
+    /// ([`recipe_comment`]); the version must be at least the highest of this recipe PCTwin ever
+    /// accepted, read from `marks` (never rolled back), and once accepted that mark is raised.
+    pub fn signed(
+        bytes: &[u8],
+        signature: &str,
+        keys: &pctwin_catalogue::TrustedKeys,
+        marks: &dyn pctwin_catalogue::RollbackMarks,
+    ) -> Result<Self, RecipeError> {
+        Self::signed_with(shipped_catalogs(), bytes, signature, keys, marks)
+    }
+
+    /// [`Recipe::signed`] with these `package-catalogs` rows.
+    pub fn signed_with(
         catalogs: &Catalogue<CatalogRow>,
         bytes: &[u8],
+        signature: &str,
+        keys: &pctwin_catalogue::TrustedKeys,
+        marks: &dyn pctwin_catalogue::RollbackMarks,
     ) -> Result<Self, RecipeError> {
+        if keys.trust() < pctwin_catalogue::Trust::Privileged {
+            return Err(RecipeError::NeedsPrivilegedKey);
+        }
+        if bytes.len() > pctwin_catalogue::MAX_BYTES {
+            return Err(RecipeError::Damaged("this recipe is too large".into()));
+        }
+        let comment = keys
+            .verify(bytes, signature)
+            .map_err(|_| RecipeError::NotSigned)?;
+        let r = Self::read_json(catalogs, bytes)?;
+        if comment != recipe_comment(r.id.as_str(), r.version) {
+            return Err(RecipeError::SignedForSomethingElse);
+        }
+        let mark = format!("recipe/{}", r.id.as_str());
+        let in_use = marks
+            .highest(&mark)
+            .map_err(|_| RecipeError::MarkUnavailable)?
+            .unwrap_or(0);
+        if r.version < in_use {
+            return Err(RecipeError::Older {
+                found: r.version,
+                in_use,
+            });
+        }
+        marks
+            .raise(&mark, r.version)
+            .map_err(|_| RecipeError::MarkUnavailable)?;
+        Ok(r)
+    }
+
+    /// Reads a recipe's bytes (only through [`Recipe::shipped`] or, once its signature holds,
+    /// [`Recipe::signed`]): the format first (a newer one is refused safely), then every
+    /// step's catalog ID through `catalogs` (one with no row: [`RecipeError::NotYetSupported`]),
+    /// then every field.
+    fn read_json(catalogs: &Catalogue<CatalogRow>, bytes: &[u8]) -> Result<Self, RecipeError> {
         let verdict = RECIPE_FORMAT.check_json(bytes)?;
         if verdict == Verdict::Older(1) {
             // Format 1 had no undo field: one carrying it was not made by format 1.
@@ -785,11 +864,17 @@ pub struct RecipeReading {
     pub damaged: Vec<(usize, RecipeError)>,
 }
 
-/// Reads each saved recipe on its own: one that cannot be read never stops the others.
-pub fn read_recipes(catalogs: &Catalogue<CatalogRow>, files: &[&[u8]]) -> RecipeReading {
+/// The trusted comment a recipe's signature must carry: its ID and version.
+pub fn recipe_comment(id: &str, version: u32) -> String {
+    format!("pctwin-recipe id={id} version={version}")
+}
+
+/// Reads each recipe compiled into the program on its own: one that cannot be read never stops
+/// the others.
+pub fn read_recipes(catalogs: &Catalogue<CatalogRow>, files: &[&'static [u8]]) -> RecipeReading {
     let mut out = RecipeReading::default();
     for (i, bytes) in files.iter().enumerate() {
-        match Recipe::from_json_with(catalogs, bytes) {
+        match Recipe::shipped_with(catalogs, bytes) {
             Ok(r) => out.ready.push(r),
             Err(RecipeError::NotYetSupported(id)) => out.not_yet_supported.push((i, id)),
             Err(e) => out.damaged.push((i, e)),

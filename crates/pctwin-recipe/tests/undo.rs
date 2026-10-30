@@ -105,7 +105,7 @@ fn a_declaration_round_trips_and_a_repeated_side_effect_is_refused() {
         side_effects: vec![SideEffect::VendorAccount, SideEffect::LeavesSettings],
     })
     .unwrap();
-    assert_eq!(Recipe::from_json(&r.to_json()).unwrap(), r);
+    assert_eq!(from_json(&r.to_json()).unwrap(), r);
     assert_eq!(
         app(UndoDeclaration {
             uninstall: true,
@@ -115,7 +115,7 @@ fn a_declaration_round_trips_and_a_repeated_side_effect_is_refused() {
     );
     let json = String::from_utf8(r.to_json()).unwrap();
     let unknown = json.replacen("vendor-account", "wipes-the-disk", 1);
-    assert!(Recipe::from_json(unknown.as_bytes()).is_err());
+    assert!(from_json(unknown.as_bytes()).is_err());
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn the_recipe_format_is_3_and_a_format_1_recipe_is_read_as_saying_nothing_about_
         1,
     );
     assert_ne!(one, json, "the undo field was taken out");
-    let read = Recipe::from_json(one.as_bytes()).unwrap();
+    let read = from_json(one.as_bytes()).unwrap();
     assert_eq!(read.undo, UndoDeclaration::default());
     assert!(!read.undo.removable());
     // Written back, it is a format-3 recipe.
@@ -146,11 +146,11 @@ fn the_recipe_format_is_3_and_a_format_1_recipe_is_read_as_saying_nothing_about_
     );
     // Format 2 reads as it was.
     let two = json.replacen(r#""format":3"#, r#""format":2"#, 1);
-    assert_eq!(Recipe::from_json(two.as_bytes()).unwrap(), r);
+    assert_eq!(from_json(two.as_bytes()).unwrap(), r);
     // A format-1 recipe that somehow carries an undo field is damaged, not trusted.
     let forged = json.replacen(r#""format":3"#, r#""format":1"#, 1);
     assert!(matches!(
-        Recipe::from_json(forged.as_bytes()),
+        from_json(forged.as_bytes()),
         Err(RecipeError::Damaged(_))
     ));
 }
@@ -170,12 +170,30 @@ fn the_saved_recipe_examples_still_read() {
         .unwrap();
         std::fs::write(&three, r.to_json()).unwrap();
     }
-    let one = Recipe::from_json(&std::fs::read(dir.join("recipe-1.json")).unwrap()).unwrap();
+    let one = from_json(&std::fs::read(dir.join("recipe-1.json")).unwrap()).unwrap();
     assert_eq!(one.undo, UndoDeclaration::default());
     assert_eq!(one.steps.len(), 1);
     for file in [two, three] {
-        let read = Recipe::from_json(&std::fs::read(file).unwrap()).unwrap();
+        let read = from_json(&std::fs::read(file).unwrap()).unwrap();
         assert!(read.undo.removable());
         assert_eq!(read.undo.side_effects, vec![SideEffect::LeavesSettings]);
     }
+}
+
+/// Bytes as a recipe compiled into the program would be (`&'static`): the tests' stand-in.
+fn leak(b: &[u8]) -> &'static [u8] {
+    Box::leak(b.to_vec().into_boxed_slice())
+}
+
+#[allow(dead_code)]
+fn from_json(b: &[u8]) -> Result<Recipe, RecipeError> {
+    Recipe::shipped(leak(b))
+}
+
+#[allow(dead_code)]
+fn from_json_with(
+    catalogs: &pctwin_catalogue::Catalogue<pctwin_recipe::CatalogRow>,
+    b: &[u8],
+) -> Result<Recipe, RecipeError> {
+    Recipe::shipped_with(catalogs, leak(b))
 }

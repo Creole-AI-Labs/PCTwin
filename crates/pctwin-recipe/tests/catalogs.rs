@@ -41,7 +41,7 @@ fn the_shipped_rows_map_every_adapter_and_its_other_names() {
 
 #[test]
 fn a_recipe_naming_another_name_of_an_adapter_reads_as_that_adapter() {
-    let r = Recipe::from_json(recipe_json("brew").as_bytes()).unwrap();
+    let r = from_json(recipe_json("brew").as_bytes()).unwrap();
     assert!(matches!(
         &r.steps[0],
         Step::Install {
@@ -62,18 +62,18 @@ fn a_recipe_naming_another_name_of_an_adapter_reads_as_that_adapter() {
 #[test]
 fn an_unknown_catalog_marks_one_recipe_not_the_whole_set() {
     assert_eq!(
-        Recipe::from_json(recipe_json("chocolatey").as_bytes()),
+        from_json(recipe_json("chocolatey").as_bytes()),
         Err(RecipeError::NotYetSupported("chocolatey".into()))
     );
     let good = recipe_json("winget");
     let unknown = recipe_json("chocolatey");
     let damaged = recipe_json("Bad Id");
     let newer = good.replacen(r#""format":3"#, r#""format":4"#, 1);
-    let files: Vec<&[u8]> = vec![
-        good.as_bytes(),
-        unknown.as_bytes(),
-        damaged.as_bytes(),
-        newer.as_bytes(),
+    let files: Vec<&'static [u8]> = vec![
+        leak(good.as_bytes()),
+        leak(unknown.as_bytes()),
+        leak(damaged.as_bytes()),
+        leak(newer.as_bytes()),
     ];
     let read = read_recipes(shipped_catalogs(), &files);
     assert_eq!(read.ready.len(), 1);
@@ -83,7 +83,7 @@ fn an_unknown_catalog_marks_one_recipe_not_the_whole_set() {
     // A catalog ID that is not text at all is damage, not an unknown catalog.
     let not_text = good.replacen(r#""catalog":"winget""#, r#""catalog":7"#, 1);
     assert!(matches!(
-        Recipe::from_json(not_text.as_bytes()),
+        from_json(not_text.as_bytes()),
         Err(RecipeError::Damaged(_))
     ));
 }
@@ -109,7 +109,7 @@ fn a_new_signed_row_maps_a_new_catalog_id_with_no_code_change() {
     .unwrap();
     assert_eq!(rows.rows().len(), 2);
     assert_eq!(rows.report().skipped.len(), 3);
-    let r = Recipe::from_json_with(&rows, recipe_json("winget-community").as_bytes()).unwrap();
+    let r = from_json_with(&rows, recipe_json("winget-community").as_bytes()).unwrap();
     assert!(matches!(
         &r.steps[0],
         Step::Install {
@@ -119,7 +119,7 @@ fn a_new_signed_row_maps_a_new_catalog_id_with_no_code_change() {
     ));
     // Not in the shipped rows.
     assert_eq!(
-        Recipe::from_json(recipe_json("winget-community").as_bytes()),
+        from_json(recipe_json("winget-community").as_bytes()),
         Err(RecipeError::NotYetSupported("winget-community".into()))
     );
 }
@@ -148,21 +148,23 @@ fn recipe_ids_refuse_underscores() {
 fn review4_a_damaged_recipe_is_damaged_whatever_catalog_it_names() {
     let damaged = recipe_json("chocolatey").replacen('}', r#","bogus":1}"#, 1);
     assert!(matches!(
-        Recipe::from_json_with(shipped_catalogs(), damaged.as_bytes()),
+        from_json_with(shipped_catalogs(), damaged.as_bytes()),
         Err(RecipeError::Damaged(_))
     ));
     let bad_package = recipe_json("chocolatey").replace("Example.App", "../../x");
-    let e = Recipe::from_json_with(shipped_catalogs(), bad_package.as_bytes()).unwrap_err();
+    let e = from_json_with(shipped_catalogs(), bad_package.as_bytes()).unwrap_err();
     assert!(!matches!(e, RecipeError::NotYetSupported(_)), "{e:?}");
     // A sound recipe with an unknown catalog is still found, not yet supported.
     assert_eq!(
-        Recipe::from_json_with(shipped_catalogs(), recipe_json("chocolatey").as_bytes())
-            .unwrap_err(),
+        from_json_with(shipped_catalogs(), recipe_json("chocolatey").as_bytes()).unwrap_err(),
         RecipeError::NotYetSupported("chocolatey".into())
     );
     let set = read_recipes(
         shipped_catalogs(),
-        &[damaged.as_bytes(), recipe_json("chocolatey").as_bytes()],
+        &[
+            leak(damaged.as_bytes()),
+            leak(recipe_json("chocolatey").as_bytes()),
+        ],
     );
     assert_eq!(set.damaged.len(), 1);
     assert_eq!(set.not_yet_supported, [(1, "chocolatey".to_string())]);
@@ -181,4 +183,22 @@ fn review4_two_rows_for_one_catalog_id_are_both_refused_and_reported() {
         adapter_for(&cat, "winget").unwrap_err(),
         RecipeError::NotYetSupported("winget".into())
     );
+}
+
+/// Bytes as a recipe compiled into the program would be (`&'static`): the tests' stand-in.
+fn leak(b: &[u8]) -> &'static [u8] {
+    Box::leak(b.to_vec().into_boxed_slice())
+}
+
+#[allow(dead_code)]
+fn from_json(b: &[u8]) -> Result<Recipe, RecipeError> {
+    Recipe::shipped(leak(b))
+}
+
+#[allow(dead_code)]
+fn from_json_with(
+    catalogs: &pctwin_catalogue::Catalogue<pctwin_recipe::CatalogRow>,
+    b: &[u8],
+) -> Result<Recipe, RecipeError> {
+    Recipe::shipped_with(catalogs, leak(b))
 }
