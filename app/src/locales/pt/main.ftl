@@ -1476,6 +1476,12 @@ qs-eyebrow-receiving = Recebendo no seu notebook
 qs-label-this = Este notebook
 qs-label-other = O outro notebook
 qs-pick-failed = Não foi possível abrir o seletor. Tente de novo.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 arquivo ou pasta foi entregue ao PCTwin para enviar. Confira a lista antes de continuar.
+        [many] { $count } de arquivos ou pastas foram entregues ao PCTwin para enviar. Confira a lista antes de continuar.
+       *[other] { $count } arquivos ou pastas foram entregues ao PCTwin para enviar. Confira a lista antes de continuar.
+    }
 qs-pick-too-many = São mais arquivos do que um único envio comporta. Desmarque algumas pastas ou envie-as em partes.
 qs-problem-lost-title = A conexão entre os notebooks caiu
 qs-problem-failed-title = Desta vez não foi possível enviar os arquivos

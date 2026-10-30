@@ -1481,6 +1481,12 @@ qs-eyebrow-receiving = Réception sur votre ordinateur portable
 qs-label-this = Ce portable
 qs-label-other = L’autre portable
 qs-pick-failed = Le sélecteur n’a pas pu s’ouvrir. Réessayez.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 fichier ou dossier a été confié à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+        [many] { $count } de fichiers ou dossiers ont été confiés à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+       *[other] { $count } fichiers ou dossiers ont été confiés à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+    }
 qs-pick-too-many = C’est plus de fichiers qu’un seul envoi ne peut en emporter. Décochez quelques dossiers, ou envoyez-les en plusieurs fois.
 qs-problem-lost-title = La connexion entre les ordinateurs a été perdue
 qs-problem-failed-title = Les fichiers n’ont pas pu être envoyés cette fois

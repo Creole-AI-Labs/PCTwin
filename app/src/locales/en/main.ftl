@@ -1308,6 +1308,11 @@ qs-eyebrow-receiving = Receiving on your laptop
 qs-label-this = This laptop
 qs-label-other = The other laptop
 qs-pick-failed = The picker could not open. Try again.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 file or folder was handed to PCTwin to send. Check the list before you continue.
+       *[other] { $count } files or folders were handed to PCTwin to send. Check the list before you continue.
+    }
 qs-pick-too-many = That is more files than one send can carry. Untick some folders, or send them in parts.
 qs-problem-lost-title = The connection between the laptops was lost
 qs-problem-failed-title = The files could not be sent this time

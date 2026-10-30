@@ -1222,6 +1222,10 @@ qs-eyebrow-receiving = 在你的笔记本电脑上接收
 qs-label-this = 这台笔记本电脑
 qs-label-other = 另一台笔记本电脑
 qs-pick-failed = 无法打开选择窗口。请重试。
+qs-handed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件或文件夹被交给 PCTwin 发送。继续前请检查列表。
+    }
 qs-pick-too-many = 文件太多，一次发送装不下。请取消勾选一些文件夹，或分几次发送。
 qs-problem-lost-title = 两台电脑之间的连接已断开
 qs-problem-failed-title = 这次未能发送文件

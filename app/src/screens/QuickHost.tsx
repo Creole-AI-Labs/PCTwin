@@ -189,6 +189,8 @@ export default function QuickHost({
   }, [windowMode, onWindow]);
   const [failed, setFailed] = useState(false);
   const [tooMany, setTooMany] = useState(false);
+  // How many things the system handed PCTwin for this send (said on the pick page).
+  const [handed, setHanded] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const live = useRef(true);
   // The receiver learns the sending laptop's name when it picks it to pair with; the sender is
@@ -301,7 +303,11 @@ export default function QuickHost({
     let on = true;
     qsLaunchFiles().then(
       (fresh) => {
-        if (on && fresh.length > 0) setItems((old) => merged(old, fresh));
+        if (on && fresh.length > 0) {
+          // Said before anything is sent: things handed to PCTwin from outside never join silently.
+          setHanded(fresh.length);
+          setItems((old) => merged(old, fresh));
+        }
       },
       () => undefined,
     );
@@ -612,6 +618,11 @@ export default function QuickHost({
                 : onHome
             }
           />
+          {handed !== null && (
+            <div role="status">
+              <Banner tone="info">{l10n.getString("qs-handed", { count: handed })}</Banner>
+            </div>
+          )}
           {failed && <Banner tone="attention">{l10n.getString("qs-pick-failed")}</Banner>}
           {addTo && toRefused && <Banner tone="attention">{l10n.getString(`qs-refusal-${toRefused.kind}`)}</Banner>}
           {offerWaiting && (

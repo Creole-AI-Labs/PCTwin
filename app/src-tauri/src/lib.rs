@@ -289,6 +289,13 @@ fn handed_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 /// A second start hands its files (after `--send`) to the app already running, and that app's
 /// window comes forward. It needs the system's real windowing, so the mock runtime has none.
+///
+/// Known limit (security review, 30 October 2026; no fix now): the plugin finds the running app
+/// through a name every program of the person's can use (a socket under the temporary folder on
+/// Linux and macOS, a named object on Windows). Another program running as the person can hold
+/// that name first, so PCTwin's own second start cannot reach the running app and its files are
+/// not handed over (a denial of service by something that already runs as the person). Nothing
+/// is sent because of it: handed files only ever join the chosen list, shown to the person.
 fn single_instance_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_single_instance::init(|app, args, _cwd| {
         let paths = handed::second_start(&args);
