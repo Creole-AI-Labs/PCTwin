@@ -1,0 +1,58 @@
+{
+  "format": 1,
+  "catalogue": "game-places",
+  "version": 1,
+  "rows": [
+    {
+      "system": "windows",
+      "kind": "save-list",
+      "path": "<winAppData>/ludusavi/manifest.yaml",
+      "name": "Your own Ludusavi save list",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "mac",
+      "kind": "save-list",
+      "path": "<home>/Library/Application Support/ludusavi/manifest.yaml",
+      "name": "Your own Ludusavi save list",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "linux",
+      "kind": "save-list",
+      "path": "<xdgConfig>/ludusavi/manifest.yaml",
+      "name": "Your own Ludusavi save list",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "linux",
+      "kind": "save-list",
+      "path": "<home>/.var/app/com.github.mtkennerly.ludusavi/config/ludusavi/manifest.yaml",
+      "name": "Your own Ludusavi save list",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "windows",
+      "kind": "store-protected",
+      "path": "<winLocalAppData>/Packages/*/SystemAppData/wgs",
+      "name": "Saves kept by the Microsoft Store and Xbox app",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "windows",
+      "kind": "mods",
+      "path": "<base>/Mods",
+      "name": "Stardew Valley add-ons",
+      "game": "Stardew Valley",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "system": "linux",
+      "kind": "mods",
+      "path": "<base>/Mods",
+      "name": "Stardew Valley add-ons",
+      "game": "Stardew Valley",
+      "checked_on": "2026-10-30"
+    }
+  ]
+}

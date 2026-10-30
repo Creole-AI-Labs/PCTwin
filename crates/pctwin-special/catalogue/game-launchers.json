@@ -1,0 +1,138 @@
+{
+  "format": 1,
+  "catalogue": "game-launchers",
+  "version": 1,
+  "rows": [
+    {
+      "launcher": "steam",
+      "name": "Steam",
+      "system": "windows",
+      "base": [
+        "<winProgramFilesX86>/Steam"
+      ],
+      "libraries": {
+        "file": "steamapps/libraryfolders.vdf",
+        "format": "vdf",
+        "at": [
+          "libraryfolders"
+        ],
+        "each": true,
+        "path": "path"
+      },
+      "games": {
+        "folder": "steamapps",
+        "files": "appmanifest_*.acf",
+        "format": "vdf",
+        "at": [
+          "AppState"
+        ],
+        "name": "name",
+        "id": "appid",
+        "install": "installdir",
+        "install_in": "steamapps/common"
+      },
+      "cloud_marker": "userdata/<storeUserId>/<storeGameId>/remotecache.vdf",
+      "verify": "steam://validate/<storeGameId>",
+      "page": "https://help.steampowered.com/faqs/view/0C48-FCBD-DA71-93EB",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "launcher": "steam",
+      "name": "Steam",
+      "system": "mac",
+      "base": [
+        "<home>/Library/Application Support/Steam"
+      ],
+      "libraries": {
+        "file": "steamapps/libraryfolders.vdf",
+        "format": "vdf",
+        "at": [
+          "libraryfolders"
+        ],
+        "each": true,
+        "path": "path"
+      },
+      "games": {
+        "folder": "steamapps",
+        "files": "appmanifest_*.acf",
+        "format": "vdf",
+        "at": [
+          "AppState"
+        ],
+        "name": "name",
+        "id": "appid",
+        "install": "installdir",
+        "install_in": "steamapps/common"
+      },
+      "cloud_marker": "userdata/<storeUserId>/<storeGameId>/remotecache.vdf",
+      "verify": "steam://validate/<storeGameId>",
+      "page": "https://help.steampowered.com/faqs/view/0C48-FCBD-DA71-93EB",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "launcher": "steam",
+      "name": "Steam",
+      "system": "linux",
+      "base": [
+        "<xdgData>/Steam"
+      ],
+      "libraries": {
+        "file": "steamapps/libraryfolders.vdf",
+        "format": "vdf",
+        "at": [
+          "libraryfolders"
+        ],
+        "each": true,
+        "path": "path"
+      },
+      "games": {
+        "folder": "steamapps",
+        "files": "appmanifest_*.acf",
+        "format": "vdf",
+        "at": [
+          "AppState"
+        ],
+        "name": "name",
+        "id": "appid",
+        "install": "installdir",
+        "install_in": "steamapps/common"
+      },
+      "cloud_marker": "userdata/<storeUserId>/<storeGameId>/remotecache.vdf",
+      "verify": "steam://validate/<storeGameId>",
+      "page": "https://help.steampowered.com/faqs/view/0C48-FCBD-DA71-93EB",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "launcher": "epic",
+      "name": "Epic Games Launcher",
+      "system": "windows",
+      "base": [
+        "<winProgramData>/Epic/EpicGamesLauncher/Data"
+      ],
+      "games": {
+        "folder": "Manifests",
+        "files": "*.item",
+        "format": "json",
+        "name": "DisplayName",
+        "id": "AppName",
+        "install": "InstallLocation"
+      },
+      "page": "https://www.epicgames.com/help/en-US/c-Category_EpicGamesStore/c-0/a000084923",
+      "checked_on": "2026-10-30"
+    },
+    {
+      "launcher": "gog",
+      "name": "GOG GALAXY",
+      "system": "windows",
+      "games": {
+        "registry": "HKEY_LOCAL_MACHINE/SOFTWARE/WOW6432Node/GOG.com/Games",
+        "format": "registry",
+        "each": true,
+        "name": "gameName",
+        "id": "gameID",
+        "install": "path"
+      },
+      "checked_on": "2026-10-30"
+    }
+  ]
+}
