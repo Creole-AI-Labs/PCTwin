@@ -974,7 +974,7 @@ pub fn rebuild_full<R: Runtime>(
                 &state.keys.capture,
                 scope,
                 &actor,
-                (plan, old_laptop),
+                (plan, old_laptop, &files),
             )
         }
         None => pctwin_fullmove::run::DataDone::default(),
@@ -1381,7 +1381,7 @@ fn land_data(
     key: &pctwin_grant::CaptureKey,
     scope: Scope,
     actor: &Actor,
-    (plan, old_laptop): (&FullPlan, &str),
+    (plan, old_laptop, files): (&FullPlan, &str, &[(String, String)]),
 ) -> pctwin_fullmove::run::DataDone {
     let mut done = pctwin_fullmove::run::DataDone {
         picked,
@@ -1395,6 +1395,7 @@ fn land_data(
         sink.remove_staging();
         return done;
     };
+    let home_text = home_path.display().to_string();
     let names: std::collections::BTreeMap<String, String> = sink
         .arrived
         .iter()
@@ -1409,6 +1410,19 @@ fn land_data(
         scope,
         actor: actor.clone(),
         system: pctwin_special::roots::System::here(),
+        // An app's settings files the catalogue describes are put right as they land: this
+        // system's keyboard shortcuts, paths pointed at where the moved files really are.
+        fix: plan.from.map(|from| pctwin_fullmove::fixups::FixCtx {
+            from,
+            to: pctwin_fullmove::extras::this_system(),
+            home_old: plan
+                .old_folders
+                .iter()
+                .find(|(role, _)| *role == pctwin_record::FolderRole::Home)
+                .map_or("", |(_, path)| path.as_str()),
+            home_new: home_text.as_str(),
+            files,
+        }),
     };
     let landed = pctwin_fullmove::data::land_all(sink, &landing, &names, edited);
     // Mail carried raw (Apple Mail): written out here as mailbox files, each message read in

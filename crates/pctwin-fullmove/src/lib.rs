@@ -25,6 +25,7 @@
 pub mod data;
 pub mod drift;
 pub mod extras;
+pub mod fixups;
 pub mod install;
 pub mod live;
 pub mod mac;

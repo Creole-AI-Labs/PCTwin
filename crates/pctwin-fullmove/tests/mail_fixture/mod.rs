@@ -341,6 +341,7 @@ pub fn receive_with(
                 permission: Permission::OwnFolders,
             },
             system: pctwin_special::roots::System::here(),
+            fix: None,
         },
         &MailOut {
             line: &line.name,

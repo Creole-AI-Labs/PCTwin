@@ -776,6 +776,9 @@ pub struct Landing<'a> {
     /// How this laptop lays out a person's home: its own system ([`System::here`]); tests that
     /// build a Windows home name Windows on every system they run on.
     pub system: System,
+    /// What the settings catalogue's file rules need to put an app's settings files right as
+    /// they land ([`crate::fixups`]); `None`: they land exactly as captured.
+    pub fix: Option<crate::fixups::FixCtx<'a>>,
 }
 
 /// Why a component of app data needs the person, in a word the screens translate (never the
@@ -928,6 +931,16 @@ pub fn land_all(
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
         }
+        // An app's settings files the catalogue describes are put right in staging first; the
+        // record then names exactly the bytes that land.
+        let fixed;
+        let r = match &n.fix {
+            Some(ctx) if !secret => {
+                fixed = crate::fixups::fix(r, &sink.folder(id), ctx);
+                &fixed
+            }
+            _ => r,
+        };
         out.push(laptop.land(id, r, step as u32, secret, &sink.folder(id)));
     }
     out
