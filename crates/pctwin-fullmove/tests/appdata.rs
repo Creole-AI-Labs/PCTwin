@@ -384,6 +384,7 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
                 mover: MOVER,
                 people: &[],
                 extras: &extras_bytes,
+                wifi: None,
             };
             let mut back = pctwin_move::resume::NoComeback;
             pctwin_move::send_by_rules(

@@ -502,6 +502,7 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
                 mover: MOVER,
                 people: &[],
                 extras: &extras_bytes,
+                wifi: None,
             };
             let mut back = pctwin_move::resume::NoComeback;
             pctwin_move::send_by_rules(

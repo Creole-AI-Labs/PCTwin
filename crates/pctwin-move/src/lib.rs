@@ -32,6 +32,7 @@ pub mod reconnect;
 pub mod report;
 pub mod resume;
 pub mod since;
+pub mod wifi;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -474,6 +475,24 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
             Err(e) => return Err(e),
         }
     }
+    // From move protocol 8: the saved Wi-Fi networks the person ticked here, with their
+    // passwords, now that the plan is approved; one record inside the sealed link. A drop here
+    // loses only the networks (the new laptop says so); the files carry on.
+    if version >= pctwin_transfer::WIFI_SINCE {
+        let record = match who.wifi {
+            Some(w) => w.record(),
+            None => zeroize::Zeroizing::new(Vec::new()),
+        };
+        match or_stop(&live.control, async {
+            Ok(wifi::send(link, &record).await?)
+        })
+        .await
+        {
+            Ok(()) => {}
+            Err(MoveError::Transfer(TransferError::ConnectionDropped)) if port.is_some() => {}
+            Err(e) => return Err(e),
+        }
+    }
     // An older new laptop was sent no personal order, so none is used here either: the order
     // its person saw is the order sent.
     let mut plain = None;
@@ -495,11 +514,15 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
 /// Who is in the move, as the old laptop tells the new one: the person moving (their account ID
 /// here) and the other people, by name; and the full move's extras ([`extras`]: empty when there
 /// are none), sent to a new laptop on move protocol 6 or later.
+///
+/// `wifi`: the saved Wi-Fi networks the person ticked here, sent with their passwords once the
+/// plan is approved, to a new laptop on move protocol 8 or later ([`wifi`]); `None`: none.
 #[derive(Debug, Clone, Copy)]
 pub struct Who<'a> {
     pub mover: &'a str,
     pub people: &'a [landing::NamedPerson],
     pub extras: &'a [u8],
+    pub wifi: Option<&'a dyn wifi::WifiOut>,
 }
 
 /// Runs the old laptop's sending of `plan` over `link` (the version agreed): one outcome per
@@ -705,6 +728,12 @@ pub trait Steps {
     /// The full move's app data: what this laptop chose and where it goes (move protocol 6 and
     /// later, the app's way of moving). None: nothing is chosen.
     fn data_in(&mut self) -> Option<&mut dyn extras::DataIn> {
+        None
+    }
+
+    /// Where the old laptop's saved Wi-Fi networks go once the plan is approved (move protocol 8
+    /// and later, the app's way of moving, [`wifi`]). None: the record is read and dropped.
+    fn wifi_in(&mut self) -> Option<&mut dyn wifi::WifiIn> {
         None
     }
 
@@ -1209,6 +1238,24 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
             Ok(()) => {}
             Err(MoveError::Transfer(TransferError::ConnectionDropped)) if resumes => {
                 if let Some(sink) = steps.data_in() {
+                    sink.lost();
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    // From move protocol 8: the old laptop's saved Wi-Fi networks, the ones its person ticked,
+    // after the app data. A drop here loses only them (said as not arrived).
+    if link.greeting().version >= pctwin_transfer::WIFI_SINCE {
+        let resumes = matches!(on_drop, OnDrop::Resumes(_));
+        match or_stop(&live.control, async { Ok(wifi::receive(link).await?) }).await {
+            Ok(record) => {
+                if let Some(sink) = steps.wifi_in() {
+                    sink.arrived(record);
+                }
+            }
+            Err(MoveError::Transfer(TransferError::ConnectionDropped)) if resumes => {
+                if let Some(sink) = steps.wifi_in() {
                     sink.lost();
                 }
             }

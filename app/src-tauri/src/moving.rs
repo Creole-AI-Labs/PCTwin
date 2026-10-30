@@ -3176,6 +3176,7 @@ async fn run_old<R: Runtime>(
         mover: &mover,
         people: &named,
         extras: &extras,
+        wifi: None,
     };
     let sent = pctwin_move::send_by_rules(
         &mut link,
@@ -3583,6 +3584,7 @@ async fn run_rescue<R: Runtime>(
             mover: &mover,
             people: &[],
             extras: &extras,
+            wifi: None,
         };
         pctwin_move::send_by_rules(
             &mut greeted,

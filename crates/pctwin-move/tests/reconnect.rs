@@ -380,6 +380,7 @@ async fn old_side<C: Channel, B: Comeback>(
         mover: "1000",
         people: &[],
         extras: &[],
+        wifi: None,
     };
     let (sent, _) = pctwin_move::send_by_rules(
         &mut link,
@@ -1223,6 +1224,7 @@ async fn a_drop_during_the_app_data_loses_only_the_app_data_and_the_files_carry_
                     mover: "1000",
                     people: &[],
                     extras: &[],
+                    wifi: None,
                 };
                 pctwin_move::send_by_rules(
                     &mut link,
