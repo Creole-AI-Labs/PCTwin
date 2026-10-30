@@ -93,7 +93,14 @@ fn the_plist_only_adds_keys_and_never_overrides_what_tauri_writes() {
             "CFBundleTypeName",
             "CFBundleTypeRole",
             "LSHandlerRank",
-            "LSItemContentTypes"
+            "LSItemContentTypes",
+            "NSServices",
+            "NSMenuItem",
+            "default",
+            "NSMessage",
+            "NSPortName",
+            "NSRequiredContext",
+            "NSSendFileTypes"
         ]
     );
 }
@@ -107,7 +114,8 @@ fn finders_open_with_offers_pctwin_but_pctwin_never_becomes_the_default() {
     // Everything from the key on: the entry holds an array of its own, so `value_of` would stop early.
     let docs = &text[text
         .find("<key>CFBundleDocumentTypes</key>")
-        .expect("declared")..];
+        .expect("declared")
+        ..text.find("<key>NSServices</key>").expect("declared")];
     assert_eq!(strings(&value_of(docs, "LSHandlerRank")), ["Alternate"]);
     assert_eq!(strings(&value_of(docs, "CFBundleTypeRole")), ["Viewer"]);
     assert_eq!(
@@ -125,4 +133,49 @@ fn finders_open_with_offers_pctwin_but_pctwin_never_becomes_the_default() {
         1,
         "one entry for everything"
     );
+}
+
+#[test]
+fn the_finders_send_with_pctwin_is_one_service_for_any_file_or_folder() {
+    // Quick Send's Finder entry point (finder_send.rs): "Send with PCTwin" in the right-click
+    // menu. An empty NSRequiredContext shows it without the person turning it on in Settings.
+    let text = plist();
+    let services = &text[text.find("<key>NSServices</key>").expect("declared")..];
+    assert_eq!(strings(&value_of(services, "NSMessage")), ["sendFiles"]);
+    assert_eq!(strings(&value_of(services, "NSPortName")), ["PCTwin"]);
+    assert_eq!(
+        strings(&value_of(services, "NSSendFileTypes")),
+        ["public.item"]
+    );
+    assert_eq!(
+        strings(&value_of(services, "default")),
+        ["Send with PCTwin"]
+    );
+    assert!(services.contains(
+        "<key>NSRequiredContext</key>
+			<dict/>"
+    ));
+    // The provider answers that message, and the name is there in every launch language.
+    let code = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/finder_send.rs"),
+    )
+    .unwrap();
+    assert!(code.contains("method(sendFiles:userData:error:)"));
+    let conf = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+    )
+    .unwrap();
+    for lang in ["en", "fr", "es", "pt", "ar", "hi", "zh-Hans"] {
+        let file = format!("macos/{lang}.lproj/ServicesMenu.strings");
+        let words =
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(&file))
+                .unwrap();
+        assert!(words.contains("\"Send with PCTwin\" = \""), "{file}");
+        assert!(
+            conf.contains(&format!(
+                "\"Resources/{lang}.lproj/ServicesMenu.strings\": \"{file}\""
+            )),
+            "{file} is bundled"
+        );
+    }
 }

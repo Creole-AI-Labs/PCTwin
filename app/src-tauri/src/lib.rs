@@ -26,6 +26,8 @@ mod finish_cleanup;
 mod finish_doctor;
 mod finish_store;
 // The full move: apps, settings and special categories joined to the move (Phase 2 joining).
+#[cfg(target_os = "macos")]
+mod finder_send;
 mod fullmove;
 #[cfg(test)]
 mod guard_examples;
@@ -566,6 +568,15 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             keep_local::put_back_left(app.handle());
             if !has_tray::<R>() {
                 return Ok(());
+            }
+            // The Finder's "Send with PCTwin": the chosen files join the chosen list.
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                finder_send::set_up(move |paths| {
+                    show_main(&handle);
+                    quicksend::dropped(&handle, paths);
+                });
             }
             let menu = tray_menu(app.handle(), "PCTwin", "PCTwin", "PCTwin")?;
             let mut tray = TrayIconBuilder::with_id("main")

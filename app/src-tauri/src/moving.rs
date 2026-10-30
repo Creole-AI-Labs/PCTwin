@@ -371,7 +371,7 @@ pub struct ChoiceView {
     /// none, or when this laptop cannot keep local copies (`keep_local_here`).
     pub online_only: Vec<OnlineOnlyGroup>,
     /// Whether this laptop can download online-only files to move them and make them online only
-    /// again afterwards (Windows; a Mac not yet, said so).
+    /// again afterwards (Windows; a Mac for what macOS keeps in a cloud; not Linux, said so).
     pub keep_local_here: bool,
 }
 
@@ -387,10 +387,10 @@ pub struct OnlineOnlyGroup {
     pub bytes: u64,
 }
 
-/// Whether this laptop can keep local copies of online-only files for the move: Windows only
-/// (the cloud app is asked to make each one online only again with the system's own `attrib`);
-/// macOS has no supported command for that yet.
-pub const KEEP_LOCAL_HERE: bool = cfg!(windows);
+/// Whether this laptop can keep local copies of online-only files for the move: Windows (the
+/// cloud app is asked to make each one online only again with the system's own `attrib`) and a
+/// Mac, for a cloud folder macOS itself keeps (its own evict call; `keep_local::keepable_here`).
+pub const KEEP_LOCAL_HERE: bool = cfg!(any(windows, target_os = "macos"));
 
 /// The person's consent to keep a copy of their files kept only online in one cloud: they are
 /// downloaded on the old laptop first, sent, then made online only again.
@@ -422,14 +422,15 @@ fn kept_online<'a>(
     })
 }
 
-/// The mover's online-only files by cloud, for the choice (none where this laptop cannot keep
-/// local copies).
-fn online_only_groups(record: &Record, mover: &str, here: bool) -> Vec<OnlineOnlyGroup> {
-    if !here {
-        return Vec::new();
-    }
+/// The mover's online-only files by cloud, for the choice: only clouds this laptop can keep local
+/// copies of (`here`).
+fn online_only_groups(
+    record: &Record,
+    mover: &str,
+    here: &dyn Fn(pctwin_record::CloudProvider) -> bool,
+) -> Vec<OnlineOnlyGroup> {
     let mut by: BTreeMap<pctwin_record::CloudProvider, (u64, u64)> = BTreeMap::new();
-    for (item, provider) in kept_online(record, mover) {
+    for (item, provider) in kept_online(record, mover).filter(|(_, p)| here(*p)) {
         let g = by.entry(provider).or_default();
         g.0 += 1;
         g.1 = g.1.saturating_add(item.size_bytes);
@@ -453,9 +454,10 @@ fn include_kept_online(
     choice: &Choice,
     mover: &str,
     depth: usize,
+    here: &dyn Fn(pctwin_record::CloudProvider) -> bool,
 ) -> Vec<ItemId> {
     let shown: std::collections::BTreeSet<pctwin_record::CloudProvider> =
-        online_only_groups(record, mover, true)
+        online_only_groups(record, mover, here)
             .into_iter()
             .map(|g| g.provider)
             .collect();
@@ -3018,7 +3020,14 @@ async fn run_old<R: Runtime>(
     // The person chooses what moves here, where their things are (decided 28 October 2026): it
     // only ever leaves things out of what was found; the new laptop still accepts what comes.
     let mut view = choice_view(&record);
-    view.online_only = online_only_groups(&record, &mover, KEEP_LOCAL_HERE);
+    let mover_home = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.home)
+        .unwrap_or_default();
+    let keepable = crate::keep_local::keepable_here(&mover_home);
+    let here = |p: pctwin_record::CloudProvider| KEEP_LOCAL_HERE && keepable(p);
+    view.online_only = online_only_groups(&record, &mover, &here);
     let (choice_depth, _) = folder_tree(&record);
     let shown = shown_folders(&record);
     let answer = moving.wait_for_choice(shown);
@@ -3032,7 +3041,7 @@ async fn run_old<R: Runtime>(
     // downloaded here one at a time within this laptop's free space while they are sent, then
     // made online only again (Task List 2.6). Only on a laptop that can do that.
     let kept_ids = if KEEP_LOCAL_HERE {
-        include_kept_online(&mut record, &choice, &mover, choice_depth)
+        include_kept_online(&mut record, &choice, &mover, choice_depth, &here)
     } else {
         Vec::new()
     };
@@ -3064,7 +3073,7 @@ async fn run_old<R: Runtime>(
             .filter_map(|i| Some((i.id, path_of(i)?))),
         pctwin_special::live::LiveKinds::built_in(),
     );
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let keep_opener = if kept_ids.is_empty() {
         None
     } else {
@@ -3103,7 +3112,7 @@ async fn run_old<R: Runtime>(
             }
         }
     };
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let keep_opener: Option<Arc<pctwin_orchestrate::local_copy_send::KeepOpener>> = {
         // Not offered here; never consented.
         let _ = &kept_ids;

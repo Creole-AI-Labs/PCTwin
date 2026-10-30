@@ -26,8 +26,8 @@
 //!   leaves the list, and the next start of PCTwin, or of a move, puts back whatever it still
 //!   names ([`put_back_listed`]), then removes it: the old laptop ends as it was.
 //!
-//! Windows only for now ([`crate::local_copy::WindowsCloudFiles`]); macOS has no supported way
-//! yet to make a file online only again, so the choice is not offered there.
+//! On Windows and, for what macOS itself keeps in a cloud (iCloud Drive), on a Mac
+//! ([`crate::local_copy::SyncedFolderFiles`]); elsewhere the choice is not offered.
 
 use std::collections::{BTreeSet, HashMap};
 use std::io::{self, Read, Seek, SeekFrom};

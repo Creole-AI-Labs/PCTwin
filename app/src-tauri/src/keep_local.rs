@@ -9,9 +9,15 @@
 //! The old laptop is read only, except for this step: consented, recorded in the outcome
 //! ([`KeptOnlineView`]) and reversed (each file made online only again).
 //!
-//! Offered only on Windows (the choose page says so elsewhere); the rest of this module is built
-//! everywhere so its tests run on every system, so its Windows-only parts are unused there.
-#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
+//! Offered on Windows for every cloud built on the system's cloud files support, and on a Mac for
+//! a cloud folder macOS itself keeps (iCloud Drive), told by asking macOS, never by its name
+//! ([`keepable_here`]); other clouds on a Mac, and Linux (its sync apps keep whole copies), are
+//! not offered and their online-only files stay in their cloud, listed as left behind. The rest
+//! of this module is built everywhere so its tests run on every system.
+#![cfg_attr(
+    not(any(windows, target_os = "macos")),
+    allow(dead_code, unused_imports)
+)]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -52,7 +58,7 @@ pub fn cloud_folders(home: &Path) -> Vec<CloudFolder> {
         &|p| p.is_dir(),
     )
     .into_iter()
-    .filter(|c| !c.work)
+    .filter(|c| !c.work && can_put_back_in(&c.root))
     .map(|c| CloudFolder {
         provider: c.provider,
         root: c.root,
@@ -135,31 +141,105 @@ fn network_now() -> Network {
     }
 }
 
-/// The send's opener for the kept files (Windows' cloud files support), over `inner`.
-#[cfg(windows)]
+/// Whether files in this cloud folder can be made online only again from here: on Windows, any
+/// (the system's cloud files support); on a Mac, only a folder macOS itself keeps in a cloud.
+fn can_put_back_in(root: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        kept_by_macos(root)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = root;
+        cfg!(windows)
+    }
+}
+
+/// The clouds whose online-only files this laptop can bring down and make online only again, for
+/// the mover whose home is `home`: on Windows every one; on a Mac those with a folder macOS keeps
+/// ([`cloud_folders`]); elsewhere none.
+pub fn keepable_here(home: &Path) -> impl Fn(CloudProvider) -> bool {
+    let windows = cfg!(windows);
+    let found: BTreeSet<CloudProvider> = if cfg!(target_os = "macos") {
+        cloud_folders(home)
+            .into_iter()
+            .map(|f| f.provider)
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
+    move |p| windows || found.contains(&p)
+}
+
+/// Whether macOS itself keeps `root` in a cloud (`NSFileManager isUbiquitousItemAtURL`): only
+/// then can it make a file there online only again.
+#[cfg(target_os = "macos")]
+fn kept_by_macos(root: &Path) -> bool {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+    let Some(path) = root.to_str() else {
+        return false;
+    };
+    let url = NSURL::fileURLWithPath(&NSString::from_str(path));
+    NSFileManager::defaultManager().isUbiquitousItemAtURL(&url)
+}
+
+/// macOS's own call asking for a file it keeps in a cloud to be made online only again
+/// (`NSFileManager evictUbiquitousItemAtURL`); whether it then is, is looked at afterwards.
+#[cfg(target_os = "macos")]
+fn evict(path: &Path) -> std::io::Result<()> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+    let name = path
+        .to_str()
+        .ok_or_else(|| std::io::Error::other("the file's name is not text"))?;
+    let url = NSURL::fileURLWithPath(&NSString::from_str(name));
+    NSFileManager::defaultManager()
+        .evictUbiquitousItemAtURL_error(&url)
+        .map_err(|_| std::io::Error::other("macOS did not take the request"))
+}
+
+/// The cloud files of one consented folder on this laptop.
+#[cfg(any(windows, target_os = "macos"))]
+fn files_in(root: &Path) -> pctwin_orchestrate::local_copy::SyncedFolderFiles {
+    #[cfg(windows)]
+    {
+        let system32 = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
+            .ok()
+            .map(|w| w.join("System32"));
+        pctwin_orchestrate::local_copy::SyncedFolderFiles::new(
+            root,
+            PUT_BACK_WAIT,
+            system32.as_deref(),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        pctwin_orchestrate::local_copy::SyncedFolderFiles::evicting(root, PUT_BACK_WAIT, evict)
+    }
+}
+
+/// The send's opener for the kept files (the system's cloud files support), over `inner`.
+#[cfg(any(windows, target_os = "macos"))]
 pub fn opener(
     inner: Arc<dyn pctwin_transfer::Opener>,
     consents: Vec<Consent>,
     files: Vec<KeepFile>,
     folders: &[CloudFolder],
 ) -> KeepOpener {
-    let system32 = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
-        .ok()
-        .map(|w| w.join("System32"));
     let clouds: Vec<Box<dyn pctwin_orchestrate::local_copy::CloudFiles + Send>> = folders
         .iter()
         .map(|f| {
-            Box::new(pctwin_orchestrate::local_copy::WindowsCloudFiles::new(
-                &f.root,
-                PUT_BACK_WAIT,
-                system32.as_deref(),
-            )) as Box<dyn pctwin_orchestrate::local_copy::CloudFiles + Send>
+            Box::new(files_in(&f.root))
+                as Box<dyn pctwin_orchestrate::local_copy::CloudFiles + Send>
         })
         .collect();
     KeepOpener::new(
         inner,
         KeepLocal::new(
-            pctwin_orchestrate::cloud::Os::Windows,
+            if cfg!(windows) {
+                pctwin_orchestrate::cloud::Os::Windows
+            } else {
+                pctwin_orchestrate::cloud::Os::Mac
+            },
             consents,
             NO_BATCH_LIMIT,
         ),
@@ -207,13 +287,11 @@ impl pctwin_orchestrate::local_copy_send::ListStore for FileList {
 }
 
 /// At PCTwin's start and before a move: puts back online only every file an earlier move made
-/// local and did not put back, then removes the list (Windows; elsewhere no list is ever made).
+/// local and did not put back, then removes the list (Windows and Mac; elsewhere no list is ever
+/// made).
 pub fn put_back_left<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(list) = list_path(app) {
-        let system32 = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
-            .ok()
-            .map(|w| w.join("System32"));
         // The cloud folders as found on this laptop now, never the ones the list names.
         let roots: Vec<PathBuf> = pctwin_scan::list_people()
             .into_iter()
@@ -223,16 +301,10 @@ pub fn put_back_left<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let _ = pctwin_orchestrate::local_copy_send::put_back_listed(
             &FileList(list),
             &roots,
-            &mut |root| {
-                Box::new(pctwin_orchestrate::local_copy::WindowsCloudFiles::new(
-                    root,
-                    PUT_BACK_WAIT,
-                    system32.as_deref(),
-                ))
-            },
+            &mut |root| Box::new(files_in(root)),
         );
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = app;
 }
 

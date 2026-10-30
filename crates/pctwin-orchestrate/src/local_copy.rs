@@ -24,8 +24,12 @@
 //! Reading a file through is what brings it down (any ordinary read of a cloud file does). On
 //! Windows the cloud app is asked to make it online only again with the documented `attrib -P +U`
 //! ("unpinned"); the cloud app does that in its own time, so PCTwin waits a bounded time and then
-//! says what it sees. macOS has no such command (only `evictUbiquitousItem`, from Objective-C), so
-//! the choice is not offered there yet.
+//! says what it sees. macOS has no command for that (Apple removed `brctl evict` in macOS 14 and
+//! `fileproviderctl evict` in 14.4); its own call, `NSFileManager evictUbiquitousItemAtURL`, is
+//! given by the app ([`PutBack::Evict`]) and works only for files macOS itself keeps in a cloud
+//! (iCloud Drive), so on a Mac only a cloud folder macOS says it keeps is offered (`keep_local`).
+//! Linux sync apps keep whole copies, never files stored online only, so there is nothing to bring
+//! down there.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -470,15 +474,26 @@ impl KeepLocal {
     }
 }
 
-/// The Windows cloud apps (OneDrive and others built on the system's cloud files support).
+/// How the cloud app is asked to make a file online only again.
 #[derive(Debug, Clone)]
-pub struct WindowsCloudFiles {
+pub enum PutBack {
+    /// Windows: the system's own `attrib -P +U`, from Windows' own `System32` as the kernel names
+    /// it (never from the environment); `None` when it is not known, and then nothing is put back.
+    Attrib(Option<PathBuf>),
+    /// macOS: the system's own call for a file it keeps in a cloud (`NSFileManager
+    /// evictUbiquitousItemAtURL`), given by the app; it answers whether macOS took the request.
+    Evict(fn(&Path) -> io::Result<()>),
+}
+
+/// The cloud apps built on the system's own support for files stored online only: Windows' cloud
+/// files (OneDrive and others) and, on a Mac, what macOS keeps in a cloud (iCloud Drive).
+#[derive(Debug, Clone)]
+pub struct SyncedFolderFiles {
     /// The consented person's cloud folder: nothing outside it is touched.
     root: PathBuf,
     /// How long to wait for the cloud app to make a file online only again.
     wait: Duration,
-    /// Windows' own `System32`, as the kernel names it (never from the environment).
-    system32: Option<PathBuf>,
+    put_back: PutBack,
 }
 
 /// Why a file was not touched.
@@ -489,7 +504,7 @@ fn not_in_scope() -> io::Error {
     )
 }
 
-impl WindowsCloudFiles {
+impl SyncedFolderFiles {
     /// `root`: the consented person's cloud folder. `system32`: Windows' own `System32` folder as
     /// the kernel names it (`pctwin_helper_os::system_folder`), where `attrib` is run from;
     /// `None` when it is not known, and then nothing is put back.
@@ -497,7 +512,17 @@ impl WindowsCloudFiles {
         Self {
             root: root.to_path_buf(),
             wait,
-            system32: system32.map(Path::to_path_buf),
+            put_back: PutBack::Attrib(system32.map(Path::to_path_buf)),
+        }
+    }
+
+    /// On a Mac: `root` as for [`new`](Self::new); `evict` is macOS's own call asking for a file
+    /// to be made online only again.
+    pub fn evicting(root: &Path, wait: Duration, evict: fn(&Path) -> io::Result<()>) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            wait,
+            put_back: PutBack::Evict(evict),
         }
     }
 
@@ -523,7 +548,7 @@ impl WindowsCloudFiles {
     }
 }
 
-impl CloudFiles for WindowsCloudFiles {
+impl CloudFiles for SyncedFolderFiles {
     fn bring_down(&mut self, path: &Path, size: u64) -> io::Result<()> {
         use std::io::Read;
         let file = self.open_read(path)?;
@@ -575,16 +600,20 @@ impl CloudFiles for WindowsCloudFiles {
 
     fn put_back(&mut self, path: &Path) -> io::Result<()> {
         self.in_scope(path)?;
-        // The system's own attrib, by its full path in the folder the kernel names, never one
-        // found on PATH or through an environment value; started there, with no environment of
-        // this process's.
-        let system32 = self
-            .system32
-            .as_deref()
-            .ok_or_else(|| io::Error::other("the system folder is not known"))?;
-        let mut command = attrib_command(system32, path);
-        if !command.status()?.success() {
-            return Err(io::Error::other("the cloud app was not asked"));
+        match &self.put_back {
+            // The system's own attrib, by its full path in the folder the kernel names, never one
+            // found on PATH or through an environment value; started there, with no environment
+            // of this process's.
+            PutBack::Attrib(system32) => {
+                let system32 = system32
+                    .as_deref()
+                    .ok_or_else(|| io::Error::other("the system folder is not known"))?;
+                let mut command = attrib_command(system32, path);
+                if !command.status()?.success() {
+                    return Err(io::Error::other("the cloud app was not asked"));
+                }
+            }
+            PutBack::Evict(evict) => evict(path)?,
         }
         // The cloud app makes it online only in its own time.
         let started = Instant::now();

@@ -51,7 +51,16 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "files": {
+        "Resources/en.lproj/ServicesMenu.strings": "macos/en.lproj/ServicesMenu.strings",
+        "Resources/fr.lproj/ServicesMenu.strings": "macos/fr.lproj/ServicesMenu.strings",
+        "Resources/es.lproj/ServicesMenu.strings": "macos/es.lproj/ServicesMenu.strings",
+        "Resources/pt.lproj/ServicesMenu.strings": "macos/pt.lproj/ServicesMenu.strings",
+        "Resources/ar.lproj/ServicesMenu.strings": "macos/ar.lproj/ServicesMenu.strings",
+        "Resources/hi.lproj/ServicesMenu.strings": "macos/hi.lproj/ServicesMenu.strings",
+        "Resources/zh-Hans.lproj/ServicesMenu.strings": "macos/zh-Hans.lproj/ServicesMenu.strings"
+      }
     },
     "windows": {
       "nsis": {

@@ -507,12 +507,12 @@ fn a_download_of_another_size_is_not_sent() {
 #[cfg(windows)]
 #[test]
 fn the_windows_adapter_on_an_ordinary_file() {
-    use pctwin_orchestrate::local_copy::WindowsCloudFiles;
+    use pctwin_orchestrate::local_copy::SyncedFolderFiles;
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("plain.txt");
     std::fs::write(&p, b"hello").unwrap();
     let system32 = std::path::Path::new(r"C:\Windows\System32");
-    let mut w = WindowsCloudFiles::new(
+    let mut w = SyncedFolderFiles::new(
         dir.path(),
         std::time::Duration::from_millis(300),
         Some(system32),
@@ -741,7 +741,7 @@ fn an_unknown_sync_apps_folder_is_handled_the_same() {
 #[cfg(windows)]
 #[test]
 fn the_windows_adapter_stays_in_the_consented_folder() {
-    use pctwin_orchestrate::local_copy::WindowsCloudFiles;
+    use pctwin_orchestrate::local_copy::SyncedFolderFiles;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("OneDrive");
     let outside = dir.path().join("Other");
@@ -758,7 +758,7 @@ fn the_windows_adapter_stays_in_the_consented_folder() {
     assert!(ok.status.success(), "{ok:?}");
     let system32 = std::path::Path::new(r"C:\Windows\System32");
     let mut w =
-        WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), Some(system32));
+        SyncedFolderFiles::new(&root, std::time::Duration::from_millis(100), Some(system32));
     assert!(
         w.bring_down(
             &theirs,
@@ -804,11 +804,11 @@ fn the_windows_adapter_stays_in_the_consented_folder() {
         )
         .is_ok()
     );
-    let mut none = WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), None);
+    let mut none = SyncedFolderFiles::new(&root, std::time::Duration::from_millis(100), None);
     let e = none.put_back(&mine).unwrap_err();
     assert!(e.to_string().contains("system folder"), "{e}");
     let fake = tempfile::tempdir().unwrap();
-    let mut elsewhere = WindowsCloudFiles::new(
+    let mut elsewhere = SyncedFolderFiles::new(
         &root,
         std::time::Duration::from_millis(100),
         Some(fake.path()),
@@ -817,6 +817,40 @@ fn the_windows_adapter_stays_in_the_consented_folder() {
         elsewhere.put_back(&mine).is_err(),
         "no attrib in that folder"
     );
+}
+
+/// The Mac adapter: macOS's own call is asked only for a file inside the consented folder, and a
+/// file it did not make online only is reported as not done, never hidden.
+#[test]
+fn the_mac_adapter_asks_macos_only_inside_the_folder() {
+    use pctwin_orchestrate::local_copy::SyncedFolderFiles;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static ASKED: AtomicUsize = AtomicUsize::new(0);
+    fn evict(_: &Path) -> io::Result<()> {
+        ASKED.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+    fn refused(_: &Path) -> io::Result<()> {
+        Err(io::Error::other("macOS refused"))
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("iCloud");
+    std::fs::create_dir(&root).unwrap();
+    let mine = root.join("a.txt");
+    std::fs::write(&mine, b"hello").unwrap();
+    let outside = dir.path().join("b.txt");
+    std::fs::write(&outside, b"x").unwrap();
+    let mut w = SyncedFolderFiles::evicting(&root, std::time::Duration::from_millis(100), evict);
+    w.bring_down(&mine, 5).unwrap();
+    // Asked, but an ordinary file never becomes online only: said as not done.
+    assert!(w.put_back(&mine).is_err());
+    assert_eq!(ASKED.load(Ordering::SeqCst), 1);
+    // Outside the consented folder: macOS is never asked.
+    assert!(w.put_back(&outside).is_err());
+    assert_eq!(ASKED.load(Ordering::SeqCst), 1);
+    let mut no = SyncedFolderFiles::evicting(&root, std::time::Duration::from_millis(100), refused);
+    let e = no.put_back(&mine).unwrap_err();
+    assert!(e.to_string().contains("refused"), "{e}");
 }
 
 /// The cloud app is asked with Windows' own attrib, from the system folder given, started there.
