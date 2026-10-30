@@ -15,7 +15,7 @@
     {"system": "windows", "under": "program-files-x86", "path": "GOG Galaxy/Games", "kind": "game-library", "name": "Games installed by GOG Galaxy", "step": "locate-verify", "checked_on": "2026-10-29"},
     {"system": "mac", "under": "home", "path": "Library/Fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},
     {"system": "mac", "under": "home", "path": "Library/Spelling", "kind": "dictionaries", "name": "Your own dictionary words", "step": "copy", "checked_on": "2026-10-29"},
-    {"system": "mac", "under": "home", "path": "Library/Mail", "kind": "mail-archives", "name": "Apple Mail", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "mac", "under": "home", "path": "Library/Mail", "kind": "mail-local", "name": "Apple Mail", "step": "export-first", "checked_on": "2026-10-30"},
     {"system": "mac", "root": "group-containers", "path": "UBF8T346G9.Office/User Content", "kind": "office-templates", "name": "Office templates, signatures and dictionaries", "step": "copy", "checked_on": "2026-10-29"},
     {"system": "mac", "root": "application-support", "path": "Steam/steamapps", "kind": "game-library", "name": "Games installed by Steam", "step": "locate-verify", "checked_on": "2026-10-29"},
     {"system": "linux", "root": "xdg-data", "path": "fonts", "kind": "fonts", "name": "Your own fonts", "step": "install", "checked_on": "2026-10-29"},

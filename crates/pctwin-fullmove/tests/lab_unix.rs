@@ -869,6 +869,7 @@ async fn full_move(kind: Kind) {
         &plan,
         &pctwin_fullmove::run::DataDone {
             files,
+            mail: Vec::new(),
             ..Default::default()
         },
         installer,

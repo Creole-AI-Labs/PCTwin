@@ -62,6 +62,7 @@ fn in_process(request: Request, f: &File) -> Answer {
         | Request::DatabaseSnapshot { .. }
         | Request::AddOn { .. }
         | Request::Emlx { .. }
+        | Request::MailKinds { .. }
         | Request::Browser { .. }
         | Request::GameRecord { .. }
         | Request::SaveManifest { .. } => {
@@ -73,7 +74,7 @@ fn in_process(request: Request, f: &File) -> Answer {
     }
 }
 
-fn every_request(size: u64) -> [Request; 11] {
+fn every_request(size: u64) -> [Request; 12] {
     [
         Request::Installer { size },
         Request::OldCopy { size },
@@ -89,6 +90,7 @@ fn every_request(size: u64) -> [Request; 11] {
         Request::DatabaseSnapshot { size, log: 0 },
         Request::AddOn { size },
         Request::Emlx { size },
+        Request::MailKinds { size, log: 0 },
         Request::Browser {
             size,
             second: 0,
@@ -698,6 +700,25 @@ mod contents {
         assert_eq!(parser.emlx(msg).unwrap(), OWN.emlx(msg).unwrap());
         assert_eq!(parser.emlx(msg).unwrap().len, 14);
         assert!(parser.emlx(b"99\nSubject: a\n").is_err());
+    }
+
+    #[test]
+    fn mail_account_kinds_come_back_as_in_process() {
+        let parser = real();
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("Envelope Index");
+        let c = rusqlite::Connection::open(&p).unwrap();
+        c.execute_batch(
+            "CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
+             INSERT INTO mailboxes(url) VALUES ('imap://A/INBOX'), ('pop://B/INBOX'), ('local:///x');",
+        )
+        .unwrap();
+        drop(c);
+        let db = std::fs::read(&p).unwrap();
+        let got = parser.mail_kinds(&db, None).unwrap();
+        assert_eq!(got, OWN.mail_kinds(&db, None).unwrap());
+        assert_eq!(got.len(), 2);
+        assert!(parser.mail_kinds(b"not a database", None).is_err());
     }
 
     #[test]

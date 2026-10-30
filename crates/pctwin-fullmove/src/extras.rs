@@ -113,6 +113,10 @@ pub enum SpecialStep {
     NotYet,
     /// PCTwin could not tell what it is: the person looks at it on the old laptop.
     LookAtIt,
+    /// Carried as it is and written out on the new laptop in a standard format the app imports
+    /// (Apple Mail's mail kept only on the old Mac, as mailbox files): the import stays the
+    /// person's own step, never claimed done.
+    Convert,
 }
 
 /// One special-category component.
@@ -142,6 +146,14 @@ pub struct SpecialLine {
     /// What the person is told because of its category (typed, the screens' words).
     #[serde(default)]
     pub notes: Vec<pctwin_special::category::Note>,
+    /// Its files' sizes added up, where the move needs room for more than the files themselves
+    /// (a line that is converted on the new laptop needs about twice its size there).
+    #[serde(default)]
+    pub bytes: u64,
+    /// For a line converted on the new laptop: the folder each of its components holds, in the
+    /// same order as `ids` (so the new laptop knows which part did not arrive). Empty otherwise.
+    #[serde(default)]
+    pub parts: Vec<String>,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -286,6 +298,13 @@ impl Extras {
             .iter()
             .any(|s| !text_ok(&s.name) || s.notes.len() > MAX_NOTES || !s.notes.iter().all(note_ok))
         {
+            return limit;
+        }
+        // Each part a plain folder name, one per component, or none.
+        let part_ok = |p: &String| text_ok(p) && !p.contains(['/', '\\']) && p != "." && p != "..";
+        if self.special.iter().any(|s| {
+            !s.parts.is_empty() && (s.parts.len() != s.ids.len() || !s.parts.iter().all(part_ok))
+        }) {
             return limit;
         }
         Ok(())
@@ -461,11 +480,19 @@ pub fn special_with(
     // Games (2.5): saves the shipped rows and the person's own save list name, found by their
     // places; the app data holding them is marked as games, other save places join the plan.
     games_of(system, owner, home, documents, &mut plan, deadline);
+    // Apple Mail (2.5 mail): its raw files are carried; the new laptop writes the mail kept only
+    // on this Mac as mailbox files. A folder PCTwin could not look into is said, never "no mail".
+    let mail = if system == pctwin_special::roots::System::Mac {
+        mail_of(owner, home, &mut plan, deadline)
+    } else {
+        MailHere::None
+    };
     // One line per app and step (an app's many components with the same step are one line, with
     // their files counted), in the order found.
     let mut lines: Vec<SpecialLine> = Vec::new();
     for p in plan.components.iter().filter(|p| text_ok(&p.app)) {
         let step = match p.component.custody {
+            _ if p.root == pctwin_special::roots::RootKind::MacMail => SpecialStep::Convert,
             Custody::Portable => SpecialStep::Copy,
             Custody::ServiceHeld => SpecialStep::SignIn,
             Custody::MachineBound => SpecialStep::Relink,
@@ -481,6 +508,15 @@ pub fn special_with(
                     | pctwin_special::component::Evidence::CredentialValues
             )
         });
+        // The folder a carried component holds (its files' first folder), for the new laptop.
+        let part = (step == SpecialStep::Convert).then(|| {
+            p.component
+                .members
+                .first()
+                .and_then(|m| m.split('/').next())
+                .unwrap_or_default()
+                .to_string()
+        });
         // A secret is always its own line: the person ticks each one by itself (D07).
         let same = |l: &&mut SpecialLine| {
             !p.component.secret
@@ -493,6 +529,7 @@ pub fn special_with(
             Some(l) => {
                 l.files += files;
                 l.ids.push(id);
+                l.parts.extend(part);
                 l.sites |= sites;
                 for n in &p.notes {
                     if !l.notes.contains(n) {
@@ -509,7 +546,38 @@ pub fn special_with(
                 sites,
                 category: p.category,
                 notes: p.notes.clone(),
+                bytes: 0,
+                parts: part.into_iter().collect(),
             }),
+        }
+    }
+    let mut mail_not_all = false;
+    match mail {
+        MailHere::None => {}
+        MailHere::NoAccess(name) => lines.push(SpecialLine {
+            name,
+            step: SpecialStep::Convert,
+            files: 0,
+            secret: false,
+            ids: Vec::new(),
+            sites: false,
+            category: pctwin_special::category::Category::Email,
+            notes: vec![pctwin_special::category::Note::MailNoAccess],
+            bytes: 0,
+            parts: Vec::new(),
+        }),
+        MailHere::Found {
+            name,
+            bytes,
+            not_all,
+        } => {
+            mail_not_all = not_all;
+            if let Some(l) = lines
+                .iter_mut()
+                .find(|l| l.step == SpecialStep::Convert && l.name == name)
+            {
+                l.bytes = bytes;
+            }
         }
     }
     lines.truncate(MAX_SPECIAL);
@@ -520,7 +588,8 @@ pub fn special_with(
         .filter(|n| n.why.contains("not fully checked"))
         .map(|n| n.count.max(1))
         .sum::<usize>()
-        + plan.coverage.unreadable.len();
+        + plan.coverage.unreadable.len()
+        + usize::from(mail_not_all);
     let forgotten = forgotten_of(system, home, documents, &plan.components, deadline);
     SpecialFound {
         forgotten,
@@ -566,6 +635,72 @@ fn games_of(
     );
 }
 
+/// What 2.5 found of Apple Mail on this laptop.
+enum MailHere {
+    None,
+    /// Its folder could not be looked into (named as the catalogue names it).
+    NoAccess(String),
+    /// Its files joined the plan.
+    Found {
+        name: String,
+        bytes: u64,
+        not_all: bool,
+    },
+}
+
+/// Apple Mail's raw files of `owner` (home `home`), added to `plan` as components carried raw
+/// (nothing in them is opened here), named as the `special-places` catalogue names the place.
+fn mail_of(
+    owner: &pctwin_record::Owner,
+    home: &std::path::Path,
+    plan: &mut pctwin_special::api::Plan,
+    deadline: std::time::Instant,
+) -> MailHere {
+    use pctwin_special::applemail::{self, Found};
+    use pctwin_special::forgotten::{self, PlaceStep};
+    let rows = pctwin_catalogue::Catalogue::<forgotten::PlaceRow>::shipped(forgotten::SHIPPED);
+    let place = applemail::MAIL_FOLDER.join("/");
+    let Some(name) = rows
+        .rows()
+        .iter()
+        .find(|r| {
+            r.system.covers(pctwin_special::roots::System::Mac)
+                && r.path == place
+                && r.step == PlaceStep::ExportFirst
+        })
+        .map(|r| r.name.clone())
+        .filter(|n| text_ok(n))
+    else {
+        // No row says how this mail moves: nothing is carried.
+        return MailHere::None;
+    };
+    match applemail::find(owner, home, deadline) {
+        Found::NotHere => MailHere::None,
+        Found::NoAccess => MailHere::NoAccess(name),
+        Found::Mail(m) => {
+            for c in m.components {
+                plan.components.push(pctwin_special::api::Planned {
+                    app: name.clone(),
+                    why: String::new(),
+                    step: pctwin_special::handoff::Step::None,
+                    proposed: true,
+                    component: c,
+                    base: m.base.clone(),
+                    placement: pctwin_special::classify::Placement::PreservedOnly,
+                    root: pctwin_special::roots::RootKind::MacMail,
+                    category: pctwin_special::category::Category::Email,
+                    notes: vec![pctwin_special::category::Note::MailImport],
+                });
+            }
+            MailHere::Found {
+                name,
+                bytes: m.bytes,
+                not_all: m.not_all,
+            }
+        }
+    }
+}
+
 /// The most time finding games takes.
 pub const GAMES_TIME: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -602,6 +737,11 @@ fn forgotten_of(
             || planned
                 .iter()
                 .any(|c| c.proposed && !c.base.as_os_str().is_empty() && p.starts_with(&c.base))
+            // Apple Mail's folder, whose raw files the move carries (`V<n>` is inside it).
+            || planned.iter().any(|c| {
+                c.root == pctwin_special::roots::RootKind::MacMail
+                    && c.base.parent().is_some_and(|mail| p.starts_with(mail))
+            })
     };
     // The finder only counts; it keeps to the scan's own time, and to its own.
     let until = deadline.min(std::time::Instant::now() + FORGOTTEN_TIME);
@@ -937,6 +1077,46 @@ mod tests {
         assert_eq!(Extras::decode(&bad.encode()), Err(ExtrasError::Limit));
         // Not JSON at all.
         assert_eq!(Extras::decode(b"\x00\x01"), Err(ExtrasError::Unreadable));
+    }
+
+    /// A line converted on the new laptop names one plain folder per component, or none; a list
+    /// of another length, or a name that is a path, is refused.
+    #[test]
+    fn a_converted_line_names_one_plain_folder_per_component() {
+        let line = |ids: &[&str], parts: &[&str]| SpecialLine {
+            name: "Apple Mail".into(),
+            step: SpecialStep::Convert,
+            files: 2,
+            secret: false,
+            ids: ids.iter().map(|s| s.to_string()).collect(),
+            sites: false,
+            category: pctwin_special::category::Category::Email,
+            notes: Vec::new(),
+            bytes: 10,
+            parts: parts.iter().map(|s| s.to_string()).collect(),
+        };
+        let with = |l: SpecialLine| {
+            let mut x = sample();
+            x.special = vec![l];
+            x.check()
+        };
+        assert_eq!(with(line(&["a", "b"], &["Mailboxes", "MailData"])), Ok(()));
+        assert_eq!(with(line(&["a", "b"], &[])), Ok(()));
+        for bad in [
+            line(&["a", "b"], &["Mailboxes"]),
+            line(&["a"], &["Mailboxes", "MailData"]),
+            line(&["a", "b"], &["Mailboxes", "x/y"]),
+            line(&["a", "b"], &["Mailboxes", "x\\y"]),
+            line(&["a", "b"], &["Mailboxes", ".."]),
+            line(&["a", "b"], &["Mailboxes", ""]),
+        ] {
+            assert_eq!(
+                with(bad.clone()),
+                Err(ExtrasError::Limit),
+                "{:?}",
+                bad.parts
+            );
+        }
     }
 
     #[test]

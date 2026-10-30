@@ -414,6 +414,34 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     4,
                 )
             },
+            ChangeView {
+                category: Some(Category::Email),
+                notes: vec![Note::MailImport],
+                ..change(
+                    Title::Name("Apple Mail".into()),
+                    Kind::Special,
+                    ChangeAction::Merge,
+                    UndoPromise::CanReverse,
+                    0,
+                    None,
+                    Some(SpecialStep::Convert),
+                    1200,
+                )
+            },
+            ChangeView {
+                category: Some(Category::Email),
+                notes: vec![Note::MailNoAccess],
+                ..change(
+                    Title::Name("Apple Mail".into()),
+                    Kind::Special,
+                    ChangeAction::LeaveAlone,
+                    UndoPromise::MustKeep,
+                    0,
+                    Some(Reason::Permission),
+                    Some(SpecialStep::Convert),
+                    0,
+                )
+            },
             change(
                 Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
                 Kind::Special,
@@ -454,6 +482,13 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     "Mail signatures",
                     "AppData/Roaming/Microsoft/Signatures",
                     PlaceStep::Copy,
+                    true,
+                ),
+                place(
+                    "mail-local",
+                    "Apple Mail",
+                    "Library/Mail",
+                    PlaceStep::ExportFirst,
                     true,
                 ),
                 Forgotten {
@@ -583,6 +618,18 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
             data(DataWhy::Placed {
                 folder: "Mail".into(),
             }),
+            data(DataWhy::MailReady {
+                messages: 120,
+                folder: "Documents/Mail from Ada's Mac".into(),
+            }),
+            data(DataWhy::MailPartsMissing {
+                messages: 40,
+                missing: 2,
+                failed: 1,
+                folder: "Documents/Mail from Ada's Mac".into(),
+            }),
+            data(DataWhy::MailSignIn { accounts: 2 }),
+            data(DataWhy::MailNoAccess),
             line(
                 Title::Key(pctwin_fullmove::plan::SPECIAL_NOT_YET),
                 Kind::Special,
@@ -1894,7 +1941,7 @@ fn calls() -> Value {
             { "name": "set_window_mode", "args": [["mode", "mini"]] },
             { "name": "window_drag", "args": [] },
             { "name": "set_tray_labels", "args": [["show", "Show"], ["send", "Send files"], ["quit", "Quit"]] },
-            { "name": "set_file_words", "args": [["bookmarksFile", "Bookmarks.html"], ["listsFile", "Open pages and add-ons.html"], ["bookmarksTitle", "Bookmarks"], ["addOns", "Add-ons"], ["openPages", "Open pages"]] },
+            { "name": "set_file_words", "args": [["bookmarksFile", "Bookmarks.html"], ["listsFile", "Open pages and add-ons.html"], ["bookmarksTitle", "Bookmarks"], ["addOns", "Add-ons"], ["openPages", "Open pages"], ["mailFolder", "Mail from {laptop}"], ["onThisMac", "On My Mac"], ["mailAccount", "Mail account {n}"]] },
             { "name": "pairing_old_start", "args": [["network", "Wi-Fi"]] },
             { "name": "pairing_old_pick", "args": [["round", 1], ["number", 42]] },
             { "name": "pairing_old_decline", "args": [["round", 1]] },

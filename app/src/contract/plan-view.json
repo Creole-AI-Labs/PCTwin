@@ -528,6 +528,56 @@
           "update": null
         },
         {
+          "action": "merge",
+          "category": "email",
+          "count": 0,
+          "files": 1200,
+          "kind": "special",
+          "needs": null,
+          "note": null,
+          "notes": [
+            {
+              "note": "mail-import"
+            }
+          ],
+          "secret": null,
+          "source": null,
+          "special": "convert",
+          "tested": null,
+          "title": {
+            "kind": "name",
+            "value": "Apple Mail"
+          },
+          "undo": "can-reverse",
+          "undoIfUpdated": null,
+          "update": null
+        },
+        {
+          "action": "leave-alone",
+          "category": "email",
+          "count": 0,
+          "files": 0,
+          "kind": "special",
+          "needs": "permission",
+          "note": null,
+          "notes": [
+            {
+              "note": "mail-no-access"
+            }
+          ],
+          "secret": null,
+          "source": null,
+          "special": "convert",
+          "tested": null,
+          "title": {
+            "kind": "name",
+            "value": "Apple Mail"
+          },
+          "undo": "must-keep",
+          "undoIfUpdated": null,
+          "update": null
+        },
+        {
           "action": "leave-alone",
           "category": null,
           "count": 0,
@@ -579,6 +629,18 @@
             "page": null,
             "place": "AppData/Roaming/Microsoft/Signatures",
             "step": "copy"
+          },
+          {
+            "bytes": 120000,
+            "complete": true,
+            "files": 3,
+            "kind": "mail-local",
+            "moving": true,
+            "name": "Apple Mail",
+            "onlineOnly": 0,
+            "page": null,
+            "place": "Library/Mail",
+            "step": "export-first"
           },
           {
             "bytes": 120000,

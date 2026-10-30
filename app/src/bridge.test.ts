@@ -279,7 +279,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await setWindowMode("mini");
       await windowDrag();
       await setTrayLabels("Show", "Send files", "Quit");
-      await setFileWords({ bookmarksFile: "Bookmarks.html", listsFile: "Open pages and add-ons.html", bookmarksTitle: "Bookmarks", addOns: "Add-ons", openPages: "Open pages" });
+      await setFileWords({ bookmarksFile: "Bookmarks.html", listsFile: "Open pages and add-ons.html", bookmarksTitle: "Bookmarks", addOns: "Add-ons", openPages: "Open pages", mailFolder: "Mail from {laptop}", onThisMac: "On My Mac", mailAccount: "Mail account {n}" });
       await pairingOldStart(null);
       await pairingOldPick(1, 42);
       await pairingOldDecline(1);

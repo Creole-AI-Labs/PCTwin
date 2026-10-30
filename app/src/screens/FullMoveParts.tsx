@@ -39,6 +39,8 @@ function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l
 function changeWhat(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
   if (c.note?.note === "sites") return l10n.getString("fullmove-step-sites");
   if (c.note?.note === "older-here") return l10n.getString("fullmove-here-older", { version: shownName(c.note.version) });
+  // Mail the old Mac would not let PCTwin look into: only what to do about it, never the step it could not take.
+  if (c.notes.some((n) => n.note === "mail-no-access")) return specialNotes(c, l10n).join(" ");
   if (c.special) return [l10n.getString(`fullmove-step-${c.special}`), ...specialNotes(c, l10n)].join(" ");
   if (c.kind === "settings") {
     return [l10n.getString("fullmove-settings-count", { count: c.count }), l10n.getString(c.action === "replace" ? "fullmove-settings-replace" : "fullmove-settings-merge")].join(" ");
@@ -142,7 +144,8 @@ export function RebuildPlanSection({
   const room = rebuild.room;
   const install = rebuild.changes.filter((c) => c.kind === "app" && c.action === "install");
   const settings = rebuild.changes.filter((c) => c.kind === "settings");
-  const appData = rebuild.changes.filter((c) => c.kind === "special" && c.special === "copy" && c.secret === null);
+  // App data PCTwin copies, and mail it writes out here for the person to import.
+  const appData = rebuild.changes.filter((c) => c.kind === "special" && (c.special === "copy" || c.special === "convert") && c.secret === null && c.needs === null);
   const secrets = rebuild.changes.filter((c) => c.secret !== null);
   const needs = rebuild.changes.filter((c) => c.needs !== null);
   const here = rebuild.changes.filter((c) => c.kind === "app" && c.action === "leave-alone" && c.needs === null);
@@ -317,8 +320,15 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
       return l10n.getString("fullmove-step-sites");
     case "rosetta":
       return l10n.getString("fullmove-note-rosetta");
-    case "data":
-      return l10n.getString(`fullmove-data-${n.why}`, n.folder === undefined ? {} : { folder: shownName(n.folder) });
+    case "data": {
+      const args: Record<string, string | number> = {};
+      if (n.folder !== undefined) args.folder = shownName(n.folder);
+      for (const k of ["messages", "missing", "failed", "accounts"] as const) {
+        const count = n[k];
+        if (count !== undefined) args[k] = count;
+      }
+      return l10n.getString(`fullmove-data-${n.why}`, args);
+    }
     case "came-from":
       return l10n.getString(n.makersSite ? "fullmove-note-came-from-maker" : "fullmove-note-came-from-elsewhere");
   }

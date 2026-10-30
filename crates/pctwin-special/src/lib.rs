@@ -44,6 +44,7 @@
 //! is copied; nothing is sent, connected, launched or run as a check; the old laptop is only read.
 
 pub mod api;
+pub mod applemail;
 pub mod browser;
 pub mod browser_read;
 pub mod capture;

@@ -394,6 +394,8 @@ mod tests {
             sites: false,
             category: Default::default(),
             notes: Vec::new(),
+            bytes: 0,
+            parts: Vec::new(),
         };
         let plan = FullPlan {
             special: vec![

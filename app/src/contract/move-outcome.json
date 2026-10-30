@@ -362,6 +362,77 @@
         {
           "count": 0,
           "kind": "special",
+          "notes": [
+            {
+              "folder": "Documents/Mail from Ada's Mac",
+              "messages": 120,
+              "note": "data",
+              "why": "mail-ready"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "failed": 1,
+              "folder": "Documents/Mail from Ada's Mac",
+              "messages": 40,
+              "missing": 2,
+              "note": "data",
+              "why": "mail-parts-missing"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "accounts": 2,
+              "note": "data",
+              "why": "mail-sign-in"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
+          "notes": [
+            {
+              "note": "data",
+              "why": "mail-no-access"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Mail"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "special",
           "notes": [],
           "reason": "finish-by-hand",
           "status": "needs-action",

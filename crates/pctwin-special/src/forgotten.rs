@@ -56,6 +56,9 @@ pub enum PlaceStep {
     /// Mail archives: copied, then the person opens each in the mail app on the new laptop
     /// (an archive is not part of the mail app until it is opened there).
     OpenInMailApp,
+    /// Mail kept only on the old laptop: PCTwin carries it and writes it out on the new laptop
+    /// in a standard mailbox format (the export); the person imports it in their mail app.
+    ExportFirst,
 }
 
 /// One row of the `special-places` catalogue: a place on one kind of system, under one of the

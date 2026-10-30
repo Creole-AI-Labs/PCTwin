@@ -778,6 +778,21 @@ fn data_notes(s: &pctwin_fullmove::run::SpecialDone) -> Vec<LineNote> {
             DataWhy::Placed { folder } => DataWhy::Placed {
                 folder: name(folder),
             },
+            DataWhy::MailReady { messages, folder } => DataWhy::MailReady {
+                messages: *messages,
+                folder: name(folder),
+            },
+            DataWhy::MailPartsMissing {
+                messages,
+                missing,
+                failed,
+                folder,
+            } => DataWhy::MailPartsMissing {
+                messages: *messages,
+                missing: *missing,
+                failed: *failed,
+                folder: name(folder),
+            },
             w => w.clone(),
         }));
     }
@@ -824,6 +839,7 @@ pub struct RebuiltView {
 /// laptop since the plan was made is held, not installed, and ends needs-action; the person is
 /// asked about it again (`move-changed`, [`crate::deliver::changes`]). What finished and what did
 /// not is kept for "Fix these" ([`crate::deliver::repair`]).
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_here<R: Runtime>(
     app: &AppHandle<R>,
     plan: &FullPlan,
@@ -832,6 +848,7 @@ pub fn rebuild_here<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
     choices: InstallChoices,
+    old_laptop: &str,
 ) -> RebuiltView {
     let mut drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
     // App data the old laptop refused because it was edited there after the approval: nothing of
@@ -846,7 +863,16 @@ pub fn rebuild_here<R: Runtime>(
     // Kept until the results are remembered (re-check of 2.9): an undo waiting for the gate then
     // spends them after, never before, so they are never put back once spent.
     let _keeping = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Rebuilding);
-    let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone(), choices);
+    let (view, lines) = rebuild_full(
+        app,
+        &held,
+        journal,
+        me,
+        data,
+        files.clone(),
+        choices,
+        old_laptop,
+    );
     crate::deliver::repair::remember(
         app,
         crate::deliver::repair::Last {
@@ -862,6 +888,7 @@ pub fn rebuild_here<R: Runtime>(
 
 /// Rebuilds `plan` as [`rebuild_here`] does, with no check for changes: the view, and every line
 /// unbounded and in plan order (for "Fix these" to merge into).
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_full<R: Runtime>(
     app: &AppHandle<R>,
     plan: &FullPlan,
@@ -870,6 +897,7 @@ pub fn rebuild_full<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
     choices: InstallChoices,
+    old_laptop: &str,
 ) -> (RebuiltView, Vec<RebuiltLine>) {
     use crate::deliver::safe_stop::{BusyWith, hold};
     // Installing, putting settings in place and placing app data must not be cut part way.
@@ -915,6 +943,7 @@ pub fn rebuild_full<R: Runtime>(
                 &state.keys.capture,
                 scope,
                 &actor,
+                (plan, old_laptop),
             )
         }
         None => pctwin_fullmove::run::DataDone::default(),
@@ -1284,7 +1313,10 @@ fn home_here() -> Option<std::path::PathBuf> {
 }
 
 /// Lands the app data in `sink` (the secrets the person ticked: `picked`) and says how each
-/// component ended; the staging folder is removed afterwards.
+/// component ended; mail carried to be converted here (`plan`'s converted lines) is written out
+/// for the person, in a folder named for the old laptop (`old_laptop`). The staging folder is
+/// removed afterwards.
+#[allow(clippy::too_many_arguments)]
 fn land_data(
     sink: &pctwin_fullmove::data::Sink,
     picked: Vec<u32>,
@@ -1293,6 +1325,7 @@ fn land_data(
     key: &pctwin_grant::CaptureKey,
     scope: Scope,
     actor: &Actor,
+    (plan, old_laptop): (&FullPlan, &str),
 ) -> pctwin_fullmove::run::DataDone {
     let mut done = pctwin_fullmove::run::DataDone {
         picked,
@@ -1311,21 +1344,44 @@ fn land_data(
         .iter()
         .filter_map(|(id, a)| Some((id.clone(), a.record.as_ref()?.app.clone())))
         .collect();
-    let landed = pctwin_fullmove::data::land_all(
-        sink,
-        &pctwin_fullmove::data::Landing {
-            journal,
-            key,
-            home: &home,
-            home_path: &home_path,
-            owner_only: &AppOwnerOnly,
-            scope,
-            actor: actor.clone(),
-            system: pctwin_special::roots::System::here(),
-        },
-        &names,
-        edited,
-    );
+    let landing = pctwin_fullmove::data::Landing {
+        journal,
+        key,
+        home: &home,
+        home_path: &home_path,
+        owner_only: &AppOwnerOnly,
+        scope,
+        actor: actor.clone(),
+        system: pctwin_special::roots::System::here(),
+    };
+    let landed = pctwin_fullmove::data::land_all(sink, &landing, &names, edited);
+    // Mail carried raw (Apple Mail): written out here as mailbox files, each message read in
+    // the parser process; the person imports them in their mail app.
+    for line in plan
+        .special
+        .iter()
+        .filter(|s| s.step == pctwin_fullmove::extras::SpecialStep::Convert && !s.ids.is_empty())
+    {
+        let mail = pctwin_fullmove::mailout::convert_mail(
+            sink,
+            &landing,
+            &pctwin_fullmove::mailout::MailOut {
+                line: &line.name,
+                ids: &line.ids,
+                parts: &line.parts,
+                documents: "Documents",
+                old_laptop,
+                words: pctwin_special::applemail::words(),
+                emlx: &pctwin_special::content::emlx_facts_of,
+                kinds: &pctwin_special::content::mail_kinds_of,
+                deadline: std::time::Instant::now() + MAIL_TIME,
+            },
+        );
+        if let Some(effect) = mail.effect {
+            done.effects.push((line.name.clone(), effect));
+        }
+        done.mail.extend(mail.lines);
+    }
     done.landed = landed.iter().map(|l| (l.id.clone(), l.result)).collect();
     done.why = landed
         .iter()
@@ -1339,6 +1395,9 @@ fn land_data(
     sink.remove_staging();
     done
 }
+
+/// The most time writing the mail out takes (each message is read in the parser process).
+const MAIL_TIME: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 /// At start: removes any app data staging folder an earlier run left (a crash, the laptop turned
 /// off part way), so nothing staged, secrets least of all, stays behind.
@@ -1815,6 +1874,8 @@ mod tests {
                     sites: false,
                     category: Default::default(),
                     notes: Vec::new(),
+                    bytes: 0,
+                    parts: Vec::new(),
                 },
                 SpecialLine {
                     name: "Notes data".into(),
@@ -1825,6 +1886,8 @@ mod tests {
                     sites: false,
                     category: Default::default(),
                     notes: Vec::new(),
+                    bytes: 0,
+                    parts: Vec::new(),
                 },
             ],
             ..FullPlan::default()

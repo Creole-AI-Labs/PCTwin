@@ -237,6 +237,10 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
       bookmarksTitle: l10n.getString("browser-file-bookmarks-title"),
       addOns: l10n.getString("browser-file-add-ons"),
       openPages: l10n.getString("browser-file-open-pages"),
+      // The engine fills in the old laptop's name and the account's number itself.
+      mailFolder: l10n.getString("mail-file-folder", { laptop: "{laptop}" }),
+      onThisMac: l10n.getString("mail-file-on-this-mac"),
+      mailAccount: l10n.getString("mail-file-account", { n: "{n}" }),
     }).catch(() => undefined);
   }, [language, l10n]);
 

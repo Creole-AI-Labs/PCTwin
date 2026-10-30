@@ -58,7 +58,7 @@ describe("R02 beyond files", () => {
     expect(plain(head("report-group-apps").textContent)).toContain(plain(text("report-count-apps", { count: 2 })));
     expect(plain(head("report-group-apps").textContent)).toContain(plain(text("report-beyond-some", { done: 0, total: 2 })));
     expect(plain(head("report-group-settings").textContent)).toContain(plain(text("report-beyond-done")));
-    expect(plain(head("report-group-special").textContent)).toContain(plain(text("report-count-special", { count: 12 })));
+    expect(plain(head("report-group-special").textContent)).toContain(plain(text("report-count-special", { count: 16 })));
     expect(plain(head("report-group-people").textContent)).toContain(plain(text("report-count-people", { count: 1 })));
     // Nothing is listed under a group until it is opened.
     expect(document.querySelector(".rp-body")).toBeNull();

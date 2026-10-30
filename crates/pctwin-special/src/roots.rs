@@ -73,6 +73,10 @@ pub enum RootKind {
     HomeDot,
     /// The system's own cache root: seen, never moved.
     SystemCache,
+    /// Mac `~/Library/Mail/V<n>` (Apple Mail's own folder): never walked as app data and never
+    /// landed as it is; only its raw message files are carried, and the new laptop writes the
+    /// mail kept only on the old Mac as standard mailbox files ([`crate::applemail`]).
+    MacMail,
 }
 
 impl RootKind {

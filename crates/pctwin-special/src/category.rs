@@ -107,6 +107,12 @@ pub enum Note {
     /// Installed games: the launcher on the new laptop finds and checks them with its own
     /// "locate" and "verify"; the games' own files are not copied unless the person chooses.
     LauncherVerify,
+    /// Mail kept only on the old Mac is written as mailbox files on the new laptop; the person
+    /// imports them in their mail app (its steps).
+    MailImport,
+    /// Apple Mail's folder could not be looked inside (Full Disk Access is off): the person turns
+    /// it on to bring mail kept only on the Mac. Never said as "no mail".
+    MailNoAccess,
 }
 
 fn any(c: &Component, f: impl Fn(&Evidence) -> bool) -> bool {

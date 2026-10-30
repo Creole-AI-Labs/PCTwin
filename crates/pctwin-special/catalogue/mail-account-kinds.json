@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "catalogue": "mail-account-kinds",
+  "version": 1,
+  "rows": [
+    {"scheme": "imap", "kind": "server", "name": "IMAP mail account", "checked_on": "2026-10-30"},
+    {"scheme": "ews", "kind": "server", "name": "Exchange mail account", "checked_on": "2026-10-30"},
+    {"scheme": "exchange", "kind": "server", "name": "Exchange mail account (older form)", "checked_on": "2026-10-30"},
+    {"scheme": "pop", "kind": "local", "name": "POP mail account (mail kept on the laptop)", "checked_on": "2026-10-30"},
+    {"scheme": "local", "kind": "local", "name": "Mailboxes kept on the laptop", "checked_on": "2026-10-30"}
+  ]
+}

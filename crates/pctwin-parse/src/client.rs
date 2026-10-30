@@ -665,6 +665,23 @@ impl pctwin_special::content::ContentReader for Parser {
         }
     }
 
+    fn mail_kinds(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+    ) -> Result<Vec<pctwin_special::applemail::AccountScheme>, ContentError> {
+        let log = log.unwrap_or_default();
+        let request = Request::MailKinds {
+            size: db.len() as u64,
+            log: log.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(db), Source::Bytes(log)]) {
+            Ok(Answer::MailKinds(kinds)) => kinds,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
     fn browser(
         &self,
         what: pctwin_special::browser_read::BrowserRead,
@@ -741,6 +758,13 @@ impl pctwin_special::content::ContentReader for Pool {
     }
     fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
         self.one().emlx(bytes)
+    }
+    fn mail_kinds(
+        &self,
+        db: &[u8],
+        log: Option<&[u8]>,
+    ) -> Result<Vec<pctwin_special::applemail::AccountScheme>, ContentError> {
+        self.one().mail_kinds(db, log)
     }
 
     fn browser(

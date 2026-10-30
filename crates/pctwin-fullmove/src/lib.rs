@@ -28,6 +28,7 @@ pub mod extras;
 pub mod install;
 pub mod live;
 pub mod mac;
+pub mod mailout;
 pub mod plan;
 pub mod run;
 pub mod undo;
