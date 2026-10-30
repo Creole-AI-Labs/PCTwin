@@ -258,7 +258,15 @@ impl TrustedKeys {
         Ok(Self { trust, keys })
     }
 
-    fn verify(&self, bytes: &[u8], signature: &str) -> Result<String, CatalogueError> {
+    /// How much trust these keys carry.
+    pub fn trust(&self) -> Trust {
+        self.trust
+    }
+
+    /// Checks a minisign signature (prehashed form only) of `bytes` by one of these keys; the
+    /// signature's trusted comment, which the caller must check names what it expects. Signed
+    /// recipes (`pctwin-recipe`) use the same check.
+    pub fn verify(&self, bytes: &[u8], signature: &str) -> Result<String, CatalogueError> {
         let sig =
             minisign_verify::Signature::decode(signature).map_err(|_| CatalogueError::NotSigned)?;
         // Prehashed signatures only (`allow_legacy` false).

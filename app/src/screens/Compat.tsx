@@ -6,7 +6,7 @@
  */
 import { useLocalization } from "@fluent/react";
 import { Badge, Button, Row, RowList, Section } from "../components/kit";
-import type { ChangeView, Tested, TestedOutcome } from "../fullmove";
+import type { AppDetail, ChangeView, Tested, TestedOutcome } from "../fullmove";
 import { Attention, Check, Info } from "../icons";
 import { MoreDetails } from "./GuardParts";
 import { TopStrip } from "./FrameParts";
@@ -46,7 +46,59 @@ export function CompatRow({ change, tested, onOpen }: { change: ChangeView; test
   );
 }
 
-export default function Compat({ change, tested, onBack }: { change: ChangeView; tested: Tested; onBack: () => void }) {
+/**
+ * One app's detail (M11): every place PCTwin can get it from, in the order it tries them, and what
+ * the old laptop's copy says about who made it. When the person installs it from a store, the store's
+ * own page for it: PCTwin opens it, the person installs, and the plan still says it is theirs to do.
+ */
+export function AppOrigin({ detail, onOpenStore }: { detail: AppDetail; onOpenStore?: (page: string) => void }) {
+  const { l10n } = useLocalization();
+  const maker =
+    detail.checked === "unsigned"
+      ? l10n.getString("app-maker-unsigned")
+      : detail.checked === "not-read"
+        ? l10n.getString("app-maker-not-read")
+        : detail.maker
+          ? l10n.getString("app-maker-signed", { maker: shownName(detail.maker) })
+          : l10n.getString("app-maker-signed-unnamed");
+  const store = detail.store;
+  return (
+    <>
+      <Section title={l10n.getString("app-from-title")}>
+        {detail.from.length === 0 ? (
+          <p>{l10n.getString("app-from-none")}</p>
+        ) : (
+          <>
+            <p>{l10n.getString("app-from-body")}</p>
+            <RowList>
+              {detail.from.map((k) => (
+                <Row key={k} title={l10n.getString(`app-from-${k}`)} />
+              ))}
+            </RowList>
+          </>
+        )}
+      </Section>
+      <Section title={l10n.getString("app-maker-title")}>
+        <p>{maker}</p>
+      </Section>
+      {store && onOpenStore && (
+        <Section title={l10n.getString("app-store-title")}>
+          <p>{l10n.getString("app-store-body")}</p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              onOpenStore(store.page);
+            }}
+          >
+            {l10n.getString(`app-store-${store.kind}`)}
+          </Button>
+        </Section>
+      )}
+    </>
+  );
+}
+
+export default function Compat({ change, tested, onBack, onOpenStore }: { change: ChangeView; tested: Tested; onBack: () => void; onOpenStore?: (page: string) => void }) {
   const { l10n } = useLocalization();
   const name = change.title.kind === "name" ? change.title.value : l10n.getString(change.title.value);
   const checked = tested.checkedOn !== null;
@@ -87,6 +139,7 @@ export default function Compat({ change, tested, onBack }: { change: ChangeView;
           </RowList>
         )}
       </Section>
+      {change.detail && <AppOrigin detail={change.detail} onOpenStore={onOpenStore} />}
       {checked && (
         <MoreDetails>
           <p>{l10n.getString("compat-checked-on", { date: new Intl.DateTimeFormat(pageLocale(), { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${tested.checkedOn ?? ""}T00:00:00Z`)) })}</p>

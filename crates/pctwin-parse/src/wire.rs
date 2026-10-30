@@ -101,6 +101,14 @@ pub enum Request {
     /// The entries a save list in the Ludusavi manifest format holds for some games (2.5
     /// games): `wanted` bytes of the games asked about (JSON), then `size` bytes of the list.
     SaveManifest { wanted: u64, size: u64 },
+    /// The value under one key of a database's key-value table (2.4 recent lists): `wanted`
+    /// bytes of which ([`pctwin_special::stored::StoredKey`], JSON), then `size` bytes of the
+    /// database.
+    StoredValue { wanted: u64, size: u64 },
+    /// The database with one key's value replaced (2.4 recent lists): `wanted` bytes of the
+    /// change ([`pctwin_special::stored::StoredChange`], JSON), then `size` bytes of the
+    /// database. Its bytes come back in [`TAG_PIECE`] frames before the answer.
+    ReplaceValue { wanted: u64, size: u64 },
 }
 
 impl Request {
@@ -115,7 +123,9 @@ impl Request {
             | Request::AddOn { size }
             | Request::Emlx { size }
             | Request::GameRecord { size, .. } => size,
-            Request::SaveManifest { wanted, size } => wanted.saturating_add(size),
+            Request::SaveManifest { wanted, size }
+            | Request::StoredValue { wanted, size }
+            | Request::ReplaceValue { wanted, size } => wanted.saturating_add(size),
             Request::DatabaseFacts { size, log, .. }
             | Request::DatabaseSnapshot { size, log }
             | Request::MailKinds { size, log } => size.saturating_add(log),
@@ -126,7 +136,9 @@ impl Request {
     /// The most bytes the parser may hand back in [`TAG_PIECE`] frames.
     pub fn most_back(&self) -> u64 {
         match *self {
-            Request::DatabaseSnapshot { .. } => pctwin_special::content::MAX_DB,
+            Request::DatabaseSnapshot { .. } | Request::ReplaceValue { .. } => {
+                pctwin_special::content::MAX_DB
+            }
             _ => 0,
         }
     }
@@ -169,6 +181,9 @@ pub enum Answer {
     Browser(Result<pctwin_special::browser_read::Found, ContentError>),
     GameRecord(Result<pctwin_special::gamefmt::Tree, ContentError>),
     SaveManifest(Result<pctwin_special::gamefmt::ManifestRead, ContentError>),
+    StoredValue(Result<Option<String>, ContentError>),
+    /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
+    ReplaceValue(Result<u64, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -195,6 +210,8 @@ impl Answer {
                 | (Answer::Browser(_), Request::Browser { .. })
                 | (Answer::GameRecord(_), Request::GameRecord { .. })
                 | (Answer::SaveManifest(_), Request::SaveManifest { .. })
+                | (Answer::StoredValue(_), Request::StoredValue { .. })
+                | (Answer::ReplaceValue(_), Request::ReplaceValue { .. })
                 | (Answer::Failed(_), _)
         )
     }

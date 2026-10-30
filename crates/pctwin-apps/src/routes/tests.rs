@@ -760,3 +760,52 @@ fn the_package_system_comes_from_os_release_and_its_family() {
     // The own ID wins over a family named later.
     assert_eq!(of("ID=ubuntu\nID_LIKE=fedora\n"), Some(LinuxPackages::Apt));
 }
+
+/// A store's page is made only from the found app's own identity, for the two stores only.
+#[test]
+fn a_store_page_is_the_exact_apps_own_page() {
+    let ms = Route::StoreListing {
+        family_name: "Example.Writer_8wekyb3d8bbwe".into(),
+    };
+    assert_eq!(
+        ms.store_page().as_deref(),
+        Some("ms-windows-store://pdp/?PFN=Example.Writer_8wekyb3d8bbwe")
+    );
+    let apple = Route::MacAppStore { adam_id: 409183694 };
+    assert_eq!(
+        apple.store_page().as_deref(),
+        Some("macappstore://apps.apple.com/app/id409183694")
+    );
+    for bad in ["", "a&b=c", "x/../y", "name with space"] {
+        let r = Route::StoreListing {
+            family_name: bad.into(),
+        };
+        assert_eq!(r.store_page(), None, "{bad}");
+    }
+    assert_eq!(Route::MacAppStore { adam_id: 0 }.store_page(), None);
+    // The check before opening takes back exactly those pages.
+    assert!(is_store_page(
+        "ms-windows-store://pdp/?PFN=Example.Writer_8wekyb3d8bbwe"
+    ));
+    assert!(is_store_page(
+        "macappstore://apps.apple.com/app/id409183694"
+    ));
+    for bad in [
+        "https://example.com",
+        "ms-windows-store://pdp/?PFN=a&b",
+        "ms-windows-store://pdp/?PFN=",
+        "macappstore://apps.apple.com/app/id+12",
+        "macappstore://apps.apple.com/app/id12/../x",
+        "macappstore://apps.apple.com/app/id0",
+        "file:///C:/Windows/System32/calc.exe",
+    ] {
+        assert!(!is_store_page(bad), "{bad}");
+    }
+    assert_eq!(
+        Route::Snap {
+            name: "writer".into()
+        }
+        .store_page(),
+        None
+    );
+}

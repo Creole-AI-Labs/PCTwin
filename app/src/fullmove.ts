@@ -99,7 +99,38 @@ export type ChangeView = {
   tested: Tested | null;
   /** For an app this laptop has no version of: what the person can use instead (2.1); PCTwin installs none. */
   choices: AppChoice[];
+  /** One app's detail (M11): where it can come from, its maker check, and a store page the person can open. Apps only. */
+  detail: AppDetail | null;
 };
+
+/** Kinds of place an app can come from (`FromKind`), in the order PCTwin tries them. */
+export const FROM_KINDS = ["winget", "microsoft-store", "homebrew", "mac-app-store", "linux-package", "flatpak", "snap", "makers-site", "old-installer", "sign-in-page"] as const;
+export type FromKind = (typeof FROM_KINDS)[number];
+/** What the old laptop's copy says about its maker (`MakerCheck`). */
+export const MAKER_CHECKS = ["signed", "unsigned", "not-read"] as const;
+export type MakerCheck = (typeof MAKER_CHECKS)[number];
+export const STORE_KINDS = ["microsoft", "apple"] as const;
+export type StoreKind = (typeof STORE_KINDS)[number];
+/** One app's detail (`AppDetail`, M11). `store.page` is opened only by the engine, after it checks it is exactly a store page. */
+export type AppDetail = { at: number; maker: string | null; checked: MakerCheck; from: FromKind[]; store: { kind: StoreKind; page: string } | null };
+
+const STORE_PAGE = /^(ms-windows-store:\/\/pdp\/\?PFN=[A-Za-z0-9._-]{1,128}|macappstore:\/\/apps\.apple\.com\/app\/id[1-9][0-9]{0,19})$/;
+
+function parseDetail(v: unknown): AppDetail | null | undefined {
+  if (v === null) return null;
+  const f = exactly(v, ["at", "maker", "checked", "from", "store"]);
+  if (!f || !isCount(f.at) || !oneOf(f.checked, MAKER_CHECKS)) return undefined;
+  if (f.maker !== null && (typeof f.maker !== "string" || f.maker === "")) return undefined;
+  const from = listOf(f.from, (x) => (oneOf(x, FROM_KINDS) ? x : null));
+  if (!from) return undefined;
+  let store: AppDetail["store"] = null;
+  if (f.store !== null) {
+    const s = exactly(f.store, ["kind", "page"]);
+    if (!s || !oneOf(s.kind, STORE_KINDS) || typeof s.page !== "string" || !STORE_PAGE.test(s.page)) return undefined;
+    store = { kind: s.kind, page: s.page };
+  }
+  return { at: f.at, maker: f.maker, checked: f.checked, from, store };
+}
 
 /** What an app choice is (`ChoiceKind`, 2.1). */
 export const CHOICE_KINDS = ["web-version", "alternative", "compatibility-layer"] as const;
@@ -382,7 +413,7 @@ function parseTested(v: unknown): Tested | null | undefined {
 }
 
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "category", "notes", "undoIfUpdated", "tested", "choices"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "category", "notes", "undoIfUpdated", "tested", "choices", "detail"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
@@ -401,13 +432,15 @@ function parseChange(v: unknown): ChangeView | null {
   if (tested === undefined) return null;
   const choices = listOf(f.choices, parseChoice);
   if (!choices || (choices.length > 0 && f.kind !== "app")) return null;
+  const detail = parseDetail(f.detail);
+  if (detail === undefined || (detail !== null && f.kind !== "app")) return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, category: f.category, notes, undoIfUpdated: f.undoIfUpdated, tested, choices };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, category: f.category, notes, undoIfUpdated: f.undoIfUpdated, tested, choices, detail };
 }
 
 /** The plan section (`RebuildPlanView`). */

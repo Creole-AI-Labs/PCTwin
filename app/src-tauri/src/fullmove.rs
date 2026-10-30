@@ -238,6 +238,8 @@ pub struct ChangeView {
     /// For an app this laptop has no edition of: what the person can use instead (shown as
     /// text; PCTwin installs none of them).
     pub choices: Vec<pctwin_fullmove::plan::ChoiceLine>,
+    /// One app's detail (M11): where it can come from, its maker check, its store page.
+    pub detail: Option<pctwin_fullmove::plan::AppDetail>,
 }
 
 /// About how much room the move takes on this laptop beyond the files, at its busiest (installer
@@ -517,6 +519,10 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
                     x
                 })
                 .collect(),
+            detail: c.detail.map(|mut d| {
+                d.maker = d.maker.map(|m| name(&m));
+                d
+            }),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.
@@ -1536,6 +1542,21 @@ pub fn data_source<R: Runtime>(
         )
         .asking(ask),
     )
+}
+
+/// Opens one app's own page in the Microsoft Store or the App Store (M11): only a page that is
+/// exactly one the plan makes from the found app's identity ([`pctwin_apps::routes::is_store_page`]);
+/// anything else is refused and nothing opens. The person installs it there with their own
+/// account; PCTwin never says it installed.
+#[tauri::command]
+pub fn open_store_page<R: Runtime>(app: AppHandle<R>, page: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !pctwin_apps::routes::is_store_page(&page) {
+        return Err("not a store page".into());
+    }
+    app.opener()
+        .open_url(page, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// The old laptop: the person's answer about the apps to close (true: try again).

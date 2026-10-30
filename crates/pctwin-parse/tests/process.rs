@@ -65,7 +65,9 @@ fn in_process(request: Request, f: &File) -> Answer {
         | Request::MailKinds { .. }
         | Request::Browser { .. }
         | Request::GameRecord { .. }
-        | Request::SaveManifest { .. } => {
+        | Request::SaveManifest { .. }
+        | Request::StoredValue { .. }
+        | Request::ReplaceValue { .. } => {
             let mut bytes = Vec::new();
             std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
             std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
@@ -618,6 +620,51 @@ mod contents {
         )
         .unwrap();
         (c, p)
+    }
+
+    /// One key's value of a key-value table (VS Code's recent list) is read and replaced in the
+    /// parser process exactly as in process, and the database handed back is whole.
+    #[test]
+    fn one_stored_value_is_read_and_replaced_in_the_process() {
+        use pctwin_special::stored::{StoredChange, StoredKey};
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.vscdb");
+        let c = rusqlite::Connection::open(&p).unwrap();
+        c.execute_batch(
+            "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
+             INSERT INTO ItemTable VALUES ('history.recentlyOpenedPathsList', '{\"entries\":[]}');
+             INSERT INTO ItemTable VALUES ('other', 'kept');",
+        )
+        .unwrap();
+        drop(c);
+        let db = std::fs::read(&p).unwrap();
+        let want = StoredKey {
+            table: "ItemTable".into(),
+            key: "history.recentlyOpenedPathsList".into(),
+        };
+        let parser = real();
+        assert_eq!(
+            parser.stored_value(&db, &want).unwrap(),
+            OWN.stored_value(&db, &want).unwrap()
+        );
+        assert_eq!(
+            parser.stored_value(&db, &want).unwrap().as_deref(),
+            Some("{\"entries\":[]}")
+        );
+        let change = StoredChange {
+            table: want.table.clone(),
+            key: want.key.clone(),
+            value: "{\"entries\":[{\"fileUri\":\"file:///x\"}]}".into(),
+        };
+        let new = parser.replace_value(&db, &change).unwrap();
+        assert_eq!(new, OWN.replace_value(&db, &change).unwrap());
+        assert_eq!(
+            parser.stored_value(&new, &want).unwrap().as_deref(),
+            Some(change.value.as_str())
+        );
+        // Not a database: refused, and the next request still works.
+        assert!(parser.replace_value(b"no", &change).is_err());
+        assert!(parser.stored_value(&db, &want).is_ok());
     }
 
     #[test]

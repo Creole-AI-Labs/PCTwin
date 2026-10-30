@@ -340,6 +340,8 @@ export function parsePrivacy(value: unknown): Privacy | null {
 
 export const movePrivacyAnswer = (again: boolean) => run("move_privacy_answer", { again });
 export const openPrivacySettings = () => run("open_privacy_settings");
+/** Opens one app's own page in the Microsoft Store or the App Store, as the plan's app detail gives it (M11). The engine opens only an exact store page. */
+export const openStorePage = (page: string) => run("open_store_page", { page });
 
 /** Where one other person's things go on the new laptop. */
 export type PlaceChoice = { kind: "existing"; accountId: string } | { kind: "new" } | { kind: "leave-out" };

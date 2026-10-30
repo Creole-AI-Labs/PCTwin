@@ -237,6 +237,45 @@ pub fn answer<R: Read, W: Write>(
                     pctwin_special::gamefmt::save_manifest(seal, &mut lines, size, &w)
                 }),
         ),
+        Request::StoredValue { wanted, size } => Answer::StoredValue(
+            whole(
+                &mut file,
+                wanted,
+                pctwin_special::stored::MAX_STORED as u64 + 4096,
+            )
+            .and_then(|w| {
+                serde_json::from_slice::<pctwin_special::stored::StoredKey>(&w)
+                    .map_err(|e| pctwin_special::content::ContentError::Damaged(e.to_string()))
+            })
+            .and_then(|w| {
+                let db = whole(&mut file, size, pctwin_special::content::MAX_DB)?;
+                pctwin_special::stored::stored_value(seal, &db, &w)
+            }),
+        ),
+        Request::ReplaceValue { wanted, size } => {
+            let read = whole(
+                &mut file,
+                wanted,
+                pctwin_special::stored::MAX_STORED as u64 * 2,
+            )
+            .and_then(|w| {
+                serde_json::from_slice::<pctwin_special::stored::StoredChange>(&w)
+                    .map_err(|e| pctwin_special::content::ContentError::Damaged(e.to_string()))
+            })
+            .and_then(|w| Ok((w, whole(&mut file, size, pctwin_special::content::MAX_DB)?)));
+            drop(file);
+            match read.and_then(|(w, db)| pctwin_special::stored::replace_value(seal, &db, &w)) {
+                Err(e) => Answer::ReplaceValue(Err(e)),
+                Ok(image) => {
+                    for piece in image.chunks(MAX_READ as usize) {
+                        if write_frame(to_app, TAG_PIECE, piece).is_err() {
+                            return Answer::Failed("the app stopped listening".into());
+                        }
+                    }
+                    Answer::ReplaceValue(Ok(image.len() as u64))
+                }
+            }
+        }
         Request::DatabaseFacts { size, log, millis } => {
             let until = std::time::Instant::now() + request.own_time();
             let _ = millis;

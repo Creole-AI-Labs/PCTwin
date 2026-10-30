@@ -940,6 +940,11 @@ plan-preview-time-one =
        *[other] लगभग { $minutes } मिनट।
     }
 plan-preview-time = लगभग { $low } से { $high } मिनट।
+plan-names-title = जब नाम टकराएँ या फ़िट न हों
+plan-names-keep-both = अगर इस लैपटॉप पर उसी नाम की फ़ाइल पहले से है, तो PCTwin दोनों रखता है। आपकी फ़ाइल कभी नहीं बदली जाती: पुराने लैपटॉप वाली फ़ाइल के नाम में एक नंबर जुड़ता है, जैसे “Budget (2).xlsx”।
+plan-names-fit = जो नाम यह लैपटॉप नहीं मानता (कोई अक्षर जो इस्तेमाल नहीं हो सकता, या अपने लिए रखा गया नाम), उसे बस उतना बदला जाता है कि वह फ़िट हो जाए।
+plan-names-case = जो दो नाम सिर्फ़ बड़े-छोटे अक्षरों में अलग हैं, वे दोनों साथ-साथ आते हैं।
+plan-names-refused = जिस फ़ाइल का फ़ोल्डर पथ इस लैपटॉप के लिए बहुत लंबा है, वह कॉपी नहीं होती। वह पुराने लैपटॉप पर रहती है, और रिपोर्ट में यह लिखा होता है।
 plan-preview-renamed =
     { NUMBER($count) ->
         [one] { $count } फ़ाइल का नाम थोड़ा बदलेगा, क्योंकि यह लैपटॉप उसका नाम स्वीकार नहीं करता। रिपोर्ट में यह लिखा होगा।
@@ -2801,6 +2806,28 @@ compat-aspects-title = हर हिस्सा
 compat-steps-title = आप क्या करेंगे
 compat-steps-none = आपको कुछ नहीं करना है।
 compat-never-checked = इस ऐप को अभी तक किसी ने जाँचा नहीं है। PCTwin इसे आज़माएगा और बताएगा कि क्या हुआ।
+app-from-title = यह कहाँ से आता है
+app-from-body = PCTwin इन जगहों पर, इसी क्रम में देखता है। जो भी मिले, वह उसी निर्माता का होना चाहिए जिसकी कॉपी आपके पुराने लैपटॉप पर है।
+app-from-none = PCTwin को यह ऐप पाने की कोई जगह नहीं मिली। आप इसे ख़ुद इंस्टॉल कर सकते हैं।
+app-from-winget = Windows का ऐप कैटलॉग
+app-from-microsoft-store = Microsoft Store
+app-from-homebrew = Homebrew, Mac ऐप्स का एक कैटलॉग
+app-from-mac-app-store = App Store
+app-from-linux-package = आपके Linux सिस्टम का अपना ऐप कैटलॉग
+app-from-flatpak = Flathub, Linux ऐप्स का एक कैटलॉग
+app-from-snap = Snap Store
+app-from-makers-site = निर्माता की अपनी वेबसाइट
+app-from-old-installer = आपके पुराने लैपटॉप पर मिला इंस्टॉलर
+app-from-sign-in-page = साइन इन करने के बाद निर्माता की वेबसाइट
+app-maker-title = इसे किसने बनाया
+app-maker-signed = { $maker } ने बनाया। PCTwin सिर्फ़ उसी निर्माता की कॉपी इंस्टॉल करता है।
+app-maker-signed-unnamed = आपके पुराने लैपटॉप की कॉपी पर उसके निर्माता के हस्ताक्षर हैं। PCTwin सिर्फ़ उसी निर्माता की कॉपी इंस्टॉल करता है।
+app-maker-unsigned = आपके पुराने लैपटॉप की कॉपी यह नहीं बताती कि इसे किसने बनाया, इसलिए PCTwin इसे आपके लिए इंस्टॉल नहीं करेगा।
+app-maker-not-read = PCTwin यह नहीं पढ़ पाया कि इसे किसने बनाया, इसलिए वह इसे आपके लिए इंस्टॉल नहीं करेगा।
+app-store-title = इसे ख़ुद इंस्टॉल करें
+app-store-body = स्टोर में ऐप का पेज खोलें और अपने खाते से वहीं इंस्टॉल करें। जब तक आप ऐसा नहीं करते, यह आपकी सूची में रहेगा।
+app-store-microsoft = Microsoft Store में खोलें
+app-store-apple = App Store में खोलें
 compat-checked-on = { $date } को जाँचा गया।
 compat-version = जाँचा गया संस्करण: { $version }
 work-strip = काम की जाँच

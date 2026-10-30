@@ -98,6 +98,7 @@ import {
   historyList,
   historyOpen,
   openPrivacySettings,
+  openStorePage,
   movePause,
   moveReport,
   moveResume,
@@ -297,6 +298,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await rescueBegin("2f1c9e3a-7b44-4c1e-9a7d-0e5b6c8d9f10", { music: "From your old laptop/Music" });
       await movePrivacyAnswer(true);
       await openPrivacySettings();
+      await openStorePage("ms-windows-store://pdp/?PFN=Example.Writer_8wekyb3d8bbwe");
       await qsPick(false);
       await qsClear();
       await qsAcceptDrops(true);

@@ -413,6 +413,25 @@ pub trait ContentReader: Sync {
         let _ = (what, bytes, second);
         Err(ContentError::Damaged(NO_READER.into()))
     }
+    /// The value under one key of a key-value table in a database ([`crate::stored`]). A
+    /// reader that does not know it reads nothing.
+    fn stored_value(
+        &self,
+        db: &[u8],
+        want: &crate::stored::StoredKey,
+    ) -> Result<Option<String>, ContentError> {
+        let _ = (db, want);
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
+    /// The database with one key's value replaced ([`crate::stored::replace_value`]).
+    fn replace_value(
+        &self,
+        db: &[u8],
+        change: &crate::stored::StoredChange,
+    ) -> Result<Vec<u8>, ContentError> {
+        let _ = (db, change);
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
 }
 
 static READER: OnceLock<&'static dyn ContentReader> = OnceLock::new();
@@ -490,6 +509,42 @@ impl ContentReader for InThisProcess {
     ) -> Result<crate::browser_read::Found, ContentError> {
         crate::browser_read::read(self.0, what, bytes, second)
     }
+    fn stored_value(
+        &self,
+        db: &[u8],
+        want: &crate::stored::StoredKey,
+    ) -> Result<Option<String>, ContentError> {
+        crate::stored::stored_value(self.0, db, want)
+    }
+    fn replace_value(
+        &self,
+        db: &[u8],
+        change: &crate::stored::StoredChange,
+    ) -> Result<Vec<u8>, ContentError> {
+        crate::stored::replace_value(self.0, db, change)
+    }
+}
+
+/// The value under one key of a database's key-value table, read in the parser process.
+pub fn stored_value_of(
+    db: &[u8],
+    want: &crate::stored::StoredKey,
+) -> Result<Option<String>, ContentError> {
+    if db.len() as u64 > MAX_DB {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.stored_value(db, want)
+}
+
+/// The database with one key's value replaced, made in the parser process.
+pub fn replaced_value_of(
+    db: &[u8],
+    change: &crate::stored::StoredChange,
+) -> Result<Vec<u8>, ContentError> {
+    if db.len() as u64 > MAX_DB {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.replace_value(db, change)
 }
 
 /// What a browser's file holds, read in the parser process (2.5 browsers).

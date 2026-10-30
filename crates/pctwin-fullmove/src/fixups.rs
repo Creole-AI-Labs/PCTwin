@@ -11,6 +11,12 @@
 //! touched: a file no catalogue entry describes, or one the rules would not move, lands exactly as
 //! it was captured.
 //!
+//! A recent list the catalogue names inside a database (VS Code's
+//! `history.recentlyOpenedPathsList` row in `state.vscdb`) is rewritten the same way: the one
+//! row is read and replaced in PCTwin's parser process ([`pctwin_special::stored`]), entries
+//! pointed at where their files landed and those whose files did not move left out; every other
+//! row and table stays as it was. If the database cannot be read, it lands as captured.
+//!
 //! The change happens in PCTwin's own staging folder, before the landing reads it: the capture
 //! record is updated with each changed file's new length and hash, so the landing checks and
 //! journals exactly the bytes it writes, and undo removes exactly those.
@@ -21,7 +27,9 @@ use std::path::Path;
 use pctwin_settings::System;
 use pctwin_settings::catalogue::Catalogue;
 use pctwin_settings::classify::{Ctx, InsideHome, Landed};
-use pctwin_settings::files::{FileCtx, FileOutcome, FoundFile, MAX_FILE, entry_for, format_of};
+use pctwin_settings::files::{
+    FileCtx, FileOutcome, FoundFile, MAX_FILE, entry_for, format_of, rewrite_recent_list,
+};
 use pctwin_special::roots::RootKind;
 
 use crate::data::{PlacementWire, Record};
@@ -99,6 +107,15 @@ pub fn fix(r: &Record, work: &Path, ctx: &FixCtx<'_>) -> Record {
     let mut out = r.clone();
     for f in &mut out.capture.files {
         let rel = format!("{folder}/{}", f.rel);
+        let path = f
+            .rel
+            .split('/')
+            .fold(work.to_path_buf(), |p, part| p.join(part));
+        if let Some(new) = recent_in_database(&catalogue, root, &rel, &path, f.len, &file_ctx) {
+            f.len = new.len() as u64;
+            f.hash = *blake3::hash(&new).as_bytes();
+            continue;
+        }
         let found = FoundFile {
             root,
             label: folder.to_string(),
@@ -108,10 +125,6 @@ pub fn fix(r: &Record, work: &Path, ctx: &FixCtx<'_>) -> Record {
         if entry_for(&catalogue, &found).is_none() || f.len > MAX_FILE {
             continue;
         }
-        let path = f
-            .rel
-            .split('/')
-            .fold(work.to_path_buf(), |p, part| p.join(part));
         let Ok(bytes) = std::fs::read(&path) else {
             continue;
         };
@@ -125,6 +138,45 @@ pub fn fix(r: &Record, work: &Path, ctx: &FixCtx<'_>) -> Record {
         }
     }
     out
+}
+
+/// A recent list the catalogue names as one row of a database file at `rel`: the row rewritten in
+/// the staged file at `path` (through the parser process), and the file's new bytes, once written.
+/// `None` when the catalogue names no such list here, or nothing changed, or it could not be
+/// read or written (the file then lands exactly as captured).
+fn recent_in_database(
+    catalogue: &Catalogue,
+    root: pctwin_recipe::SettingsRoot,
+    rel: &str,
+    path: &Path,
+    len: u64,
+    ctx: &FileCtx<'_>,
+) -> Option<Vec<u8>> {
+    use pctwin_special::stored::{StoredChange, StoredKey};
+    let list = catalogue.apps.iter().flat_map(|a| &a.recent).find(|l| {
+        l.table.is_some() && l.root == root && pctwin_settings::apps::path_matches(&l.path, rel)
+    })?;
+    if len > pctwin_special::content::MAX_DB {
+        return None;
+    }
+    let want = StoredKey {
+        table: list.table.clone()?,
+        key: list.key.clone(),
+    };
+    let db = std::fs::read(path).ok()?;
+    let json = pctwin_special::content::stored_value_of(&db, &want).ok()??;
+    let (new, _left) = rewrite_recent_list(&json, ctx).ok()?;
+    if new == json {
+        return None;
+    }
+    let change = StoredChange {
+        table: want.table,
+        key: want.key,
+        value: new,
+    };
+    let bytes = pctwin_special::content::replaced_value_of(&db, &change).ok()?;
+    std::fs::write(path, &bytes).ok()?;
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -217,6 +269,128 @@ mod tests {
             ..r.clone()
         };
         assert_eq!(fix(&kept, work.path(), &ctx), kept);
+    }
+
+    /// VS Code's recent list in its staged `state.vscdb`: an entry whose file moved points at
+    /// where it landed, one whose file did not move is left out, the other rows stay, and the
+    /// record names the new bytes.
+    #[test]
+    fn vs_codes_recent_list_in_its_database_is_pointed_at_the_moved_files() {
+        use pctwin_special::capture::{Capture, CapturedFile, Method, generation};
+        use pctwin_special::component::{Component, Custody, Evidence, Preservation};
+        pctwin_parse::testing::install_readers();
+        let work = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let landed = home.path().join("Documents").join("notes.md");
+        std::fs::create_dir_all(landed.parent().unwrap()).unwrap();
+        std::fs::write(&landed, b"notes").unwrap();
+        let landed = landed.to_string_lossy().into_owned();
+        std::fs::create_dir_all(work.path().join("User/globalStorage")).unwrap();
+        let db_path = work.path().join("User/globalStorage/state.vscdb");
+        let recent = r#"{"entries":[{"fileUri":"file:///c%3A/Users/ada/Documents/notes.md"},{"folderUri":"file:///c%3A/Users/ada/Downloads/old"}]}"#;
+        let c = rusqlite::Connection::open(&db_path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO ItemTable VALUES ('history.recentlyOpenedPathsList', ?1)",
+            [recent],
+        )
+        .unwrap();
+        c.execute("INSERT INTO ItemTable VALUES ('colorTheme', 'dark')", [])
+            .unwrap();
+        drop(c);
+        let before = std::fs::read(&db_path).unwrap();
+        let rel = "User/globalStorage/state.vscdb".to_string();
+        let members = vec![rel.clone()];
+        let component = Component::new(
+            pctwin_record::Owner::Person {
+                account_id: "ada".into(),
+            },
+            "Code",
+            members.clone(),
+            Custody::Portable,
+            false,
+            vec![Evidence::Unreadable {
+                why: "a test".into(),
+            }],
+        );
+        let r = Record {
+            app: "Visual Studio Code".into(),
+            capture: Capture {
+                component: component.id,
+                method: Method::SteadyCopy,
+                preservation: Preservation::Captured,
+                generation: generation(work.path(), &members),
+                files: vec![CapturedFile {
+                    rel: rel.clone(),
+                    len: before.len() as u64,
+                    hash: *blake3::hash(&before).as_bytes(),
+                }],
+                folded: Vec::new(),
+                evidence: Vec::new(),
+                closed_unconfirmed: false,
+            },
+            component,
+            placement: PlacementWire::Same {
+                root: RootKind::Roaming,
+                folder: "Code".into(),
+            },
+            root: RootKind::Roaming,
+        };
+        let files = [(r"C:\Users\ada\Documents\notes.md".to_string(), landed)];
+        let here = if cfg!(windows) {
+            System::Windows
+        } else if cfg!(target_os = "macos") {
+            System::Mac
+        } else {
+            System::OtherLinux
+        };
+        let home_new = home.path().to_string_lossy().into_owned();
+        let ctx = FixCtx {
+            from: System::Windows,
+            to: here,
+            home_old: r"C:\Users\ada",
+            home_new: &home_new,
+            files: &files,
+        };
+        let fixed = fix(&r, work.path(), &ctx);
+        let after = std::fs::read(&db_path).unwrap();
+        assert_ne!(after, before);
+        assert_eq!(fixed.capture.files[0].len, after.len() as u64);
+        assert_eq!(
+            fixed.capture.files[0].hash,
+            *blake3::hash(&after).as_bytes()
+        );
+        let c = rusqlite::Connection::open(&db_path).unwrap();
+        let value = |key: &str| -> String {
+            c.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        let list = value("history.recentlyOpenedPathsList");
+        let v: serde_json::Value = serde_json::from_str(&list).unwrap();
+        let e = v["entries"].as_array().unwrap();
+        assert_eq!(
+            e.len(),
+            1,
+            "the entry whose folder did not move is left out: {list}"
+        );
+        let uri = e[0]["fileUri"].as_str().unwrap();
+        assert!(uri.ends_with("/Documents/notes.md"), "{uri}");
+        assert!(!uri.contains("Users/ada"), "{uri}");
+        assert_eq!(value("colorTheme"), "dark");
+        drop(c);
+
+        // A file that is not a database: lands exactly as captured.
+        std::fs::write(&db_path, b"not a database").unwrap();
+        let mut broken = r.clone();
+        broken.capture.files[0].len = 14;
+        broken.capture.files[0].hash = *blake3::hash(b"not a database").as_bytes();
+        assert_eq!(fix(&broken, work.path(), &ctx), broken);
+        assert_eq!(std::fs::read(&db_path).unwrap(), b"not a database");
     }
 
     #[test]

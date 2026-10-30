@@ -75,6 +75,11 @@ pub fn sign_raw(bytes: &[u8], trusted_comment: &str) -> String {
     sign_with(&SEED, &KEY_ID, bytes, trusted_comment)
 }
 
+/// A minisign signature of `bytes` by the privileged test key, with exactly this trusted comment.
+pub fn sign_raw_privileged(bytes: &[u8], trusted_comment: &str) -> String {
+    sign_with(&PRIVILEGED_SEED, &PRIVILEGED_KEY_ID, bytes, trusted_comment)
+}
+
 /// A catalogue file's signature by the test key, bound to its name and version as
 /// [`crate::Catalogue::signed`] requires.
 pub fn sign(bytes: &[u8], catalogue: &str, version: u32) -> String {

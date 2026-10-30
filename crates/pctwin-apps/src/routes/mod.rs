@@ -193,7 +193,47 @@ pub enum Route {
     },
 }
 
+/// Whether `page` is exactly a store page [`Route::store_page`] makes, and nothing else: the one
+/// check before the app opens it.
+pub fn is_store_page(page: &str) -> bool {
+    let route = if let Some(f) = page.strip_prefix("ms-windows-store://pdp/?PFN=") {
+        Route::StoreListing {
+            family_name: f.to_string(),
+        }
+    } else if let Some(id) = page.strip_prefix("macappstore://apps.apple.com/app/id") {
+        match id.parse::<u64>() {
+            Ok(adam_id) if id.bytes().all(|b| b.is_ascii_digit()) => Route::MacAppStore { adam_id },
+            _ => return false,
+        }
+    } else {
+        return false;
+    };
+    route.store_page().as_deref() == Some(page)
+}
+
 impl Route {
+    /// The store's own page for this exact app, as an address the system opens in the store app
+    /// (the Microsoft Store by the package family name, the App Store by its store ID), for the
+    /// person to install it there with their own account. Made only from the found app's typed
+    /// identity, never from text a catalogue or a screen gives; `None` for other routes, or a
+    /// family name that is not one.
+    pub fn store_page(&self) -> Option<String> {
+        match self {
+            Route::StoreListing { family_name } => {
+                let ok = !family_name.is_empty()
+                    && family_name.len() <= 128
+                    && family_name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+                ok.then(|| format!("ms-windows-store://pdp/?PFN={family_name}"))
+            }
+            Route::MacAppStore { adam_id } if *adam_id > 0 => {
+                Some(format!("macappstore://apps.apple.com/app/id{adam_id}"))
+            }
+            _ => None,
+        }
+    }
+
     /// Whether the version it brings is known before anything is downloaded (so a downgrade can
     /// be ruled out in the plan, not only after).
     pub fn version_known_ahead(&self) -> bool {
