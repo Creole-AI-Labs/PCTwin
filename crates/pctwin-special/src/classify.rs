@@ -1087,7 +1087,6 @@ fn classify_within(
 
     // Everything else, one file at a time; plain data gathers into one component.
     let mut plain: Vec<String> = Vec::new();
-    let mut messages: Vec<String> = Vec::new();
     for f in by_rel.values() {
         if used.contains(&f.rel) {
             continue;
@@ -1174,9 +1173,10 @@ fn classify_within(
                 false,
                 vec![Evidence::MailStore, Evidence::MailArchive],
             ),
-            Shape::Mbox => b.push(one, Custody::Portable, false, vec![Evidence::MailStore]),
-            // Saved messages one per file: the mailbox moves whole, as one part.
-            Shape::Emlx => messages.push(f.rel.clone()),
+            // Saved messages one per file (emlx) merge with the rest of the folder's mail below.
+            Shape::Mbox | Shape::Emlx => {
+                b.push(one, Custody::Portable, false, vec![Evidence::MailStore])
+            }
             Shape::LmdbData => b.push(one, Custody::Portable, false, vec![Evidence::LiveStore]),
             Shape::Json => match json.get(&f.rel) {
                 Some(Ok(j)) if j.machine_bound_key => b.push(
@@ -1286,14 +1286,6 @@ fn classify_within(
             ),
             _ => plain.push(f.rel.clone()),
         }
-    }
-    if !messages.is_empty() {
-        b.push(
-            messages,
-            Custody::Portable,
-            false,
-            vec![Evidence::MailStore],
-        );
     }
     if !plain.is_empty() {
         b.push(

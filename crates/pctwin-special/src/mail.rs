@@ -72,7 +72,7 @@ pub fn emlx_facts(_: InChild, bytes: &[u8]) -> Result<EmlxFacts, ContentError> {
     let first = std::str::from_utf8(&bytes[..nl])
         .map_err(|_| damaged("its first line does not say its length"))?
         .trim();
-    if first.is_empty() || first.len() > 12 || !first.bytes().all(|b| b.is_ascii_digit()) {
+    if first.len() > 12 || !first.bytes().all(|b| b.is_ascii_digit()) {
         return Err(damaged("its first line does not say its length"));
     }
     let len: u64 = first
@@ -460,6 +460,7 @@ mod tests {
         for bad in [
             EmlxFacts {
                 len: 0,
+                marked: vec![],
                 ..ok.clone()
             },
             EmlxFacts {
@@ -594,6 +595,27 @@ mod tests {
         let r = export_mailboxes(&src, &t.path().join("none"), &reader, Instant::now()).unwrap();
         assert!(r.not_all_looked_at);
         assert_eq!(r.mailboxes[0].failed, 1);
+    }
+
+    #[test]
+    fn a_mailbox_is_converted_only_when_every_message_was_written_whole() {
+        let b = |written, partial, failed| MailboxExport {
+            name: "m".into(),
+            file: None,
+            written,
+            partial,
+            failed,
+        };
+        assert_eq!(b(3, 0, 0).result().status(), ItemStatus::Converted);
+        for (w, p, f) in [(3, 0, 1), (3, 1, 0), (0, 1, 0)] {
+            assert_eq!(
+                b(w, p, f).result(),
+                ItemResult::because(Reason::PartsMissing),
+                "{w} {p} {f}"
+            );
+        }
+        assert_eq!(b(0, 0, 2).result(), ItemResult::because(Reason::Unreadable));
+        assert_eq!(b(0, 0, 0).result(), ItemResult::because(Reason::Unreadable));
     }
 
     #[test]
