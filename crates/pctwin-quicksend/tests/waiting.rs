@@ -667,7 +667,7 @@ fn a_source_rewritten_at_the_same_length_during_the_copy_ends_it() {
         }
         T0
     };
-    let got = store.prepare_with_clock(&[big.clone()], &[alex()], 7, T0, None, &clock);
+    let got = store.prepare_with_clock(std::slice::from_ref(&big), &[alex()], 7, T0, None, &clock);
     assert!(
         matches!(got, Err(WaitingError::ChangedWhileCopying(_))),
         "{got:?}"
