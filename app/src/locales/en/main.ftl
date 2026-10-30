@@ -408,6 +408,12 @@ before-done =
 before-note = Do not type passwords or recovery keys here. Finishing this list does not mean the old laptop is safe to wipe.
 before-empty = Nothing needs doing on your old laptop before the move.
 before-continue = Return to the move plan
+before-keys-title = Licence keys found on this laptop
+before-keys-body = These apps keep their licence key on this laptop. Write each key down or keep it somewhere safe before you leave this laptop. PCTwin does not put keys in the move or its report.
+before-keys-show = Show key
+before-keys-show-label = Show key for { $app }
+before-keys-hide = Hide key
+before-keys-gone = PCTwin could not read this key again. Open { $app } to find it.
 
 ## S11 Get help with this task (a short problem code)
 

@@ -39,6 +39,7 @@ mod info_plist;
 mod keep_local;
 mod laptop_name;
 pub mod launch;
+mod licence_keys;
 pub mod limits;
 #[cfg(test)]
 mod lockdown;
@@ -359,6 +360,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         laptop_name::laptop_name_shuffle,
         laptop_name::laptop_name_use,
         laptop_name::laptop_name_type,
+        licence_keys::licence_keys_found,
+        licence_keys::licence_key_show,
         guard::guard_view,
         guard::guard_intent,
         fullmove::fullmove_undo,

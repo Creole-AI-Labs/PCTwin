@@ -390,6 +390,12 @@ before-done =
 before-note = 不要在这里输入密码或恢复密钥。完成这份列表并不代表旧笔记本电脑可以安全清空。
 before-empty = 迁移之前，旧笔记本电脑上没有需要处理的事项。
 before-continue = 返回迁移方案
+before-keys-title = 在这台笔记本电脑上找到的许可证密钥
+before-keys-body = 这些应用将其许可证密钥保存在这台笔记本电脑上。在离开这台笔记本电脑之前，请记下每个密钥或将其保存在安全的地方。PCTwin 不会将密钥放入迁移或其报告中。
+before-keys-show = 显示密钥
+before-keys-show-label = 显示 { $app } 的密钥
+before-keys-hide = 隐藏密钥
+before-keys-gone = PCTwin 无法再次读取此密钥。请打开 { $app } 查找它。
 
 ## S11 Get help with this task (a short problem code)
 

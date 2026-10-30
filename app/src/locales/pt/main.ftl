@@ -411,6 +411,12 @@ before-done =
 before-note = Não digite senhas nem chaves de recuperação aqui. Terminar esta lista não significa que já é seguro apagar o notebook antigo.
 before-empty = Não é preciso fazer nada no seu notebook antigo antes da mudança.
 before-continue = Voltar ao plano da mudança
+before-keys-title = Chaves de licença encontradas neste notebook
+before-keys-body = Estes apps guardam a chave de licença neste notebook. Anote cada chave ou guarde-a em um lugar seguro antes de deixar este notebook. O PCTwin não coloca chaves na mudança nem no relatório.
+before-keys-show = Mostrar chave
+before-keys-show-label = Mostrar a chave de { $app }
+before-keys-hide = Ocultar chave
+before-keys-gone = O PCTwin não conseguiu ler esta chave de novo. Abra { $app } para encontrá-la.
 
 ## S11 Get help with this task (a short problem code)
 

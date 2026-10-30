@@ -88,6 +88,8 @@
     "allow-laptop-name-shuffle",
     "allow-laptop-name-use",
     "allow-laptop-name-type",
+    "allow-licence-keys-found",
+    "allow-licence-key-show",
     "allow-guard-view",
     "allow-guard-intent",
     "allow-fullmove-undo",

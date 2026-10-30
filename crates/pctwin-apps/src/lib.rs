@@ -24,5 +24,6 @@ pub mod compat;
 pub mod fetch;
 pub mod found;
 pub mod install;
+pub mod keys;
 pub mod routes;
 pub mod version;

@@ -412,6 +412,12 @@ before-done =
 before-note = Ne saisissez ici ni mot de passe ni clé de récupération. Terminer cette liste ne veut pas dire que l’ancien ordinateur portable peut être effacé sans risque.
 before-empty = Rien à faire sur votre ancien ordinateur portable avant le transfert.
 before-continue = Revenir au plan du transfert
+before-keys-title = Clés de licence trouvées sur cet ordinateur portable
+before-keys-body = Ces applis gardent leur clé de licence sur cet ordinateur portable. Notez chaque clé ou conservez-la en lieu sûr avant de quitter cet ordinateur portable. PCTwin ne met aucune clé dans le transfert ni dans son rapport.
+before-keys-show = Afficher la clé
+before-keys-show-label = Afficher la clé de { $app }
+before-keys-hide = Masquer la clé
+before-keys-gone = PCTwin n’a pas pu relire cette clé. Ouvrez { $app } pour la trouver.
 
 ## S11 Get help with this task (a short problem code)
 

@@ -286,3 +286,41 @@
 .people-table .people-note:first-of-type {
   margin-block-start: 0;
 }
+
+/* Licence keys found on this laptop: one row per app, its key shown only when asked */
+.before-keys {
+  margin-block-start: var(--space-6);
+}
+
+.before-keys-title {
+  margin: 0;
+  font-size: var(--type-small);
+}
+
+.before-keys-list {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+}
+
+.before-keys-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  font-size: var(--type-small);
+}
+
+.before-keys-list li + li {
+  border-block-start: 1px solid var(--colour-line);
+}
+
+.before-key {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}

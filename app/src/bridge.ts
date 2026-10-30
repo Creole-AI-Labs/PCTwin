@@ -927,6 +927,28 @@ export const laptopNameUse = () => ask("laptop_name_use", parseLabelView);
 /** Keeps a name the person typed; a name that cannot be used is refused as `pairing-name-invalid`. */
 export const laptopNameType = (name: string) => ask("laptop_name_type", parseLabelView, { name });
 
+/* ---------- Licence keys found on this laptop (src-tauri/src/licence_keys.rs) ---------- */
+
+/** An app that keeps its licence key on this laptop: the place's id and the app. Never the key. */
+export type KeyPlace = { id: string; app: string };
+
+export function parseKeyPlaces(value: unknown): KeyPlace[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: KeyPlace[] = [];
+  for (const item of value) {
+    const f = exactly(item, ["id", "app"]);
+    if (!f || typeof f.id !== "string" || typeof f.app !== "string") return null;
+    out.push({ id: f.id, app: f.app });
+  }
+  return out;
+}
+
+/** The apps on this laptop that keep a licence key in the open (old laptop, the person's own). */
+export const licenceKeysFound = () => ask("licence_keys_found", parseKeyPlaces);
+/** One key, read again now, for the person who asked to see it; null when it cannot be read. Never kept. */
+export const licenceKeyShow = (id: string) =>
+  ask("licence_key_show", (v) => (v === null || typeof v === "string" ? { key: v } : null), { id }).then((r) => r.key);
+
 /* ---------- Updates (src-tauri/src/updates.rs) ---------- */
 
 /** A newer build of PCTwin: its version. */

@@ -86,6 +86,8 @@ const COMMANDS: &[&str] = &[
     "laptop_name_shuffle",
     "laptop_name_use",
     "laptop_name_type",
+    "licence_keys_found",
+    "licence_key_show",
     "guard_view",
     "guard_intent",
     "fullmove_undo",

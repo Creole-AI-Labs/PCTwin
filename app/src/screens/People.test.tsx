@@ -241,6 +241,37 @@ function renderBefore(over: Partial<Parameters<typeof BeforeYouStart>[0]> = {}) 
 const tick = (kind: string) => screen.getByRole<HTMLInputElement>("checkbox", { name: nameIs(attr("before-done", { item: text(`before-${kind}-title`) })) });
 
 describe("Before you start", () => {
+  it("lists apps whose licence key is kept here, shows a key only when asked, and hides it again", async () => {
+    const onShowKey = vi.fn((id: string) => Promise.resolve(id === "editor" ? "ABCD-1234" : null));
+    renderBefore({
+      keys: [
+        { id: "editor", app: "Editor" },
+        { id: "gone", app: "Archiver" },
+      ],
+      onShowKey,
+    });
+    expect(screen.getByText(withText(text("before-keys-title")))).toBeTruthy();
+    // No key is on the page until the person asks for it.
+    expect(screen.queryByText("ABCD-1234")).toBeNull();
+    expect(onShowKey).not.toHaveBeenCalled();
+    fireEvent.click(button("before-keys-show-label", { app: "Editor" }));
+    expect(onShowKey).toHaveBeenCalledWith("editor");
+    expect(await screen.findByText("ABCD-1234")).toBeTruthy();
+    // Hidden again: gone from the page.
+    fireEvent.click(button("before-keys-hide"));
+    expect(screen.queryByText("ABCD-1234")).toBeNull();
+    // A key that can no longer be read says so, with what to do.
+    fireEvent.click(button("before-keys-show-label", { app: "Archiver" }));
+    expect(await screen.findByText(withText(text("before-keys-gone", { app: "Archiver" })))).toBeTruthy();
+    noMissingText();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("shows no key section when no app keeps one here", () => {
+    renderBefore({ keys: [], onShowKey: vi.fn() });
+    expect(screen.queryByText(withText(text("before-keys-title")))).toBeNull();
+  });
+
   it("lists what to do on the old laptop, each as the person's own tick, and says PCTwin cannot see it", async () => {
     renderBefore();
     expect(heading().textContent).toBe(text("before-title"));
