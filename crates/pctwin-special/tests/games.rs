@@ -468,7 +468,8 @@ fn programs_and_store_protected_saves_are_never_copied() {
         saves: cat(
             "game-saves",
             &format!(
-                r#"{{"name":"Ember Road","files":{{"<base>/saves":{{}}}},"installDir":{{"EmberRoad":{{}}}},{DAY}}}"#
+                r#"{{"name":"Ember Road","files":{{"<base>/saves":{{}}}},"installDir":{{"EmberRoad":{{}}}},{DAY}}},
+                {{"name":"Store Game","files":{{"<winLocalAppData>/Packages/Maker.Game_abc/SystemAppData/wgs":{{}}}},{DAY}}}"#
             ),
         ),
         launchers: cat("game-launchers", &lantern_row()),
@@ -486,7 +487,9 @@ fn programs_and_store_protected_saves_are_never_copied() {
     }));
     assert_eq!(report.protected.len(), 1);
     assert_eq!(report.protected[0].files, 1);
+    // A row naming the store's own place finds nothing to copy there.
     assert!(report.saves.iter().all(|s| !s.base.starts_with(&wgs)));
+    assert!(report.saves.iter().all(|s| s.game != "Store Game"));
     let m = report
         .saves
         .iter()
