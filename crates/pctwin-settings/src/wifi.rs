@@ -20,10 +20,22 @@
 //!   only on its standard output; added with `nmcli connection add` without the password, which
 //!   then goes to `nmcli`'s own editor on its standard input ([`export_nm`], [`import_nm`]).
 //!   NetworkManager's own permission check (polkit) decides who may see or add each one.
-//! - **Mac:** not built yet. `networksetup` takes the password on its command line; the route
-//!   that keeps it off is `networksetup` without the password and the System keychain item
-//!   added through `security`'s own command reader on its standard input, which needs the
-//!   administrator helper. Until then these networks are a guided step.
+//! - **Mac** (30 October 2026): read with the system's own tools: the Wi-Fi device and its saved
+//!   networks from `networksetup`, and each network's password from its item in the System
+//!   keychain with `security find-generic-password -w`, which macOS itself guards with its own
+//!   administrator prompt (PCTwin never sees the administrator's password and never bypasses the
+//!   prompt; macOS asks once for each network, since each item has its own access list). The
+//!   password comes back only on the tool's standard output, into wiped memory. A network with no
+//!   keychain item may be open or an organisation's: it is not moved (never guessed).
+//!   Added on a new Mac as a configuration profile (`com.apple.wifi.managed`, Apple's own
+//!   format for saved networks), written into a fresh owner-only folder and handed to macOS with
+//!   `open`: macOS shows it in System Settings, where the person installs it with the
+//!   administrator's password (one approval for every network). The password is never on a
+//!   command line (`networksetup -addpreferredwirelessnetworkatindex` would put it there, where
+//!   other programs on the laptop can read it). The profile file is removed when PCTwin stops
+//!   waiting ([`MacProfile`] dropped), and a folder a crash left behind at the next start
+//!   ([`sweep_leftovers`]). A network counts as added only once `networksetup` lists it.
+//!   Removing the profile in System Settings removes its networks again.
 
 use std::path::{Path, PathBuf};
 
@@ -759,4 +771,275 @@ pub fn import_nm(runner: &mut dyn Runner, n: &Network) -> Result<(), WifiError> 
     } else {
         Err(WifiError::NotThere)
     }
+}
+
+/* ---------- Mac: networksetup, the System keychain, a configuration profile ---------- */
+
+/// The System keychain, where macOS keeps saved Wi-Fi passwords.
+pub const SYSTEM_KEYCHAIN: &str = "/Library/Keychains/System.keychain";
+/// The kind macOS gives a saved Wi-Fi password's keychain item.
+pub const AIRPORT_KIND: &str = "AirPort network password";
+
+/// The Wi-Fi device (`en0`) in `networksetup -listallhardwareports`: the device after the
+/// `Hardware Port: Wi-Fi` line (`AirPort` on older systems).
+pub fn mac_wifi_device(ports: &str) -> Option<String> {
+    let mut wifi = false;
+    for l in ports.lines().map(str::trim) {
+        if let Some(port) = l.strip_prefix("Hardware Port:") {
+            wifi = matches!(port.trim(), "Wi-Fi" | "AirPort");
+        } else if let Some(dev) = l.strip_prefix("Device:")
+            && wifi
+        {
+            let dev = dev.trim();
+            let plain = !dev.is_empty()
+                && dev.len() <= 15
+                && dev.bytes().all(|b| b.is_ascii_alphanumeric());
+            return plain.then(|| dev.to_string());
+        }
+    }
+    None
+}
+
+/// The saved networks in `networksetup -listpreferredwirelessnetworks <device>`: one per line
+/// after its heading, each indented by one tab (a name's own spaces kept).
+pub fn mac_preferred(list: &str) -> Vec<String> {
+    list.lines()
+        .filter_map(|l| l.strip_prefix('\t'))
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .filter(|s| !s.is_empty() && s.len() <= 32 && !s.chars().any(char::is_control))
+        .take(MAX_PROFILES)
+        .collect()
+}
+
+fn mac_device(runner: &mut dyn Runner) -> Result<String, WifiError> {
+    let ports = runner
+        .run(Tool::Networksetup, &["-listallhardwareports"])
+        .map_err(|_| WifiError::Tool)?;
+    if !ports.ok {
+        return Err(WifiError::Tool);
+    }
+    mac_wifi_device(&ports.stdout).ok_or(WifiError::Tool)
+}
+
+/// The networks saved on this Mac, by name.
+pub fn mac_saved(runner: &mut dyn Runner) -> Result<Vec<String>, WifiError> {
+    let dev = mac_device(runner)?;
+    let list = runner
+        .run(
+            Tool::Networksetup,
+            &["-listpreferredwirelessnetworks", &dev],
+        )
+        .map_err(|_| WifiError::Tool)?;
+    if !list.ok {
+        return Err(WifiError::Tool);
+    }
+    Ok(mac_preferred(&list.stdout))
+}
+
+/// Every saved Wi-Fi network on this Mac with a password, with the password when `with_keys`
+/// (see the module notes): macOS asks for the administrator for each one; a network whose
+/// password it does not give moves without it.
+pub fn export_mac(runner: &mut dyn Runner, with_keys: bool) -> Result<Vec<Network>, WifiError> {
+    let mut nets = Vec::new();
+    for ssid in mac_saved(runner)? {
+        // The item's attributes only: no password, no prompt.
+        let item = runner.run(
+            Tool::Security,
+            &[
+                "find-generic-password",
+                "-D",
+                AIRPORT_KIND,
+                "-a",
+                &ssid,
+                SYSTEM_KEYCHAIN,
+            ],
+        );
+        if !item.is_ok_and(|o| o.ok) {
+            // No password item: open, or an organisation's network. Never guessed.
+            continue;
+        }
+        let secret = if with_keys {
+            runner
+                .run_secret(
+                    Tool::Security,
+                    &[
+                        "find-generic-password",
+                        "-D",
+                        AIRPORT_KIND,
+                        "-a",
+                        &ssid,
+                        "-w",
+                        SYSTEM_KEYCHAIN,
+                    ],
+                    None,
+                )
+                .ok()
+                .filter(|o| o.ok)
+                .and_then(|o| {
+                    let p = o.stdout.strip_suffix('\n').unwrap_or(&o.stdout);
+                    (!p.is_empty() && p.len() <= 64 && !p.chars().any(char::is_control))
+                        .then(|| Secret::new(Zeroizing::new(p.to_string())))
+                })
+        } else {
+            None
+        };
+        nets.push(Network {
+            name: ssid.clone(),
+            ssid,
+            hidden: false,
+            auto_connect: true,
+            // A Mac's item does not say WPA2 or WPA3; WPA2's name is the one every system reads
+            // (the Mac's own profile below asks for any WPA personal network).
+            security: Security::Personal {
+                auth: "WPA2PSK".into(),
+                encryption: "AES".into(),
+            },
+            secret,
+        });
+    }
+    Ok(nets)
+}
+
+fn uuid(mut b: [u8; 16]) -> String {
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h: String = b.iter().map(|x| format!("{x:02X}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    )
+}
+
+/// The configuration profile that adds `nets` on a Mac (Apple's `com.apple.wifi.managed`
+/// payload, one for each network), its identifiers from `random` (16 bytes for the profile and
+/// 16 for each network). Only open and password networks; the passwords are written only into
+/// the returned buffer, which is wiped when dropped.
+pub fn mac_profile(nets: &[&Network], random: &[u8]) -> Result<Zeroizing<String>, WifiError> {
+    if nets.is_empty() || nets.len() > MAX_PROFILES || random.len() < 16 * (nets.len() + 1) {
+        return Err(WifiError::Tool);
+    }
+    let id = |i: usize| -> String {
+        let mut b = [0u8; 16];
+        b.copy_from_slice(&random[16 * i..16 * (i + 1)]);
+        uuid(b)
+    };
+    let bad = |s: &str| s.is_empty() || s.len() > 32 || s.chars().any(char::is_control);
+    let tf = |b: bool| if b { "<true/>" } else { "<false/>" };
+    let mut x = Zeroizing::new(String::with_capacity(1024 * (nets.len() + 1)));
+    x.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>PayloadContent</key><array>");
+    for (i, n) in nets.iter().enumerate() {
+        if bad(&n.ssid) {
+            return Err(WifiError::BadName);
+        }
+        let (kind, key) = match &n.security {
+            Security::Open => ("None", None),
+            Security::Personal { .. } => {
+                let s = n.secret.as_ref().ok_or(WifiError::Unreadable)?;
+                let p = s.expose();
+                if p.is_empty() || p.len() > 64 || p.chars().any(char::is_control) {
+                    return Err(WifiError::Unreadable);
+                }
+                ("WPA", Some(p))
+            }
+            Security::Enterprise => return Err(WifiError::Enterprise),
+            Security::Other(_) => return Err(WifiError::Unreadable),
+        };
+        let uid = id(i + 1);
+        x.push_str(&format!(
+            "<dict><key>PayloadType</key><string>com.apple.wifi.managed</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.creoleailabs.pctwin.wifi.{uid}</string><key>PayloadUUID</key><string>{uid}</string><key>PayloadDisplayName</key><string>{name}</string><key>SSID_STR</key><string>{name}</string><key>HIDDEN_NETWORK</key>{hidden}<key>AutoJoin</key>{auto}<key>EncryptionType</key><string>{kind}</string>",
+            name = escape(&n.ssid),
+            hidden = tf(n.hidden),
+            auto = tf(n.auto_connect),
+        ));
+        if let Some(p) = key {
+            x.push_str("<key>Password</key><string>");
+            x.push_str(&escape(p));
+            x.push_str("</string>");
+        }
+        x.push_str("</dict>");
+    }
+    let uid = id(0);
+    x.push_str(&format!(
+        "</array><key>PayloadType</key><string>Configuration</string><key>PayloadVersion</key><integer>1</integer><key>PayloadIdentifier</key><string>com.creoleailabs.pctwin.wifi.{uid}</string><key>PayloadUUID</key><string>{uid}</string><key>PayloadDisplayName</key><string>Wi-Fi networks from your old laptop (PCTwin)</string><key>PayloadOrganization</key><string>PCTwin</string><key>PayloadScope</key><string>System</string><key>PayloadRemovalDisallowed</key><false/></dict></plist>\n"
+    ));
+    Ok(x)
+}
+
+/// A profile handed to macOS, waiting for the person to install it in System Settings. Its file
+/// (and folder) is removed when this is dropped.
+pub struct MacProfile {
+    folder: TempFolder,
+    /// The networks it adds, by name.
+    pub ssids: Vec<String>,
+}
+
+impl MacProfile {
+    /// The profile file.
+    pub fn file(&self) -> PathBuf {
+        self.folder.0.join("PCTwin Wi-Fi.mobileconfig")
+    }
+}
+
+/// Writes the profile for `nets` into a fresh owner-only folder in `parent` and hands it to
+/// macOS (`open`), which shows it in System Settings for the person to install (see the module
+/// notes). Nothing is added until they do; [`added_mac`] says which are there.
+pub fn offer_mac(
+    runner: &mut dyn Runner,
+    folders: &dyn PrivateFolders,
+    parent: &Path,
+    nets: &[&Network],
+) -> Result<MacProfile, WifiError> {
+    let mut random = vec![0u8; 16 * (nets.len() + 1)];
+    getrandom::fill(&mut random).map_err(|_| WifiError::Tool)?;
+    let profile = mac_profile(nets, &random)?;
+    let offered = MacProfile {
+        folder: fresh_folder(folders, parent)?,
+        ssids: nets.iter().map(|n| n.ssid.clone()).collect(),
+    };
+    let file = offered.file();
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+            .map_err(|_| WifiError::Tool)?;
+        f.write_all(profile.as_bytes())
+            .map_err(|_| WifiError::Tool)?;
+    }
+    drop(profile);
+    let path = file.to_str().ok_or(WifiError::BadName)?;
+    let opened = runner
+        .run(Tool::Open, &[path])
+        .map_err(|_| WifiError::Tool)?;
+    if !opened.ok {
+        return Err(WifiError::Tool);
+    }
+    Ok(offered)
+}
+
+/// The System Settings page where the person installs a downloaded profile.
+pub const PROFILES_PAGE: &str = "x-apple.systempreferences:com.apple.Profiles-Settings.extension";
+
+/// Opens System Settings at its profiles page.
+pub fn open_profiles_page(runner: &mut dyn Runner) -> Result<(), WifiError> {
+    match runner.run(Tool::Open, &[PROFILES_PAGE]) {
+        Ok(o) if o.ok => Ok(()),
+        _ => Err(WifiError::Tool),
+    }
+}
+
+/// Which of the offered networks this Mac now lists as saved (the person installed the
+/// profile): one answer for each, in order.
+pub fn added_mac(runner: &mut dyn Runner, offered: &MacProfile) -> Result<Vec<bool>, WifiError> {
+    let now = mac_saved(runner)?;
+    Ok(offered
+        .ssids
+        .iter()
+        .map(|s| now.iter().any(|n| n == s))
+        .collect())
 }

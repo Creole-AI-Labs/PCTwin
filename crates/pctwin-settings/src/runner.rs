@@ -28,6 +28,13 @@ pub enum Tool {
     /// Linux NetworkManager's `nmcli` (Wi-Fi profiles; secrets only on its standard input and
     /// output, never on its command line: [`Runner::run_secret`]).
     Nmcli,
+    /// macOS `networksetup` (only reading the Wi-Fi device and its saved networks).
+    Networksetup,
+    /// macOS `security` (only `find-generic-password` for a saved Wi-Fi network's item in the
+    /// System keychain; its password only on standard output, after macOS's own prompt).
+    Security,
+    /// macOS `open` (only a file PCTwin wrote, or a System Settings page).
+    Open,
 }
 
 impl Tool {
@@ -42,6 +49,9 @@ impl Tool {
             Tool::XdgSettings => "/usr/bin/xdg-settings".into(),
             Tool::Dconf => "/usr/bin/dconf".into(),
             Tool::Nmcli => "/usr/bin/nmcli".into(),
+            Tool::Networksetup => "/usr/sbin/networksetup".into(),
+            Tool::Security => "/usr/bin/security".into(),
+            Tool::Open => "/usr/bin/open".into(),
             Tool::Netsh => {
                 let root = std::env::var_os("SystemRoot")
                     .map(|r| r.to_string_lossy().into_owned())
