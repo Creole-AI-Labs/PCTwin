@@ -331,6 +331,17 @@ dependencies = [
 
 [[package]]
 name = "cfb"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a347dcabdae9c31b0825fd6a8bed285ec9c2acb89c47827126d52fa4f59cece3"
+dependencies = [
+ "fnv",
+ "uuid",
+ "web-time",
+]
+
+[[package]]
+name = "cfb"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f13298d9178622b7916ec5d01d470425c04273c8ed07e87b1c38b34c4f4612b"
@@ -1405,6 +1416,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "msi"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0325f8473ef1f5c38ee42345e2cd1678299cbbfa169d1776654a2a682867420"
+dependencies = [
+ "byteorder",
+ "cfb 0.14.0",
+ "encoding_rs",
+ "uuid",
+]
+
+[[package]]
 name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1627,6 +1650,7 @@ dependencies = [
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-settings",
+ "pctwin-special",
  "pctwin-transfer",
  "pctwin-types",
  "serde_json",
@@ -1669,6 +1693,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "getrandom 0.4.3",
+ "msi",
  "pctwin-catalogue",
  "pctwin-gate",
  "pctwin-grant",
@@ -1758,7 +1783,7 @@ version = "0.1.0"
 dependencies = [
  "authenticode",
  "base64 0.22.1",
- "cfb",
+ "cfb 0.15.0",
  "cms",
  "const-oid 0.9.6",
  "der",
@@ -1807,10 +1832,13 @@ dependencies = [
  "cap-fs-ext",
  "cap-primitives",
  "pctwin-catalogue",
+ "pctwin-journal",
  "pctwin-record",
  "pctwin-scan",
+ "pctwin-transfer",
  "pctwin-types",
  "serde",
+ "serde_json",
  "sysinfo",
  "thiserror 2.0.21",
  "unicode-normalization",
@@ -1901,7 +1929,7 @@ name = "pctwin-scan"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "cfb",
+ "cfb 0.15.0",
  "dirs",
  "lnk",
  "pctwin-catalogue",
@@ -1917,6 +1945,7 @@ dependencies = [
  "thiserror 2.0.21",
  "thread-priority",
  "winapi-util",
+ "winreg",
 ]
 
 [[package]]
@@ -1965,6 +1994,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
+ "winreg",
 ]
 
 [[package]]
