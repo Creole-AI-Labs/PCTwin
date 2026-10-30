@@ -2874,3 +2874,10 @@ progress-current-open-in = PCTwin 复制 { $name } 期间，{ $app } 无法保�
 fullmove-rebuilding-waiting-wifi = { $minutes ->
        *[other] 正在等待免费 Wi-Fi 后再下载应用：最多再等 { $minutes } 分钟
     }
+
+# 2.5 games
+special-note-saves-in-launcher-cloud = 你的游戏启动器会在线保存这些存档。在新笔记本电脑上登录启动器后，它们就会回来，所以除非你勾选，PCTwin 不会复制它们。旧笔记本电脑上的副本保持不变。
+special-note-save-may-not-work-here = 这些存档来自另一种系统。PCTwin 会把它们保留在你的新笔记本电脑上，但那里的游戏可能无法打开它们。
+special-note-store-protected-saves = 商店会自己保管这些存档，所以 PCTwin 无法复制它们。在新笔记本电脑上登录商店并安装游戏后，它们就会回来。
+special-note-mod-programs-held = 这个游戏的一些附加内容是程序。PCTwin 会列出它们，但不会复制或启用它们。请从它们的制作者那里重新获取。
+special-note-launcher-verify = 在新笔记本电脑上安装启动器并登录。然后使用它自己的验证或定位步骤，让它找到并检查你的游戏。只有在你选择时，PCTwin 才会复制已安装的游戏。

@@ -404,6 +404,21 @@
           "notes": [
             {
               "note": "cloud-saves-may-differ"
+            },
+            {
+              "note": "saves-in-launcher-cloud"
+            },
+            {
+              "note": "save-may-not-work-here"
+            },
+            {
+              "note": "store-protected-saves"
+            },
+            {
+              "note": "mod-programs-held"
+            },
+            {
+              "note": "launcher-verify"
             }
           ],
           "secret": null,
