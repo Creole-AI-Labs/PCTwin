@@ -10,7 +10,11 @@
           "/usr/lib/pctwin/pctwin-handover": "binaries/plain/pctwin-handover",
           "/usr/lib/pctwin/pctwin-parser": "binaries/plain/pctwin-parser",
           "/usr/share/polkit-1/actions/com.creoleailabs.pctwin.helper.policy": "../../crates/pctwin-helper-os/packaging/linux/com.creoleailabs.pctwin.helper.policy"
-        }
+        },
+        "desktopTemplate": "bundle/pctwin.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "bundle/pctwin.desktop"
       }
     }
   }

@@ -213,6 +213,11 @@
     Pop $R8
     pctwin_no_rule:
   ${EndIf}
+  ; Right-click > Send to > PCTwin (`handed.rs`): Windows adds the chosen paths after `--send`.
+  ; Send to has no all-users folder, so it goes to the person installing (usually the mover).
+  SetShellVarContext current
+  CreateShortCut "$SENDTO\PCTwin.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "--send" "$INSTDIR\${MAINBINARYNAME}.exe" 0
+  SetShellVarContext all
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -232,4 +237,7 @@
   !insertmacro PCTWIN_CLOSED
   nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${PCTWIN_FIREWALL_RULE}"'
   Pop $R8
+  SetShellVarContext current
+  Delete "$SENDTO\PCTwin.lnk"
+  SetShellVarContext all
 !macroend

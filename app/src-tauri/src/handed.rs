@@ -5,9 +5,9 @@
 //!
 //! - **Windows "Send to"**: a shortcut named "PCTwin" in the person's Send to folder
 //!   (`shell:sendto`), target `PCTwin.exe --send`; Windows adds the chosen paths after it. Made
-//!   by the installer (installer notes for the Chief).
-//! - **Linux file managers**: the app's `.desktop` file with `Exec=pctwin --send %F`; Nautilus,
-//!   Dolphin and Nemo list it under Open With.
+//!   and removed by the installer (`windows/hooks.nsh`), for the person installing.
+//! - **Linux file managers**: the app's `.desktop` file (`bundle/pctwin.desktop`, deb and rpm)
+//!   with `Exec=pctwin --send %F`; Nautilus, Dolphin and Nemo list it under Open With.
 //! - **Mac**: the app declares that it opens any file and folder (`CFBundleDocumentTypes`); Open
 //!   With and a drop on the Dock icon hand the files to the running app as an "opened" run
 //!   event, which [`opened`] reads; a small plugin inside `app()` (lib.rs) passes them to
