@@ -52,6 +52,78 @@ const MAX_READ: u64 = crate::content::MAX_JSON as u64;
 pub const BOOKMARKS_FILE: &str = "Bookmarks.html";
 pub const LISTS_FILE: &str = "Open pages and add-ons.html";
 
+/// The words of the files PCTwin writes for the person, in their language: the screens send
+/// them ([`set_words`]); until then, and for any word that is not safe, the English ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Words {
+    /// The bookmarks file's name (ends `.html`).
+    pub bookmarks_file: String,
+    /// The list page's name (ends `.html`).
+    pub lists_file: String,
+    /// The bookmarks file's title.
+    pub bookmarks_title: String,
+    /// The list page's headings.
+    pub add_ons: String,
+    pub open_pages: String,
+}
+
+impl Default for Words {
+    fn default() -> Self {
+        Self {
+            bookmarks_file: BOOKMARKS_FILE.into(),
+            lists_file: LISTS_FILE.into(),
+            bookmarks_title: "Bookmarks".into(),
+            add_ons: "Add-ons".into(),
+            open_pages: "Open pages".into(),
+        }
+    }
+}
+
+static WORDS: std::sync::RwLock<Option<Words>> = std::sync::RwLock::new(None);
+
+/// A file name the person's words may give: one plain name ending `.html`, nothing a system
+/// treats specially (no folder parts, no reserved marks, no control characters, no leading or
+/// trailing dot or space), at most 100 characters.
+pub fn file_name_ok(n: &str) -> bool {
+    let stem = n.strip_suffix(".html").unwrap_or("");
+    !stem.trim().is_empty()
+        && n.chars().count() <= 100
+        && !n.starts_with(['.', ' '])
+        && !stem.ends_with(['.', ' '])
+        && !n.chars().any(|c| {
+            c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+}
+
+fn text_ok(t: &str) -> bool {
+    !t.trim().is_empty() && t.chars().count() <= 100 && !t.chars().any(char::is_control)
+}
+
+/// Sets the words of the files written from now on. False (and the words stay as they were) when
+/// any is not safe.
+pub fn set_words(w: Words) -> bool {
+    let ok = file_name_ok(&w.bookmarks_file)
+        && file_name_ok(&w.lists_file)
+        && !w.bookmarks_file.eq_ignore_ascii_case(&w.lists_file)
+        && [&w.bookmarks_title, &w.add_ons, &w.open_pages]
+            .iter()
+            .all(|t| text_ok(t));
+    if ok && let Ok(mut g) = WORDS.write() {
+        *g = Some(w);
+        return true;
+    }
+    false
+}
+
+/// The words in use.
+pub fn words() -> Words {
+    WORDS
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_default()
+}
+
 /// Whether `url` is kept in a bookmarks file or a list: its scheme is one of [`SAFE_SCHEMES`].
 pub fn safe_address(url: &str) -> bool {
     url.split_once(':').is_some_and(|(scheme, rest)| {
@@ -89,6 +161,11 @@ pub struct Written {
 /// The standard bookmarks file (`NETSCAPE-Bookmark-file-1`, which every major browser imports)
 /// for `tree`, under the heading `name`.
 pub fn netscape_html(tree: &Tree, name: &str) -> Written {
+    netscape_html_in(tree, name, &words())
+}
+
+/// [`netscape_html`] with the words `w`.
+fn netscape_html_in(tree: &Tree, name: &str, w: &Words) -> Written {
     fn nodes(n: &[Node], depth: usize, out: &mut String, kept: &mut usize, dropped: &mut usize) {
         let pad = "    ".repeat(depth + 1);
         for n in n {
@@ -131,8 +208,10 @@ pub fn netscape_html(tree: &Tree, name: &str) -> Written {
     let mut html = String::from(
         "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n\
          <META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n\
-         <TITLE>Bookmarks</TITLE>\n",
+         <TITLE>",
     );
+    html.push_str(&escape(&w.bookmarks_title));
+    html.push_str("</TITLE>\n");
     html.push_str(&format!("<H1>{}</H1>\n<DL><p>\n", escape(name)));
     let (mut kept, mut dropped) = (0, 0);
     nodes(&tree.roots, 0, &mut html, &mut kept, &mut dropped);
@@ -148,6 +227,11 @@ pub fn netscape_html(tree: &Tree, name: &str) -> Written {
 /// person: no script and nothing that loads by itself (the page forbids it); an address is a link
 /// only when it is a page on the web, and nothing is ever opened for the person.
 pub fn lists_html(name: &str, add_ons: &[String], pages: &[Page]) -> Written {
+    lists_html_in(name, add_ons, pages, &words())
+}
+
+/// [`lists_html`] with the words `w`.
+fn lists_html_in(name: &str, add_ons: &[String], pages: &[Page], w: &Words) -> Written {
     let mut html = format!(
         "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n\
          <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'\">\n\
@@ -156,7 +240,7 @@ pub fn lists_html(name: &str, add_ons: &[String], pages: &[Page]) -> Written {
     );
     let (mut kept, mut dropped) = (0, 0);
     if !add_ons.is_empty() {
-        html.push_str("<h2>Add-ons</h2>\n<ul>\n");
+        html.push_str(&format!("<h2>{}</h2>\n<ul>\n", escape(&w.add_ons)));
         for a in add_ons {
             kept += 1;
             html.push_str(&format!("<li>{}</li>\n", escape(a)));
@@ -164,7 +248,7 @@ pub fn lists_html(name: &str, add_ons: &[String], pages: &[Page]) -> Written {
         html.push_str("</ul>\n");
     }
     if !pages.is_empty() {
-        html.push_str("<h2>Open pages</h2>\n<ul>\n");
+        html.push_str(&format!("<h2>{}</h2>\n<ul>\n", escape(&w.open_pages)));
         for p in pages {
             if !safe_address(&p.url) {
                 dropped += 1;
@@ -661,6 +745,7 @@ pub fn capture(
             format!("{dir}/{file}")
         }
     };
+    let words = words();
     for (dir, r) in &read {
         left_out = left_out.saturating_add(r.left_out);
         if let Some(t) = &r.tree {
@@ -669,7 +754,7 @@ pub fn capture(
             if w.kept > 0 {
                 bookmarks = bookmarks.saturating_add(w.kept as u32);
                 left_out = left_out.saturating_add(w.dropped as u32);
-                put(at(dir, BOOKMARKS_FILE), &w.html)?;
+                put(at(dir, &words.bookmarks_file), &w.html)?;
             }
         }
         let names: Vec<String> = r.add_ons.iter().cloned().collect();
@@ -679,7 +764,7 @@ pub fn capture(
                 add_ons = add_ons.saturating_add(names.len() as u32);
                 pages = pages.saturating_add((w.kept - names.len()) as u32);
                 left_out = left_out.saturating_add(w.dropped as u32);
-                put(at(dir, LISTS_FILE), &w.html)?;
+                put(at(dir, &words.lists_file), &w.html)?;
             }
         }
     }
@@ -880,5 +965,110 @@ mod tests {
         assert!(w.html.contains(">https://untitled.example/</a>"));
         assert!(!w.html.contains("javascript") && !w.html.contains("<script"));
         assert!(!w.html.to_lowercase().contains("onload"));
+    }
+}
+
+#[cfg(test)]
+mod words_tests {
+    use super::*;
+
+    #[test]
+    fn only_safe_words_are_taken_and_english_stays_until_then() {
+        let fr = Words {
+            bookmarks_file: "Favoris.html".into(),
+            lists_file: "Pages ouvertes et extensions.html".into(),
+            bookmarks_title: "Favoris".into(),
+            add_ons: "Extensions".into(),
+            open_pages: "Pages ouvertes".into(),
+        };
+        for bad in [
+            Words {
+                bookmarks_file: "../x.html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: "a\\b.html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: "Favoris.txt".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: ".html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: " .html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: ".x.html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: "x..html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: "a:b.html".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_file: format!("{}.html", "x".repeat(96)),
+                ..fr.clone()
+            },
+            Words {
+                lists_file: "favoris.HTML".into(),
+                bookmarks_file: "Favoris.HTML".into(),
+                ..fr.clone()
+            },
+            Words {
+                lists_file: "FAVORIS.html".into(),
+                ..fr.clone()
+            },
+            Words {
+                add_ons: "".into(),
+                ..fr.clone()
+            },
+            Words {
+                open_pages: "a\nb".into(),
+                ..fr.clone()
+            },
+            Words {
+                bookmarks_title: "x".repeat(101),
+                ..fr.clone()
+            },
+        ] {
+            assert!(!set_words(bad.clone()), "{bad:?}");
+        }
+        assert!(file_name_ok(&format!("{}.html", "x".repeat(95))));
+        assert!(file_name_ok("书签.html"));
+        // Taken whole when every word is safe (set here: no other test in this program sets them).
+        assert!(set_words(fr.clone()));
+        assert_eq!(words(), fr);
+        assert!(set_words(Words::default()));
+        let tree = Tree {
+            roots: vec![],
+            left_out: 0,
+        };
+        assert!(
+            netscape_html_in(&tree, "B", &fr)
+                .html
+                .contains("<TITLE>Favoris</TITLE>")
+        );
+        let page = lists_html_in(
+            "B",
+            &["A".into()],
+            &[Page {
+                title: "T".into(),
+                url: "https://example.org/".into(),
+            }],
+            &fr,
+        );
+        assert!(
+            page.html.contains("<h2>Extensions</h2>")
+                && page.html.contains("<h2>Pages ouvertes</h2>")
+        );
     }
 }

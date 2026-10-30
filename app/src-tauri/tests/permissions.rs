@@ -32,10 +32,11 @@ use tauri::{App, WebviewUrl, WebviewWindow};
 /// Exactly what the screens may call, 94 names: the app's ninety-one commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 121] = [
+const SCREENS_MAY_CALL: [&str; 122] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
+    "set_file_words",
     "pairing_old_start",
     "pairing_old_pick",
     "pairing_old_decline",
@@ -306,6 +307,7 @@ fn refused(cmd: &str, result: &Result<(), String>) -> bool {
 fn wrong_arguments(cmd: &str) -> Value {
     match cmd {
         "set_tray_labels" => json!({ "show": 1, "quit": 2 }),
+        "set_file_words" => json!({ "bookmarksFile": 1 }),
         "pairing_old_start" => json!({ "network": 5 }),
         "pairing_old_pick" => json!({ "round": "x", "number": "y" }),
         "pairing_old_decline" => json!({ "round": "x" }),

@@ -7,6 +7,7 @@
     "allow-set-window-mode",
     "allow-window-drag",
     "allow-set-tray-labels",
+    "allow-set-file-words",
     "allow-pairing-old-start",
     "allow-pairing-old-pick",
     "allow-pairing-old-decline",

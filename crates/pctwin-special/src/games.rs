@@ -430,6 +430,72 @@ impl Catalogues {
     }
 }
 
+// ---------- the move's own reader and plan ----------
+
+static READER: std::sync::OnceLock<&'static dyn GameReader> = std::sync::OnceLock::new();
+
+/// Installs the reader this program reads launcher records and save lists through, once (the
+/// app at its start with its parser processes, tests with theirs). False when one was installed
+/// already (that one stays).
+pub fn install_reader(reader: &'static dyn GameReader) -> bool {
+    READER.set(reader).is_ok()
+}
+
+/// No reader installed: nothing is read, every record is "not checked", never guessed.
+struct NoReader;
+
+impl GameReader for NoReader {
+    fn record(&self, _: RecordFormat, _: &[u8]) -> Result<Tree, ContentError> {
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
+    fn save_manifest(&self, _: &[u8], _: &Wanted) -> Result<ManifestRead, ContentError> {
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
+}
+
+const NO_READER: &str = "no parser process is installed to read it";
+
+/// The installed reader, or one that reads nothing.
+pub fn installed_reader() -> &'static dyn GameReader {
+    READER.get().copied().unwrap_or(&NoReader)
+}
+
+/// Adds games to the move's plan (`plan`, made by [`crate::api::plan_within`] for the person
+/// `owner` with home folder `home` on `from`): the saves the shipped rows and the person's own
+/// save list name are found, the plan's app data that holds them is marked as games with their
+/// notes ([`enrich`]), and saves no other part takes become components of their own
+/// ([`components`]). `env` gives the person's folder values (only local folders), `moving` says
+/// whether the move already takes a path with the person's own files.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_games(
+    plan: &mut Plan,
+    owner: &Owner,
+    home: &Path,
+    documents: Option<PathBuf>,
+    from: System,
+    to: System,
+    env: &dyn Fn(&str) -> Option<PathBuf>,
+    moving: &dyn Fn(&Path) -> bool,
+    until: Instant,
+) -> GameReport {
+    let places = Places::standard(from, home, documents, None, env);
+    let roots = crate::roots::roots_of(from, home, &|_| None);
+    let rows = Catalogues::shipped();
+    let report = find(&FindInput {
+        places: &places,
+        to,
+        roots: &roots,
+        rows: &rows,
+        reader: installed_reader(),
+        registry: &SystemRegistry,
+        moving,
+        until,
+    });
+    enrich(plan, &report, from, to);
+    plan.components.extend(components(owner, &report));
+    report
+}
+
 // ---------- the licence hook ----------
 
 /// Whether the Ludusavi manifest's data may be fetched: only once its licence is cleared.

@@ -70,6 +70,9 @@ describe("the approval screen's apps, settings and app data", () => {
     expect(body).toContain(text("fullmove-step-sign-in"));
     expect(body).toContain(text("fullmove-special-not-yet"));
     expect(body).toContain(text("fullmove-step-not-yet"));
+    // What each special category adds is said beside its step (2.5).
+    expect(body).toContain(text("special-note-search-rebuilds"));
+    expect(body).toContain(text("special-note-tool-settings-review"));
     // What stays behind is counted and said.
     expect(body).toContain(plain(text("fullmove-not-moved-private", { count: 40 })));
     expect(body).toContain(plain(text("fullmove-special-not-moved", { count: 7 })));

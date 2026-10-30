@@ -1883,6 +1883,7 @@ fn calls() -> Value {
             { "name": "set_window_mode", "args": [["mode", "mini"]] },
             { "name": "window_drag", "args": [] },
             { "name": "set_tray_labels", "args": [["show", "Show"], ["quit", "Quit"]] },
+            { "name": "set_file_words", "args": [["bookmarksFile", "Bookmarks.html"], ["listsFile", "Open pages and add-ons.html"], ["bookmarksTitle", "Bookmarks"], ["addOns", "Add-ons"], ["openPages", "Open pages"]] },
             { "name": "pairing_old_start", "args": [["network", "Wi-Fi"]] },
             { "name": "pairing_old_pick", "args": [["round", 1], ["number", 42]] },
             { "name": "pairing_old_decline", "args": [["round", 1]] },

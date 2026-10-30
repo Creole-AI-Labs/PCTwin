@@ -58,9 +58,12 @@ mod updates;
 /// folder read at once; each starts only when first asked.
 fn install_content_readers() {
     static CONTENTS: std::sync::OnceLock<pctwin_parse::Pool> = std::sync::OnceLock::new();
-    pctwin_special::content::install_reader(CONTENTS.get_or_init(|| {
+    let pool = CONTENTS.get_or_init(|| {
         pctwin_parse::Pool::beside_this_program(pctwin_special::classify::PLAN_THREADS)
-    }));
+    });
+    pctwin_special::content::install_reader(pool);
+    // Game launchers' records and save lists (2.5 games) go through the same processes.
+    pctwin_special::games::install_reader(pool);
 }
 
 /// Where the files a parser process reads come from: each source has its own process, so a file
@@ -243,6 +246,26 @@ fn set_tray_labels<R: Runtime>(
     Ok(())
 }
 
+/// The words of the files PCTwin writes for the person beside a browser's data (its bookmarks
+/// file and the list of its add-ons and open pages, 2.5), in the person's language, from the
+/// screens' translation files. False when a word is not safe: the English words stay.
+#[tauri::command]
+fn set_file_words(
+    bookmarks_file: String,
+    lists_file: String,
+    bookmarks_title: String,
+    add_ons: String,
+    open_pages: String,
+) -> bool {
+    pctwin_special::browser::set_words(pctwin_special::browser::Words {
+        bookmarks_file,
+        lists_file,
+        bookmarks_title,
+        add_ons,
+        open_pages,
+    })
+}
+
 fn tray_menu<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::Result<Menu<R>> {
     let show = MenuItem::with_id(app, TRAY_SHOW, show, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_QUIT, quit, true, None::<&str>)?;
@@ -278,6 +301,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         set_window_mode,
         window_drag,
         set_tray_labels,
+        set_file_words,
         pairing::pairing_old_start,
         pairing::pairing_old_pick,
         pairing::pairing_old_decline,

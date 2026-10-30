@@ -1528,6 +1528,10 @@ export const windowDrag = (): Promise<void> => runInApp("window_drag", {});
 /** The tray menu speaks the person's language too. */
 export const setTrayLabels = (show: string, quit: string): Promise<void> => runInApp("set_tray_labels", { show, quit });
 
+/** The words of the files PCTwin writes beside a browser's data, in the person's language (2.5). */
+export const setFileWords = (w: { bookmarksFile: string; listsFile: string; bookmarksTitle: string; addOns: string; openPages: string }): Promise<void> =>
+  runInApp("set_file_words", w);
+
 /** Our own site in the person's browser (the shell allows https://getpctwin.com/ only). Outside the app, a new tab. */
 export async function openInBrowser(url: string): Promise<void> {
   if (inApp()) {
