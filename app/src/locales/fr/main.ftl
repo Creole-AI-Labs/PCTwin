@@ -412,6 +412,12 @@ before-done =
 before-note = Ne saisissez ici ni mot de passe ni clé de récupération. Terminer cette liste ne veut pas dire que l’ancien ordinateur portable peut être effacé sans risque.
 before-empty = Rien à faire sur votre ancien ordinateur portable avant le transfert.
 before-continue = Revenir au plan du transfert
+before-keys-title = Clés de licence trouvées sur cet ordinateur portable
+before-keys-body = Ces applis gardent leur clé de licence sur cet ordinateur portable. Notez chaque clé ou conservez-la en lieu sûr avant de quitter cet ordinateur portable. PCTwin ne met aucune clé dans le transfert ni dans son rapport.
+before-keys-show = Afficher la clé
+before-keys-show-label = Afficher la clé de { $app }
+before-keys-hide = Masquer la clé
+before-keys-gone = PCTwin n’a pas pu relire cette clé. Ouvrez { $app } pour la trouver.
 
 ## S11 Get help with this task (a short problem code)
 
@@ -2183,6 +2189,9 @@ fullmove-note-registration = Votre ancien ordinateur l’indiquait comme enregis
 fullmove-note-product-id = Son identifiant de produit sur votre ancien ordinateur était { $id }.
 fullmove-note-extras = D’autres programmes sont arrivés avec elle : { $apps }. Supprimez-les dans les paramètres de votre ordinateur si vous n’en voulez pas.
 fullmove-note-rosetta = Conçue pour les Mac Intel, elle a besoin de Rosetta. Si ce Mac propose d’installer Rosetta quand vous ouvrez l’app, choisissez Installer.
+
+fullmove-note-came-from-maker = La copie de son programme d’installation sur votre ancien ordinateur portable venait du site web de l’éditeur.
+fullmove-note-came-from-elsewhere = La copie de son programme d’installation sur votre ancien ordinateur portable ne venait pas du site web de l’éditeur. PCTwin ne récupère les applis qu’auprès de l’éditeur.
 fullmove-data-lost = La connexion a été perdue avant l’arrivée de ces données. Elles sont toujours en sécurité sur votre ancien ordinateur. Lancez un nouveau transfert pour les apporter.
 fullmove-data-did-not-arrive = Ces données ne sont pas arrivées. Elles sont toujours en sécurité sur votre ancien ordinateur. Lancez un nouveau transfert pour les apporter.
 fullmove-data-app-open = L’application était ouverte sur votre ancien ordinateur, donc ses données n’ont pas été copiées. Fermez-la là-bas, puis lancez un nouveau transfert pour les apporter.

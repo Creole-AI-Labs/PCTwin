@@ -209,6 +209,14 @@ pub struct AppEntry {
     pub plan: AppPlan,
 }
 
+impl AppEntry {
+    /// The app the plan installs and checks against: for an app from another kind of laptop,
+    /// the same maker's edition for this one; else the old laptop's app.
+    pub fn subject(&self) -> &FoundApp {
+        self.plan.subject(&self.app)
+    }
+}
+
 /// What the apps the plan installs need from the internet, before the person approves (Task List
 /// 2.7): how many are downloaded. An installer found on the old laptop is never reused yet
 /// ([`crate::install`]), so every one is.
@@ -479,9 +487,15 @@ impl FullPlan {
             .found
             .iter()
             .filter(|a| movers(a, mover))
-            .map(|a| AppEntry {
-                app: a.clone(),
-                plan: routes::plan(a, here.target, &here_of(a, here.installed), &hints),
+            .map(|a| {
+                // An app from another kind of laptop: whether the same maker's edition is here.
+                let subject =
+                    routes::here_subject(a, here.target.system, routes::counterpart::shipped());
+                let is_here = here_of(subject.as_ref().unwrap_or(a), here.installed);
+                AppEntry {
+                    app: a.clone(),
+                    plan: routes::plan(a, here.target, &is_here, &hints),
+                }
             })
             .filter(|e| e.plan.disposition != Disposition::PartOfSystem)
             .collect();
@@ -625,7 +639,7 @@ impl FullPlan {
                 note: app_note(&e.plan),
                 undo_if_updated: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(Promise::KeepsNewer),
-                tested: Some(self.tested(&e.app)),
+                tested: Some(self.tested(e.subject())),
                 update: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(at as u32),
             });
@@ -870,9 +884,12 @@ mod tests {
             sign_in: false,
             registration: vec![],
             why: None,
+            choices: vec![],
+            trail: None,
         };
         let mut p = AppPlan {
             disposition: Disposition::Install,
+            stand_in: None,
             routes: vec![
                 Route::MacAppStore { adam_id: 1 },
                 Route::Cask {
@@ -1140,6 +1157,7 @@ mod tests {
     fn routes(routes: Vec<Route>) -> AppPlan {
         AppPlan {
             disposition: Disposition::Install,
+            stand_in: None,
             routes,
             flags: vec![],
             card: routes::Card {
@@ -1151,6 +1169,8 @@ mod tests {
                 sign_in: false,
                 registration: vec![],
                 why: None,
+                choices: vec![],
+                trail: None,
             },
         }
     }
@@ -1381,5 +1401,64 @@ mod tests {
             |c| c.title == Title::Key(SPECIAL_NOT_YET) && c.needs == Some(Reason::FinishByHand)
         ));
         assert!(fresh.changes_anything());
+    }
+
+    /// Review finding (30 October 2026): an app by the same maker as a counterpart row's app is
+    /// not that app. Google Drive from Windows, going to a Mac that has Chrome, is not "already
+    /// here"; Chrome from Windows is.
+    #[test]
+    fn another_app_by_the_same_maker_is_never_its_counterpart_here() {
+        use pctwin_record::{
+            AppArch, AppMaker, AppSystem, FoundWhere, Owner, RegistryView, SignerId,
+        };
+        let windows = |name: &str| FoundApp {
+            name: name.into(),
+            version: Some("1.0".into()),
+            publisher: Some("Google LLC".into()),
+            owner: Owner::Shared,
+            system: AppSystem::Windows,
+            found: FoundWhere::WindowsEntry {
+                view: RegistryView::Machine,
+                key: name.into(),
+                product_code: None,
+            },
+            arch: AppArch::UNKNOWN,
+            maker: AppMaker::Windows(Box::new(SignerId {
+                organization: Some("Google LLC".into()),
+                country: Some("US".into()),
+                ..Default::default()
+            })),
+            web: None,
+            update_feed: None,
+            installers: vec![],
+            notes: vec![],
+        };
+        let chrome_on_mac = FoundApp {
+            name: "Google Chrome".into(),
+            publisher: None,
+            system: AppSystem::Mac,
+            found: FoundWhere::MacBundle {
+                bundle_id: "com.google.Chrome".into(),
+                folder: "Google Chrome.app".into(),
+                app_store_id: None,
+            },
+            maker: AppMaker::MacTeam {
+                team_id: "EQHXZ8M8AV".into(),
+            },
+            ..windows("Google Chrome")
+        };
+        let mac_list = AppList {
+            found: vec![chrome_on_mac],
+            not_read: vec![],
+        };
+        let here = |a: &FoundApp| {
+            let subject = routes::here_subject(a, AppSystem::Mac, routes::counterpart::shipped());
+            here_of(subject.as_ref().unwrap_or(a), &mac_list)
+        };
+        assert_eq!(here(&windows("Google Drive")), Here::Absent);
+        assert!(matches!(
+            here(&windows("Google Chrome")),
+            Here::Present { .. }
+        ));
     }
 }

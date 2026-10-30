@@ -408,6 +408,12 @@ before-done =
 before-note = Do not type passwords or recovery keys here. Finishing this list does not mean the old laptop is safe to wipe.
 before-empty = Nothing needs doing on your old laptop before the move.
 before-continue = Return to the move plan
+before-keys-title = Licence keys found on this laptop
+before-keys-body = These apps keep their licence key on this laptop. Write each key down or keep it somewhere safe before you leave this laptop. PCTwin does not put keys in the move or its report.
+before-keys-show = Show key
+before-keys-show-label = Show key for { $app }
+before-keys-hide = Hide key
+before-keys-gone = PCTwin could not read this key again. Open { $app } to find it.
 
 ## S11 Get help with this task (a short problem code)
 
@@ -1987,6 +1993,9 @@ fullmove-note-registration = Your old laptop listed it as registered to { $who }
 fullmove-note-product-id = Its product ID on your old laptop was { $id }.
 fullmove-note-extras = Other programs came with it: { $apps }. Remove them in your laptop’s settings if you do not want them.
 fullmove-note-rosetta = Made for Intel Macs, so it needs Rosetta. If this Mac offers to install Rosetta when you open the app, choose Install.
+
+fullmove-note-came-from-maker = Your old laptop’s copy of its installer came from the maker’s own website.
+fullmove-note-came-from-elsewhere = Your old laptop’s copy of its installer did not come from the maker’s own website. PCTwin gets apps only from the maker.
 fullmove-data-lost = The connection was lost before this data arrived. It is still safe on your old laptop. Start a new move to bring it.
 fullmove-data-did-not-arrive = This data did not arrive. It is still safe on your old laptop. Start a new move to bring it.
 fullmove-data-app-open = The app was open on your old laptop, so its data was not copied. Close the app there, then start a new move to bring it.

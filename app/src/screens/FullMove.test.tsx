@@ -168,6 +168,9 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(plain(text("fullmove-note-extras", { apps: "Writer Helper" })));
     // An app made for Intel Macs says it needs Rosetta.
     expect(body).toContain(text("fullmove-note-rosetta"));
+    // Where its installer came from: only the yes or no, never an address.
+    expect(body).toContain(plain(text("fullmove-note-came-from-elsewhere")));
+    expect(body).not.toContain("http");
     expect(body).toContain(text("fullmove-outcome-fresh"));
     // Gap 2: each reason in words, with the folder for app data landed beside.
     for (const why of ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed"]) {

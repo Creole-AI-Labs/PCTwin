@@ -424,7 +424,9 @@ fn file_plan(name: &str, bytes: &[u8]) -> FileOutcome {
         from: System::Windows,
         to: System::Windows,
         home_old: r"C:\Users\ada",
-        home_new: r"C:\Users\ada",
+        // The person's home on the new laptop holds where the move put their documents: a
+        // path is only ever pointed inside it.
+        home_new: r"D:\New",
         running: &e.running,
         versions: &e.versions,
         folder_renames: &e.renames,

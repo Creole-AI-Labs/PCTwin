@@ -134,6 +134,10 @@
               "note": "registration",
               "owner": "Ada",
               "productId": "12345-OEM"
+            },
+            {
+              "makersSite": false,
+              "note": "came-from"
             }
           ],
           "reason": "manual-install",

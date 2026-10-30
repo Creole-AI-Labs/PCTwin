@@ -214,6 +214,11 @@ pub enum AppNote {
         company: Option<String>,
         product_id: Option<String>,
     },
+    /// Whether the installer found for this app was downloaded from one of its maker's own sites,
+    /// as its download mark says, checked against the signed catalogue (Security Design, the
+    /// scan rules, 30 October 2026). Only this yes or no is kept: the address itself is never
+    /// kept, sent, logged or shown.
+    DownloadMark { makers_site: bool },
 }
 
 /// One app found on the old laptop.
@@ -420,7 +425,10 @@ impl FoundApp {
                 owner,
                 company,
                 product_id,
-            } = n;
+            } = n
+            else {
+                continue;
+            };
             opt(owner, MAX_APP_TEXT)?;
             opt(company, MAX_APP_TEXT)?;
             opt(product_id, MAX_APP_TEXT)?;
@@ -624,15 +632,22 @@ pub(crate) fn write_apps(out: &mut Vec<u8>, apps: &AppList) -> Result<(), Record
         }
         w.u8(a.notes.len() as u8);
         for n in &a.notes {
-            let AppNote::Registration {
-                owner,
-                company,
-                product_id,
-            } = n;
-            w.u8(0);
-            w.opt(owner);
-            w.opt(company);
-            w.opt(product_id);
+            match n {
+                AppNote::Registration {
+                    owner,
+                    company,
+                    product_id,
+                } => {
+                    w.u8(0);
+                    w.opt(owner);
+                    w.opt(company);
+                    w.opt(product_id);
+                }
+                AppNote::DownloadMark { makers_site } => {
+                    w.u8(1);
+                    w.u8(u8::from(*makers_site));
+                }
+            }
         }
     }
     w.u32(apps.not_read.len() as u32);
@@ -797,14 +812,21 @@ pub(crate) fn read_apps(rest: &mut &[u8]) -> Result<(AppList, u64), RecordError>
         }
         let mut notes = Vec::with_capacity(k);
         for _ in 0..k {
-            if r.u8()? != 0 {
-                return Err(bad("an unknown kind of note"));
+            match r.u8()? {
+                0 => notes.push(AppNote::Registration {
+                    owner: r.opt(MAX_APP_TEXT)?,
+                    company: r.opt(MAX_APP_TEXT)?,
+                    product_id: r.opt(MAX_APP_TEXT)?,
+                }),
+                1 => notes.push(AppNote::DownloadMark {
+                    makers_site: match r.u8()? {
+                        0 => false,
+                        1 => true,
+                        _ => return Err(bad("an unknown download mark answer")),
+                    },
+                }),
+                _ => return Err(bad("an unknown kind of note")),
             }
-            notes.push(AppNote::Registration {
-                owner: r.opt(MAX_APP_TEXT)?,
-                company: r.opt(MAX_APP_TEXT)?,
-                product_id: r.opt(MAX_APP_TEXT)?,
-            });
             r.held += 96;
         }
         found.push(FoundApp {
@@ -905,5 +927,65 @@ impl<'a> In<'a, '_> {
             2 => Owner::System,
             _ => return Err(bad("an unknown kind of owner")),
         })
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    fn app(notes: Vec<AppNote>) -> AppList {
+        AppList {
+            found: vec![FoundApp {
+                name: "Writer".into(),
+                version: None,
+                publisher: None,
+                owner: Owner::Shared,
+                system: AppSystem::Windows,
+                found: FoundWhere::WindowsEntry {
+                    view: RegistryView::Machine,
+                    key: "Writer".into(),
+                    product_code: None,
+                },
+                arch: AppArch::UNKNOWN,
+                maker: AppMaker::Unsigned,
+                web: None,
+                update_feed: None,
+                installers: vec![],
+                notes,
+            }],
+            not_read: vec![],
+        }
+    }
+
+    /// A download mark travels as its yes or no only, beside a registration.
+    #[test]
+    fn a_download_mark_note_crosses_as_a_yes_or_no() {
+        for makers_site in [true, false] {
+            let list = app(vec![
+                AppNote::Registration {
+                    owner: Some("Ada".into()),
+                    company: None,
+                    product_id: None,
+                },
+                AppNote::DownloadMark { makers_site },
+            ]);
+            list.validate().unwrap();
+            let mut out = Vec::new();
+            write_apps(&mut out, &list).unwrap();
+            let mut rest = &out[..];
+            assert_eq!(read_apps(&mut rest).unwrap().0, list);
+        }
+        // An answer other than yes or no is refused.
+        let mut out = Vec::new();
+        write_apps(
+            &mut out,
+            &app(vec![AppNote::DownloadMark { makers_site: true }]),
+        )
+        .unwrap();
+        let at = out.iter().rposition(|b| *b == 1).unwrap();
+        out[at] = 2;
+        let mut rest = &out[..];
+        assert!(read_apps(&mut rest).is_err());
     }
 }

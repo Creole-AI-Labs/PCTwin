@@ -390,6 +390,12 @@ before-done =
 before-note = 不要在这里输入密码或恢复密钥。完成这份列表并不代表旧笔记本电脑可以安全清空。
 before-empty = 迁移之前，旧笔记本电脑上没有需要处理的事项。
 before-continue = 返回迁移方案
+before-keys-title = 在这台笔记本电脑上找到的许可证密钥
+before-keys-body = 这些应用将其许可证密钥保存在这台笔记本电脑上。在离开这台笔记本电脑之前，请记下每个密钥或将其保存在安全的地方。PCTwin 不会将密钥放入迁移或其报告中。
+before-keys-show = 显示密钥
+before-keys-show-label = 显示 { $app } 的密钥
+before-keys-hide = 隐藏密钥
+before-keys-gone = PCTwin 无法再次读取此密钥。请打开 { $app } 查找它。
 
 ## S11 Get help with this task (a short problem code)
 
@@ -1869,6 +1875,9 @@ fullmove-note-registration = 你的旧电脑显示它注册在 { $who } 名下�
 fullmove-note-product-id = 它在旧电脑上的产品 ID 是 { $id }。
 fullmove-note-extras = 随它一起来了其他程序：{ $apps }。如果你不需要，请在电脑设置中删除它们。
 fullmove-note-rosetta = 这是为 Intel Mac 制作的，因此需要 Rosetta。打开该应用时，如果这台 Mac 提示安装 Rosetta，请选择“安装”。
+
+fullmove-note-came-from-maker = 您旧笔记本电脑上的安装程序副本来自制造商自己的网站。
+fullmove-note-came-from-elsewhere = 您旧笔记本电脑上的安装程序副本并非来自制造商自己的网站。PCTwin 只从制造商处获取应用。
 fullmove-data-lost = 这些数据到达前连接已断开。它们仍安全地保存在你的旧电脑上。开始新的移动即可带过来。
 fullmove-data-did-not-arrive = 这些数据没有到达。它们仍安全地保存在你的旧电脑上。开始新的移动即可带过来。
 fullmove-data-app-open = 这个应用在旧电脑上是打开的，所以它的数据没有复制。请在那里关闭应用，然后开始新的移动把它带过来。

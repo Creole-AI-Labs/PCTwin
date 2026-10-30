@@ -305,6 +305,83 @@
      "AUS Eastern Standard Time"
     ]
    ]
+  },
+  "vscode-keys": {
+   "columns": [
+    "windows",
+    "mac",
+    "linux"
+   ],
+   "rows": [
+    [
+     "ctrl",
+     "cmd",
+     "ctrl"
+    ],
+    [
+     "win",
+     "ctrl",
+     "meta"
+    ]
+   ]
+  },
+  "jetbrains-keys": {
+   "columns": [
+    "windows",
+    "mac",
+    "linux"
+   ],
+   "rows": [
+    [
+     "ctrl",
+     "meta",
+     "ctrl"
+    ],
+    [
+     "meta",
+     "ctrl",
+     "meta"
+    ]
+   ]
+  },
+  "jetbrains-keymaps": {
+   "columns": [
+    "windows",
+    "mac",
+    "linux"
+   ],
+   "rows": [
+    [
+     "$default",
+     "Mac OS X 10.5+",
+     "$default"
+    ],
+    [
+     "$default",
+     "Mac OS X 10.5+",
+     "Default for GNOME"
+    ],
+    [
+     "$default",
+     "Mac OS X 10.5+",
+     "Default for KDE"
+    ],
+    [
+     "$default",
+     "Mac OS X 10.5+",
+     "Default for XWin"
+    ],
+    [
+     "$default",
+     "Mac OS X",
+     "$default"
+    ],
+    [
+     "Eclipse",
+     "Eclipse (Mac OS X)",
+     "Eclipse"
+    ]
+   ]
   }
  },
  "settings": [
@@ -1056,6 +1133,9 @@
    "pages": {
     "windows": {
      "uri": "ms-settings:mousetouchpad"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Mouse-Settings.extension"
     }
    }
   },
@@ -1304,6 +1384,21 @@
      "read_only": true
     }
    },
+   "pages": {
+    "windows": {
+     "uri": "ms-settings:display"
+    },
+    "mac": {
+     "uri": "x-apple.systempreferences:com.apple.Displays-Settings.extension"
+    }
+   }
+  },
+  {
+   "id": "display.arrangement",
+   "value": {
+    "name": {}
+   },
+   "route": "guided",
    "pages": {
     "windows": {
      "uri": "ms-settings:display"
@@ -1705,7 +1800,12 @@
      "cross_os": [
       {
        "at": "*/key",
-       "rule": "swap-modifiers"
+       "rule": {
+        "translate": {
+         "table": "vscode-keys",
+         "keys": true
+        }
+       }
       }
      ]
     },
@@ -1762,6 +1862,40 @@
      "format": "opaque",
      "writer": "nobody"
     }
+   ],
+   "extensions": {
+    "places": [
+     {
+      "root": "home",
+      "path": ".vscode/extensions/extensions.json"
+     }
+    ],
+    "form": {
+     "json": {
+      "id": "identifier/id",
+      "source": "metadata/source",
+      "store_sources": [
+       "gallery"
+      ]
+     }
+    },
+    "store": "vscode-marketplace"
+   },
+   "recent": [
+    {
+     "root": "config",
+     "path": "Code/User/globalStorage/state.vscdb",
+     "key": "history.recentlyOpenedPathsList"
+    }
+   ],
+   "documents": [
+    {
+     "ending": ".code-workspace",
+     "at": [
+      "folders/*/path",
+      "folders/*/uri"
+     ]
+    }
    ]
   },
   {
@@ -1816,6 +1950,23 @@
     },
     {
      "root": "config",
+     "path": "JetBrains/*/options/keymap.xml",
+     "format": "xml",
+     "writer": "settings",
+     "default": "copy",
+     "rules": [
+      {
+       "at": "application/component/active_keymap/@name",
+       "rule": {
+        "translate": {
+         "table": "jetbrains-keymaps"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "root": "config",
      "path": "JetBrains/*/options/*.xml",
      "format": "xml",
      "writer": "settings",
@@ -1840,7 +1991,46 @@
      "path": "JetBrains/*/keymaps/*.xml",
      "format": "xml",
      "writer": "settings",
-     "default": "copy"
+     "default": "copy",
+     "cross_os": [
+      {
+       "at": "keymap/action/keyboard-shortcut/@first-keystroke",
+       "rule": {
+        "translate": {
+         "table": "jetbrains-keys",
+         "keys": true
+        }
+       }
+      },
+      {
+       "at": "keymap/action/keyboard-shortcut/@second-keystroke",
+       "rule": {
+        "translate": {
+         "table": "jetbrains-keys",
+         "keys": true
+        }
+       }
+      },
+      {
+       "at": "keymap/action/mouse-shortcut/@keystroke",
+       "rule": {
+        "translate": {
+         "table": "jetbrains-keys",
+         "keys": true
+        }
+       }
+      }
+     ],
+     "rules": [
+      {
+       "at": "keymap/@parent",
+       "rule": {
+        "translate": {
+         "table": "jetbrains-keymaps"
+        }
+       }
+      }
+     ]
     },
     {
      "root": "config",
@@ -1861,7 +2051,29 @@
      "format": "opaque",
      "writer": "nobody"
     }
-   ]
+   ],
+   "extensions": {
+    "places": [
+     {
+      "systems": [
+       "windows",
+       "mac"
+      ],
+      "root": "config",
+      "path": "JetBrains/*/plugins"
+     },
+     {
+      "systems": [
+       "gnome",
+       "kde",
+       "other-linux"
+      ],
+      "root": "local-data",
+      "path": "JetBrains/*"
+     }
+    ],
+    "form": "folder-names"
+   }
   }
  ],
  "exceptions": [

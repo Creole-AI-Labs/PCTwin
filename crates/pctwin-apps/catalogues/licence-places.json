@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "catalogue": "licence-places",
+  "version": 1,
+  "rows": [
+    {"id": "sublime-text-windows", "app": "Sublime Text", "system": "windows", "place": {"kind": "file", "under": "app-data", "path": "Sublime Text/Local/License.sublime_license"}},
+    {"id": "sublime-text-mac", "app": "Sublime Text", "system": "mac", "place": {"kind": "file", "under": "app-data", "path": "Sublime Text/Local/License.sublime_license"}},
+    {"id": "sublime-text-linux", "app": "Sublime Text", "system": "linux", "place": {"kind": "file", "under": "app-data", "path": "sublime-text/Local/License.sublime_license"}},
+    {"id": "winrar-windows", "app": "WinRAR", "system": "windows", "place": {"kind": "file", "under": "app-data", "path": "WinRAR/rarreg.key"}},
+    {"id": "beyond-compare-4-windows", "app": "Beyond Compare 4", "system": "windows", "place": {"kind": "file", "under": "app-data", "path": "Scooter Software/Beyond Compare 4/BC4Key.txt"}}
+  ]
+}

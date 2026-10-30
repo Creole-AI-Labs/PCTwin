@@ -1,9 +1,11 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { Button } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
+import type { KeyPlace } from "../bridge";
 import type { BeforeItem } from "../people";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
+import LicenceKeys from "./LicenceKeys";
 import { Heading } from "./PairParts";
 import "./people.css";
 
@@ -13,6 +15,10 @@ type Props = {
   /** The person ticked or unticked one. Their word only: PCTwin cannot see whether it was done. */
   onToggle: (id: string, done: boolean) => void;
   onContinue: () => void;
+  /** Apps on this laptop that keep a licence key in the open (the product key finder). */
+  keys?: readonly KeyPlace[];
+  /** Reads one of those keys again for the person who asked to see it. */
+  onShowKey?: (id: string) => Promise<string | null>;
 };
 
 /**
@@ -21,7 +27,7 @@ type Props = {
  * things that cannot move by copying. Each tick is the person's own check, kept apart from anything
  * PCTwin measured, and none of it is required: Continue always works.
  */
-export default function BeforeYouStart({ items, onBack, onToggle, onContinue }: Props) {
+export default function BeforeYouStart({ items, onBack, onToggle, onContinue, keys = [], onShowKey }: Props) {
   const { l10n } = useLocalization();
 
   return (
@@ -63,6 +69,8 @@ export default function BeforeYouStart({ items, onBack, onToggle, onContinue }: 
           ))}
         </ul>
       )}
+
+      {onShowKey && <LicenceKeys keys={keys} onShow={onShowKey} />}
 
       <div className="note">
         <Info />

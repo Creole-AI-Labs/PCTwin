@@ -375,8 +375,15 @@ impl<'a> WingetInstaller<'a> {
         let text = std::fs::read_to_string(&yaml).map_err(|_| manual())?;
         let m = Manifest::parse(&text).map_err(|_| manual())?;
         // The very app the old laptop had, never an older version.
-        winget::confirms(&m, &e.app).ok_or_else(manual)?;
-        if !pctwin_apps::version::not_a_downgrade(m.version.as_deref(), e.app.version.as_deref()) {
+        winget::confirms(&m, e.subject()).ok_or_else(manual)?;
+        // The build for this laptop's processor, never an emulated one.
+        if !winget::native_for(&m, self.arch) {
+            return Err(manual());
+        }
+        if !pctwin_apps::version::not_a_downgrade(
+            m.version.as_deref(),
+            e.subject().version.as_deref(),
+        ) {
             return Err(manual());
         }
         let kind = pctwin_apps::install::kind_of(
@@ -394,7 +401,7 @@ impl<'a> WingetInstaller<'a> {
             at as u64,
             sha,
             kind,
-            &e.app,
+            e.subject(),
             m.product_code_of_installer(),
             self.for_move,
         )
@@ -468,7 +475,7 @@ impl<'a> WingetInstaller<'a> {
 
     /// Installs one prepared download through the helper, then looks at what is really there.
     fn install_one(&mut self, p: &Prepared, entry: &AppEntry) -> AppResult {
-        let app = &entry.app;
+        let app = entry.subject();
         let Some(plan) = self.plan.clone() else {
             // The helper never ran (declined, or it could not start, such as a packages folder
             // it would not trust): nothing was installed; the person installs it.

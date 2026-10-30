@@ -370,6 +370,18 @@ impl One<'_> {
         if row.not_applicable.contains(&self.to) {
             return self.done(&old, Outcome::NotApplicable, Action::Leave(NOT_THERE));
         }
+        // The old system keeps this setting where no catalogue place can read it (a Mac's
+        // desktop picture, its display scaling): never "could not read". When the new laptop has
+        // a page or a place for it, or the setting is the person's step anyway, it is a guided
+        // step the person finishes on the new laptop, with nothing claimed as moved.
+        if matches!(reading, Reading::NotBuilt)
+            && !row.places.contains_key(&self.from)
+            && (row.route == Route::Guided
+                || row.pages.contains_key(&self.to)
+                || row.places.get(&self.to).is_some_and(|p| !p.read_only()))
+        {
+            return self.done(&old, Outcome::Guided, Action::Guided(None));
+        }
         let Some(value) = old.clone() else {
             let why = match reading {
                 Reading::Managed => MANAGED_BEFORE,
@@ -409,10 +421,9 @@ impl One<'_> {
             }
             Route::Native => {}
         }
-        let Some(place) = row.places.get(&self.to).filter(|p| !p.read_only()) else {
-            return self.done(&old, Outcome::Guided, Action::Guided(Some(value)));
-        };
-        // The value to use on the new laptop, before asking whether it can hold it.
+        let place = row.places.get(&self.to).filter(|p| !p.read_only());
+        // The value to use on the new laptop, before asking whether it can hold it. A file
+        // setting the person sets by hand is shown with where its file is on the new laptop.
         let wanted = match (&row.value, &value) {
             (ValueType::FilePath, SettingValue::Text(old_path)) => {
                 match self.files.arrival(old_path) {
@@ -447,6 +458,13 @@ impl One<'_> {
                 SettingValue::Text(out.join(","))
             }
             _ => value.clone(),
+        };
+        let Some(place) = place else {
+            let shown = match row.value {
+                ValueType::FilePath => wanted,
+                _ => value,
+            };
+            return self.done(&old, Outcome::Guided, Action::Guided(Some(shown)));
         };
         let held = self.hold(place, &wanted);
         let (outcome, mut new_value) = match held {

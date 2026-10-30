@@ -95,7 +95,10 @@ fn entry(app: FoundApp) -> AppEntry {
                 sign_in: false,
                 registration: vec![],
                 why: None,
+                choices: vec![],
+                trail: None,
             },
+            stand_in: None,
         },
         app,
     }
@@ -776,4 +779,24 @@ mod choices {
         let d = downloads_of(&[entry(app()), with_old(entry(app())), manual, not_installed]);
         assert_eq!(d.apps, 2);
     }
+}
+
+/// Task List 2.1, ARM and Intel: only the build for this laptop's processor is installed; a
+/// download winget fell back to for another processor (run through emulation) never reaches
+/// the helper.
+#[test]
+fn a_build_for_another_processor_never_reaches_the_helper() {
+    pctwin_parse::testing::install_readers();
+    let arm = run(
+        FakeWinget {
+            manifest: manifest(CODE, Some(sha(INSTALLER)))
+                .replace("Architecture: x64", "Architecture: arm64"),
+            bytes: INSTALLER.to_vec(),
+            calls: Default::default(),
+        },
+        FakeHelper::default(),
+    );
+    assert_eq!(arm.results[0].result.reason(), Some(Reason::ManualInstall));
+    assert!(arm.helper.started.is_empty());
+    assert!(arm.helper.staged.is_empty());
 }

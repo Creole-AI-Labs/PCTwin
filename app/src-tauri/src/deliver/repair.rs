@@ -572,7 +572,10 @@ pub(crate) mod tests {
                     sign_in: false,
                     registration: vec![],
                     why: None,
+                    choices: vec![],
+                    trail: None,
                 },
+                stand_in: None,
             },
         };
         FullPlan {

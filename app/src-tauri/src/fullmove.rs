@@ -359,12 +359,21 @@ fn linux_packages() -> Option<pctwin_apps::routes::LinuxPackages> {
         return None;
     }
     let file = |p: &str| std::fs::metadata(p).is_ok_and(|m| m.is_file());
-    if file("/var/lib/dpkg/status") {
-        Some(LinuxPackages::Apt)
-    } else if file("/usr/bin/rpm") && file("/usr/bin/dnf") {
-        Some(LinuxPackages::Dnf)
-    } else {
-        None
+    let apt = || file("/var/lib/dpkg/status");
+    let dnf = || file("/usr/bin/rpm") && (file("/usr/bin/dnf") || file("/usr/bin/dnf5"));
+    // The system's own name for its family first (Fedora, Rocky, Nobara: ID or ID_LIKE), and
+    // only if that family's tools are really here; then the tools alone.
+    let named = std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .ok()
+        .and_then(|t| LinuxPackages::from_os_release(&t));
+    match named {
+        Some(LinuxPackages::Apt) if apt() => Some(LinuxPackages::Apt),
+        Some(LinuxPackages::Dnf) if dnf() => Some(LinuxPackages::Dnf),
+        Some(_) => None,
+        None if apt() => Some(LinuxPackages::Apt),
+        None if dnf() => Some(LinuxPackages::Dnf),
+        None => None,
     }
 }
 
@@ -708,6 +717,10 @@ pub enum LineNote {
     Rosetta,
     /// Why its app data needs the person.
     Data(pctwin_fullmove::data::DataWhy),
+    /// Whether its installer on the old laptop came from the maker's own site, as its download
+    /// mark said: only this yes or no, never the address.
+    #[serde(rename_all = "camelCase")]
+    CameFrom { makers_site: bool },
 }
 
 /// An app already on this laptop, left as it is.
@@ -742,6 +755,9 @@ fn todo_notes(todo: &[pctwin_apps::after::Todo]) -> Vec<LineNote> {
             Todo::Rosetta => Some(LineNote::Rosetta),
             Todo::Extras(apps) => Some(LineNote::Extras {
                 apps: bounded(apps.iter().map(|a| name(a)).collect()).0,
+            }),
+            Todo::CameFrom { makers_site } => Some(LineNote::CameFrom {
+                makers_site: *makers_site,
             }),
         })
         .collect()

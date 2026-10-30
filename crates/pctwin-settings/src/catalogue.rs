@@ -607,9 +607,16 @@ pub enum Rule {
     RewritePath,
     /// A start-up hook: written switched off (`to`), the original kept for the person.
     Disable(serde_json::Value),
-    /// Keyboard shortcuts across Mac and the others: `ctrl` and `cmd` swapped. An equivalent:
-    /// the person confirms.
-    SwapModifiers,
+    /// Between systems, looked up in a catalogue table from the old system's column to the new
+    /// one's (`windows`, `mac`, `linux`): with `keys`, each key name of a keyboard shortcut
+    /// (`ctrl+k ctrl+c`, `ctrl shift A`) on its own, so `ctrl` becomes `cmd` on a Mac in one
+    /// editor and `meta` in another; otherwise the whole value (a keymap's name). Anything the
+    /// table does not name stays. An equivalent: the person confirms.
+    Translate {
+        table: String,
+        #[serde(default)]
+        keys: bool,
+    },
 }
 
 /// A rule for the fields whose path matches `at` (`/`-separated; `*` matches any one part; a
@@ -646,9 +653,61 @@ pub struct AppFile {
     pub rewrite_paths: bool,
     #[serde(default)]
     pub macros: BTreeMap<String, MacroRoot>,
-    /// Rules that apply only between a Mac and another system.
+    /// Rules that apply only between different systems (Windows, a Mac, Linux).
     #[serde(default)]
     pub cross_os: Vec<FieldRule>,
+}
+
+/// Where an app keeps the list of its add-ons (extensions, plugins) on some systems.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListPlace {
+    /// The systems this place is for; empty means every system.
+    #[serde(default)]
+    pub systems: Vec<System>,
+    pub root: SettingsRoot,
+    /// A file (for a list file) or a folder whose folders are the add-ons; `*` for a versioned
+    /// folder.
+    pub path: String,
+}
+
+/// How an add-on list is read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ListForm {
+    /// A JSON list of objects: the identifier at `id`, and where it came from at `source`
+    /// (`/`-separated); only those whose source is one of `store_sources` (or that name none)
+    /// may be asked for from the store.
+    Json {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+        #[serde(default)]
+        store_sources: Vec<String>,
+    },
+    /// Each folder is one add-on, known only by the folder's name.
+    FolderNames,
+}
+
+/// An app's add-ons, carried as a list ([`crate::extensions`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionList {
+    pub places: Vec<ListPlace>,
+    pub form: ListForm,
+    /// The editor's own store, which installs an add-on by its identifier. None: the person
+    /// installs each one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+}
+
+impl ExtensionList {
+    /// The list's place on `system`.
+    pub fn place(&self, system: System) -> Option<&ListPlace> {
+        self.places
+            .iter()
+            .find(|p| p.systems.is_empty() || p.systems.contains(&system))
+    }
 }
 
 fn hold_back() -> Rule {
@@ -667,6 +726,35 @@ pub struct AppEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub versioned_folder: Option<String>,
     pub files: Vec<AppFile>,
+    /// Its add-ons, carried as a list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<ExtensionList>,
+    /// Stored values that are lists of recent files or workspaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<RecentList>,
+    /// Kinds of the person's own documents that name folders by their path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub documents: Vec<PathDocument>,
+}
+
+/// A stored value that is a list of recent files or workspaces, by the file that holds it and
+/// its key there (VS Code's `history.recentlyOpenedPathsList` in its state database, which the
+/// private-data role reads and hands to [`crate::files::rewrite_recent_list`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecentList {
+    pub root: SettingsRoot,
+    pub path: String,
+    pub key: String,
+}
+
+/// A kind of the person's own document, by its file ending, whose fields at `at` (`/`-separated
+/// patterns) are folder paths ([`crate::files::rewrite_document`]): a VS Code `.code-workspace`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathDocument {
+    pub ending: String,
+    pub at: Vec<String>,
 }
 
 /// A found setting that must not move for a given app, and why (the catalogue enriching the
@@ -916,6 +1004,26 @@ impl Catalogue {
                 row: a.app.clone(),
                 why,
             })?;
+            // A translation names a table with a column for every system.
+            let rules = a
+                .files
+                .iter()
+                .flat_map(|f| f.rules.iter().chain(&f.cross_os));
+            for r in rules {
+                if let Rule::Translate { table, .. } = &r.rule {
+                    let ok = self.tables.get(table).is_some_and(|t| {
+                        ["windows", "mac", "linux"]
+                            .iter()
+                            .all(|c| t.column(c).is_some())
+                    });
+                    if !ok {
+                        return Err(CatalogueError::Row {
+                            row: a.app.clone(),
+                            why: format!("the translation table {table:?} is missing a system"),
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }

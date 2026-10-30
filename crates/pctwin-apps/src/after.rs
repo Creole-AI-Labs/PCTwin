@@ -208,6 +208,11 @@ pub enum Todo {
     Rosetta,
     /// Other programs appeared with it; the person can remove them.
     Extras(Vec<String>),
+    /// Whether the installer found on the old laptop came from the maker's own site, as its
+    /// download mark said (only the yes or no; never the address).
+    CameFrom {
+        makers_site: bool,
+    },
 }
 
 /// What the person still has to do for `app` (`sign_in` and `licence_key` from the routes'
@@ -231,7 +236,15 @@ pub fn checklist(
             owner,
             company,
             product_id,
-        } = n;
+        } = n
+        else {
+            if let AppNote::DownloadMark { makers_site } = n {
+                out.push(Todo::CameFrom {
+                    makers_site: *makers_site,
+                });
+            }
+            continue;
+        };
         out.push(Todo::Registration {
             owner: owner.clone(),
             company: company.clone(),

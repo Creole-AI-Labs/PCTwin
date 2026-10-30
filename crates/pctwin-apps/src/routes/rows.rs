@@ -25,6 +25,9 @@ pub struct RowMatch {
     pub windows_org: Option<String>,
     pub windows_country: Option<String>,
     pub team_id: Option<String>,
+    /// The exact name of the app's entry in Windows' list of programs, with its maker: the
+    /// product among that maker's apps. Never on its own (a name alone never matches).
+    pub entry_name: Option<String>,
 }
 
 /// Where a row says the app can be had.
@@ -198,6 +201,12 @@ pub fn check_match(m: &RowMatch) -> Result<(), String> {
     if !identity {
         return Err("a row must name the app's identity or its maker, never a name alone".into());
     }
+    if m.entry_name.is_some() && m.windows_org.is_none() && m.product_code.is_none() {
+        return Err("an entry name is given only with the app's maker or product code".into());
+    }
+    if m.entry_name.as_ref().is_some_and(|n| n.trim().is_empty()) {
+        return Err("an entry name is plain text".into());
+    }
     if m.windows_org.is_some() != m.windows_country.is_some() {
         return Err("a Windows maker is named by organisation and country together".into());
     }
@@ -209,7 +218,10 @@ pub fn check_match(m: &RowMatch) -> Result<(), String> {
             return Err("an identity holds characters no identity has".into());
         }
     }
-    for t in [&m.windows_org, &m.windows_country].into_iter().flatten() {
+    for t in [&m.windows_org, &m.windows_country, &m.entry_name]
+        .into_iter()
+        .flatten()
+    {
         if t.trim().is_empty() || !pctwin_record::apps::text_ok(t, 256) {
             return Err("a maker's name is plain text".into());
         }
@@ -251,6 +263,10 @@ pub fn identity_matches(app: &FoundApp, system: AppSystem, m: &RowMatch) -> bool
         AppMaker::MacTeam { team_id } => Some(team_id.as_str()),
         _ => None,
     };
+    let entry_name = match &app.found {
+        FoundWhere::WindowsEntry { .. } => Some(app.name.as_str()),
+        _ => None,
+    };
     let want = |row: &Option<String>, have: Option<&str>, exact: bool| match row {
         None => true,
         Some(r) => have.is_some_and(|h| if exact { r == h } else { same(r, h) }),
@@ -261,6 +277,7 @@ pub fn identity_matches(app: &FoundApp, system: AppSystem, m: &RowMatch) -> bool
         && want(&m.windows_org, org, true)
         && want(&m.windows_country, country, true)
         && want(&m.team_id, team, true)
+        && want(&m.entry_name, entry_name, true)
 }
 
 /// The rows compiled into this build.
@@ -338,6 +355,8 @@ mod tests {
             // A fixed link without its bytes.
             r#"{"id":"w","system":"windows","match":{"team-id":"ABCDE12345"},"route":{"kind":"fixed-link","url":"https://example.com/x","version":"1","sha256":"zz"}}"#,
             r#"{"id":"w","system":"windows","match":{"team-id":"ABCDE12345"},"route":{"kind":"fixed-link","url":"https://example.com/x","version":"1","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#,
+            // An entry name with no Windows maker or product code to go with it.
+            r#"{"id":"w","system":"windows","match":{"team-id":"ABCDE12345","entry-name":"Writer"},"route":{"kind":"winget","id":"A.B"}}"#,
             // An organisation without its country.
             r#"{"id":"w","system":"windows","match":{"windows-org":"Example Ltd"},"route":{"kind":"winget","id":"A.B"}}"#,
             // A command where an ID goes; an unknown kind of route.

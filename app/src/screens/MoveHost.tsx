@@ -32,8 +32,11 @@ import {
   type PeopleHere,
   type PeopleToPlace,
   type RescueDrive as RescueDriveView,
+  type KeyPlace,
   type Peer,
   type WaitStage,
+  licenceKeyShow,
+  licenceKeysFound,
 } from "../bridge";
 import AcceptMove from "./AcceptMove";
 import BeforeYouStart from "./BeforeYouStart";
@@ -328,6 +331,20 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
   const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
     (["licences", "passwords", "codes", "online"] as const).map((kind) => ({ id: kind, kind, done: false })),
   );
+  // Licence keys apps keep in the open on this (old) laptop: looked for when the page opens.
+  const [keys, setKeys] = useState<KeyPlace[]>([]);
+  useEffect(() => {
+    if (!before || !old) return;
+    let live = true;
+    void licenceKeysFound()
+      .catch(() => [])
+      .then((found) => {
+        if (live) setKeys(found);
+      });
+    return () => {
+      live = false;
+    };
+  }, [before, old]);
   const [expanded, setExpanded] = useState(false);
   const [mini, setMini] = useState(false);
   const mode = windowFor(view, expanded, mini);
@@ -502,6 +519,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
         return (
           <BeforeYouStart
             items={beforeItems}
+            keys={keys}
+            onShowKey={licenceKeyShow}
             onBack={() => {
               setBefore(false);
             }}

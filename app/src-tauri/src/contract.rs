@@ -522,6 +522,7 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                         company: None,
                         product_id: Some("12345-OEM".into()),
                     },
+                    LineNote::CameFrom { makers_site: false },
                 ],
             ),
             line(
@@ -1912,6 +1913,8 @@ fn calls() -> Value {
             { "name": "history_list", "args": [] },
             { "name": "history_open", "args": [["id", "1792627200000-0"]] },
             { "name": "history_export", "args": [] },
+            { "name": "licence_keys_found", "args": [] },
+            { "name": "licence_key_show", "args": [["id", "office-2019"]] },
             { "name": "quicksend_pick", "args": [["folders", false]] },
             { "name": "quicksend_accept_drops", "args": [["on", true]] },
             { "name": "quicksend_clear", "args": [] },

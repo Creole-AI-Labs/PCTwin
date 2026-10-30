@@ -324,6 +324,19 @@
       "name": "history_export"
     },
     {
+      "args": [],
+      "name": "licence_keys_found"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "office-2019"
+        ]
+      ],
+      "name": "licence_key_show"
+    },
+    {
       "args": [
         [
           "folders",

@@ -4,7 +4,7 @@
 
 use pctwin_recipe::text_ok;
 
-use crate::catalogue::{AppEntry, FieldRule, FileFormat, Rule, Writer};
+use crate::catalogue::{AppEntry, FieldRule, FileFormat, ListForm, Rule, Writer};
 
 /// Checks one app entry (part of reading a catalogue).
 pub fn check_entry(a: &AppEntry) -> Result<(), String> {
@@ -55,6 +55,58 @@ pub fn check_entry(a: &AppEntry) -> Result<(), String> {
             if !(m.starts_with('$') && m.ends_with('$') && m.len() > 2 && m.len() <= 32) {
                 return Err("a path placeholder is written $LIKE_THIS$".into());
             }
+        }
+    }
+    if a.recent.len() > 16
+        || a.recent.iter().any(|r| {
+            !pattern_ok(&r.path) || r.key.is_empty() || r.key.len() > 128 || !text_ok(&r.key)
+        })
+    {
+        return Err("a recent list is a plain file and key".into());
+    }
+    if a.documents.len() > 16
+        || a.documents.iter().any(|d| {
+            let e = d.ending.as_bytes();
+            !(2..=32).contains(&e.len())
+                || e[0] != b'.'
+                || !e[1..]
+                    .iter()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                || d.at.is_empty()
+                || d.at.len() > 16
+                || d.at.iter().any(|p| !pattern_ok(p))
+        })
+    {
+        return Err("a document kind is a file ending and plain field patterns".into());
+    }
+    if let Some(x) = &a.extensions {
+        if x.places.is_empty()
+            || x.places.len() > 8
+            || x.places.iter().any(|p| !pattern_ok(&p.path))
+        {
+            return Err("an add-on list needs between 1 and 8 plain places".into());
+        }
+        let plain =
+            |s: &str| !s.is_empty() && s.len() <= 64 && text_ok(s) && !s.contains(['\\', '*']);
+        if let ListForm::Json {
+            id,
+            source,
+            store_sources,
+        } = &x.form
+            && !(plain(id)
+                && source.as_deref().is_none_or(plain)
+                && store_sources.len() <= 8
+                && store_sources.iter().all(|s| plain(s)))
+        {
+            return Err("an add-on list's fields are plain names".into());
+        }
+        if let Some(store) = &x.store
+            && !(plain(store)
+                && store
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'))
+        {
+            return Err("an add-on store is named in lowercase letters, digits and -".into());
         }
     }
     Ok(())

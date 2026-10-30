@@ -411,6 +411,12 @@ before-done =
 before-note = Não digite senhas nem chaves de recuperação aqui. Terminar esta lista não significa que já é seguro apagar o notebook antigo.
 before-empty = Não é preciso fazer nada no seu notebook antigo antes da mudança.
 before-continue = Voltar ao plano da mudança
+before-keys-title = Chaves de licença encontradas neste notebook
+before-keys-body = Estes apps guardam a chave de licença neste notebook. Anote cada chave ou guarde-a em um lugar seguro antes de deixar este notebook. O PCTwin não coloca chaves na mudança nem no relatório.
+before-keys-show = Mostrar chave
+before-keys-show-label = Mostrar a chave de { $app }
+before-keys-hide = Ocultar chave
+before-keys-gone = O PCTwin não conseguiu ler esta chave de novo. Abra { $app } para encontrá-la.
 
 ## S11 Get help with this task (a short problem code)
 
@@ -2178,6 +2184,9 @@ fullmove-note-registration = Seu notebook antigo mostrava o app registrado em no
 fullmove-note-product-id = O ID do produto no seu notebook antigo era { $id }.
 fullmove-note-extras = Outros programas vieram junto: { $apps }. Remova-os nas configurações do notebook se não os quiser.
 fullmove-note-rosetta = Feito para Macs com Intel, então precisa do Rosetta. Se este Mac oferecer instalar o Rosetta quando você abrir o app, escolha Instalar.
+
+fullmove-note-came-from-maker = A cópia do instalador no seu notebook antigo veio do site do fabricante.
+fullmove-note-came-from-elsewhere = A cópia do instalador no seu notebook antigo não veio do site do fabricante. O PCTwin obtém apps somente do fabricante.
 fullmove-data-lost = A conexão caiu antes de estes dados chegarem. Eles continuam seguros no seu notebook antigo. Comece uma nova transferência para trazê-los.
 fullmove-data-did-not-arrive = Estes dados não chegaram. Eles continuam seguros no seu notebook antigo. Comece uma nova transferência para trazê-los.
 fullmove-data-app-open = O app estava aberto no seu notebook antigo, então os dados dele não foram copiados. Feche o app lá e comece uma nova transferência para trazê-los.

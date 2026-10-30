@@ -84,6 +84,16 @@ pub fn search_query(app: &FoundApp) -> Option<(String, bool)> {
     }
 }
 
+/// Whether the downloaded manifest's installer is the one built for this laptop's processor
+/// `arch` (as winget names it), or one built for every processor (`neutral`). An installer that
+/// does not say, or says another, is not installed: winget falls back to an emulated build when
+/// the native one is missing, and PCTwin installs the native build only (Task List 2.1).
+pub fn native_for(m: &Manifest, arch: &str) -> bool {
+    m.architecture
+        .as_deref()
+        .is_some_and(|a| a.eq_ignore_ascii_case(arch) || a.eq_ignore_ascii_case("neutral"))
+}
+
 /// `winget search <query> --source winget` (exactly, for a name).
 pub fn search_call(winget: &Path, query: &str, by_code: bool) -> Call {
     let mut args: Vec<OsString> = vec!["search".into()];
@@ -622,6 +632,19 @@ ManifestType: merged
         let escaped = PUTTY.replace("Publisher: Simon Tatham", r#"Publisher: "Simon\x41Tatham""#);
         let m = Manifest::parse(&escaped).unwrap();
         assert_eq!(m.publisher, None);
+    }
+
+    #[test]
+    fn only_the_native_build_is_taken() {
+        let m = Manifest::parse(PUTTY).unwrap();
+        assert!(native_for(&m, "x64"));
+        assert!(native_for(&m, "X64"));
+        assert!(!native_for(&m, "arm64"));
+        assert!(!native_for(&m, "x86"));
+        let neutral =
+            Manifest::parse(&PUTTY.replace("Architecture: x64", "Architecture: neutral")).unwrap();
+        assert!(native_for(&neutral, "arm64"));
+        assert!(!native_for(&Manifest::default(), "x64"));
     }
 
     #[test]

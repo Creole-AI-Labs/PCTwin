@@ -302,6 +302,7 @@ fn entry(routes: Vec<Route>) -> AppEntry {
     AppEntry {
         plan: AppPlan {
             disposition: Disposition::Install,
+            stand_in: None,
             routes,
             flags: vec![],
             card: Card {
@@ -313,6 +314,8 @@ fn entry(routes: Vec<Route>) -> AppEntry {
                 sign_in: false,
                 registration: vec![],
                 why: None,
+                choices: vec![],
+                trail: None,
             },
         },
         app,

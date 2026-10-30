@@ -93,6 +93,8 @@ import {
   updateCheck,
   updateInstall,
   historyExport,
+  licenceKeysFound,
+  licenceKeyShow,
   historyList,
   historyOpen,
   openPrivacySettings,
@@ -344,6 +346,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await historyList();
       await historyOpen("1792627200000-0").catch(() => undefined);
       await historyExport();
+      await licenceKeysFound().catch(() => undefined);
+      await licenceKeyShow("office-2019").catch(() => undefined);
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}", approve: "Approve reading the files of {names}." });
       await moveChoosePlace("pictures").catch(() => undefined);
       await moveUsualPlace("pictures");

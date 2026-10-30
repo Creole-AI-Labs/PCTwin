@@ -20,6 +20,17 @@
 //!
 //! [`store`] reads and writes both on one laptop; [`ownership`] keeps one writer per domain.
 //!
+//! **Editors and paths.** App settings files ([`files`]) translate between systems through
+//! catalogue tables (keyboard shortcuts, keymaps); an editor's add-ons move as a list, each
+//! reinstalled through the editor's own store or left to the person ([`extensions`]); recent
+//! lists and workspace documents point only at what the move brought, inside the person's home.
+//!
+//! **Screens and devices.** Display scaling and arrangement are the person's step on the new
+//! laptop (a saved arrangement fits only the exact screens it was saved for). Printers
+//! themselves are found by `pctwin_special::forgotten` and added again by name by the full
+//! move's extras; this crate carries only which one is the default (`devices.default-printer`,
+//! chosen again when that printer is not on the new laptop).
+//!
 //! **Nothing that could run or fetch is written (fourth review, finding F1).** Writing is scoped
 //! to the one allow-list discovery reads ([`found::Address::writable`]); the general rule
 //! ([`classify::run_or_fetch`]) keeps back, by the value's shape and the key's kind and never by
@@ -44,6 +55,7 @@ pub mod catalogue;
 pub mod classify;
 pub mod codec;
 pub mod confirm;
+pub mod extensions;
 pub mod files;
 pub mod found;
 pub mod generic;

@@ -412,6 +412,12 @@ before-done =
 before-note = No escribas aquí contraseñas ni claves de recuperación. Terminar esta lista no significa que ya puedas borrar el portátil antiguo sin riesgo.
 before-empty = No hay nada que hacer en tu portátil antiguo antes del traslado.
 before-continue = Volver al plan del traslado
+before-keys-title = Claves de licencia encontradas en este portátil
+before-keys-body = Estas aplicaciones guardan su clave de licencia en este portátil. Anote cada clave o guárdela en un lugar seguro antes de dejar este portátil. PCTwin no incluye las claves en el traslado ni en su informe.
+before-keys-show = Mostrar clave
+before-keys-show-label = Mostrar la clave de { $app }
+before-keys-hide = Ocultar clave
+before-keys-gone = PCTwin no pudo volver a leer esta clave. Abra { $app } para encontrarla.
 
 ## S11 Get help with this task (a short problem code)
 
@@ -2174,6 +2180,9 @@ fullmove-note-registration = Tu laptop anterior la tenía registrada a nombre de
 fullmove-note-product-id = Su ID de producto en tu laptop anterior era { $id }.
 fullmove-note-extras = Llegaron otros programas con ella: { $apps }. Quítalos en la configuración de tu laptop si no los quieres.
 fullmove-note-rosetta = Hecha para Mac con Intel, así que necesita Rosetta. Si esta Mac ofrece instalar Rosetta al abrir la app, elige Instalar.
+
+fullmove-note-came-from-maker = La copia de su instalador en su portátil antiguo vino del sitio web del fabricante.
+fullmove-note-came-from-elsewhere = La copia de su instalador en su portátil antiguo no vino del sitio web del fabricante. PCTwin obtiene las aplicaciones solo del fabricante.
 fullmove-data-lost = Se perdió la conexión antes de que llegaran estos datos. Siguen a salvo en tu laptop anterior. Inicia un nuevo traslado para traerlos.
 fullmove-data-did-not-arrive = Estos datos no llegaron. Siguen a salvo en tu laptop anterior. Inicia un nuevo traslado para traerlos.
 fullmove-data-app-open = La app estaba abierta en tu laptop anterior, así que sus datos no se copiaron. Cierra la app allí y luego inicia un nuevo traslado para traerlos.
@@ -2282,7 +2291,7 @@ forgotten-kind-mail-archives = Correo guardado en este portátil
 forgotten-kind-game-saves = Partidas guardadas
 forgotten-kind-game-library = Juegos instalados por un lanzador de juegos
 forgotten-moving = Esto se mueve con el resto de tus cosas.
-forgotten-not-moving = Esto no está en la mudanza. Puedes copiarlo tú.
+forgotten-not-moving = Esto no está en el traslado. Puedes copiarlo tú.
 forgotten-step-install = Después de la mudanza, abre cada fuente en el nuevo portátil y elige Instalar.
 forgotten-step-locate-verify = Instala el lanzador de juegos en el nuevo portátil e inicia sesión. Puede volver a instalar tus juegos. Si copias esta carpeta, usa la opción del lanzador para buscar juegos instalados y deja que compruebe los archivos.
 forgotten-not-whole = PCTwin dejó de contar aquí, así que puede haber más.

@@ -9,7 +9,7 @@ use pctwin_settings::catalogue::{Catalogue, System, Writer};
 use pctwin_settings::classify::{Ctx, FolderMap, Why};
 use pctwin_settings::files::{
     FileCtx, FileOutcome, FoundFile, Left, OLDER_APP, discover_files, format_of, plan_file,
-    rewrite_recent_list, strip_jsonc, swap_modifiers,
+    rewrite_recent_list, strip_jsonc, translate,
 };
 
 fn folders() -> FolderMap {
@@ -21,6 +21,15 @@ fn folders() -> FolderMap {
         ("C:\\Users\\ada\\code".into(), "/Users/ada/code".into()),
         ("/home/ada/Projects".into(), "/home/ada/Projects".into()),
     ])
+}
+
+/// The person's home on each system.
+fn home(s: System) -> &'static str {
+    match s {
+        System::Windows => "C:\\Users\\ada",
+        System::Mac => "/Users/ada",
+        _ => "/home/ada",
+    }
 }
 
 struct Env {
@@ -50,8 +59,8 @@ impl Env {
             },
             from,
             to,
-            home_old: "/home/ada",
-            home_new: "/home/ada",
+            home_old: home(from),
+            home_new: home(to),
             running: &self.running,
             versions: &self.versions,
             folder_renames: &self.renames,
@@ -191,7 +200,11 @@ fn keyboard_shortcuts_between_a_mac_and_windows_are_an_equivalent() {
     ));
     assert!(!equivalent);
     assert!(out.contains("ctrl+shift+k"));
-    assert_eq!(swap_modifiers("cmd+s", false), "ctrl+s");
+    let t = &cat.tables["vscode-keys"];
+    assert_eq!(
+        translate(t, "cmd+s", System::Mac, System::Windows, true),
+        "ctrl+s"
+    );
 }
 
 #[test]
