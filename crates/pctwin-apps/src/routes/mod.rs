@@ -233,6 +233,46 @@ impl Route {
             _ => None,
         }
     }
+}
+
+/// The install chains PCTwin runs itself, one per kind of laptop. A route belongs to at most one
+/// ([`Route::chain`]); a route of none is the person's step (a store listing, the maker's page).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chain {
+    /// Windows: winget as the person, then the administrator helper (`pctwin-fullmove`'s
+    /// `install`).
+    Winget,
+    /// Linux: the system's own package tools (`pkcon`, `flatpak`, `snap`; `pctwin-fullmove`'s
+    /// `unix`).
+    LinuxPackages,
+    /// A Mac: a plain Homebrew cask, downloaded and placed by PCTwin itself
+    /// (`pctwin-fullmove`'s `mac`).
+    MacCask,
+}
+
+impl Route {
+    /// The install chain that installs from this route, if PCTwin installs from it at all. This
+    /// is the one place that is decided: the plan says an app needs the person when none of its
+    /// routes has a chain, and each chain installs only from its own routes, so a route can never
+    /// be installable in one place and not in the other. Every route is named here (no catch-all),
+    /// so a new route is decided when it is added.
+    pub fn chain(&self) -> Option<Chain> {
+        match self {
+            Route::Winget { .. } => Some(Chain::Winget),
+            Route::Apt { .. } | Route::Dnf { .. } | Route::Flatpak { .. } | Route::Snap { .. } => {
+                Some(Chain::LinuxPackages)
+            }
+            Route::Cask { .. } => Some(Chain::MacCask),
+            // The person's own steps: the store's listing (their sign-in, their licence), the
+            // App Store, the maker's page or feed, an installer from the old laptop (never reused
+            // yet), the maker's sign-in page.
+            Route::StoreListing { .. }
+            | Route::MacAppStore { .. }
+            | Route::Maker(_)
+            | Route::OldInstaller { .. }
+            | Route::SignInPage { .. } => None,
+        }
+    }
 
     /// Whether the version it brings is known before anything is downloaded (so a downgrade can
     /// be ruled out in the plan, not only after).

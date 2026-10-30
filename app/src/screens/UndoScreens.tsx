@@ -20,6 +20,14 @@ import { TopStrip } from "./FrameParts";
 import { UndoLegend } from "./ChangesPreview";
 import { IntentButton, MeasuredLine, MoreDetails, MoreLine, Name, RefusalLine, StateLine, useGuard } from "./GuardParts";
 import { Heading } from "./ProgressParts";
+import { OWN_TITLES } from "../fullmove";
+
+/** A line's name: one of the settings catalogue's groups by its key (translated), or a name as it is. */
+function LineName({ name }: { name: string }) {
+  const { l10n } = useLocalization();
+  const own = name.startsWith("fullmove-settings-") && (OWN_TITLES as readonly string[]).includes(name);
+  return own ? <>{l10n.getString(name)}</> : <Name>{name}</Name>;
+}
 
 function PlanBadge({ plan }: { plan: UndoPlan }) {
   const { l10n } = useLocalization();
@@ -68,7 +76,7 @@ export function UndoPreview({ screen }: { screen: Extract<ScreenView, { kind: "u
       <UndoLegend />
       <RowList>
         {screen.lines.map((l, i) => (
-          <Row key={i} title={<Name>{l.name}</Name>} end={<PlanBadge plan={l.plan} />} />
+          <Row key={i} title={<LineName name={l.name} />} end={<PlanBadge plan={l.plan} />} />
         ))}
       </RowList>
       <MoreLine more={screen.more} />
@@ -94,7 +102,7 @@ export function UndoDone({ screen }: { screen: Extract<ScreenView, { kind: "undo
       {working && <MeasuredLine progress={view.progress} />}
       <RowList>
         {screen.lines.map((l, i) => (
-          <Row key={i} title={<Name>{l.name}</Name>} end={<ResultBadge result={l.result} />} />
+          <Row key={i} title={<LineName name={l.name} />} end={<ResultBadge result={l.result} />} />
         ))}
       </RowList>
       <MoreLine more={screen.more} />
@@ -103,7 +111,7 @@ export function UndoDone({ screen }: { screen: Extract<ScreenView, { kind: "undo
           <ul>
             {details.map((l, i) => (
               <li key={i}>
-                <Name>{l.name}</Name>: <span lang="en">{l.detail}</span>
+                <LineName name={l.name} />: <span lang="en">{l.detail}</span>
               </li>
             ))}
           </ul>

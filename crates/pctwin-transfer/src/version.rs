@@ -51,10 +51,21 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// plan is approved, after the app data, the old laptop sends one sealed record of the ticked
 /// networks with their passwords. With a laptop on 7 or older the old laptop offers none (its
 /// person is not asked), and nothing more is sent.
+///
+/// Version 9 (31 October 2026) carries the settings catalogue's rows in the extras
+/// ([`CATALOGUE_SINCE`]): the old laptop reads each row it has a place for (theme, wallpaper,
+/// pointer, scaling, keyboard layouts, default browser...), read only, and the new laptop maps
+/// them between the two systems as the catalogue says. No new message: the extras gain one
+/// field, which an old laptop sends only to a new laptop on 9 or later (an older one refuses a
+/// field it does not know); a new laptop on 9 that is sent none plans none.
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 3,
-    newest: 8,
+    newest: 9,
 };
+
+/// The first move protocol version whose extras may carry the settings catalogue's rows as the
+/// old laptop read them.
+pub const CATALOGUE_SINCE: u16 = 9;
 
 /// The first move protocol version that moves saved Wi-Fi networks with their passwords.
 pub const WIFI_SINCE: u16 = 8;

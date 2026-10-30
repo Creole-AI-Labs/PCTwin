@@ -776,6 +776,10 @@ pub struct Landing<'a> {
     /// How this laptop lays out a person's home: its own system ([`System::here`]); tests that
     /// build a Windows home name Windows on every system they run on.
     pub system: System,
+    /// The old laptop's kind of system, as its extras said (`plan.from`): with this laptop's own,
+    /// where each component goes here is decided here, from this laptop's own catalogue
+    /// ([`pctwin_special::classify::placement_of`]), never taken from the old laptop.
+    pub from: System,
     /// What the settings catalogue's file rules need to put an app's settings files right as
     /// they land ([`crate::fixups`]); `None`: they land exactly as captured.
     pub fix: Option<crate::fixups::FixCtx<'a>>,
@@ -849,6 +853,10 @@ pub fn land_all(
     let rec = n.journal.imports(n.key);
     let stop = Stop::new();
     let made = MadeFolders::default();
+    let special_rows =
+        pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
+            pctwin_special::catalogue::SHIPPED,
+        );
     let seal = PlanSeal::new(
         2,
         *blake3::Hasher::new_derive_key("PCTwin app data landing 2026-10-28 v1")
@@ -931,6 +939,9 @@ pub fn land_all(
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
         }
+        // Where it goes here, decided here (the old laptop planned for its own kind of system).
+        let placed = placed_here(r, n.from, n.system, &special_rows);
+        let r = &placed;
         // An app's settings files the catalogue describes are put right in staging first; the
         // record then names exactly the bytes that land.
         let fixed;
@@ -944,6 +955,30 @@ pub fn land_all(
         out.push(laptop.land(id, r, step as u32, secret, &sink.folder(id)));
     }
     out
+}
+
+/// `r` placed for this laptop (`to`), as this laptop's own catalogue says for data from a laptop
+/// of `from` ([`pctwin_special::classify::placement_of`]). The old laptop names only where the
+/// data was there (its root and folder, sent as `Same`); a component it sent kept aside stays
+/// kept aside, and one it sent already placed elsewhere is not trusted: kept aside too.
+pub fn placed_here(
+    r: &Record,
+    from: System,
+    to: System,
+    rows: &pctwin_catalogue::Catalogue<pctwin_special::catalogue::SpecialRow>,
+) -> Record {
+    let placement = match &r.placement {
+        PlacementWire::Same { root, folder } => {
+            (&pctwin_special::classify::placement_of(*root, folder, from, to, rows)).into()
+        }
+        PlacementWire::Translated { .. } | PlacementWire::PreservedOnly => {
+            PlacementWire::PreservedOnly
+        }
+    };
+    Record {
+        placement,
+        ..r.clone()
+    }
 }
 
 /// Whether a component arrived whole: nothing about it was refused, and every file its record
@@ -1150,6 +1185,103 @@ mod whole_tests {
         assert!(
             !arrived_whole(&arrived(&[], true), []),
             "refused, even with no files"
+        );
+    }
+}
+
+#[cfg(test)]
+mod placed_tests {
+    use super::*;
+    use pctwin_special::capture::{Capture, Method, generation};
+    use pctwin_special::component::{Component, Custody, Evidence, Preservation};
+
+    fn record(placement: PlacementWire, root: RootKind) -> Record {
+        let component = Component::new(
+            pctwin_record::Owner::Person {
+                account_id: "ada".into(),
+            },
+            "Code",
+            vec!["User/keybindings.json".to_string()],
+            Custody::Portable,
+            false,
+            vec![Evidence::Unreadable {
+                why: "a test".into(),
+            }],
+        );
+        let t = tempfile::tempdir().unwrap();
+        Record {
+            app: "Visual Studio Code".into(),
+            capture: Capture {
+                component: component.id,
+                method: Method::SteadyCopy,
+                preservation: Preservation::Captured,
+                generation: generation(t.path(), &[]),
+                files: vec![],
+                folded: Vec::new(),
+                evidence: Vec::new(),
+                closed_unconfirmed: false,
+            },
+            component,
+            placement,
+            root,
+        }
+    }
+
+    /// Engine gap closed (31 October 2026): where app data goes is decided on the new laptop,
+    /// from its own catalogue, for the old laptop's kind of system; the old laptop's own word
+    /// for another place is never taken.
+    #[test]
+    fn app_data_is_placed_here_from_this_laptops_catalogue() {
+        let rows = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
+            pctwin_special::catalogue::SHIPPED,
+        );
+        let same = |root| PlacementWire::Same {
+            root,
+            folder: "Code".into(),
+        };
+        let r = record(same(RootKind::Roaming), RootKind::Roaming);
+        assert_eq!(
+            placed_here(&r, System::Windows, System::Mac, &rows).placement,
+            PlacementWire::Translated {
+                root: RootKind::ApplicationSupport,
+                folder: "Code".into()
+            }
+        );
+        assert_eq!(
+            placed_here(&r, System::Windows, System::Linux, &rows).placement,
+            PlacementWire::Translated {
+                root: RootKind::XdgConfig,
+                folder: "Code".into()
+            }
+        );
+        // The same kind of laptop: the same place.
+        assert_eq!(
+            placed_here(&r, System::Windows, System::Windows, &rows).placement,
+            same(RootKind::Roaming)
+        );
+        // A folder no row names for this system: kept aside, never guessed.
+        let unknown = record(
+            PlacementWire::Same {
+                root: RootKind::Roaming,
+                folder: "Lab Unknown".into(),
+            },
+            RootKind::Roaming,
+        );
+        assert_eq!(
+            placed_here(&unknown, System::Windows, System::Mac, &rows).placement,
+            PlacementWire::PreservedOnly
+        );
+        // The old laptop's own word for another place is not taken.
+        let claimed = record(
+            PlacementWire::Translated {
+                root: RootKind::ApplicationSupport,
+                folder: "Elsewhere".into(),
+            },
+            RootKind::Roaming,
+        );
+        assert_eq!(
+            placed_here(&claimed, System::Windows, System::Mac, &rows).placement,
+            PlacementWire::PreservedOnly
         );
     }
 }

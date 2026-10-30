@@ -194,7 +194,18 @@ pub struct Extras {
     /// or none found). Left out of the bytes when `None`, so an older new laptop reads them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wifi: Option<Vec<crate::wifi::WifiListed>>,
+    /// The settings catalogue's rows as the old laptop read them, row by row (theme, wallpaper,
+    /// pointer, scaling, keyboard layouts, default browser...; move protocol 9,
+    /// [`pctwin_transfer::CATALOGUE_SINCE`]). The new laptop maps them between the two systems
+    /// as the catalogue says ([`pctwin_settings::map::plan`]). `None`: not read (an older old
+    /// laptop, or an older new laptop that would refuse the field). Left out of the bytes when
+    /// `None`, so an older new laptop reads them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalogue: Option<pctwin_settings::map::Capture>,
 }
+
+/// The most catalogue rows, and settings without a row, one capture may name.
+pub const MAX_CATALOGUE: usize = 1000;
 
 /// Why the old laptop's extras were refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -238,6 +249,7 @@ impl Extras {
             left_out_by_person: false,
             forgotten: None,
             wifi: None,
+            catalogue: None,
         }
     }
 
@@ -320,8 +332,51 @@ impl Extras {
         {
             return limit;
         }
+        if let Some(c) = &self.catalogue
+            && !catalogue_ok(c, self.system)
+        {
+            return limit;
+        }
         Ok(())
     }
+
+    /// Carries the settings catalogue's rows as this laptop read them (only to a new laptop on
+    /// move protocol 9 or later: an older one refuses a field it does not know).
+    pub fn with_catalogue(&mut self, capture: pctwin_settings::map::Capture) {
+        self.catalogue = Some(capture);
+    }
+}
+
+/// Whether a capture of the catalogue's rows may cross: read on the extras' own system, within
+/// its bounds, every text within its length. The values themselves are checked against the new
+/// laptop's own catalogue when it plans them ([`pctwin_settings::map::plan`]).
+pub fn catalogue_ok(c: &pctwin_settings::map::Capture, system: System) -> bool {
+    use pctwin_settings::map::Reading;
+    let reading_ok = |r: &Reading| match r {
+        Reading::Value(pctwin_recipe::SettingValue::Text(t)) => {
+            t.len() <= pctwin_types::limits::SETTING_TEXT_BYTES
+        }
+        Reading::Unreadable(why) => text_ok(why),
+        _ => true,
+    };
+    c.system == system
+        && c.readings.len() <= MAX_CATALOGUE
+        && c.unsupported.len() <= MAX_CATALOGUE
+        && c.protected.len() <= MAX_CATALOGUE
+        && c.readings.values().all(reading_ok)
+        && c.unsupported
+            .iter()
+            .all(|f| text_ok(&f.store) && f.name.len() <= MAX_TEXT)
+}
+
+/// The settings catalogue's rows on this laptop, read only through its own mechanisms
+/// ([`pctwin_settings::Store::capture`]); `None` when the catalogue cannot be read.
+pub fn catalogue_here() -> Option<pctwin_settings::map::Capture> {
+    let system = this_system();
+    let cat = pctwin_settings::catalogue::Catalogue::starter().ok()?;
+    let mut store =
+        pctwin_settings::Store::new(cat, pctwin_settings::mechanism::Mechanisms::real(system));
+    Some(store.capture())
 }
 
 /// Whether one found setting may cross: within every limit the new laptop checks. The one rule
@@ -440,6 +495,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         left_out_by_person: false,
         forgotten: None,
         wifi: None,
+        catalogue: None,
     }
 }
 
@@ -489,6 +545,9 @@ pub fn special_with(
     let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
         pctwin_special::catalogue::SHIPPED,
     );
+    // Planned for this laptop's own kind of system: the old laptop says only where each
+    // component is here (its root and folder). Where it goes on the new laptop is decided there,
+    // from that laptop's own catalogue (`data::placed_here`), never by this laptop.
     let mut plan =
         pctwin_special::api::plan_within(owner, home, apps, system, system, &cat, deadline);
     // Games (2.5): saves the shipped rows and the person's own save list name, found by their
@@ -915,6 +974,15 @@ impl Extras {
     }
 }
 
+/// How a laptop of settings' kind of system `s` lays out a person's home (2.5's roots).
+pub fn roots_system(s: System) -> pctwin_special::roots::System {
+    match s {
+        System::Windows => pctwin_special::roots::System::Windows,
+        System::Mac => pctwin_special::roots::System::Mac,
+        System::Gnome | System::Kde | System::OtherLinux => pctwin_special::roots::System::Linux,
+    }
+}
+
 /// This laptop's kind of system, as settings know it.
 pub fn this_system() -> System {
     if cfg!(windows) {
@@ -1193,5 +1261,55 @@ mod tests {
             NotMovedGroup::SystemOwn
         );
         assert_eq!(NotMovedGroup::of(&Why::TooMany), NotMovedGroup::NotRead);
+    }
+}
+
+#[cfg(test)]
+mod catalogue_tests {
+    use super::*;
+    use pctwin_settings::map::{Capture, Reading};
+
+    fn capture(system: System) -> Capture {
+        let mut c = Capture::new(system, 1);
+        c.readings.insert(
+            pctwin_settings::SettingId::new("appearance.theme").unwrap(),
+            Reading::Value(pctwin_recipe::SettingValue::Text("dark".into())),
+        );
+        c
+    }
+
+    /// The catalogue's rows cross in the extras (move protocol 9); an older new laptop is sent
+    /// none (the field is left out of the bytes), and an older old laptop's extras, without
+    /// it, read as before.
+    #[test]
+    fn the_catalogues_rows_cross_and_older_laptops_read_as_before() {
+        let mut x = Extras::empty(System::Windows);
+        let before = x.encode();
+        assert!(!String::from_utf8_lossy(&before).contains("catalogue"));
+        assert_eq!(Extras::decode(&before).unwrap().catalogue, None);
+        x.with_catalogue(capture(System::Windows));
+        let bytes = x.encode();
+        assert_eq!(
+            Extras::decode(&bytes).unwrap().catalogue,
+            Some(capture(System::Windows))
+        );
+    }
+
+    /// A capture said to be another system's, or past its bounds, is refused with the extras.
+    #[test]
+    fn a_capture_of_another_system_or_past_its_bounds_is_refused() {
+        let mut x = Extras::empty(System::Windows);
+        x.with_catalogue(capture(System::Mac));
+        assert_eq!(Extras::decode(&x.encode()), Err(ExtrasError::Limit));
+        let mut big = capture(System::Windows);
+        big.readings.insert(
+            pctwin_settings::SettingId::new("appearance.theme").unwrap(),
+            Reading::Value(pctwin_recipe::SettingValue::Text(
+                "x".repeat(pctwin_types::limits::SETTING_TEXT_BYTES + 1),
+            )),
+        );
+        let mut x = Extras::empty(System::Windows);
+        x.with_catalogue(big);
+        assert_eq!(Extras::decode(&x.encode()), Err(ExtrasError::Limit));
     }
 }
