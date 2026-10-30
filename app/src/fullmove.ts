@@ -97,7 +97,22 @@ export type ChangeView = {
   undoIfUpdated: "keeps-newer" | null;
   /** An app's compatibility record (Task List 2.9 item 8); none for settings and special categories. */
   tested: Tested | null;
+  /** For an app this laptop has no version of: what the person can use instead (2.1); PCTwin installs none. */
+  choices: AppChoice[];
 };
+
+/** What an app choice is (`ChoiceKind`, 2.1). */
+export const CHOICE_KINDS = ["web-version", "alternative", "compatibility-layer"] as const;
+export type ChoiceKind = (typeof CHOICE_KINDS)[number];
+/** One choice for an app with no version here: its name and address, shown as text, never opened by PCTwin. */
+export type AppChoice = { kind: ChoiceKind; name: string; url: string };
+
+function parseChoice(v: unknown): AppChoice | null {
+  const f = exactly(v, ["kind", "name", "url"]);
+  return f && oneOf(f.kind, CHOICE_KINDS) && typeof f.name === "string" && f.name !== "" && typeof f.url === "string" && /^https:\/\/[^\s]+$/.test(f.url)
+    ? { kind: f.kind, name: f.name, url: f.url }
+    : null;
+}
 
 /** How well an app has been tested (`TestedOutcome`). */
 export const TESTED_OUTCOMES = ["works", "works-with-steps", "partly", "not-supported", "not-tested"] as const;
@@ -367,7 +382,7 @@ function parseTested(v: unknown): Tested | null | undefined {
 }
 
 function parseChange(v: unknown): ChangeView | null {
-  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "category", "notes", "undoIfUpdated", "tested"]);
+  const f = exactly(v, ["title", "kind", "action", "undo", "count", "needs", "special", "files", "secret", "update", "source", "note", "category", "notes", "undoIfUpdated", "tested", "choices"]);
   if (!f) return null;
   const title = parseTitle(f.title);
   if (!title || !oneOf(f.kind, CHANGE_KINDS) || !oneOf(f.action, CHANGE_ACTIONS) || !oneOf(f.undo, UNDO_PROMISES)) return null;
@@ -384,13 +399,15 @@ function parseChange(v: unknown): ChangeView | null {
   if (f.undoIfUpdated !== null && f.undoIfUpdated !== "keeps-newer") return null;
   const tested = parseTested(f.tested);
   if (tested === undefined) return null;
+  const choices = listOf(f.choices, parseChoice);
+  if (!choices || (choices.length > 0 && f.kind !== "app")) return null;
   let needs: Reason | null = null;
   if (f.needs !== null) {
     const r = parseResult({ status: "needs-action", reason: f.needs });
     if (!r || !("reason" in r) || r.reason === undefined) return null;
     needs = r.reason;
   }
-  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, category: f.category, notes, undoIfUpdated: f.undoIfUpdated, tested };
+  return { title, kind: f.kind, action: f.action, undo: f.undo, count: f.count, needs, special: f.special, files: f.files, secret: f.secret, update: f.update, source: f.source, note, category: f.category, notes, undoIfUpdated: f.undoIfUpdated, tested, choices };
 }
 
 /** The plan section (`RebuildPlanView`). */

@@ -123,6 +123,43 @@ describe("the approval screen's apps, settings and app data", () => {
   });
 });
 
+describe("apps with no version for this laptop (2.1)", () => {
+  it("lists what the person can use instead, each kind with its name and address as text", async () => {
+    const plan = fullPlan();
+    const app = plan.changes.find((c) => c.choices.length > 0);
+    if (!app) throw new Error("the engine's example has an app with choices");
+    expect(app.choices.map((c) => c.kind)).toEqual(["web-version", "alternative", "compatibility-layer"]);
+    const { container } = inApp(<RebuildPlanSection rebuild={plan} />);
+    const body = plain(container.textContent);
+    expect(body).toContain(plain(text("fullmove-choices-title")));
+    for (const c of app.choices) expect(body).toContain(plain(text(`fullmove-choice-${c.kind}`, { name: c.name, url: c.url })));
+    // Shown as text: PCTwin never opens these addresses.
+    expect(container.querySelectorAll("[data-choice] a")).toHaveLength(0);
+    expect(await violations()).toEqual([]);
+  });
+
+  it("refuses a choice that is not an https address, of an unknown kind, or on something other than an app", () => {
+    const withChoice = (choice: unknown, kind = "app") => {
+      const p = structuredClone(plans[1]) as { rebuild: { changes: { kind: string; choices: unknown[] }[] } };
+      const c = p.rebuild.changes.find((x) => x.choices.length > 0);
+      if (!c) throw new Error("an app with choices");
+      c.choices = [choice];
+      c.kind = kind;
+      return parsePlanView(p);
+    };
+    expect(withChoice({ kind: "alternative", name: "Board", url: "https://board.example" })).not.toBeNull();
+    for (const bad of [
+      { kind: "alternative", name: "Board", url: "http://board.example" },
+      { kind: "alternative", name: "Board", url: "javascript:alert(1)" },
+      { kind: "store", name: "Board", url: "https://board.example" },
+      { kind: "alternative", name: "", url: "https://board.example" },
+    ]) {
+      expect(withChoice(bad)).toBeNull();
+    }
+    expect(withChoice({ kind: "alternative", name: "Board", url: "https://board.example" }, "settings")).toBeNull();
+  });
+});
+
 describe("saved Wi-Fi networks (2.4)", () => {
   it("the plan names each network with what happens to it, and never a password", async () => {
     const plan = fullPlan();

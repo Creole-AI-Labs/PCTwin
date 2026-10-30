@@ -95,6 +95,7 @@
         {
           "action": "install",
           "category": null,
+          "choices": [],
           "count": 0,
           "files": 0,
           "kind": "app",
@@ -146,6 +147,23 @@
         {
           "action": "leave-alone",
           "category": null,
+          "choices": [
+            {
+              "kind": "web-version",
+              "name": "Sketch Tool on the web",
+              "url": "https://sketch.example/app"
+            },
+            {
+              "kind": "alternative",
+              "name": "Drawing Board",
+              "url": "https://drawing.example"
+            },
+            {
+              "kind": "compatibility-layer",
+              "name": "CrossOver",
+              "url": "https://crossover.example"
+            }
+          ],
           "count": 0,
           "files": 0,
           "kind": "app",
@@ -195,6 +213,7 @@
         {
           "action": "install",
           "category": null,
+          "choices": [],
           "count": 0,
           "files": 0,
           "kind": "app",
@@ -246,6 +265,7 @@
         {
           "action": "replace",
           "category": null,
+          "choices": [],
           "count": 12,
           "files": 0,
           "kind": "settings",
@@ -267,6 +287,7 @@
         {
           "action": "leave-alone",
           "category": null,
+          "choices": [],
           "count": 0,
           "files": 0,
           "kind": "app",
@@ -291,6 +312,7 @@
         {
           "action": "leave-alone",
           "category": "browser",
+          "choices": [],
           "count": 0,
           "files": 1,
           "kind": "special",
@@ -322,6 +344,7 @@
         {
           "action": "leave-alone",
           "category": "email",
+          "choices": [],
           "count": 0,
           "files": 3,
           "kind": "special",
@@ -347,6 +370,7 @@
         {
           "action": "merge",
           "category": "email",
+          "choices": [],
           "count": 0,
           "files": 40,
           "kind": "special",
@@ -372,6 +396,7 @@
         {
           "action": "merge",
           "category": "browser",
+          "choices": [],
           "count": 0,
           "files": 12,
           "kind": "special",
@@ -410,6 +435,7 @@
         {
           "action": "merge",
           "category": "game",
+          "choices": [],
           "count": 0,
           "files": 5,
           "kind": "special",
@@ -453,6 +479,7 @@
         {
           "action": "merge",
           "category": "ai-tool",
+          "choices": [],
           "count": 0,
           "files": 9,
           "kind": "special",
@@ -481,6 +508,7 @@
         {
           "action": "merge",
           "category": "secret",
+          "choices": [],
           "count": 0,
           "files": 2,
           "kind": "special",
@@ -509,6 +537,7 @@
         {
           "action": "merge",
           "category": "other",
+          "choices": [],
           "count": 0,
           "files": 4,
           "kind": "special",
@@ -530,6 +559,7 @@
         {
           "action": "merge",
           "category": "email",
+          "choices": [],
           "count": 0,
           "files": 1200,
           "kind": "special",
@@ -555,6 +585,7 @@
         {
           "action": "leave-alone",
           "category": "email",
+          "choices": [],
           "count": 0,
           "files": 0,
           "kind": "special",
@@ -580,6 +611,7 @@
         {
           "action": "leave-alone",
           "category": null,
+          "choices": [],
           "count": 0,
           "files": 0,
           "kind": "special",

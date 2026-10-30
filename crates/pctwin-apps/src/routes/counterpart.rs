@@ -91,7 +91,7 @@ pub struct Edition {
 }
 
 /// What a choice is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChoiceKind {
     /// The maker's own web version (its address is on one of the maker's own sites).

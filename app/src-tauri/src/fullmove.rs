@@ -235,6 +235,9 @@ pub struct ChangeView {
     pub undo_if_updated: Option<UndoPromise>,
     /// What tests of this app between these two systems showed (apps only).
     pub tested: Option<pctwin_apps::compat::Tested>,
+    /// For an app this laptop has no edition of: what the person can use instead (shown as
+    /// text; PCTwin installs none of them).
+    pub choices: Vec<pctwin_fullmove::plan::ChoiceLine>,
 }
 
 /// About how much room the move takes on this laptop beyond the files, at its busiest (installer
@@ -505,6 +508,15 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
                 t.version = t.version.map(|v| name(&v));
                 t
             }),
+            choices: c
+                .choices
+                .into_iter()
+                .map(|mut x| {
+                    x.name = name(&x.name);
+                    x.url = name(&x.url);
+                    x
+                })
+                .collect(),
         })
         .collect();
     // Each kind is bounded on its own, so many settings never hide an app or a step to take.

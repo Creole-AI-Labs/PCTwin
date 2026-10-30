@@ -169,6 +169,8 @@ export function RebuildPlanSection({
   const here = rebuild.changes.filter((c) => c.kind === "app" && c.action === "leave-alone" && c.needs === null);
   const left = rebuild.notMoved.filter((n) => n.count > 0);
   const older = rebuild.changes.filter((c) => c.update !== null);
+  // Apps with no version for this laptop, and what the person can use instead (2.1).
+  const instead = rebuild.changes.filter((c) => c.kind === "app" && c.choices.length > 0);
   return (
     <section className="fm-plan" aria-labelledby="fm-plan-title">
       <h2 id="fm-plan-title" className="plan-box-title">
@@ -205,6 +207,28 @@ export function RebuildPlanSection({
       )}
       <WifiBox lines={rebuild.wifi} />
       <Changes titleId="fullmove-group-needs" changes={needs} />
+      {instead.length > 0 && (
+        <PlanBox title={l10n.getString("fullmove-choices-title")}>
+          <p className="plan-lead">{l10n.getString("fullmove-choices-body")}</p>
+          <ul className="plan-items">
+            {instead.map((c, i) => {
+              const name = c.title.kind === "name" ? c.title.value : l10n.getString(c.title.value);
+              return (
+                <li key={i} className="plan-item">
+                  <Name>{name}</Name>
+                  <ul>
+                    {c.choices.map((x) => (
+                      <li key={`${x.kind}-${x.name}`} className="plan-note" data-choice={x.kind}>
+                        {l10n.getString(`fullmove-choice-${x.kind}`, { name: x.name, url: x.url })}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </PlanBox>
+      )}
       <Changes titleId="fullmove-group-here" changes={here} />
       {older.length > 0 && onUpdate && (
         // An older version is here: left as it is unless the person ticks Update it.

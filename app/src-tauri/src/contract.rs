@@ -183,7 +183,9 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         notes: Vec::new(),
         undo_if_updated: None,
         tested: None,
+        choices: Vec::new(),
     };
+    use pctwin_apps::routes::counterpart::ChoiceKind;
     use pctwin_special::category::{Category, Note};
     use pctwin_special::forgotten::{Finding, Forgotten, PlaceStep, Printer};
     let place = |kind: &str, name: &str, place: &str, step, moving| Forgotten {
@@ -232,8 +234,33 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     0,
                 )
             },
+            // No edition here: the person's choices, each kind once (2.1).
             ChangeView {
                 tested: Some(pctwin_apps::compat::Tested::not_tested()),
+                choices: [
+                    (
+                        ChoiceKind::WebVersion,
+                        "Sketch Tool on the web",
+                        "https://sketch.example/app",
+                    ),
+                    (
+                        ChoiceKind::Alternative,
+                        "Drawing Board",
+                        "https://drawing.example",
+                    ),
+                    (
+                        ChoiceKind::CompatibilityLayer,
+                        "CrossOver",
+                        "https://crossover.example",
+                    ),
+                ]
+                .into_iter()
+                .map(|(kind, name, url)| pctwin_fullmove::plan::ChoiceLine {
+                    kind,
+                    name: name.into(),
+                    url: url.into(),
+                })
+                .collect(),
                 ..change(
                     Title::Name("Sketch Tool".into()),
                     Kind::App,

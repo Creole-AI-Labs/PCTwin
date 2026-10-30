@@ -124,6 +124,20 @@ pub struct Change {
     /// What tests of this app between these two systems showed (apps only; `None` for other
     /// changes).
     pub tested: Option<pctwin_apps::compat::Tested>,
+    /// For an app this laptop has no edition of: what the person can use instead (2.1). PCTwin
+    /// installs none of them.
+    pub choices: Vec<ChoiceLine>,
+}
+
+/// One choice for an app this laptop has no edition of (2.1): the maker's web version, another
+/// maker's app that does the same job, or a compatibility layer as information only. From the
+/// signed `app-counterparts` catalogue; its address is shown as text, never opened by PCTwin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceLine {
+    pub kind: pctwin_apps::routes::counterpart::ChoiceKind,
+    pub name: String,
+    pub url: String,
 }
 
 /// What else the person should know about a change, beside what it does.
@@ -649,6 +663,17 @@ impl FullPlan {
                 undo_if_updated: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(Promise::KeepsNewer),
                 tested: Some(self.tested(e.subject())),
+                choices: e
+                    .plan
+                    .card
+                    .choices
+                    .iter()
+                    .map(|c| ChoiceLine {
+                        kind: c.kind,
+                        name: c.name.clone(),
+                        url: c.url.clone(),
+                    })
+                    .collect(),
                 update: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(at as u32),
             });
@@ -671,6 +696,7 @@ impl FullPlan {
                 note: None,
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         }
         for (at, s) in self.special.iter().enumerate() {
@@ -709,6 +735,7 @@ impl FullPlan {
                 note: s.sites.then_some(ChangeNote::Sites),
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -731,6 +758,7 @@ impl FullPlan {
                 note: None,
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         }
         if self.special_not_checked > 0 {
@@ -751,6 +779,7 @@ impl FullPlan {
                 note: None,
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         }
         if self.left_out_by_person {
@@ -771,6 +800,7 @@ impl FullPlan {
                 note: None,
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         } else if self.from.is_some() && !self.special_searched {
             out.push(Change {
@@ -790,6 +820,7 @@ impl FullPlan {
                 note: None,
                 undo_if_updated: None,
                 tested: None,
+                choices: Vec::new(),
             });
         }
         out

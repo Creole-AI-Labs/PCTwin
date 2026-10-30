@@ -3346,3 +3346,10 @@ report-count-wifi = { $count ->
         [many] { $count } redes
        *[other] { $count } redes
     }
+
+# 2.1 apps with no version for this laptop: what the person can use instead
+fullmove-choices-title = Apps sem versão para este notebook
+fullmove-choices-body = O PCTwin não instala nenhuma destas opções. São outras formas de fazer o mesmo trabalho aqui.
+fullmove-choice-web-version = Use no navegador: { $name } ({ $url })
+fullmove-choice-alternative = Outro app que faz o mesmo trabalho: { $name } ({ $url })
+fullmove-choice-compatibility-layer = { $name } pode executar a versão do seu notebook antigo. O PCTwin não verificou se funciona ({ $url })

@@ -2959,3 +2959,10 @@ report-group-wifi = Wi-Fi 网络
 report-count-wifi = { $count ->
        *[other] { $count } 个网络
     }
+
+# 2.1 apps with no version for this laptop: what the person can use instead
+fullmove-choices-title = 这台电脑没有对应版本的应用
+fullmove-choices-body = PCTwin 不会安装其中任何一项。它们是在这里完成同样工作的其他方式。
+fullmove-choice-web-version = 在浏览器中使用：{ $name }（{ $url }）
+fullmove-choice-alternative = 能完成同样工作的另一个应用：{ $name }（{ $url }）
+fullmove-choice-compatibility-layer = { $name } 也许能运行你旧电脑上的版本。PCTwin 未检查它是否可用（{ $url }）
