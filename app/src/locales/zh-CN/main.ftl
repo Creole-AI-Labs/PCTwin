@@ -768,6 +768,11 @@ plan-preview-time-one =
        *[other] 大约 { $minutes } 分钟。
     }
 plan-preview-time = 大约 { $low } 到 { $high } 分钟。
+plan-names-title = 名称冲突或不合适时
+plan-names-keep-both = 如果这台电脑上已有同名文件，PCTwin 会两个都保留。你的文件绝不会被替换：来自旧电脑的那个会加上一个编号，例如“Budget (2).xlsx”。
+plan-names-fit = 这台电脑不允许的名称（含有不能使用的字符，或是系统保留的名称）只做最小的修改，使其可用。
+plan-names-case = 只在大小写上不同的两个名称都会保留，并排放在一起。
+plan-names-refused = 文件夹路径对这台电脑来说太长的文件不会被复制。它会留在旧电脑上，报告中会说明。
 plan-preview-renamed =
     { NUMBER($count) ->
        *[other] 有 { $count } 个文件的名称会略有不同，因为这台笔记本电脑不允许使用原名称。报告会逐一列出。
@@ -2543,6 +2548,28 @@ compat-aspects-title = 每个部分
 compat-steps-title = 你需要做的
 compat-steps-none = 你不需要做任何步骤。
 compat-never-checked = 还没有人测试过这个应用。PCTwin 会尝试，并告诉你结果。
+app-from-title = 从哪里获取
+app-from-body = PCTwin 会按这个顺序在这些地方查找。找到的版本必须和旧电脑上的那份来自同一个开发者。
+app-from-none = PCTwin 没有找到可以获取这个应用的地方。你可以自己安装。
+app-from-winget = Windows 应用目录
+app-from-microsoft-store = Microsoft Store
+app-from-homebrew = Homebrew（Mac 应用目录）
+app-from-mac-app-store = App Store
+app-from-linux-package = 你的 Linux 系统自带的应用目录
+app-from-flatpak = Flathub（Linux 应用目录）
+app-from-snap = Snap Store
+app-from-makers-site = 开发者自己的网站
+app-from-old-installer = 在旧电脑上找到的安装程序
+app-from-sign-in-page = 登录后的开发者网站
+app-maker-title = 开发者
+app-maker-signed = 由 { $maker } 开发。PCTwin 只安装同一开发者的版本。
+app-maker-signed-unnamed = 旧电脑上的这份有开发者的签名。PCTwin 只安装同一开发者的版本。
+app-maker-unsigned = 旧电脑上的这份没有说明开发者是谁，所以 PCTwin 不会替你安装。
+app-maker-not-read = PCTwin 无法读取开发者信息，所以不会替你安装。
+app-store-title = 自己安装
+app-store-body = 在商店中打开这个应用的页面，用你自己的账户在那里安装。安装之前，它会一直留在你的待办列表里。
+app-store-microsoft = 在 Microsoft Store 中打开
+app-store-apple = 在 App Store 中打开
 compat-checked-on = 检查日期：{ $date }。
 compat-version = 测试的版本：{ $version }
 work-strip = 工作检查

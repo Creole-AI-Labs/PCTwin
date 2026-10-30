@@ -184,6 +184,17 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
         undo_if_updated: None,
         tested: None,
         choices: Vec::new(),
+        detail: None,
+    };
+    use pctwin_fullmove::plan::{AppDetail, FromKind, MakerCheck, StoreKind, StorePage};
+    let detail = |at, maker: Option<&str>, checked, from: Vec<FromKind>, store| {
+        Some(AppDetail {
+            at,
+            maker: maker.map(str::to_string),
+            checked,
+            from,
+            store,
+        })
     };
     use pctwin_apps::routes::counterpart::ChoiceKind;
     use pctwin_special::category::{Category, Note};
@@ -223,6 +234,25 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             ChangeView {
                 source: Some("Example.Writer".into()),
                 tested: Some(writer_tested),
+                // Every kind of place an app can come from, once.
+                detail: detail(
+                    0,
+                    Some("Example Ltd"),
+                    MakerCheck::Signed,
+                    vec![
+                        FromKind::Winget,
+                        FromKind::MicrosoftStore,
+                        FromKind::Homebrew,
+                        FromKind::MacAppStore,
+                        FromKind::LinuxPackage,
+                        FromKind::Flatpak,
+                        FromKind::Snap,
+                        FromKind::MakersSite,
+                        FromKind::OldInstaller,
+                        FromKind::SignInPage,
+                    ],
+                    None,
+                ),
                 ..change(
                     Title::Name("Writer".into()),
                     Kind::App,
@@ -237,6 +267,16 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             // No edition here: the person's choices, each kind once (2.1).
             ChangeView {
                 tested: Some(pctwin_apps::compat::Tested::not_tested()),
+                detail: detail(
+                    1,
+                    None,
+                    MakerCheck::Unsigned,
+                    vec![FromKind::MacAppStore],
+                    Some(StorePage {
+                        kind: StoreKind::Apple,
+                        page: "macappstore://apps.apple.com/app/id409183694".into(),
+                    }),
+                ),
                 choices: [
                     (
                         ChoiceKind::WebVersion,
@@ -276,6 +316,16 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                 source: Some("Example.Viewer".into()),
                 note: Some(pctwin_fullmove::plan::ChangeNote::IntelOnly),
                 tested: Some(pctwin_apps::compat::Tested::not_tested()),
+                detail: detail(
+                    2,
+                    None,
+                    MakerCheck::NotRead,
+                    vec![FromKind::MicrosoftStore],
+                    Some(StorePage {
+                        kind: StoreKind::Microsoft,
+                        page: "ms-windows-store://pdp/?PFN=Example.Viewer_8wekyb3d8bbwe".into(),
+                    }),
+                ),
                 ..change(
                     Title::Name("Viewer".into()),
                     Kind::App,
@@ -2080,6 +2130,7 @@ fn calls() -> Value {
             { "name": "move_usual_place", "args": [["role", "pictures"]] },
             { "name": "move_privacy_answer", "args": [["again", true]] },
             { "name": "open_privacy_settings", "args": [] },
+            { "name": "open_store_page", "args": [["page", "ms-windows-store://pdp/?PFN=Example.Writer_8wekyb3d8bbwe"]] },
             { "name": "move_pause", "args": [] },
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },

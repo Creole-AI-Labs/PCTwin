@@ -46,6 +46,7 @@ const api = vi.hoisted(() => ({
   listenSafeStop: vi.fn(),
   recoveryKitSave: vi.fn(),
   historyList: vi.fn(),
+  openStorePage: vi.fn(),
 }));
 vi.mock("../bridge", async (original) => ({ ...(await original<typeof import("../bridge")>()), ...api }));
 
@@ -165,6 +166,44 @@ describe("the compatibility record (item 8)", () => {
     await user.click(screen.getByRole("button", { name: text("compat-open-name", { name: "Sketch Tool" }) }));
     expect(screen.getByText(text("compat-never-checked"))).toBeTruthy();
     expect(screen.queryByText(text("compat-checked-on", { date: "x" }))).toBeNull();
+  });
+});
+
+describe("one app's detail (M11)", () => {
+  it("says every place an app can come from and who made it", async () => {
+    const { plan } = rebuild();
+    const user = userEvent.setup();
+    inApp(<PlanReview plan={plan} approval={null} onApprovalChange={noop} onStart={noop} />);
+    await user.click(screen.getByRole("button", { name: text("compat-open-name", { name: "Writer" }) }));
+    for (const k of ["winget", "microsoft-store", "homebrew", "mac-app-store", "linux-package", "flatpak", "snap", "makers-site", "old-installer", "sign-in-page"]) {
+      expect(screen.getByText(text(`app-from-${k}`))).toBeTruthy();
+    }
+    expect(screen.getByText(text("app-maker-signed", { maker: "Example Ltd" }))).toBeTruthy();
+    // PCTwin installs it itself: no store page to open.
+    expect(screen.queryByRole("button", { name: text("app-store-microsoft") })).toBeNull();
+    expect(await violations({ region: { enabled: false } })).toEqual([]);
+  });
+
+  it("opens the App Store's own page for an app the person installs, and claims nothing", async () => {
+    const { plan } = rebuild();
+    const user = userEvent.setup();
+    api.openStorePage.mockResolvedValue(undefined);
+    inApp(<PlanReview plan={plan} approval={null} onApprovalChange={noop} onStart={noop} />);
+    await user.click(screen.getByRole("button", { name: text("compat-open-name", { name: "Sketch Tool" }) }));
+    expect(screen.getByText(text("app-maker-unsigned"))).toBeTruthy();
+    expect(screen.getByText(text("app-store-body"))).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: text("app-store-apple") }));
+    expect(api.openStorePage).toHaveBeenCalledWith("macappstore://apps.apple.com/app/id409183694");
+    expect(await violations({ region: { enabled: false } })).toEqual([]);
+  });
+
+  it("refuses a detail whose store page is not exactly a store's", () => {
+    const good = structuredClone(planJson[1]) as unknown as { rebuild: { changes: { detail: { store: { page: string } | null } | null }[] } };
+    expect(parsePlanView(good)).not.toBeNull();
+    const d = good.rebuild.changes.find((c) => c.detail?.store)?.detail;
+    expect(d?.store).toBeTruthy();
+    if (d?.store) d.store.page = "https://example.com/app";
+    expect(parsePlanView(good)).toBeNull();
   });
 });
 

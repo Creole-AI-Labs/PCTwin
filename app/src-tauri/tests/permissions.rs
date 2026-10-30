@@ -32,7 +32,7 @@ use tauri::{App, WebviewUrl, WebviewWindow};
 /// Exactly what the screens may call, 94 names: the app's ninety-one commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 124] = [
+const SCREENS_MAY_CALL: [&str; 125] = [
     "set_window_mode",
     "window_drag",
     "set_tray_labels",
@@ -57,6 +57,7 @@ const SCREENS_MAY_CALL: [&str; 124] = [
     "move_usual_place",
     "move_privacy_answer",
     "open_privacy_settings",
+    "open_store_page",
     "move_pause",
     "move_resume",
     "move_stop",
@@ -321,6 +322,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
         "move_choose_place" | "move_usual_place" => json!({ "role": 1 }),
         "move_privacy_answer" => json!({ "again": "x" }),
+        "open_store_page" => json!({ "page": 1 }),
         "help_code" => json!({ "topic": 1, "step": 2 }),
         "quicksend_pick" => json!({ "folders": "x" }),
         "quicksend_accept_drops" => json!({ "on": "x" }),

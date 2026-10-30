@@ -202,6 +202,9 @@ describe("the move, once paired", () => {
     expect(screen.getByText(withText(text("plan-preview-time", { low: 4, high: 8 })))).toBeTruthy();
     expect(screen.getByText(withText(text("plan-preview-renamed", { count: 1 })))).toBeTruthy();
     expect(screen.getByText(withText(text("plan-preview-runs-at-sign-in", { count: 1 })))).toBeTruthy();
+    // M08: what happens when names clash, exactly the engine's own rules (no choice it cannot honour).
+    for (const k of ["keep-both", "fit", "case", "refused"]) expect(screen.getByText(text(`plan-names-${k}`))).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
     // There is no plan editing in this flow yet, so no Edit button that goes nowhere.
     expect(screen.queryByRole("button", { name: text("plan-edit") })).toBeNull();
     const start = screen.getByRole("button", { name: text("plan-start") });

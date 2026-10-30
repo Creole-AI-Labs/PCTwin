@@ -127,6 +127,114 @@ pub struct Change {
     /// For an app this laptop has no edition of: what the person can use instead (2.1). PCTwin
     /// installs none of them.
     pub choices: Vec<ChoiceLine>,
+    /// One app's detail (M11): where it can come from, who made it as checked on the old
+    /// laptop, and the store page the person can open (apps only).
+    pub detail: Option<AppDetail>,
+}
+
+/// One app's detail (M11, Task List 2.8): every place PCTwin found it can come from, in the order
+/// tried, and what the old laptop's own copy says about who made it. Nothing here is a choice of
+/// source: every route still ends at the maker check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppDetail {
+    /// The app's place in the plan's app list.
+    pub at: u32,
+    /// Who made it, as its signature on the old laptop names them (none when it cannot be said).
+    pub maker: Option<String>,
+    pub checked: MakerCheck,
+    pub from: Vec<FromKind>,
+    /// The Microsoft Store or the App Store has it: the person can open its page there (when
+    /// PCTwin does not install it itself).
+    pub store: Option<StorePage>,
+}
+
+/// A store's page for one app ([`Route::store_page`]): opened only after the app checks again
+/// that it is exactly such a page ([`pctwin_apps::routes::is_store_page`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorePage {
+    pub kind: StoreKind,
+    pub page: String,
+}
+
+/// What the old laptop's own copy says about its maker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MakerCheck {
+    /// Signed: whatever PCTwin installs must be signed by the same maker.
+    Signed,
+    /// It carries no maker signature: PCTwin installs nothing for it.
+    Unsigned,
+    /// Its signature could not be read.
+    NotRead,
+}
+
+/// A kind of place an app can come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FromKind {
+    Winget,
+    MicrosoftStore,
+    Homebrew,
+    MacAppStore,
+    LinuxPackage,
+    Flatpak,
+    Snap,
+    MakersSite,
+    OldInstaller,
+    SignInPage,
+}
+
+/// Which store's page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StoreKind {
+    Microsoft,
+    Apple,
+}
+
+/// The detail of the app at `at` in the plan.
+pub fn app_detail(at: usize, e: &AppEntry) -> AppDetail {
+    use pctwin_record::AppMaker;
+    let mut from: Vec<FromKind> = Vec::new();
+    for r in &e.plan.routes {
+        let k = match r {
+            Route::Winget { .. } => FromKind::Winget,
+            Route::StoreListing { .. } => FromKind::MicrosoftStore,
+            Route::Cask { .. } => FromKind::Homebrew,
+            Route::MacAppStore { .. } => FromKind::MacAppStore,
+            Route::Apt { .. } | Route::Dnf { .. } => FromKind::LinuxPackage,
+            Route::Flatpak { .. } => FromKind::Flatpak,
+            Route::Snap { .. } => FromKind::Snap,
+            Route::Maker(_) => FromKind::MakersSite,
+            Route::OldInstaller { .. } => FromKind::OldInstaller,
+            Route::SignInPage { .. } => FromKind::SignInPage,
+        };
+        if !from.contains(&k) {
+            from.push(k);
+        }
+    }
+    let store = e.plan.routes.iter().find_map(|r| {
+        let page = r.store_page()?;
+        let kind = match r {
+            Route::MacAppStore { .. } => StoreKind::Apple,
+            _ => StoreKind::Microsoft,
+        };
+        Some(StorePage { kind, page })
+    });
+    AppDetail {
+        at: at as u32,
+        maker: e.plan.card.maker.clone(),
+        checked: match e.app.maker {
+            AppMaker::Unsigned => MakerCheck::Unsigned,
+            AppMaker::NotRead { .. } => MakerCheck::NotRead,
+            _ => MakerCheck::Signed,
+        },
+        from,
+        // Only when PCTwin does not install it itself: then the store is the person's way.
+        store: store.filter(|_| needs_of(&e.plan).is_some()),
+    }
 }
 
 /// One choice for an app this laptop has no edition of (2.1): the maker's web version, another
@@ -676,6 +784,7 @@ impl FullPlan {
                     .collect(),
                 update: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(at as u32),
+                detail: Some(app_detail(at, e)),
             });
         }
         for g in &self.groups {
@@ -697,6 +806,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         }
         for (at, s) in self.special.iter().enumerate() {
@@ -736,6 +846,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
@@ -759,6 +870,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         }
         if self.special_not_checked > 0 {
@@ -780,6 +892,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         }
         if self.left_out_by_person {
@@ -801,6 +914,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         } else if self.from.is_some() && !self.special_searched {
             out.push(Change {
@@ -821,6 +935,7 @@ impl FullPlan {
                 undo_if_updated: None,
                 tested: None,
                 choices: Vec::new(),
+                detail: None,
             });
         }
         out
@@ -1008,6 +1123,43 @@ mod tests {
         assert_eq!(e.source(), Some("painter"));
         assert_eq!(e.winget(), None);
         assert_eq!(downloads_of(std::slice::from_ref(&e)).apps, 1);
+
+        // Its detail (M11): every place it can come from, its maker check, and the App Store's
+        // own page for it, since the person installs it.
+        let d = app_detail(3, &e);
+        assert_eq!(d.at, 3);
+        assert_eq!(d.from, [FromKind::MacAppStore, FromKind::Homebrew]);
+        assert_eq!(d.checked, MakerCheck::Unsigned);
+        assert_eq!(
+            d.store,
+            Some(StorePage {
+                kind: StoreKind::Apple,
+                page: "macappstore://apps.apple.com/app/id1".into()
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&d.from).unwrap(),
+            serde_json::json!(["mac-app-store", "homebrew"])
+        );
+        // An app PCTwin installs itself offers no store page.
+        let mut installs = e.clone();
+        installs.plan.routes = vec![
+            Route::Winget {
+                id: "Example.Painter".into(),
+                by: WingetBy::Row,
+            },
+            Route::StoreListing {
+                family_name: "Example.Painter_abc".into(),
+            },
+        ];
+        let d = app_detail(0, &installs);
+        assert_eq!(d.from, [FromKind::Winget, FromKind::MicrosoftStore]);
+        assert_eq!(d.store, None);
+        installs.plan.routes.remove(0);
+        assert_eq!(
+            app_detail(0, &installs).store.map(|s| s.kind),
+            Some(StoreKind::Microsoft)
+        );
     }
 
     /// Apps, settings and app data the person chose on the old laptop to leave behind are said as

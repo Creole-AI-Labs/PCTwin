@@ -815,6 +815,11 @@ plan-preview-time-one =
        *[other] About { $minutes } minutes.
     }
 plan-preview-time = About { $low } to { $high } minutes.
+plan-names-title = When names clash or do not fit
+plan-names-keep-both = If a file with the same name is already on this laptop, PCTwin keeps both. Yours is never replaced: the one from your old laptop gets a number added, such as “Budget (2).xlsx”.
+plan-names-fit = A name this laptop does not allow (a character it cannot use, or a name it keeps for itself) is changed just enough to fit.
+plan-names-case = Two names that differ only in capital letters both arrive, side by side.
+plan-names-refused = A file whose folder path is too long for this laptop is not copied. It stays on your old laptop, and the report says so.
 plan-preview-renamed =
     { NUMBER($count) ->
         [one] { $count } file gets a slightly different name, because this laptop does not allow its name. The report lists it.
@@ -2679,6 +2684,28 @@ compat-aspects-title = Each part
 compat-steps-title = What you will do
 compat-steps-none = No steps from you.
 compat-never-checked = Nobody has tested this app yet. PCTwin will try it and tell you what happened.
+app-from-title = Where it comes from
+app-from-body = PCTwin looks in these places, in this order. Whatever it finds must be made by the same maker as the copy on your old laptop.
+app-from-none = PCTwin found nowhere to get this app from. You can install it yourself.
+app-from-winget = The Windows app catalogue
+app-from-microsoft-store = The Microsoft Store
+app-from-homebrew = Homebrew, a catalogue of Mac apps
+app-from-mac-app-store = The App Store
+app-from-linux-package = Your Linux system's own app catalogue
+app-from-flatpak = Flathub, a catalogue of Linux apps
+app-from-snap = The Snap Store
+app-from-makers-site = The maker's own website
+app-from-old-installer = The installer found on your old laptop
+app-from-sign-in-page = The maker's website, after you sign in
+app-maker-title = Who made it
+app-maker-signed = Made by { $maker }. PCTwin only installs a copy made by the same maker.
+app-maker-signed-unnamed = The copy on your old laptop is signed by its maker. PCTwin only installs a copy made by the same maker.
+app-maker-unsigned = The copy on your old laptop does not say who made it, so PCTwin will not install it for you.
+app-maker-not-read = PCTwin could not read who made it, so it will not install it for you.
+app-store-title = Install it yourself
+app-store-body = Open the app's page in the store and install it there with your own account. It stays on your list until you do.
+app-store-microsoft = Open in the Microsoft Store
+app-store-apple = Open in the App Store
 compat-checked-on = Checked on { $date }.
 compat-version = Version tested: { $version }
 work-strip = Work check

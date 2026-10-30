@@ -1031,6 +1031,11 @@ plan-preview-time-one =
        *[other] نحو { $minutes } دقيقة.
     }
 plan-preview-time = نحو { $low } إلى { $high } دقيقة.
+plan-names-title = عندما تتشابه الأسماء أو لا تناسب
+plan-names-keep-both = إذا كان على هذا الحاسوب ملف بالاسم نفسه، يحتفظ PCTwin بالاثنين. لا يُستبدل ملفك أبدًا: يُضاف رقم إلى الملف القادم من حاسوبك القديم، مثل «Budget (2).xlsx».
+plan-names-fit = الاسم الذي لا يسمح به هذا الحاسوب (حرف لا يمكنه استخدامه أو اسم محجوز له) يُغيَّر بالقدر اللازم فقط ليناسب.
+plan-names-case = الاسمان اللذان يختلفان في الأحرف الكبيرة فقط يصلان كلاهما، جنبًا إلى جنب.
+plan-names-refused = الملف الذي يكون مسار مجلده أطول مما يسمح به هذا الحاسوب لا يُنسخ. يبقى على حاسوبك القديم، ويذكر التقرير ذلك.
 plan-preview-renamed =
     { NUMBER($count) ->
         [zero] { $count } ملف سيحصل على اسم مختلف قليلًا لأن هذا الحاسوب لا يسمح باسمه. يذكره التقرير.
@@ -3176,6 +3181,28 @@ compat-aspects-title = كل جزء
 compat-steps-title = ما ستفعله أنت
 compat-steps-none = لا خطوات مطلوبة منك.
 compat-never-checked = لم يختبر أحد هذا التطبيق بعد. سيجرّبه PCTwin ويخبرك بما حدث.
+app-from-title = من أين يأتي
+app-from-body = يبحث PCTwin في هذه الأماكن بهذا الترتيب. يجب أن يكون ما يجده من الصانع نفسه الذي صنع النسخة الموجودة على حاسوبك القديم.
+app-from-none = لم يجد PCTwin أي مكان للحصول على هذا التطبيق. يمكنك تثبيته بنفسك.
+app-from-winget = كتالوج تطبيقات Windows
+app-from-microsoft-store = Microsoft Store
+app-from-homebrew = Homebrew، كتالوج لتطبيقات Mac
+app-from-mac-app-store = App Store
+app-from-linux-package = كتالوج التطبيقات في نظام Linux لديك
+app-from-flatpak = Flathub، كتالوج لتطبيقات Linux
+app-from-snap = Snap Store
+app-from-makers-site = موقع الصانع نفسه
+app-from-old-installer = ملف التثبيت الموجود على حاسوبك القديم
+app-from-sign-in-page = موقع الصانع، بعد تسجيل الدخول
+app-maker-title = من صنعه
+app-maker-signed = من صنع { $maker }. لا يثبّت PCTwin إلا نسخة من الصانع نفسه.
+app-maker-signed-unnamed = النسخة الموجودة على حاسوبك القديم موقّعة من صانعها. لا يثبّت PCTwin إلا نسخة من الصانع نفسه.
+app-maker-unsigned = النسخة الموجودة على حاسوبك القديم لا تذكر من صنعها، لذلك لن يثبّتها PCTwin لك.
+app-maker-not-read = لم يتمكن PCTwin من قراءة من صنعه، لذلك لن يثبّته لك.
+app-store-title = ثبّته بنفسك
+app-store-body = افتح صفحة التطبيق في المتجر وثبّته هناك بحسابك الخاص. يبقى في قائمتك حتى تفعل ذلك.
+app-store-microsoft = فتح في Microsoft Store
+app-store-apple = فتح في App Store
 compat-checked-on = جرى الفحص في { $date }.
 compat-version = الإصدار الذي جرى اختباره: { $version }
 work-strip = فحص العمل

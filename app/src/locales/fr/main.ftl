@@ -961,6 +961,11 @@ plan-preview-time-one =
        *[other] Environ { $minutes } minutes.
     }
 plan-preview-time = Environ { $low } à { $high } minutes.
+plan-names-title = Quand des noms se ressemblent ou ne conviennent pas
+plan-names-keep-both = Si un fichier du même nom est déjà sur cet ordinateur, PCTwin garde les deux. Le vôtre n’est jamais remplacé : celui de votre ancien ordinateur reçoit un numéro, par exemple « Budget (2).xlsx ».
+plan-names-fit = Un nom que cet ordinateur n’accepte pas (un caractère interdit ou un nom réservé) est modifié juste assez pour convenir.
+plan-names-case = Deux noms qui ne diffèrent que par les majuscules arrivent tous les deux, côte à côte.
+plan-names-refused = Un fichier dont le chemin de dossier est trop long pour cet ordinateur n’est pas copié. Il reste sur votre ancien ordinateur, et le rapport l’indique.
 plan-preview-renamed =
     { NUMBER($count) ->
         [one] { $count } fichier aura un nom un peu différent, car ce portable n’accepte pas le sien. Le rapport l’indique.
@@ -2893,6 +2898,28 @@ compat-aspects-title = Chaque partie
 compat-steps-title = Ce que vous ferez
 compat-steps-none = Rien à faire de votre côté.
 compat-never-checked = Personne n’a encore testé cette application. PCTwin l’essaiera et vous dira ce qui s’est passé.
+app-from-title = D’où elle vient
+app-from-body = PCTwin cherche à ces endroits, dans cet ordre. Ce qu’il trouve doit venir du même éditeur que la copie de votre ancien ordinateur.
+app-from-none = PCTwin n’a trouvé aucun endroit où obtenir cette application. Vous pouvez l’installer vous-même.
+app-from-winget = Le catalogue d’applications de Windows
+app-from-microsoft-store = Le Microsoft Store
+app-from-homebrew = Homebrew, un catalogue d’applications pour Mac
+app-from-mac-app-store = L’App Store
+app-from-linux-package = Le catalogue d’applications de votre système Linux
+app-from-flatpak = Flathub, un catalogue d’applications pour Linux
+app-from-snap = Le Snap Store
+app-from-makers-site = Le site de l’éditeur
+app-from-old-installer = Le programme d’installation trouvé sur votre ancien ordinateur
+app-from-sign-in-page = Le site de l’éditeur, après connexion à votre compte
+app-maker-title = Qui l’a faite
+app-maker-signed = Faite par { $maker }. PCTwin installe uniquement une copie du même éditeur.
+app-maker-signed-unnamed = La copie de votre ancien ordinateur est signée par son éditeur. PCTwin installe uniquement une copie du même éditeur.
+app-maker-unsigned = La copie de votre ancien ordinateur ne dit pas qui l’a faite : PCTwin ne l’installera donc pas pour vous.
+app-maker-not-read = PCTwin n’a pas pu lire qui l’a faite : il ne l’installera donc pas pour vous.
+app-store-title = Installez-la vous-même
+app-store-body = Ouvrez la page de l’application dans le store et installez-la avec votre propre compte. Elle reste dans votre liste tant que ce n’est pas fait.
+app-store-microsoft = Ouvrir dans le Microsoft Store
+app-store-apple = Ouvrir dans l’App Store
 compat-checked-on = Vérifié le { $date }.
 compat-version = Version testée : { $version }
 work-strip = Vérification du travail

@@ -4,6 +4,8 @@ import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
 import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
 import { listText } from "../move";
+import { openStorePage } from "../bridge";
+import { MoreDetails } from "./GuardParts";
 import FrameFooter from "./FrameFooter";
 import { RebuildPlanSection, type InstallChoices } from "./FullMoveParts";
 import Compat from "./Compat";
@@ -61,8 +63,30 @@ function PreviewNotes({ preview, first }: { preview: PlanPreview; first: FolderR
             </li>
           ))}
         </ul>
+        {preview.renamed + preview.refused > 0 && <NameRules />}
       </Banner>
     </div>
+  );
+}
+
+/**
+ * M08: what happens when a name clashes or does not fit, said as the copy's own fixed rules. There is
+ * nothing to choose: PCTwin never replaces a file already on this laptop, so "keep both" is the only
+ * rule, and the report shows where each file landed.
+ */
+function NameRules() {
+  const { l10n } = useLocalization();
+  return (
+    <MoreDetails>
+      <p className="plan-lead">{l10n.getString("plan-names-title")}</p>
+      <ul className="plan-items">
+        {(["keep-both", "fit", "case", "refused"] as const).map((k) => (
+          <li key={k} className="plan-item">
+            <small className="plan-item-text">{l10n.getString(`plan-names-${k}`)}</small>
+          </li>
+        ))}
+      </ul>
+    </MoreDetails>
   );
 }
 
@@ -182,6 +206,9 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         tested={compat.tested}
         onBack={() => {
           setCompat(null);
+        }}
+        onOpenStore={(page) => {
+          void openStorePage(page).catch(() => undefined);
         }}
       />
     );

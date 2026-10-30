@@ -97,6 +97,24 @@
           "category": null,
           "choices": [],
           "count": 0,
+          "detail": {
+            "at": 0,
+            "checked": "signed",
+            "from": [
+              "winget",
+              "microsoft-store",
+              "homebrew",
+              "mac-app-store",
+              "linux-package",
+              "flatpak",
+              "snap",
+              "makers-site",
+              "old-installer",
+              "sign-in-page"
+            ],
+            "maker": "Example Ltd",
+            "store": null
+          },
           "files": 0,
           "kind": "app",
           "needs": null,
@@ -165,6 +183,18 @@
             }
           ],
           "count": 0,
+          "detail": {
+            "at": 1,
+            "checked": "unsigned",
+            "from": [
+              "mac-app-store"
+            ],
+            "maker": null,
+            "store": {
+              "kind": "apple",
+              "page": "macappstore://apps.apple.com/app/id409183694"
+            }
+          },
           "files": 0,
           "kind": "app",
           "needs": "manual-install",
@@ -215,6 +245,18 @@
           "category": null,
           "choices": [],
           "count": 0,
+          "detail": {
+            "at": 2,
+            "checked": "not-read",
+            "from": [
+              "microsoft-store"
+            ],
+            "maker": null,
+            "store": {
+              "kind": "microsoft",
+              "page": "ms-windows-store://pdp/?PFN=Example.Viewer_8wekyb3d8bbwe"
+            }
+          },
           "files": 0,
           "kind": "app",
           "needs": null,
@@ -267,6 +309,7 @@
           "category": null,
           "choices": [],
           "count": 12,
+          "detail": null,
           "files": 0,
           "kind": "settings",
           "needs": null,
@@ -289,6 +332,7 @@
           "category": null,
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 0,
           "kind": "app",
           "needs": null,
@@ -314,6 +358,7 @@
           "category": "browser",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 1,
           "kind": "special",
           "needs": "sign-in",
@@ -346,6 +391,7 @@
           "category": "email",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 3,
           "kind": "special",
           "needs": "sign-in",
@@ -372,6 +418,7 @@
           "category": "email",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 40,
           "kind": "special",
           "needs": null,
@@ -398,6 +445,7 @@
           "category": "browser",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 12,
           "kind": "special",
           "needs": null,
@@ -437,6 +485,7 @@
           "category": "game",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 5,
           "kind": "special",
           "needs": null,
@@ -481,6 +530,7 @@
           "category": "ai-tool",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 9,
           "kind": "special",
           "needs": null,
@@ -510,6 +560,7 @@
           "category": "secret",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 2,
           "kind": "special",
           "needs": null,
@@ -539,6 +590,7 @@
           "category": "other",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 4,
           "kind": "special",
           "needs": null,
@@ -561,6 +613,7 @@
           "category": "email",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 1200,
           "kind": "special",
           "needs": null,
@@ -587,6 +640,7 @@
           "category": "email",
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 0,
           "kind": "special",
           "needs": "permission",
@@ -613,6 +667,7 @@
           "category": null,
           "choices": [],
           "count": 0,
+          "detail": null,
           "files": 0,
           "kind": "special",
           "needs": "finish-by-hand",

@@ -295,6 +295,15 @@
       "name": "open_privacy_settings"
     },
     {
+      "args": [
+        [
+          "page",
+          "ms-windows-store://pdp/?PFN=Example.Writer_8wekyb3d8bbwe"
+        ]
+      ],
+      "name": "open_store_page"
+    },
+    {
       "args": [],
       "name": "move_pause"
     },

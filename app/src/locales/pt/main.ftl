@@ -956,6 +956,11 @@ plan-preview-time-one =
        *[other] Cerca de { $minutes } minutos.
     }
 plan-preview-time = Cerca de { $low } a { $high } minutos.
+plan-names-title = Quando nomes coincidem ou não cabem
+plan-names-keep-both = Se já houver um arquivo com o mesmo nome neste laptop, o PCTwin mantém os dois. O seu nunca é substituído: o do laptop antigo recebe um número, como “Orçamento (2).xlsx”.
+plan-names-fit = Um nome que este laptop não permite (um caractere que não pode usar ou um nome reservado) é alterado só o necessário para caber.
+plan-names-case = Dois nomes que só diferem em letras maiúsculas chegam os dois, lado a lado.
+plan-names-refused = Um arquivo cujo caminho de pastas é longo demais para este laptop não é copiado. Ele fica no laptop antigo, e o relatório informa isso.
 plan-preview-renamed =
     { NUMBER($count) ->
         [one] { $count } arquivo terá um nome um pouco diferente, porque este notebook não aceita o nome dele. O relatório indica isso.
@@ -2888,6 +2893,28 @@ compat-aspects-title = Cada parte
 compat-steps-title = O que você vai fazer
 compat-steps-none = Nenhum passo da sua parte.
 compat-never-checked = Ninguém testou este app ainda. O PCTwin vai tentar e dizer o que aconteceu.
+app-from-title = De onde vem
+app-from-body = O PCTwin procura nestes lugares, nesta ordem. O que encontrar tem de ser do mesmo fabricante da cópia do seu laptop antigo.
+app-from-none = O PCTwin não encontrou nenhum lugar para obter este app. Você pode instalá-lo.
+app-from-winget = O catálogo de apps do Windows
+app-from-microsoft-store = A Microsoft Store
+app-from-homebrew = Homebrew, um catálogo de apps para Mac
+app-from-mac-app-store = A App Store
+app-from-linux-package = O catálogo de apps do seu sistema Linux
+app-from-flatpak = Flathub, um catálogo de apps para Linux
+app-from-snap = A Snap Store
+app-from-makers-site = O site do fabricante
+app-from-old-installer = O instalador encontrado no seu laptop antigo
+app-from-sign-in-page = O site do fabricante, depois de entrar na sua conta
+app-maker-title = Quem fez
+app-maker-signed = Feito por { $maker }. O PCTwin só instala uma cópia do mesmo fabricante.
+app-maker-signed-unnamed = A cópia do seu laptop antigo é assinada pelo fabricante. O PCTwin só instala uma cópia do mesmo fabricante.
+app-maker-unsigned = A cópia do seu laptop antigo não diz quem a fez, então o PCTwin não vai instalá-la para você.
+app-maker-not-read = O PCTwin não conseguiu ler quem a fez, então não vai instalá-la para você.
+app-store-title = Instale você mesmo
+app-store-body = Abra a página do app na loja e instale-o lá com sua própria conta. Ele continua na sua lista até você fazer isso.
+app-store-microsoft = Abrir na Microsoft Store
+app-store-apple = Abrir na App Store
 compat-checked-on = Verificado em { $date }.
 compat-version = Versão testada: { $version }
 work-strip = Verificação de trabalho
