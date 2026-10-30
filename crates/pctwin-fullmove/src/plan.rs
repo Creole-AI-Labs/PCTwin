@@ -1240,6 +1240,35 @@ mod tests {
         assert_eq!(install_promise(&routes(vec![])), Promise::RemoveYourself);
     }
 
+    /// Mail converted here is chosen to be carried, and the room it needs is twice its size (staged
+    /// as it arrived, then written out beside it).
+    #[test]
+    fn mail_converted_here_is_chosen_and_counted_twice_for_room() {
+        let line = |name: &str, step, id: &str, bytes| SpecialLine {
+            name: name.into(),
+            step,
+            files: 1,
+            secret: false,
+            ids: vec![id.into()],
+            sites: false,
+            category: Default::default(),
+            notes: Vec::new(),
+            bytes,
+            parts: Vec::new(),
+        };
+        let plan = FullPlan {
+            special: vec![
+                line("Apple Mail", SpecialStep::Convert, "m1", 1000),
+                line("Notes data", SpecialStep::Copy, "c1", 0),
+                line("Game", SpecialStep::ExportFirst, "e1", 5),
+            ],
+            ..FullPlan::default()
+        };
+        let c = plan.choice(&[]);
+        assert_eq!(c.copy, vec!["m1".to_string(), "c1".to_string()]);
+        assert_eq!(plan.room_needed().app_data, APP_DATA_FILE + 2000);
+    }
+
     /// Task List 2.9: every special category's step is said with what undo can do: app data PCTwin
     /// places is put back; a sign-in or relinking is the maker's; anything PCTwin does not change
     /// is left.

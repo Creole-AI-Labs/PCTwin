@@ -630,6 +630,82 @@ fn stopping_keeps_nothing_partly_read_and_keeps_the_private_folder() {
     assert_eq!(std::fs::read_dir(&w).unwrap().count(), 0);
 }
 
+/// Changes the first file of a component once its copy has begun (it shows in the work folder),
+/// while the second, large file is still to be read: each file alone reads steady, but the two
+/// were not read at one moment.
+struct ChangesFirst {
+    first: PathBuf,
+    copied: PathBuf,
+    writer: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl Holders for ChangesFirst {
+    fn holding(&self, _: &[PathBuf]) -> Holding {
+        let (first, copied) = (self.first.clone(), self.copied.clone());
+        *self.writer.lock().unwrap() = Some(std::thread::spawn(move || {
+            let until = std::time::Instant::now() + MINUTE;
+            while !copied.exists() && std::time::Instant::now() < until {
+                std::thread::yield_now();
+            }
+            std::fs::write(&first, b"the index changed meanwhile").unwrap();
+        }));
+        Holding::Free
+    }
+}
+
+/// A component carried raw (Apple Mail's index and its log) is read steady as a whole: a file
+/// that changed after it was copied, while the rest was still read, refuses the capture.
+#[test]
+fn files_carried_raw_that_were_not_read_at_one_moment_are_not_captured() {
+    let t = temp();
+    let base = t.path().join("V10");
+    put(&base.join("MailData/Envelope Index"), b"db");
+    put(
+        &base.join("MailData/Envelope Index-wal"),
+        &vec![b'w'; 64 * 1024 * 1024],
+    );
+    let members = vec![
+        "MailData/Envelope Index".to_string(),
+        "MailData/Envelope Index-wal".to_string(),
+    ];
+    let c = Component::new(
+        Owner::Person {
+            account_id: "501".into(),
+        },
+        "Mail/V10/MailData",
+        members.clone(),
+        Custody::NeedsExport,
+        false,
+        vec![Evidence::MailStore, Evidence::CarriedRaw],
+    );
+    let approved = Approved {
+        seal: seal(),
+        component: c.id,
+        root: root(),
+        generation: generation(&base, &members),
+        handle: 1,
+    };
+    let w = t.path().join("w");
+    std::fs::create_dir(&w).unwrap();
+    let app = ChangesFirst {
+        first: base.join("MailData/Envelope Index"),
+        copied: w.join("MailData").join("Envelope Index"),
+        writer: Default::default(),
+    };
+    let got = capture(
+        grant(),
+        &approved,
+        &c,
+        &base,
+        &w,
+        &app,
+        &Stop::new(),
+        Now::real(),
+    );
+    app.writer.lock().unwrap().take().unwrap().join().unwrap();
+    assert_eq!(got.unwrap_err(), CaptureError::KeptChanging);
+}
+
 /// Starts an app writing the file the moment capture asks whether anything holds it (after the
 /// approved generation was checked), as an app that wakes up mid-move would.
 struct WakesUp {

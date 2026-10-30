@@ -680,6 +680,40 @@ mod tests {
         assert_eq!(r.mailboxes[0].failed, 1);
     }
 
+    /// A reader whose facts fit the file but miss a line that starts a message: the file read back
+    /// holds more messages than were written, so the mailbox is never called converted.
+    #[test]
+    fn a_file_that_reads_back_with_another_count_is_not_converted() {
+        let t = tempfile::tempdir().unwrap();
+        let src = t.path().join("src");
+        let out = t.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        put(
+            &src.join("Inbox.mbox/1.emlx"),
+            &emlx(
+                b"Subject: a\n\nFrom here a new message seems to start\n",
+                b"",
+            ),
+        );
+        let unmarked = |b: &[u8]| {
+            let mut f = emlx_facts(seal(), b)?;
+            f.marked.clear();
+            Ok(f)
+        };
+        let r = export_mailboxes(&src, &out, &unmarked, later()).unwrap();
+        let b = &r.mailboxes[0];
+        assert_eq!(b.written, 1);
+        assert!(!b.checked);
+        assert_eq!(b.result(), ItemResult::because(Reason::NotVerified));
+        assert_eq!(envelopes(b.file.as_ref().unwrap()).unwrap(), 2);
+        // The same message with its line marked reads back as one.
+        let out2 = t.path().join("out2");
+        std::fs::create_dir_all(&out2).unwrap();
+        let r = export_mailboxes(&src, &out2, &reader, later()).unwrap();
+        assert!(r.mailboxes[0].checked);
+        assert_eq!(r.mailboxes[0].result().status(), ItemStatus::Converted);
+    }
+
     #[test]
     fn a_mailbox_is_converted_only_when_every_message_was_written_whole() {
         let b = |written, partial, failed| MailboxExport {

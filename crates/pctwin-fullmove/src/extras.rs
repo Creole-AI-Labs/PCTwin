@@ -1079,6 +1079,46 @@ mod tests {
         assert_eq!(Extras::decode(b"\x00\x01"), Err(ExtrasError::Unreadable));
     }
 
+    /// A line converted on the new laptop names one plain folder per component, or none; a list
+    /// of another length, or a name that is a path, is refused.
+    #[test]
+    fn a_converted_line_names_one_plain_folder_per_component() {
+        let line = |ids: &[&str], parts: &[&str]| SpecialLine {
+            name: "Apple Mail".into(),
+            step: SpecialStep::Convert,
+            files: 2,
+            secret: false,
+            ids: ids.iter().map(|s| s.to_string()).collect(),
+            sites: false,
+            category: pctwin_special::category::Category::Email,
+            notes: Vec::new(),
+            bytes: 10,
+            parts: parts.iter().map(|s| s.to_string()).collect(),
+        };
+        let with = |l: SpecialLine| {
+            let mut x = sample();
+            x.special = vec![l];
+            x.check()
+        };
+        assert_eq!(with(line(&["a", "b"], &["Mailboxes", "MailData"])), Ok(()));
+        assert_eq!(with(line(&["a", "b"], &[])), Ok(()));
+        for bad in [
+            line(&["a", "b"], &["Mailboxes"]),
+            line(&["a"], &["Mailboxes", "MailData"]),
+            line(&["a", "b"], &["Mailboxes", "x/y"]),
+            line(&["a", "b"], &["Mailboxes", "x\\y"]),
+            line(&["a", "b"], &["Mailboxes", ".."]),
+            line(&["a", "b"], &["Mailboxes", ""]),
+        ] {
+            assert_eq!(
+                with(bad.clone()),
+                Err(ExtrasError::Limit),
+                "{:?}",
+                bad.parts
+            );
+        }
+    }
+
     #[test]
     fn the_forgotten_things_found_cross_within_their_bounds() {
         use pctwin_special::forgotten::{Finding, Forgotten, MAX_PRINTERS, PlaceStep, Printer};
