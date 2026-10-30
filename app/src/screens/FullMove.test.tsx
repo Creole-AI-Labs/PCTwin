@@ -164,6 +164,9 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(plain(text("fullmove-note-registration", { who: "Ada" })));
     expect(body).toContain(plain(text("fullmove-note-product-id", { id: "12345-OEM" })));
     expect(body).toContain(plain(text("fullmove-note-extras", { apps: "Writer Helper" })));
+    // Where its installer came from: only the yes or no, never an address.
+    expect(body).toContain(plain(text("fullmove-note-came-from-elsewhere")));
+    expect(body).not.toContain("http");
     expect(body).toContain(text("fullmove-outcome-fresh"));
     // Gap 2: each reason in words, with the folder for app data landed beside.
     for (const why of ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed"]) {

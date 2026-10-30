@@ -521,6 +521,7 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                         company: None,
                         product_id: Some("12345-OEM".into()),
                     },
+                    LineNote::CameFrom { makers_site: false },
                 ],
             ),
             line(

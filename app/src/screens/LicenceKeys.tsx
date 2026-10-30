@@ -17,15 +17,26 @@ type Props = {
  */
 export default function LicenceKeys({ keys, onShow }: Props) {
   const { l10n } = useLocalization();
-  // Keys shown, held outside React state so they can be dropped when the page closes.
-  const shown = useRef(new Map<string, string | null>());
-  const [, redraw] = useState(0);
+  // Keys shown, by place. The latest map is also kept aside so the page drops every key it
+  // still holds when it closes.
+  const [shown, setShown] = useState(() => new Map<string, string | null>());
+  const latest = useRef(shown);
   useEffect(() => {
-    const keysShown = shown.current;
+    latest.current = shown;
+  }, [shown]);
+  useEffect(() => {
+    const held = latest;
     return () => {
-      keysShown.clear();
+      held.current.clear();
     };
   }, []);
+  const change = (edit: (m: Map<string, string | null>) => void) => {
+    setShown((old) => {
+      const next = new Map(old);
+      edit(next);
+      return next;
+    });
+  };
 
   if (keys.length === 0) return null;
   return (
@@ -38,8 +49,8 @@ export default function LicenceKeys({ keys, onShow }: Props) {
       </Localized>
       <ul className="before-keys-list">
         {keys.map((k) => {
-          const value = shown.current.get(k.id) ?? null;
-          const open = shown.current.has(k.id);
+          const value = shown.get(k.id) ?? null;
+          const open = shown.has(k.id);
           return (
             <li key={k.id}>
               <strong>{k.app}</strong>
@@ -53,8 +64,7 @@ export default function LicenceKeys({ keys, onShow }: Props) {
                 <Button
                   variant="quiet"
                   onClick={() => {
-                    shown.current.delete(k.id);
-                    redraw((n) => n + 1);
+                    change((m) => m.delete(k.id));
                   }}
                 >
                   {l10n.getString("before-keys-hide")}
@@ -67,8 +77,7 @@ export default function LicenceKeys({ keys, onShow }: Props) {
                     void onShow(k.id)
                       .catch(() => null)
                       .then((key) => {
-                        shown.current.set(k.id, key);
-                        redraw((n) => n + 1);
+                        change((m) => m.set(k.id, key));
                       });
                   }}
                 >

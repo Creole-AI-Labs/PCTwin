@@ -696,6 +696,10 @@ pub enum LineNote {
     Sites,
     /// Why its app data needs the person.
     Data(pctwin_fullmove::data::DataWhy),
+    /// Whether its installer on the old laptop came from the maker's own site, as its download
+    /// mark said: only this yes or no, never the address.
+    #[serde(rename_all = "camelCase")]
+    CameFrom { makers_site: bool },
 }
 
 /// An app already on this laptop, left as it is.
@@ -729,6 +733,9 @@ fn todo_notes(todo: &[pctwin_apps::after::Todo]) -> Vec<LineNote> {
             Todo::Registration { .. } | Todo::Restart => None,
             Todo::Extras(apps) => Some(LineNote::Extras {
                 apps: bounded(apps.iter().map(|a| name(a)).collect()).0,
+            }),
+            Todo::CameFrom { makers_site } => Some(LineNote::CameFrom {
+                makers_site: *makers_site,
             }),
         })
         .collect()

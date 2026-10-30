@@ -307,6 +307,8 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
       return l10n.getString("fullmove-step-sites");
     case "data":
       return l10n.getString(`fullmove-data-${n.why}`, n.folder === undefined ? {} : { folder: shownName(n.folder) });
+    case "came-from":
+      return l10n.getString(n.makersSite ? "fullmove-note-came-from-maker" : "fullmove-note-came-from-elsewhere");
   }
 }
 

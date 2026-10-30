@@ -4200,6 +4200,14 @@ fn old_laptop_apps(
         pctwin_apps::found::link_installers(&mut apps, &candidates, &|p: &std::path::Path| {
             pctwin_maker::windows_old_copy(p, crate::parser(crate::Files::FoundInstallers))
         });
+        // Where each linked installer was downloaded from, as its mark says: only whether that
+        // was the maker's own site is kept (Security Design, the scan rules, 30 October 2026).
+        pctwin_apps::found::note_download_marks(
+            &mut apps,
+            &candidates,
+            &pctwin_apps::routes::trail::read_windows_mark,
+            pctwin_apps::routes::counterpart::shipped(),
+        );
     }
     #[cfg(not(windows))]
     let _ = (record, roots);

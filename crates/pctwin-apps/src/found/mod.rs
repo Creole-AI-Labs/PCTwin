@@ -221,6 +221,40 @@ pub fn link_installers(
     }
 }
 
+/// Notes, for each app with installer files linked ([`link_installers`]), whether those files were
+/// downloaded from its maker's own sites, as their download marks say (`read_mark`), against the
+/// signed catalogue `rows` (Security Design, the scan rules, 30 October 2026). Only the yes or no
+/// is kept, as one note: no for any file off the maker's sites, yes when every file that says
+/// anything is on them. A file with no mark, or a mark that says nothing, adds nothing. The
+/// address never leaves this function, and the app is still installed only from its maker.
+pub fn note_download_marks(
+    apps: &mut AppList,
+    candidates: &[(pctwin_record::ItemId, std::path::PathBuf)],
+    read_mark: &dyn Fn(&std::path::Path) -> Option<crate::routes::trail::MarkAddress>,
+    rows: &pctwin_catalogue::Catalogue<crate::routes::counterpart::CounterpartRow>,
+) {
+    for app in &mut apps.found {
+        let mut said: Option<bool> = None;
+        for id in &app.installers {
+            let Some((_, path)) = candidates.iter().find(|(c, _)| c == id) else {
+                continue;
+            };
+            let Some(mark) = read_mark(path) else {
+                continue;
+            };
+            if let Some(on) = crate::routes::trail::mark_on_makers_site(app, &mark, rows) {
+                said = Some(said.unwrap_or(true) && on);
+            }
+        }
+        if let Some(makers_site) = said {
+            app.notes
+                .retain(|n| !matches!(n, pctwin_record::AppNote::DownloadMark { .. }));
+            app.notes
+                .push(pctwin_record::AppNote::DownloadMark { makers_site });
+        }
+    }
+}
+
 /// Every app on this laptop, by its system's own rule (see the module notes). `people` are
 /// everyone on the laptop (account ID and home folder), `me` the person PCTwin runs as;
 /// `reader` (the parser process) reads installers' signatures.
@@ -282,6 +316,147 @@ fn short(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The download-trail clue (Security Design, the scan rules, 30 October 2026): a linked
+    /// installer's mark becomes one yes or no note; the address itself reaches nothing the move
+    /// keeps or shows (the record, the plan, the checklist), and the routes stay the maker's.
+    #[test]
+    fn a_download_mark_is_kept_only_as_a_yes_or_no() {
+        use crate::routes::counterpart::tests::{TUNES, rows as counterparts, windows_tunes};
+        use crate::routes::trail::zone_identifier_address;
+        use pctwin_record::{AppNote, ItemId};
+        let c = counterparts(TUNES);
+        let item = ItemId::from_hex(&"07".repeat(16)).unwrap();
+        let other = ItemId::from_hex(&"08".repeat(16)).unwrap();
+        let mut app = windows_tunes();
+        app.web = None;
+        app.installers = vec![item];
+        let candidates = vec![
+            (item, std::path::PathBuf::from("Downloads/TunesSetup.msi")),
+            (other, std::path::PathBuf::from("Downloads/Other.msi")),
+        ];
+        let secret = "https://dl.example-music.com/TunesSetup.msi?token=SECRET-TOKEN-123";
+        let mark = |zone: &'static str| {
+            move |_: &std::path::Path| {
+                zone_identifier_address(&format!(
+                    "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl={zone}\r\n"
+                ))
+            }
+        };
+        let mut list = AppList {
+            found: vec![app.clone()],
+            not_read: vec![],
+        };
+        let on = mark("https://dl.example-music.com/TunesSetup.msi?token=SECRET-TOKEN-123");
+        note_download_marks(&mut list, &candidates, &on, &c);
+        assert_eq!(
+            list.found[0].notes,
+            [AppNote::DownloadMark { makers_site: true }]
+        );
+        // Nothing the move keeps or shows holds the address.
+        let record = serde_json::to_string(&list).unwrap();
+        let crate::routes::AppPlan { routes, card, .. } = crate::routes::plan_with(
+            &list.found[0],
+            crate::routes::Target {
+                system: pctwin_record::AppSystem::Windows,
+                arch: pctwin_record::AppArch::UNKNOWN,
+                linux: None,
+            },
+            &crate::routes::Here::Absent,
+            &crate::routes::Hints {
+                rows: &pctwin_catalogue::Catalogue::shipped(
+                    r#"{"format":1,"catalogue":"app-routes","version":1,"rows":[]}"#,
+                ),
+                winget: &|_: &FoundApp| vec![],
+                casks: None,
+            },
+            &c,
+        );
+        let todo = crate::after::checklist(
+            &list.found[0],
+            false,
+            false,
+            crate::after::Installed::Failed,
+            &[],
+        );
+        for shown in [record, format!("{routes:?}{card:?}"), format!("{todo:?}")] {
+            assert!(
+                !shown.contains("SECRET-TOKEN") && !shown.contains("dl.example-music"),
+                "{shown}"
+            );
+        }
+        assert!(secret.contains("SECRET-TOKEN"));
+        // The app is still never installed from the mark's address: only its maker's routes
+        // (here, the installer file itself, which the maker check still decides).
+        assert_eq!(routes, [crate::routes::Route::OldInstaller { item }]);
+        assert!(todo.contains(&crate::after::Todo::CameFrom { makers_site: true }));
+
+        // Off the maker's sites: no. No mark, or a mark that says nothing: no note at all.
+        let mut list = AppList {
+            found: vec![app.clone()],
+            not_read: vec![],
+        };
+        note_download_marks(
+            &mut list,
+            &candidates,
+            &mark("https://mirror.example.net/t.msi"),
+            &c,
+        );
+        assert_eq!(
+            list.found[0].notes,
+            [AppNote::DownloadMark { makers_site: false }]
+        );
+        for says_nothing in [mark("about:internet"), mark("https://203.0.113.9/t.msi")] {
+            let mut list = AppList {
+                found: vec![app.clone()],
+                not_read: vec![],
+            };
+            note_download_marks(&mut list, &candidates, &says_nothing, &c);
+            assert!(list.found[0].notes.is_empty());
+        }
+        let mut list = AppList {
+            found: vec![app.clone()],
+            not_read: vec![],
+        };
+        note_download_marks(&mut list, &candidates, &|_: &std::path::Path| None, &c);
+        assert!(list.found[0].notes.is_empty());
+        // Each file by its own mark: another app's file (listed first, off the maker's sites) is
+        // never read for this one; and one file off the maker's sites among several is a no.
+        let by_file = |p: &std::path::Path| {
+            let url = if p.ends_with("Other.msi") {
+                "https://mirror.example.net/o.msi"
+            } else {
+                "https://dl.example-music.com/t.msi"
+            };
+            zone_identifier_address(&format!(
+                "[ZoneTransfer]
+HostUrl={url}
+"
+            ))
+        };
+        let reversed: Vec<_> = candidates.iter().rev().cloned().collect();
+        let mut list = AppList {
+            found: vec![app.clone()],
+            not_read: vec![],
+        };
+        note_download_marks(&mut list, &reversed, &by_file, &c);
+        assert_eq!(
+            list.found[0].notes,
+            [AppNote::DownloadMark { makers_site: true }]
+        );
+        for installers in [vec![item, other], vec![other, item]] {
+            let mut list = AppList {
+                found: vec![app.clone()],
+                not_read: vec![],
+            };
+            list.found[0].installers = installers;
+            note_download_marks(&mut list, &candidates, &by_file, &c);
+            assert_eq!(
+                list.found[0].notes,
+                [AppNote::DownloadMark { makers_site: false }]
+            );
+        }
+    }
 
     #[test]
     fn text_from_the_old_laptop_is_cleaned_and_cut() {

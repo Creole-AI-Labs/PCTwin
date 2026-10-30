@@ -120,7 +120,8 @@ export type LineNote =
   | { note: "registration"; owner: string | null; company: string | null; productId: string | null }
   | { note: "extras"; apps: string[] }
   | { note: "sites" }
-  | { note: "data"; why: DataWhy; folder?: string };
+  | { note: "data"; why: DataWhy; folder?: string }
+  | { note: "came-from"; makersSite: boolean };
 
 /** An app already on this laptop, left as it is (`HereLine`). */
 export type HereLine = { name: string; older: string | null };
@@ -238,6 +239,10 @@ function parseLineNote(v: unknown): LineNote | null {
   if (kind === "registration") {
     const f = exactly(v, ["note", "owner", "company", "productId"]);
     return f && nameOrNull(f.owner) && nameOrNull(f.company) && nameOrNull(f.productId) ? { note: kind, owner: f.owner, company: f.company, productId: f.productId } : null;
+  }
+  if (kind === "came-from") {
+    const f = exactly(v, ["note", "makersSite"]);
+    return f && typeof f.makersSite === "boolean" ? { note: kind, makersSite: f.makersSite } : null;
   }
   if (kind === "extras") {
     const f = exactly(v, ["note", "apps"]);
