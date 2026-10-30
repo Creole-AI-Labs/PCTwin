@@ -3815,6 +3815,7 @@ name = "pctwin-fullmove"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "getrandom 0.4.3",
  "pctwin-apps",
  "pctwin-catalogue",
  "pctwin-executor",
@@ -3834,6 +3835,7 @@ dependencies = [
  "pctwin-types",
  "plist",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.10.9",

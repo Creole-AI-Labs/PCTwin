@@ -38,9 +38,15 @@ pctwin-maker = { path = "../pctwin-maker" }
 sha2 = "0.10.9"
 # The Mac chain (src/mac.rs) reads `hdiutil attach -plist`.
 plist = "1.10"
+# A placed Mac app's folder name made new (src/mac.rs).
+getrandom = "0.4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
+
+[target.'cfg(unix)'.dependencies]
+# The Mac chain moves an app into place without replacing anything (renameatx_np RENAME_EXCL).
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 # The tests read other apps' data files through the real parser process.

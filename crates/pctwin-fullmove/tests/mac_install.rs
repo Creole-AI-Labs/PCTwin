@@ -88,6 +88,12 @@ struct Mac {
     admin: bool,
     licence: bool,
     gatekeeper_offline: bool,
+    /// Gatekeeper accepts it as a Developer ID app Apple has not notarised.
+    not_notarised: bool,
+    /// The copy PCTwin makes is changed after copying (its signature then fails).
+    tamper_copy: bool,
+    /// Another app appears at the place while PCTwin copies.
+    appears: bool,
     calls: RefCell<Vec<Call>>,
     mounted: RefCell<Vec<PathBuf>>,
 }
@@ -100,6 +106,9 @@ impl Mac {
             admin: true,
             licence: false,
             gatekeeper_offline: false,
+            not_notarised: false,
+            tamper_copy: false,
+            appears: false,
             calls: RefCell::new(Vec::new()),
             mounted: RefCell::new(Vec::new()),
         }
@@ -181,7 +190,21 @@ impl Runner for Mac {
                 Self::ran(0, String::new(), String::new())
             }
             "/usr/bin/ditto" => {
-                copy_tree(Path::new(&a[0]), Path::new(&a[1]));
+                let to = Path::new(&a[1]);
+                copy_tree(Path::new(&a[0]), to);
+                if self.tamper_copy {
+                    std::fs::write(to.join("Contents").join("_broken"), "").unwrap();
+                }
+                if self.appears {
+                    let place = to
+                        .parent()
+                        .unwrap()
+                        .parent()
+                        .unwrap()
+                        .join(to.file_name().unwrap());
+                    std::fs::create_dir_all(&place).unwrap();
+                    std::fs::write(place.join("theirs"), "another app").unwrap();
+                }
                 Self::ran(0, String::new(), String::new())
             }
             "/usr/bin/codesign" if a[0] == "-dv" => {
@@ -219,8 +242,13 @@ impl Runner for Mac {
                 0,
                 String::new(),
                 format!(
-                    "{}: accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Example ({TEAM})",
-                    last.display()
+                    "{}: accepted\nsource={}\norigin=Developer ID Application: Example ({TEAM})",
+                    last.display(),
+                    if self.not_notarised {
+                        "Developer ID"
+                    } else {
+                        "Notarized Developer ID"
+                    }
                 ),
             ),
             other => panic!("no stand-in for {other} {a:?}"),
@@ -635,11 +663,14 @@ fn an_intel_only_app_on_apple_silicon_says_rosetta_and_needs_it_installed() {
             &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
         );
         assert!(r.todo.contains(&Todo::Rosetta), "{r:?}");
-        assert!(r.installed);
+        let placed = lap.root.join("Applications").join("Painter.app").exists();
         if rosetta {
             assert_eq!(r.result.status(), ItemStatus::Reinstalled);
+            assert!(r.installed && placed);
         } else {
+            // Checked before anything is placed: never placed, the person's step.
             assert_eq!(r.result.reason(), Some(Reason::FinishByHand));
+            assert!(!r.installed && !placed);
         }
     }
     // On an Intel Mac the same app is native: nothing to say.
@@ -678,6 +709,11 @@ fn an_app_needing_a_newer_macos_or_older_than_the_persons_is_not_reinstalled() {
         &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
     );
     assert_eq!(r.result.reason(), Some(Reason::NoEquivalent), "{r:?}");
+    assert!(!r.installed);
+    assert!(
+        !lap.root.join("Applications").join("Painter.app").exists(),
+        "never placed"
+    );
 
     let lap = Laptop::new();
     let mut mac = Mac::new();
@@ -698,6 +734,169 @@ fn an_app_needing_a_newer_macos_or_older_than_the_persons_is_not_reinstalled() {
         Some(Reason::FinishByHand),
         "older than the person's"
     );
+    assert!(!r.installed);
+    assert!(
+        !lap.root.join("Applications").join("Painter.app").exists(),
+        "never placed"
+    );
+    assert!(mac.calls_to("/usr/bin/ditto").is_empty(), "nothing copied");
+
+    // An app for Apple silicon only, going to an Intel Mac, would not run: never placed.
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    mac.inside = Bundle {
+        arch: "thin (arm64)",
+        ..painter()
+    };
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    i.arm64 = false;
+    let r = install(
+        &mut i,
+        &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
+    );
+    assert_eq!(r.result.reason(), Some(Reason::NoEquivalent), "{r:?}");
+    assert!(!lap.root.join("Applications").join("Painter.app").exists());
+}
+
+#[test]
+fn an_app_for_neither_processor_of_an_apple_silicon_mac_is_never_placed() {
+    // An old 32-bit Intel app: Rosetta cannot run it either.
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    mac.inside = Bundle {
+        arch: "thin (i386)",
+        ..painter()
+    };
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    let r = install(
+        &mut i,
+        &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
+    );
+    assert_eq!(r.result.reason(), Some(Reason::NoEquivalent), "{r:?}");
+    assert!(!r.todo.contains(&Todo::Rosetta));
+    assert!(!lap.root.join("Applications").join("Painter.app").exists());
+}
+
+#[test]
+fn a_developer_id_app_apple_has_not_notarised_is_never_placed() {
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    mac.not_notarised = true;
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    let r = install(
+        &mut i,
+        &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
+    );
+    assert_eq!(r.result.reason(), Some(Reason::NotVerified), "{r:?}");
+    assert!(!lap.root.join("Applications").join("Painter.app").exists());
+}
+
+#[test]
+fn an_old_app_with_no_team_never_matches_a_download_with_none() {
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    // The download's signature names no team; neither did the old laptop's.
+    mac.inside = Bundle {
+        team: "not set",
+        ..painter()
+    };
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    let mut e = entry(vec![cask("painter", "https://example.com/p.dmg", None)]);
+    e.app.maker = AppMaker::NotRead {
+        why: "Its signature names no developer team.".into(),
+    };
+    let r = install(&mut i, &e);
+    assert_eq!(r.result.reason(), Some(Reason::NotVerified), "{r:?}");
+    assert!(!lap.root.join("Applications").join("Painter.app").exists());
+}
+
+#[test]
+fn the_copy_is_checked_where_it_was_made_and_a_changed_copy_is_never_placed() {
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    mac.tamper_copy = true;
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    let r = install(
+        &mut i,
+        &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
+    );
+    assert_eq!(r.result.reason(), Some(Reason::NotVerified), "{r:?}");
+    let apps = lap.root.join("Applications");
+    assert!(!apps.join("Painter.app").exists());
+    // PCTwin's own copy folder is gone; nothing else was there to touch.
+    assert_eq!(std::fs::read_dir(&apps).unwrap().count(), 0);
+}
+
+#[test]
+fn an_app_that_appears_at_the_place_while_copying_is_never_replaced_or_removed() {
+    let lap = Laptop::new();
+    let mut mac = Mac::new();
+    mac.appears = true;
+    let dl = Downloads::new();
+    let fetch = |r: &Request| dl.fetch(r);
+    let mut i = lap.installer(&mac, &fetch);
+    let r = install(
+        &mut i,
+        &entry(vec![cask("painter", "https://example.com/p.dmg", None)]),
+    );
+    assert_eq!(r.result.reason(), Some(Reason::FinishByHand), "{r:?}");
+    assert!(!r.installed);
+    let apps = lap.root.join("Applications");
+    let theirs = apps.join("Painter.app");
+    assert_eq!(
+        std::fs::read_to_string(theirs.join("theirs")).unwrap(),
+        "another app"
+    );
+    assert!(
+        !theirs.join("Contents").exists(),
+        "nothing of PCTwin's went into it"
+    );
+    // Only PCTwin's own copy folder was removed.
+    let left: Vec<_> = std::fs::read_dir(&apps)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, [std::ffi::OsString::from("Painter.app")]);
+}
+
+#[test]
+fn a_link_inside_the_download_is_never_followed() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::create_dir_all(root.join("Tools").join("Painter.app")).unwrap();
+    std::fs::write(root.join("File.app"), b"").unwrap();
+    let inside = |p: &str| pctwin_fullmove::mac::app_inside(p).unwrap();
+    assert!(pctwin_fullmove::mac::reach_inside(root, &inside("Tools/Painter.app")).is_some());
+    assert!(
+        pctwin_fullmove::mac::reach_inside(root, &inside("File.app")).is_none(),
+        "a file"
+    );
+    assert!(pctwin_fullmove::mac::reach_inside(root, &inside("Gone.app")).is_none());
+    let elsewhere = d.path().join("elsewhere");
+    std::fs::create_dir_all(elsewhere.join("Painter.app")).unwrap();
+    // A folder in the download that is a link (to /Applications, say). Making a link needs a
+    // right Windows does not always give; the Mac and Linux runners always make it.
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&elsewhere, root.join("Linked")).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(&elsewhere, root.join("Linked")).is_ok();
+    if linked {
+        assert!(pctwin_fullmove::mac::reach_inside(root, &inside("Linked/Painter.app")).is_none());
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(elsewhere.join("Painter.app"), root.join("Direct.app")).unwrap();
+        #[cfg(unix)]
+        assert!(pctwin_fullmove::mac::reach_inside(root, &inside("Direct.app")).is_none());
+    }
 }
 
 #[test]

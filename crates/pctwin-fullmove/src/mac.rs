@@ -13,22 +13,28 @@
 //!    in the Finder, never verified twice, never agreeing to a licence for the person (a disk
 //!    image that asks is left for the person); a zip is unpacked with `ditto`, which keeps the
 //!    app's signature and quarantine flag.
-//! 3. **The very app the old laptop had**: the cask's one app must carry the old laptop's bundle
-//!    ID, be signed by the old laptop's developer team (Team ID) and pass the Mac's own checks
-//!    (`codesign`, Gatekeeper and Apple's notarisation, [`pctwin_maker::mac::check_app`]).
-//!    Anything else is never placed: the next cask is tried.
+//! 3. **The very app the old laptop had**: the cask's one app (reached without following any
+//!    link inside the download) must carry the old laptop's bundle ID, be signed by the old
+//!    laptop's developer team (a Team ID on both sides; none on either side never matches) and
+//!    pass the Mac's own checks (`codesign`, and Gatekeeper accepting it as notarised by Apple,
+//!    [`pctwin_maker::mac::check_app`]; a Developer ID app Apple has not notarised is refused).
+//!    It must also run here and not be older than the person's: never older, its
+//!    `LSMinimumSystemVersion` no newer than this Mac's macOS, built for this Mac's processor (an
+//!    Intel-only app on Apple silicon only when Rosetta is installed). Anything else is never
+//!    placed: the next cask is tried, and the last one's reason is the app's.
 //! 4. **Placed as the person** with `ditto`, into `/Applications` when the person may write it
 //!    (an administrator, which most people moving are) and otherwise into their own
 //!    `~/Applications`, where macOS runs apps just the same: no administrator prompt and no
-//!    helper (Security Design C: the helper is for other people's things). An app already at
-//!    that place is never replaced.
-//! 5. **Checked where it landed**, which is the launch check PCTwin can make without opening the
-//!    app on the person's screen: the copy there is read again (bundle ID, Team ID, version never
-//!    older than the person's), its signature and Gatekeeper's answer hold, it runs on this
-//!    Mac's macOS (`LSMinimumSystemVersion`) and processor. Opening it is the person's own first
-//!    step (macOS asks once for a downloaded app). An Intel-only app on Apple silicon runs
-//!    through Rosetta: said on its line, and needs-action when Rosetta is not installed (macOS
-//!    offers it when the app is first opened).
+//!    helper (Security Design C: the helper is for other people's things). It is copied first
+//!    into a fresh hidden folder of PCTwin's own beside that place, checked again there (so what
+//!    is placed is exactly what was checked), and then moved into place by a rename that never
+//!    replaces anything (`renameatx_np` with `RENAME_EXCL`): an app already at that place, or
+//!    one that appears meanwhile, is never touched. Only PCTwin's own folder is ever removed.
+//! 5. **The launch check PCTwin can make without opening the app on the person's screen** is
+//!    step 3 on the copy that is moved into place. Opening it is the person's own first step
+//!    (macOS asks once for a downloaded app). An Intel-only app on Apple silicon runs through
+//!    Rosetta: said on its line. Without Rosetta it is not placed: needs-action, saying it needs
+//!    Rosetta (macOS offers to install it).
 //!
 //! Anything that does not hold ends needs-action or failed with its reason, never "reinstalled".
 //! Every tool is given a fixed environment and runs at its fixed path, with fixed arguments and
@@ -43,7 +49,7 @@ use pctwin_apps::after::{self, Installed, Todo};
 use pctwin_apps::fetch::{Expected, Outcome, Request};
 use pctwin_apps::routes::Route;
 use pctwin_journal::RestorePoint;
-use pctwin_maker::facts::Signature;
+use pctwin_maker::facts::{Malware, Signature};
 use pctwin_maker::run::{Call, Ran, Runner};
 use pctwin_record::{AppMaker, FoundApp, FoundWhere};
 use pctwin_types::{ItemResult, ItemStatus, Reason};
@@ -101,6 +107,41 @@ pub fn app_inside(name: &str) -> Option<PathBuf> {
         .is_some_and(|n| n.len() > 4 && n.ends_with(".app"));
     (plain && ends_app).then_some(p)
 }
+
+/// The app inside an opened download, reached step by step from `root` without following any
+/// link: a link at any step (a folder in a disk image pointing at `/Applications`, say) is
+/// refused, and the app itself must be a real folder.
+pub fn reach_inside(root: &Path, inside: &Path) -> Option<PathBuf> {
+    let mut at = root.to_path_buf();
+    for c in inside.components() {
+        at.push(c);
+        let m = std::fs::symlink_metadata(&at).ok()?;
+        if m.file_type().is_symlink() || !m.is_dir() {
+            return None;
+        }
+    }
+    Some(at)
+}
+
+/// Moves `from` to `to` (both in one folder's volume), never replacing anything at `to`.
+#[cfg(unix)]
+fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(std::io::Error::from)
+}
+
+/// Elsewhere (the tests' own build on Windows; the Mac chain never runs there): the folder is
+/// moved only when nothing has that name (Windows never moves a folder over another).
+#[cfg(not(unix))]
+fn move_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(to).is_ok() {
+        return Err(std::io::ErrorKind::AlreadyExists.into());
+    }
+    std::fs::rename(from, to)
+}
+
+/// The start of the hidden folder PCTwin copies an app into beside its place.
+pub const PLACING_PREFIX: &str = ".pctwin-placing-";
 
 /// A cask token as part of a file name: letters, digits, `-`, `_`, `@`, `.`.
 fn plain_token(t: &str) -> bool {
@@ -186,6 +227,12 @@ enum Miss {
     Occupied,
     /// A disk image that asks the person to agree to its licence.
     Licence,
+    /// The app, but older than the person's: never placed.
+    Older,
+    /// The app, but it would not run on this Mac (a newer macOS, another processor).
+    WontRun,
+    /// The app, built for Intel Macs only, and Rosetta is not installed: not placed.
+    NeedsRosetta,
 }
 
 impl Miss {
@@ -194,7 +241,8 @@ impl Miss {
             Miss::Metered | Miss::Licence => Reason::ManualInstall,
             Miss::NotVerified => Reason::NotVerified,
             Miss::Failed => Reason::InstallFailed,
-            Miss::Occupied => Reason::FinishByHand,
+            Miss::Occupied | Miss::Older | Miss::NeedsRosetta => Reason::FinishByHand,
+            Miss::WontRun => Reason::NoEquivalent,
         }
     }
 }
@@ -363,8 +411,12 @@ impl MacInstaller<'_> {
     }
 
     /// The bundle read as the scan reads one, and whether it is the old laptop's app: the same
-    /// bundle ID and Team ID, and a signature and Gatekeeper answer that hold.
+    /// bundle ID, a Team ID on both sides and the same one, a signature that holds, and
+    /// Gatekeeper accepting it as notarised by Apple.
     fn same_app(&self, bundle: &Path, had: &FoundApp) -> Result<FoundApp, Miss> {
+        let AppMaker::MacTeam { team_id: had_team } = &had.maker else {
+            return Err(Miss::NotVerified);
+        };
         let meta = std::fs::symlink_metadata(bundle).map_err(|_| Miss::NotVerified)?;
         if !meta.is_dir() {
             return Err(Miss::NotVerified);
@@ -381,26 +433,71 @@ impl MacInstaller<'_> {
         }
         // The Team ID is checked once, below, from the same `codesign` reading the scan uses.
         let facts = pctwin_maker::mac::check_app(self.runner, bundle, CHECK_TIME);
-        if facts.signature != Signature::Trusted
-            || facts.team.as_ref().map(|t| t.team_id.as_str())
-                != match &had.maker {
-                    AppMaker::MacTeam { team_id } => Some(team_id.as_str()),
-                    _ => None,
-                }
-        {
+        let notarised = matches!(facts.malware, Malware::CoveredBySystemTrust { .. });
+        let same_team = facts.team.as_ref().is_some_and(|t| t.team_id == *had_team);
+        if facts.signature != Signature::Trusted || !notarised || !same_team {
             return Err(Miss::NotVerified);
         }
         Ok(read)
     }
 
-    /// One cask for `e`: downloaded, opened, checked, placed. `Ok` holds where it was placed.
+    /// Whether the checked app `read` (at `bundle`) runs on this Mac and is not older than the
+    /// person's (see the module notes, step 3). `Ok(true)`: it runs through Rosetta.
+    fn fits_here(&self, read: &FoundApp, bundle: &Path, had: &FoundApp) -> Result<bool, Miss> {
+        if !pctwin_apps::version::not_a_downgrade(read.version.as_deref(), had.version.as_deref()) {
+            return Err(Miss::Older);
+        }
+        let plist = bundle.join("Contents").join("Info.plist");
+        let needs = std::fs::read(&plist)
+            .ok()
+            .and_then(|b| pctwin_apps::found::mac::minimum_system(&b));
+        if needs
+            .as_deref()
+            .is_some_and(|n| macos_at_least(&self.macos, n) != Some(true))
+        {
+            return Err(Miss::WontRun);
+        }
+        let arch = read.arch;
+        if !arch.known {
+            return Err(Miss::NotVerified);
+        }
+        if self.arm64 {
+            if arch.arm64 {
+                return Ok(false);
+            }
+            if !arch.x64 {
+                return Err(Miss::WontRun);
+            }
+            return if self.rosetta {
+                Ok(true)
+            } else {
+                Err(Miss::NeedsRosetta)
+            };
+        }
+        if arch.x64 {
+            Ok(false)
+        } else {
+            Err(Miss::WontRun)
+        }
+    }
+
+    /// The app at `bundle` checked in full: the old laptop's app, and it fits this Mac.
+    fn checked(&self, bundle: &Path, had: &FoundApp) -> Result<(FoundApp, bool), Miss> {
+        let read = self.same_app(bundle, had)?;
+        let rosetta = self.fits_here(&read, bundle, had)?;
+        Ok((read, rosetta))
+    }
+
+    /// One cask for `e`: downloaded, opened, checked, copied into PCTwin's own folder beside
+    /// its place, checked again there, and moved into place without replacing anything. `Ok`
+    /// holds whether it runs through Rosetta.
     fn one_cask(
         &self,
         n: usize,
         e: &AppEntry,
         apps: &Path,
         cask: (&str, &str, Option<&[u8; 32]>, &str),
-    ) -> Result<PathBuf, Miss> {
+    ) -> Result<bool, Miss> {
         let (token, url, sha, app) = cask;
         let inside = app_inside(app).ok_or(Miss::NotVerified)?;
         let name = inside.file_name().ok_or(Miss::NotVerified)?.to_owned();
@@ -415,41 +512,62 @@ impl MacInstaller<'_> {
         let root = match &opened {
             Opened::Mounted(p) | Opened::Unpacked(p) => p.clone(),
         };
-        let placed = self.same_app(&root.join(&inside), &e.app).and_then(|_| {
-            // Looked at again just before: something put there meanwhile is never replaced.
-            if std::fs::symlink_metadata(&dest).is_ok() {
-                return Err(Miss::Occupied);
-            }
-            if self.ok(
-                "/usr/bin/ditto",
-                vec![
-                    root.join(&inside).into_os_string(),
-                    dest.clone().into_os_string(),
-                ],
-            ) {
-                Ok(dest.clone())
-            } else {
-                Err(Miss::Failed)
-            }
-        });
+        let placed = reach_inside(&root, &inside)
+            .ok_or(Miss::NotVerified)
+            .and_then(|source| {
+                self.checked(&source, &e.app)?;
+                self.place(n, &source, &name, &dest, &e.app)
+            });
         self.close(&opened);
         placed
     }
 
-    /// The honest result for the app PCTwin placed at `dest` (see the module notes, step 5).
-    /// A copy that is not the app, or whose signature no longer holds, is removed again: it is
-    /// PCTwin's own, made a moment ago.
-    fn verdict(&self, e: &AppEntry, dest: &Path) -> AppResult {
-        let app = &e.app;
-        let here = match self.same_app(dest, app) {
-            Ok(h) => h,
-            Err(_) => {
-                let _ = std::fs::remove_dir_all(dest);
-                return AppResult::because(Reason::InstallFailed);
-            }
+    /// Copies the checked app at `source` into a fresh hidden folder of PCTwin's own in the
+    /// folder of `dest`, checks that copy, and moves it to `dest` only if nothing is there.
+    /// Only PCTwin's own folder is ever removed.
+    fn place(
+        &self,
+        n: usize,
+        source: &Path,
+        name: &std::ffi::OsStr,
+        dest: &Path,
+        had: &FoundApp,
+    ) -> Result<bool, Miss> {
+        let folder = dest.parent().ok_or(Miss::Failed)?;
+        let mut b = [0u8; 8];
+        getrandom::fill(&mut b).map_err(|_| Miss::Failed)?;
+        let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        let mine = folder.join(format!("{PLACING_PREFIX}{n}-{tag}"));
+        // A new folder, never one that was there: if the name is taken, nothing goes on.
+        std::fs::create_dir(&mine).map_err(|_| Miss::Failed)?;
+        let staged = mine.join(name);
+        let done = if self.ok(
+            "/usr/bin/ditto",
+            vec![
+                source.as_os_str().to_owned(),
+                staged.clone().into_os_string(),
+            ],
+        ) {
+            // What is moved into place is exactly what is checked here.
+            self.checked(&staged, had).and_then(|(_, rosetta)| {
+                match move_no_replace(&staged, dest) {
+                    Ok(()) => Ok(rosetta),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(Miss::Occupied),
+                    Err(_) => Err(Miss::Failed),
+                }
+            })
+        } else {
+            Err(Miss::Failed)
         };
+        let _ = std::fs::remove_dir_all(&mine);
+        done
+    }
+
+    /// The result for an app placed after every check held (see the module notes): reporting
+    /// only; nothing is checked or removed here.
+    fn verdict(&self, e: &AppEntry, rosetta: bool) -> AppResult {
         let mut todo = after::checklist(
-            app,
+            &e.app,
             e.plan.card.sign_in,
             e.plan.card.licence_key,
             Installed::Done {
@@ -457,32 +575,11 @@ impl MacInstaller<'_> {
             },
             &[],
         );
-        let plist = dest.join("Contents").join("Info.plist");
-        let needs = std::fs::read(&plist)
-            .ok()
-            .and_then(|b| pctwin_apps::found::mac::minimum_system(&b));
-        let runs_here = needs
-            .as_deref()
-            .is_none_or(|n| macos_at_least(&self.macos, n) == Some(true));
-        let intel_only = self.arm64 && here.arch.intel_only();
-        if intel_only {
+        if rosetta {
             todo.push(Todo::Rosetta);
         }
-        let result = if !runs_here {
-            // It needs a newer macOS than this Mac has: it would not open.
-            ItemResult::because(Reason::NoEquivalent)
-        } else if !pctwin_apps::version::not_a_downgrade(
-            here.version.as_deref(),
-            app.version.as_deref(),
-        ) {
-            ItemResult::because(Reason::FinishByHand)
-        } else if intel_only && !self.rosetta {
-            // macOS offers Rosetta the first time the app is opened: the person's step.
-            ItemResult::because(Reason::FinishByHand)
-        } else {
-            ItemResult::done(ItemStatus::Reinstalled)
-                .unwrap_or_else(|_| ItemResult::because(Reason::NotVerified))
-        };
+        let result = ItemResult::done(ItemStatus::Reinstalled)
+            .unwrap_or_else(|_| ItemResult::because(Reason::NotVerified));
         AppResult::installed(result, todo)
     }
 
@@ -509,13 +606,17 @@ impl MacInstaller<'_> {
         let mut last = Miss::Failed;
         for (i, c) in casks.into_iter().enumerate() {
             match self.one_cask(n * 4 + i, e, apps, c) {
-                Ok(dest) => return self.verdict(e, &dest),
+                Ok(rosetta) => return self.verdict(e, rosetta),
                 // Waiting for a free connection, or a place that is taken: no other cask helps.
                 Err(m @ (Miss::Metered | Miss::Occupied)) => return AppResult::because(m.reason()),
                 Err(m) => last = m,
             }
         }
-        AppResult::because(last.reason())
+        let mut r = AppResult::because(last.reason());
+        if last == Miss::NeedsRosetta {
+            r.todo.push(Todo::Rosetta);
+        }
+        r
     }
 }
 
