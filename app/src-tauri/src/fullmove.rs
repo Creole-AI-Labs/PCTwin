@@ -72,6 +72,19 @@ pub const APPDATA_EVENT: &str = "move-appdata";
 /// The old laptop: apps to close before their data can be read (`move-appdata-open`).
 pub const APPDATA_OPEN_EVENT: &str = "move-appdata-open";
 
+/// The old laptop: files an app holds open that the system cannot name, waited for by PCTwin
+/// itself (`move-live-wait`; the founder, 30 October 2026).
+pub const LIVE_WAIT_EVENT: &str = "move-live-wait";
+
+/// The files waited for, by name, and the minutes left at most before the move goes on without
+/// them (they then end needs-action, said in the report).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveWait {
+    pub files: Vec<String>,
+    pub minutes_left: u64,
+}
+
 /// The apps the person is asked to close on the old laptop: for their app data, or for files in
 /// the person's own folders that they hold open (`files`, by name; Task List 2.5, 29 October
 /// 2026). An app the system cannot name is not in `apps`; its files still are in `files`.

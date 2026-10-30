@@ -3150,3 +3150,8 @@ fullmove-rebuilding-waiting-wifi = { $minutes ->
         [one] ऐप डाउनलोड करने से पहले मुफ़्त Wi-Fi का इंतज़ार: ज़्यादा से ज़्यादा 1 मिनट और
        *[other] ऐप डाउनलोड करने से पहले मुफ़्त Wi-Fi का इंतज़ार: ज़्यादा से ज़्यादा { $minutes } मिनट और
     }
+
+# 2.5 files held by an app nobody can name
+fullmove-live-wait-title = फ़ाइलों के खाली होने का इंतज़ार
+fullmove-live-wait-body = ये फ़ाइलें इस लैपटॉप पर किसी ऐप में खुली हैं। PCTwin हर 30 सेकंड में फिर से जाँचता है, ज़्यादा से ज़्यादा { $minutes } मिनट और। अगर तब भी खुली हों, तो स्थानांतरण इनके बिना चलता है और रिपोर्ट इन्हें बताती है।
+fullmove-live-wait-stop = स्थानांतरण रोकें

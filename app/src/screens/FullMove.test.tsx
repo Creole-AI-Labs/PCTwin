@@ -13,7 +13,7 @@ import { parseMoveOutcome, parsePlanView } from "../bridge";
 import { parseRebuildStep } from "../fullmove";
 import { localization } from "../i18n";
 import { violations } from "../testing/a11y";
-import { AppDataComing, CloseApps, RebuildPlanSection, Rebuilding, RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
+import { AppDataComing, CloseApps, LiveWait, RebuildPlanSection, Rebuilding, RebuiltSection, rebuiltNeedsAction } from "./FullMoveParts";
 import appdata from "../contract/move-appdata.json";
 import opens from "../contract/move-appdata-open.json";
 import { parseAppsOpen, parseDataProgress } from "../fullmove";
@@ -249,5 +249,18 @@ describe("the app data before the files", () => {
     ] as const;
     for (const view of waiting) expect(next(view, progress)).toBe(view);
     expect(next({ kind: "wait", stage: "moving" }, progress).kind).toBe("progress");
+  });
+});
+
+describe("files an app nobody can name holds open", () => {
+  it("never asks the person to find the app: says PCTwin waits, for how long at most, lists the files, and offers only Stop", () => {
+    const onStop = vi.fn();
+    inApp(<LiveWait wait={{ files: ["Accounts.db"], minutesLeft: 14 }} onStop={onStop} />);
+    expect(screen.getByRole("heading", { name: text("fullmove-live-wait-title") })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(text("fullmove-live-wait-body", { minutes: 14 }));
+    expect(screen.getByText("Accounts.db")).toBeTruthy();
+    expect(screen.queryByText(text("fullmove-close-again"))).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: text("fullmove-live-wait-stop") }));
+    expect(onStop).toHaveBeenCalledOnce();
   });
 });

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pctwin_fullmove::live::{
-    HeldFile, LiveFile, LiveOpener, apps_to_close, find_live, held_now, until_closed,
+    HeldFile, LiveFile, LiveOpener, UNNAMED_EVERY, Unnamed, apps_to_close, find_live, held_now,
+    until_closed,
 };
 use pctwin_record::ItemId;
 use pctwin_special::capture::{Holders, Holding};
@@ -112,16 +113,88 @@ fn live_files_are_found_by_kind_never_by_name_alone() {
     assert_eq!(found[1].path, d.join("Outlook.pst"));
 }
 
+/// For the tests where an app is named: the unnamed wait must never be reached.
+fn never_waits() -> Unnamed<'static> {
+    Unnamed {
+        sleep: Box::leak(Box::new(|_| panic!("never waits when an app is named"))),
+        told: Box::leak(Box::new(|_: &[HeldFile], _| {})),
+    }
+}
+
+/// An app the system cannot name: nobody is asked; PCTwin looks again every 30 seconds, says
+/// how many minutes are left at most, and goes on with the files still held after 15 minutes.
+#[test]
+fn files_held_by_an_app_nobody_can_name_are_waited_for_then_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = [live(dir.path(), "money.db", 1)];
+    let holders = Fake::held_for(usize::MAX, &[""]);
+    let mut slept = 0;
+    let mut told: Vec<u64> = Vec::new();
+    let left = until_closed(
+        &files,
+        &holders,
+        &mut |_| panic!("never asked when no app is named"),
+        &mut Unnamed {
+            sleep: &mut |d| {
+                assert_eq!(d, UNNAMED_EVERY);
+                slept += 1;
+                true
+            },
+            told: &mut |held, minutes| {
+                assert_eq!(held.len(), 1);
+                told.push(minutes);
+            },
+        },
+    );
+    assert_eq!(left.len(), 1, "still held after the wait");
+    assert_eq!(slept, 30, "every 30 seconds for 15 minutes");
+    assert_eq!(told.first(), Some(&15));
+    assert_eq!(told.last(), Some(&1));
+    // Freed after two looks: it goes on at once, with nothing held.
+    let freed = Fake::held_for(2, &[""]);
+    let mut looks = 0;
+    let left = until_closed(
+        &files,
+        &freed,
+        &mut |_| panic!("never asked"),
+        &mut Unnamed {
+            sleep: &mut |_| {
+                looks += 1;
+                true
+            },
+            told: &mut |_, _| {},
+        },
+    );
+    assert!(left.is_empty());
+    assert_eq!(looks, 2);
+    // The move stopped while waiting: it ends the wait at once.
+    let left = until_closed(
+        &files,
+        &holders,
+        &mut |_| panic!("never asked"),
+        &mut Unnamed {
+            sleep: &mut |_| false,
+            told: &mut |_, _| {},
+        },
+    );
+    assert_eq!(left.len(), 1);
+}
+
 #[test]
 fn the_person_is_asked_until_the_app_is_closed_and_only_about_held_files() {
     let dir = tempfile::tempdir().unwrap();
     let files = [live(dir.path(), "money.db", 1)];
     let holders = Fake::held_for(2, &["Money Manager"]);
     let mut asked: Vec<Vec<HeldFile>> = Vec::new();
-    let left = until_closed(&files, &holders, &mut |held| {
-        asked.push(held.to_vec());
-        true
-    });
+    let left = until_closed(
+        &files,
+        &holders,
+        &mut |held| {
+            asked.push(held.to_vec());
+            true
+        },
+        &mut never_waits(),
+    );
     assert!(left.is_empty(), "closed after two tries");
     assert_eq!(asked.len(), 2);
     assert_eq!(apps_to_close(&asked[0]), vec!["Money Manager".to_string()]);
@@ -134,10 +207,15 @@ fn going_on_without_them_leaves_the_held_files_with_their_apps() {
     let files = [live(dir.path(), "a.db", 1), live(dir.path(), "b.pst", 2)];
     let holders = Fake::held_for(usize::MAX, &["Outlook", "Outlook"]);
     let mut times = 0;
-    let left = until_closed(&files, &holders, &mut |_| {
-        times += 1;
-        false
-    });
+    let left = until_closed(
+        &files,
+        &holders,
+        &mut |_| {
+            times += 1;
+            false
+        },
+        &mut never_waits(),
+    );
     assert_eq!(times, 1, "asked once, then gone on");
     assert_eq!(left.len(), 2);
     assert_eq!(apps_to_close(&left), vec!["Outlook".to_string()]);
@@ -153,7 +231,12 @@ fn nothing_is_asked_when_nothing_holds_them_or_the_system_cannot_tell() {
         answer_when_free: Holding::CannotTell,
         ..Fake::held_for(0, &[])
     };
-    let left = until_closed(&files, &cannot, &mut |_| panic!("never asked"));
+    let left = until_closed(
+        &files,
+        &cannot,
+        &mut |_| panic!("never asked"),
+        &mut never_waits(),
+    );
     assert!(left.is_empty());
 }
 

@@ -17,7 +17,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FILE_KINDS, ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
-import { parseAppsOpen, parseDataProgress, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type RebuildStep } from "./fullmove";
+import { parseAppsOpen, parseDataProgress, parseLiveWait, parseRebuildPlan, parseRebuilt, parseRebuildStep, type AppsOpen, type DataProgress, type LiveWait, type RebuildStep } from "./fullmove";
 import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem, type ChangesView, type RepairProblem, type SafeStopView, type WorkPick, type WorkProblem } from "./deliver";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 import { parseCleanupDone, parseCleanupView, parseDeltaView, parseDoctorView, parseFinishProblem, parseFinishView, parseGoodbyeView, parseHandoverRecorded, parseHandoverStarted, parseHandoverView, parseReportView, parseSavedSetup, parseSetupView, parseUndoPreview, type CatchupPurpose, type ChoiceIn, type CleanupWhat, type DeltaView, type Disclosure, type DoctorRole, type FinishProblem, type GoodbyeAnswer, type HandoverAction, type PersonSays } from "./finish";
@@ -850,6 +850,7 @@ export type MoveEvent =
   | { kind: "rebuild"; step: RebuildStep }
   | { kind: "appdata"; progress: DataProgress }
   | { kind: "appdata-open"; open: AppsOpen }
+  | { kind: "live-wait"; wait: LiveWait }
   | { kind: "choose"; choice: ChoiceView }
   | { kind: "changed"; changes: ChangesView };
 
@@ -876,6 +877,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-changed", parseChangesView, (changes) => ({ kind: "changed", changes })),
     on("move-appdata", parseDataProgress, (progress) => ({ kind: "appdata", progress })),
     on("move-appdata-open", parseAppsOpen, (open) => ({ kind: "appdata-open", open })),
+    on("move-live-wait", parseLiveWait, (wait) => ({ kind: "live-wait", wait })),
     on("move-choose", parseChoiceView, (choice) => ({ kind: "choose", choice })),
   ]);
   return () => {

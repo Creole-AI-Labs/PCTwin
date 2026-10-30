@@ -1255,6 +1255,13 @@ fn families() -> Vec<(&'static str, Value)> {
             ]),
         ),
         (
+            "move-live-wait",
+            json([crate::fullmove::LiveWait {
+                files: vec!["Accounts.db".into()],
+                minutes_left: 14,
+            }]),
+        ),
+        (
             "move-appdata-open",
             json([
                 crate::fullmove::AppsOpen {
@@ -1985,6 +1992,7 @@ fn calls() -> Value {
             "moveUndoClosed": crate::fullmove::UNDO_CLOSED_EVENT,
             "moveAppdata": crate::fullmove::APPDATA_EVENT,
             "moveAppdataOpen": crate::fullmove::APPDATA_OPEN_EVENT,
+            "moveLiveWait": crate::fullmove::LIVE_WAIT_EVENT,
             "moveChoose": crate::moving::CHOOSE_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,

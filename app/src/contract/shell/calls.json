@@ -847,6 +847,7 @@
     "moveFinished": "move-finished",
     "moveFound": "move-found",
     "moveLink": "move-link",
+    "moveLiveWait": "move-live-wait",
     "movePeer": "move-peer",
     "movePeople": "move-people",
     "movePlan": "move-plan",

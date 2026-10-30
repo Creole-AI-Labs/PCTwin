@@ -64,10 +64,10 @@ import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
-import { AppDataComing, CloseApps, Rebuilding, installDefaults, type InstallChoices } from "./FullMoveParts";
+import { AppDataComing, CloseApps, LiveWait, Rebuilding, installDefaults, type InstallChoices } from "./FullMoveParts";
 import UndoHost from "./UndoHost";
 import FinishHost from "./FinishHost";
-import type { AppsOpen, DataProgress, RebuildStep } from "../fullmove";
+import type { AppsOpen, DataProgress, RebuildStep, LiveWait as LiveWaitView } from "../fullmove";
 import { ownFolderName } from "../ownFolder";
 import StopMove from "./StopMove";
 import MoveChanged from "./MoveChanged";
@@ -111,6 +111,8 @@ type View =
   | { kind: "appdata"; progress: DataProgress }
   /** The old laptop: apps to close before their data can be read. */
   | { kind: "close-apps"; open: AppsOpen }
+  /** The old laptop: files an app nobody can name holds open, waited for by PCTwin itself. */
+  | { kind: "live-wait"; wait: LiveWaitView }
   /** Something changed after the person said yes: only that is asked about again (2.9, X06). */
   | { kind: "changed"; changes: ChangesView };
 
@@ -176,6 +178,7 @@ export function stepOf(view: View, old: boolean): HelpStep {
     case "rebuilding":
     case "appdata":
     case "close-apps":
+    case "live-wait":
     case "changed":
       return "moving";
     case "undo":
@@ -211,6 +214,7 @@ export function next(view: View, event: MoveEvent): View {
   if (event.kind === "appdata") return view.kind === "progress" ? view : { kind: "appdata", progress: event.progress };
   // The apps to close, and the person's files an app holds open, each listed on its own.
   if (event.kind === "appdata-open") return { kind: "close-apps", open: event.open };
+  if (event.kind === "live-wait") return { kind: "live-wait", wait: event.wait };
   if (view.kind === "appdata" && event.kind === "stage") return view;
   switch (event.kind) {
     case "link":
@@ -785,6 +789,8 @@ function MoveHostPages({ old, onPairAgain, onHome, onWindow, rescue }: HostProps
       return <Rebuilding step={view.step} waitsForFreeWifi={waitsForFreeWifi} />;
     case "appdata":
       return <AppDataComing progress={view.progress} />;
+    case "live-wait":
+      return <LiveWait wait={view.wait} onStop={stopNow} />;
     case "close-apps":
       return (
         <CloseApps

@@ -3115,22 +3115,50 @@ async fn run_old<R: Runtime>(
     let holders: Arc<dyn pctwin_special::capture::Holders + Send + Sync> =
         Arc::new(crate::fullmove::NamedHolders);
     if !live_files.is_empty() {
-        let (app, moving, files, holders) = (
+        let (app, moving, files, holders, control) = (
             app.clone(),
             moving.clone(),
             live_files.clone(),
             Arc::clone(&holders),
+            live.control.clone(),
         );
         pctwin_move::or_stop(&live.control, async move {
             tauri::async_runtime::spawn_blocking(move || {
-                pctwin_fullmove::live::until_closed(&files, holders.as_ref(), &mut |held| {
-                    crate::fullmove::ask_to_close(
-                        &app,
-                        &moving,
-                        pctwin_fullmove::live::apps_to_close(held),
-                        held.iter().map(|h| h.file.name.clone()).collect(),
-                    )
-                })
+                let told_app = app.clone();
+                pctwin_fullmove::live::until_closed(
+                    &files,
+                    holders.as_ref(),
+                    &mut |held| {
+                        crate::fullmove::ask_to_close(
+                            &app,
+                            &moving,
+                            pctwin_fullmove::live::apps_to_close(held),
+                            held.iter().map(|h| h.file.name.clone()).collect(),
+                        )
+                    },
+                    // No app can be named: PCTwin waits by itself, a second at a time so a stop
+                    // ends the wait at once.
+                    &mut pctwin_fullmove::live::Unnamed {
+                        sleep: &mut |d| {
+                            for _ in 0..d.as_secs() {
+                                if control.stopped() {
+                                    return false;
+                                }
+                                std::thread::sleep(std::time::Duration::from_secs(1));
+                            }
+                            !control.stopped()
+                        },
+                        told: &mut |held, minutes_left| {
+                            let _ = told_app.emit(
+                                crate::fullmove::LIVE_WAIT_EVENT,
+                                crate::fullmove::LiveWait {
+                                    files: held.iter().map(|h| h.file.name.clone()).collect(),
+                                    minutes_left,
+                                },
+                            );
+                        },
+                    },
+                )
             })
             .await
             .map_err(|_| MoveError::from(Stop::Cancelled))

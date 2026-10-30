@@ -8,7 +8,7 @@
  */
 import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Section } from "../components/kit";
-import type { AppsOpen, ChangeView, DataProgress, Downloads, LineNote, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
+import type { AppsOpen, ChangeView, DataProgress, Downloads, LineNote, LiveWait as LiveWaitView, RebuildPlan, RebuildStep, Rebuilt, RebuiltLine, Title } from "../fullmove";
 import { shownName } from "../names";
 import FrameFooter from "./FrameFooter";
 import { Attention, Check } from "../icons";
@@ -407,6 +407,34 @@ export function AppDataComing({ progress }: { progress: DataProgress }) {
  * folders an app holds open (2.5), each list on its own with what it means; Try again or Go on
  * without them.
  */
+/**
+ * Files an app holds open that the system cannot name: nobody is asked to find the app. PCTwin
+ * looks again every 30 seconds for up to 15 minutes, then goes on without them (the report
+ * lists them). Only Stop the move is offered (the founder, 30 October 2026).
+ */
+export function LiveWait({ wait, onStop }: { wait: LiveWaitView; onStop: () => void }) {
+  const { l10n } = useLocalization();
+  return (
+    <>
+      <TopStrip labelId="move-wait-eyebrow" />
+      <Heading id="fullmove-live-wait-title" />
+      <p className="subhead" role="status">
+        {l10n.getString("fullmove-live-wait-body", { minutes: wait.minutesLeft })}
+      </p>
+      <RowList>
+        {wait.files.map((f) => (
+          <Row key={f} title={<Name>{f}</Name>} />
+        ))}
+      </RowList>
+      <FrameFooter>
+        <Button variant="quiet" onClick={onStop}>
+          {l10n.getString("fullmove-live-wait-stop")}
+        </Button>
+      </FrameFooter>
+    </>
+  );
+}
+
 export function CloseApps({ open, onAnswer }: { open: AppsOpen; onAnswer: (retry: boolean) => void }) {
   const { l10n } = useLocalization();
   const { apps, files } = open;

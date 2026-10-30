@@ -156,20 +156,53 @@ pub fn held_now(files: &[LiveFile], holders: &dyn Holders) -> Vec<HeldFile> {
         .collect()
 }
 
+/// How often PCTwin looks again at files held by an app the system cannot name, and how long it
+/// waits for them at most (the founder, 30 October 2026: a person who cannot tell which app holds
+/// a file is never asked to find it; PCTwin waits by itself, then goes on and says which).
+pub const UNNAMED_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+pub const UNNAMED_AT_MOST: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Waiting for files held by an app nobody can name: `sleep` waits that long and answers false
+/// when the move stopped meanwhile; `told` hears the files still held and the minutes left at most.
+pub struct Unnamed<'a> {
+    pub sleep: &'a mut dyn FnMut(std::time::Duration) -> bool,
+    pub told: &'a mut dyn FnMut(&[HeldFile], u64),
+}
+
 /// Before the send: while an app holds any of `files` open, asks the person (`ask`, with the
 /// files held and who holds them) to close it; `ask` answers true for Try again, false for Go on
-/// without them. Returns the files still held when the person went on (none once all are closed).
-/// PCTwin never closes an app.
+/// without them. When no app holding them can be named, nobody is asked: PCTwin looks again
+/// every [`UNNAMED_EVERY`] for up to [`UNNAMED_AT_MOST`] ([`Unnamed`]). Returns the files still
+/// held when it went on (none once all are free). PCTwin never closes an app.
 pub fn until_closed(
     files: &[LiveFile],
     holders: &dyn Holders,
     ask: &mut dyn FnMut(&[HeldFile]) -> bool,
+    unnamed: &mut Unnamed<'_>,
 ) -> Vec<HeldFile> {
+    let mut waited = std::time::Duration::ZERO;
     loop {
         let held = held_now(files, holders);
-        if held.is_empty() || !ask(&held) {
+        if held.is_empty() {
             return held;
         }
+        if held
+            .iter()
+            .any(|h| h.by.iter().any(|a| !a.trim().is_empty()))
+        {
+            if !ask(&held) {
+                return held;
+            }
+            continue;
+        }
+        if waited >= UNNAMED_AT_MOST {
+            return held;
+        }
+        (unnamed.told)(&held, (UNNAMED_AT_MOST - waited).as_secs().div_ceil(60));
+        if !(unnamed.sleep)(UNNAMED_EVERY) {
+            return held;
+        }
+        waited += UNNAMED_EVERY;
     }
 }
 

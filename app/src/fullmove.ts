@@ -398,6 +398,15 @@ export function parseDataProgress(v: unknown): DataProgress | null {
 /** `files`: files in the person's own folders an app holds open (2.5), by name; empty for app data. */
 export type AppsOpen = { apps: string[]; files: string[] };
 
+/** Files an app holds open that the system cannot name: PCTwin waits by itself (`LiveWait`, event `move-live-wait`). */
+export type LiveWait = { files: string[]; minutesLeft: number };
+
+export function parseLiveWait(v: unknown): LiveWait | null {
+  const f = exactly(v, ["files", "minutesLeft"]);
+  const files = f ? listOf(f.files, (x) => (typeof x === "string" ? x : null)) : null;
+  return f && files && files.length > 0 && isCount(f.minutesLeft) ? { files, minutesLeft: f.minutesLeft } : null;
+}
+
 export function parseAppsOpen(v: unknown): AppsOpen | null {
   const f = exactly(v, ["apps", "files"]);
   const apps = f ? listOf(f.apps, (x) => (typeof x === "string" ? x : null)) : null;

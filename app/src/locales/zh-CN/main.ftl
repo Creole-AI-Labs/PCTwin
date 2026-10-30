@@ -2874,3 +2874,8 @@ progress-current-open-in = PCTwin 复制 { $name } 期间，{ $app } 无法保�
 fullmove-rebuilding-waiting-wifi = { $minutes ->
        *[other] 正在等待免费 Wi-Fi 后再下载应用：最多再等 { $minutes } 分钟
     }
+
+# 2.5 files held by an app nobody can name
+fullmove-live-wait-title = 正在等待文件空闲
+fullmove-live-wait-body = 这些文件正在本电脑上的某个应用中打开。PCTwin 每 30 秒检查一次，最多再等 { $minutes } 分钟。如果届时仍未关闭，迁移会在没有它们的情况下继续，报告中会列出它们。
+fullmove-live-wait-stop = 停止迁移

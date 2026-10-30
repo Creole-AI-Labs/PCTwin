@@ -12,7 +12,7 @@ import { OPTIONAL_KEYS, parseConnectionView, parseEndedEarly, parseEvidence, par
   parseQsSession, parseQsSend, parseQsSessionReceipt } from "../bridge";
 import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
 import { parseChangesView, parseKitSaved, parseRepairDone, parseRepairOffer, parseRepairProblem, parseSafeStop, parseWorkChecks, parseWorkProblem } from "../deliver";
-import { parseAppsOpen, parseDataProgress, parseRebuildStep } from "../fullmove";
+import { parseAppsOpen, parseLiveWait, parseDataProgress, parseRebuildStep } from "../fullmove";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
 
@@ -35,6 +35,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "move-rebuild": parseRebuildStep,
   "move-appdata": parseDataProgress,
   "move-appdata-open": parseAppsOpen,
+  "move-live-wait": parseLiveWait,
   "move-choose": parseChoiceView,
   "report-item": parseReportItem,
   interrupted: parseInterrupted,

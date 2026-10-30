@@ -3251,3 +3251,8 @@ fullmove-rebuilding-waiting-wifi = { $minutes ->
         [many] Esperando Wi-Fi gratuito para descargar las apps: { $minutes } minutos más como mucho
        *[other] Esperando Wi-Fi gratuito para descargar las apps: { $minutes } minutos más como mucho
     }
+
+# 2.5 files held by an app nobody can name
+fullmove-live-wait-title = Esperando a que los archivos estén libres
+fullmove-live-wait-body = Estos archivos están abiertos en una app de este portátil. PCTwin vuelve a comprobarlo cada 30 segundos, durante { $minutes } minutos como mucho. Si siguen abiertos, el traslado continúa sin ellos y el informe los indica.
+fullmove-live-wait-stop = Detener el traslado
