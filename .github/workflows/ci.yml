@@ -731,7 +731,7 @@ jobs:
               ls target/release/pctwin-helper.exe target/release/pctwin-handover.exe target/release/pctwin-parser.exe ;;
             macOS)
               app="$(ls -d "$bundle"/macos/*.app)"
-              ls "$app/Contents/MacOS/pctwin-helper" "$app/Contents/MacOS/pctwin-handover" "$app/Contents/MacOS/pctwin-parser"
+              ls "$app/Contents/MacOS/pctwin-helper" "$app/Contents/MacOS/pctwin-handover" "$app/Contents/MacOS/pctwin-parser" "$app/Contents/MacOS/pctwin-fetch"
               plutil -lint "$app/Contents/Library/LaunchDaemons/com.creoleailabs.pctwin.helper.plist" ;;
             Linux)
               list="$(dpkg -c "$bundle"/deb/*.deb)"

@@ -133,6 +133,21 @@ pub enum ChangeNote {
     /// Saved sign-ins to websites or accounts in it are tied to the old laptop: the person signs
     /// in again here.
     Sites,
+    /// Built for Intel Macs only, going to an Apple-silicon Mac: it runs through Rosetta, which
+    /// Apple is ending (said on its line so the person knows before approving).
+    IntelOnly,
+}
+
+/// What the person should know about an app beside what happens to it: an older version here
+/// first, then that it needs Rosetta.
+pub fn app_note(plan: &AppPlan) -> Option<ChangeNote> {
+    older_here(plan)
+        .map(|version| ChangeNote::OlderHere { version })
+        .or_else(|| {
+            plan.flags
+                .contains(&Flag::IntelOnly)
+                .then_some(ChangeNote::IntelOnly)
+        })
 }
 
 /// The version of an app on this laptop that is older than the old laptop's, if it is.
@@ -214,12 +229,22 @@ pub fn downloads_of(apps: &[AppEntry]) -> Downloads {
     Downloads {
         apps: apps
             .iter()
-            .filter(|e| e.plan.disposition == Disposition::Install && e.winget().is_some())
+            .filter(|e| e.plan.disposition == Disposition::Install && e.source().is_some())
             .count() as u64,
     }
 }
 
 impl AppEntry {
+    /// The package PCTwin itself downloads and installs the app from: its first winget ID or plain
+    /// Homebrew cask (the Mac chain, [`crate::mac`]), if any.
+    pub fn source(&self) -> Option<&str> {
+        self.plan.routes.iter().find_map(|r| match r {
+            Route::Winget { id, .. } => Some(id.as_str()),
+            Route::Cask { token, .. } => Some(token.as_str()),
+            _ => None,
+        })
+    }
+
     /// The first route PCTwin itself installs from (a winget package), if any.
     pub fn winget(&self) -> Option<&str> {
         self.plan.routes.iter().find_map(|r| match r {
@@ -248,6 +273,8 @@ pub struct NewLaptop<'a> {
     pub folders: Vec<(FolderRole, String)>,
     /// winget IDs suggested for an app, searched as the person (none: winget is not here).
     pub winget: &'a dyn Fn(&FoundApp) -> Vec<(String, WingetBy)>,
+    /// Homebrew's cask list, read on a Mac (`None`: not a Mac, or it could not be read).
+    pub casks: Option<&'a routes::brew::CaskIndex>,
 }
 
 /// Room for the largest installer download held at once (each is removed once installed).
@@ -445,7 +472,7 @@ impl FullPlan {
         let hints = Hints {
             rows,
             winget: here.winget,
-            casks: None,
+            casks: here.casks,
         };
         let apps: Vec<AppEntry> = record
             .apps
@@ -593,9 +620,9 @@ impl FullPlan {
                 notes: Vec::new(),
                 secret: None,
                 source: (action == Action::Install)
-                    .then(|| e.winget().map(str::to_string))
+                    .then(|| e.source().map(str::to_string))
                     .flatten(),
-                note: older_here(&e.plan).map(|version| ChangeNote::OlderHere { version }),
+                note: app_note(&e.plan),
                 undo_if_updated: (older_here(&e.plan).is_some() && e.winget().is_some())
                     .then_some(Promise::KeepsNewer),
                 tested: Some(self.tested(&e.app)),
@@ -831,6 +858,77 @@ impl FullPlan {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_intel_only_app_says_rosetta_unless_an_older_version_is_here_and_a_cask_is_its_source() {
+        use pctwin_apps::routes::{Card, Disposition, Route};
+        let card = Card {
+            name: "Painter".into(),
+            version: None,
+            maker: None,
+            web: None,
+            licence_key: false,
+            sign_in: false,
+            registration: vec![],
+            why: None,
+        };
+        let mut p = AppPlan {
+            disposition: Disposition::Install,
+            routes: vec![
+                Route::MacAppStore { adam_id: 1 },
+                Route::Cask {
+                    token: "painter".into(),
+                    version: "1".into(),
+                    url: "https://example.com/p.dmg".into(),
+                    sha256: None,
+                    auto_updates: false,
+                    app: "Painter.app".into(),
+                },
+            ],
+            flags: vec![Flag::IntelOnly],
+            card,
+        };
+        assert_eq!(app_note(&p), Some(ChangeNote::IntelOnly));
+        p.flags.push(Flag::OlderHere {
+            version: Some("0.9".into()),
+        });
+        assert_eq!(
+            app_note(&p),
+            Some(ChangeNote::OlderHere {
+                version: "0.9".into()
+            })
+        );
+        p.flags.clear();
+        assert_eq!(app_note(&p), None);
+        assert_eq!(
+            serde_json::to_value(ChangeNote::IntelOnly).unwrap(),
+            serde_json::json!({ "note": "intel-only" })
+        );
+        let e = AppEntry {
+            app: pctwin_record::FoundApp {
+                name: "Painter".into(),
+                version: None,
+                publisher: None,
+                owner: pctwin_record::Owner::Shared,
+                system: pctwin_record::AppSystem::Mac,
+                found: FoundWhere::MacBundle {
+                    bundle_id: "org.example.painter".into(),
+                    folder: "Painter.app".into(),
+                    app_store_id: Some(1),
+                },
+                arch: pctwin_record::AppArch::UNKNOWN,
+                maker: pctwin_record::AppMaker::Unsigned,
+                web: None,
+                update_feed: None,
+                installers: vec![],
+                notes: vec![],
+            },
+            plan: p,
+        };
+        assert_eq!(e.source(), Some("painter"));
+        assert_eq!(e.winget(), None);
+        assert_eq!(downloads_of(std::slice::from_ref(&e)).apps, 1);
+    }
+
     /// Apps, settings and app data the person chose on the old laptop to leave behind are said as
     /// their choice, never as something left to do (first real test, 28 October 2026).
     #[test]
@@ -939,6 +1037,7 @@ mod tests {
             installed: &installed,
             folders: vec![],
             winget: &winget,
+            casks: None,
         };
         let plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
         let names: Vec<_> = plan.apps.iter().map(|e| e.app.name.as_str()).collect();
@@ -987,6 +1086,7 @@ mod tests {
             installed: &installed,
             folders: vec![],
             winget: &none,
+            casks: None,
         };
         let plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
         let changes = plan.changes();
@@ -1015,6 +1115,7 @@ mod tests {
         };
         let here = NewLaptop {
             winget: &found,
+            casks: None,
             ..here
         };
         let mut plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
@@ -1139,6 +1240,7 @@ mod tests {
             installed: &installed,
             folders: vec![],
             winget: &winget,
+            casks: None,
         };
         let mut plan = FullPlan::build(&record, "1000", None, &here, &mut |_, _| None);
         let line = |p: &FullPlan, n: &str| {
@@ -1255,6 +1357,7 @@ mod tests {
             installed: &installed,
             folders: vec![(FolderRole::Documents, "D:\\Ada\\Documents".into())],
             winget: &none,
+            casks: None,
         };
         let d = crate::extras::digest(&x.encode());
         let fresh = FullPlan::build(&record, "1000", Some((&x, d)), &here, &mut |_, _| {

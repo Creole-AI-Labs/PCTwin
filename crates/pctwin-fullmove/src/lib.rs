@@ -11,7 +11,8 @@
 //!   what undo can do for each change. Its digest joins the plan the person approves.
 //! - [`run`]: after the files arrived: settings through the executor and the effect journal,
 //!   apps through an [`run::Installer`] (the administrator helper on Windows; the system's own
-//!   package tools on Linux, [`unix`]; a fake in tests),
+//!   package tools on Linux, [`unix`]; plain Homebrew casks placed as the person on a Mac,
+//!   [`mac`]; a fake in tests),
 //!   and one result word per item.
 //! - [`live`]: on the old laptop, the person's files that are live while their app runs (a mail
 //!   store, a database): copied only once that app is closed, or left needs-action.
@@ -26,6 +27,7 @@ pub mod drift;
 pub mod extras;
 pub mod install;
 pub mod live;
+pub mod mac;
 pub mod plan;
 pub mod run;
 pub mod undo;

@@ -511,6 +511,7 @@ impl Steps for NewPerson {
             installed: &self.installed,
             folders: self.folders.clone(),
             winget: &no_winget,
+            casks: None,
         };
         self.plan = Some(FullPlan::build(
             record,

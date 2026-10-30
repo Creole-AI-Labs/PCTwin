@@ -81,6 +81,8 @@ describe("the approval screen's apps, settings and app data", () => {
     const body = plain(container.textContent);
     // Gap 6: an older version already here, with its version, left as it is.
     expect(body).toContain(plain(text("fullmove-here-older", { version: "2.0" })));
+    // An app made for Intel Macs going to Apple silicon says so before the approval.
+    expect(body).toContain(text("fullmove-app-rosetta"));
     // R1: a browser's saved sign-ins to websites are tied to the old laptop.
     expect(body).toContain(text("fullmove-step-sites"));
     // Gap 8: links and junctions are counted and said, never silently left.
@@ -164,6 +166,8 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(plain(text("fullmove-note-registration", { who: "Ada" })));
     expect(body).toContain(plain(text("fullmove-note-product-id", { id: "12345-OEM" })));
     expect(body).toContain(plain(text("fullmove-note-extras", { apps: "Writer Helper" })));
+    // An app made for Intel Macs says it needs Rosetta.
+    expect(body).toContain(text("fullmove-note-rosetta"));
     expect(body).toContain(text("fullmove-outcome-fresh"));
     // Gap 2: each reason in words, with the folder for app data landed beside.
     for (const why of ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed"]) {

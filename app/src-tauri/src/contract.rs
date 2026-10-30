@@ -245,6 +245,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             },
             ChangeView {
                 source: Some("Example.Viewer".into()),
+                note: Some(pctwin_fullmove::plan::ChangeNote::IntelOnly),
                 tested: Some(pctwin_apps::compat::Tested::not_tested()),
                 ..change(
                     Title::Name("Viewer".into()),
@@ -534,6 +535,7 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                     LineNote::Extras {
                         apps: vec!["Writer Helper".into()],
                     },
+                    LineNote::Rosetta,
                 ],
             ),
             line(
@@ -1869,7 +1871,7 @@ fn calls() -> Value {
         "commands": [
             { "name": "set_window_mode", "args": [["mode", "mini"]] },
             { "name": "window_drag", "args": [] },
-            { "name": "set_tray_labels", "args": [["show", "Show"], ["quit", "Quit"]] },
+            { "name": "set_tray_labels", "args": [["show", "Show"], ["send", "Send files"], ["quit", "Quit"]] },
             { "name": "pairing_old_start", "args": [["network", "Wi-Fi"]] },
             { "name": "pairing_old_pick", "args": [["round", 1], ["number", 42]] },
             { "name": "pairing_old_decline", "args": [["round", 1]] },

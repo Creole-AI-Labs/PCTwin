@@ -34,6 +34,7 @@ fn plan_of(bytes: Option<&[u8]>) -> FullPlan {
         installed: &installed,
         folders: vec![],
         winget: &none,
+        casks: None,
     };
     let mut plan = FullPlan::build(
         &record,

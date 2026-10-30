@@ -619,12 +619,18 @@ pub fn plan_here(record: &Record, mover: &str, extras: Option<&[u8]>, me: &str) 
             .cloned()
             .unwrap_or_default()
     };
+    // A Mac: Homebrew's cask list, read through the locked-down fetch process.
+    #[cfg(target_os = "macos")]
+    let casks = casks_here();
+    #[cfg(not(target_os = "macos"))]
+    let casks: Option<pctwin_apps::routes::brew::CaskIndex> = None;
     let here = NewLaptop {
         system: pctwin_fullmove::extras::this_system(),
         target: this_target(),
         installed: &installed,
         folders,
         winget: &no_hints,
+        casks: casks.as_ref(),
     };
     let mut reader: Option<Option<SettingsAdapter>> = None;
     let mut current = |plan: &pctwin_settings::generic::FoundPlan, key: &str| {
@@ -685,6 +691,8 @@ pub enum LineNote {
     Extras { apps: Vec<String> },
     /// Saved sign-ins to websites or accounts in it stayed tied to the old laptop.
     Sites,
+    /// Built for Intel Macs: it runs through Rosetta, which Apple is ending.
+    Rosetta,
     /// Why its app data needs the person.
     Data(pctwin_fullmove::data::DataWhy),
 }
@@ -718,6 +726,7 @@ fn todo_notes(todo: &[pctwin_apps::after::Todo]) -> Vec<LineNote> {
                 })
             }
             Todo::Registration { .. } | Todo::Restart => None,
+            Todo::Rosetta => Some(LineNote::Rosetta),
             Todo::Extras(apps) => Some(LineNote::Extras {
                 apps: bounded(apps.iter().map(|a| name(a)).collect()).0,
             }),
@@ -884,8 +893,9 @@ pub fn rebuild_full<R: Runtime>(
     // What landed where: a moved setting points only at a file that is there.
     let data_done = pctwin_fullmove::run::DataDone { files, ..data_done };
     // Windows with winget: the real chain (winget as the person, then the administrator helper
-    // once). Linux: the system's own package tools. Elsewhere (a Mac, for now): every app needs
-    // the person, and no administrator is asked for.
+    // once). Linux: the system's own package tools. A Mac: plain Homebrew casks, downloaded by
+    // the fetch process and placed as the person (pctwin_fullmove::mac). Elsewhere every app
+    // needs the person, and no administrator is asked for.
     let mut no_installer = NoInstaller {
         why: "this laptop has no way for PCTwin to install apps yet",
     };
@@ -946,7 +956,7 @@ pub fn rebuild_full<R: Runtime>(
                 chain
             }
         });
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = &choices;
     #[cfg(windows)]
     let installer: &mut dyn Installer = match chain.as_mut() {
@@ -993,7 +1003,54 @@ pub fn rebuild_full<R: Runtime>(
     } else {
         &mut no_installer
     };
-    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+    #[cfg(target_os = "macos")]
+    let fetcher = pctwin_apps::fetch::process::default_home()
+        .and_then(|h| pctwin_apps::fetch::process::Fetcher::beside_this(h).ok());
+    #[cfg(target_os = "macos")]
+    let fetch = |r: &pctwin_apps::fetch::Request| match &fetcher {
+        Some(f) => {
+            f.fetch(r, MAC_DOWNLOAD_TIME)
+                .unwrap_or_else(|e| pctwin_apps::fetch::Outcome::Network {
+                    why: format!("{e:?}"),
+                })
+        }
+        None => pctwin_apps::fetch::Outcome::Bad {
+            why: "the download program is not here".into(),
+        },
+    };
+    #[cfg(target_os = "macos")]
+    let mut mac = pctwin_fullmove::mac::MacInstaller {
+        runner: &pctwin_maker::run::SystemRunner,
+        fetch: &fetch,
+        staging: fetcher
+            .as_ref()
+            .map(pctwin_apps::fetch::process::Fetcher::staging)
+            .unwrap_or_default(),
+        work: {
+            let mut b = [0u8; 8];
+            let _ = getrandom::fill(&mut b);
+            let tag: String = b.iter().map(|x| format!("{x:02x}")).collect();
+            let work = std::env::temp_dir().join(format!("pctwin-installs-{tag}"));
+            // Recorded before use, so clean-up (R07) knows it is PCTwin's own.
+            crate::finish_cleanup::record(app, &work);
+            work
+        },
+        home: home_here().unwrap_or_default(),
+        system_apps: std::path::PathBuf::from("/Applications"),
+        arm64: this_target().arch.arm64,
+        rosetta: pctwin_fullmove::mac::rosetta_here(),
+        macos: macos_version().unwrap_or_default(),
+        // A Mac cannot say whether its connection charges for data: downloads go ahead unless
+        // the person asked to wait for free Wi-Fi, and then they are left for the person.
+        allow_metered: !choices.wait_free_wifi,
+    };
+    #[cfg(target_os = "macos")]
+    let installer: &mut dyn Installer = if fetcher.is_some() && home_here().is_some() {
+        &mut mac
+    } else {
+        &mut no_installer
+    };
+    #[cfg(not(any(windows, unix)))]
     let installer: &mut dyn Installer = &mut no_installer;
     let mut progress = |step: Progress| {
         let _ = app.emit(REBUILD_EVENT, step);
@@ -1142,6 +1199,51 @@ impl pctwin_special::land::OwnerOnly for AppOwnerOnly {
         #[cfg(unix)]
         return pctwin_special::land::UnixOwnerOnly.private_folder(path);
     }
+}
+
+/// The longest one app download may take on a Mac.
+#[cfg(target_os = "macos")]
+const MAC_DOWNLOAD_TIME: Duration = Duration::from_secs(30 * 60);
+
+/// This Mac's macOS version (`sw_vers -productVersion`).
+#[cfg(target_os = "macos")]
+fn macos_version() -> Option<String> {
+    let out = pctwin_types::process::quiet("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .env_clear()
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let v = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !v.is_empty() && v.len() < 32).then_some(v)
+}
+
+/// Homebrew's cask list (the plan's hints on a Mac), read through the locked-down fetch process
+/// as winget is searched on Windows; `None` when it cannot be read (the apps then need the
+/// person, said on the plan).
+#[cfg(target_os = "macos")]
+fn casks_here() -> Option<pctwin_apps::routes::brew::CaskIndex> {
+    use pctwin_apps::fetch::process::{Fetcher, default_home};
+    use pctwin_apps::fetch::{Outcome, Request};
+    use pctwin_apps::routes::brew::{CASKS_URL, CaskIndex, MAX_CASKS_BYTES};
+    let fetcher = Fetcher::beside_this(default_home()?).ok()?;
+    let file = fetcher.staging().join("homebrew-casks.json");
+    let req = Request {
+        url: CASKS_URL.into(),
+        also_hosts: Vec::new(),
+        max_bytes: MAX_CASKS_BYTES as u64,
+        expected: None,
+        file: file.clone(),
+        // The list, not an app: read like winget's own catalogue on Windows.
+        allow_metered: true,
+    };
+    let done = matches!(
+        fetcher.fetch(&req, Duration::from_secs(180)),
+        Ok(Outcome::Done { .. })
+    );
+    let bytes = done.then(|| std::fs::read(&file).ok()).flatten();
+    let _ = std::fs::remove_file(&file);
+    CaskIndex::parse(&bytes?).ok()
 }
 
 /// The signed-in person's home folder here.

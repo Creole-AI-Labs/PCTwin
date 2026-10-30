@@ -1108,6 +1108,7 @@ plan-blocked-fix = اختيار الحسابات
 ## Tray menu
 
 tray-show = إظهار PCTwin
+tray-send = إرسال الملفات
 tray-quit = إنهاء PCTwin
 
 ## F01 secondary actions and their coming-soon pages
@@ -2394,12 +2395,14 @@ fullmove-extras-refused = تعذّرت قراءة إعدادات وبيانات 
 fullmove-app-from = يثبّت PCTwin حزمة winget ‏{ $id } من مطوّرها، بعد التحقق من أنها هذا التطبيق ومن المطوّر نفسه.
 fullmove-here-older = يوجد على هذا الحاسوب إصدار أقدم ({ $version }). يتركه PCTwin كما هو.
 fullmove-step-sites = تسجيلات الدخول المحفوظة إلى المواقع تبقى مرتبطة بالحاسوب القديم. سجّل الدخول إلى هذه المواقع مرة أخرى على هذا الحاسوب.
+fullmove-app-rosetta = صُمّم لأجهزة Mac القديمة بمعالج Intel. يعمل على هذا الـMac عبر Rosetta، الذي ستوقفه Apple، لذا قد يتوقف عن العمل بعد تحديث لاحق لنظام macOS. ابحث عن إصدار أحدث من الشركة المصنّعة.
 fullmove-links = اختصارات إلى أماكن أخرى بين ملفاتك، لا يتبعها PCTwin ولا ينقلها: { $count }
 fullmove-note-sign-in = افتحه وسجّل الدخول إلى حسابك.
 fullmove-note-licence-key = افتحه وأدخل مفتاح الترخيص، أو سجّل الدخول إلى الحساب الذي يحمل ترخيصك.
 fullmove-note-registration = كان حاسوبك القديم يُظهره مسجّلًا باسم { $who }.
 fullmove-note-product-id = كان معرّف المنتج على حاسوبك القديم { $id }.
 fullmove-note-extras = جاءت معه برامج أخرى: { $apps }. أزلها من إعدادات حاسوبك إن لم تكن تريدها.
+fullmove-note-rosetta = صُمّم لأجهزة Mac بمعالج Intel، لذا يحتاج إلى Rosetta. إذا عرض هذا الـMac تثبيت Rosetta عند فتح التطبيق، فاختر تثبيت.
 fullmove-data-lost = انقطع الاتصال قبل وصول هذه البيانات. ما زالت آمنة على حاسوبك القديم. ابدأ نقلًا جديدًا لإحضارها.
 fullmove-data-did-not-arrive = لم تصل هذه البيانات. ما زالت آمنة على حاسوبك القديم. ابدأ نقلًا جديدًا لإحضارها.
 fullmove-data-app-open = كان التطبيق مفتوحًا على حاسوبك القديم، لذلك لم تُنسخ بياناته. أغلق التطبيق هناك، ثم ابدأ نقلًا جديدًا لإحضارها.
