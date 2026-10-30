@@ -1135,6 +1135,7 @@ report-more-details = 更多详情
 report-note-changed-since-scan = 扫描后有改动：已按现在的样子复制。
 report-note-no-longer-there = 已不在原处：发送之前，它已在旧笔记本电脑上被移动、改名或删除。
 report-note-time-not-kept = 日期未保留：这个磁盘无法保存它的最后修改日期，所以显示的是复制的日期。
+report-note-no-permission = 未添加：此文件夹由这台电脑上的所有人共用，只有管理员才能向其中添加内容。请联系负责这台电脑的人，或自行复制到那里。
 
 evidence-read-back = 已从硬盘读回进行检查。
 evidence-memory = 通过这台笔记本电脑的内存检查，而不是硬盘。

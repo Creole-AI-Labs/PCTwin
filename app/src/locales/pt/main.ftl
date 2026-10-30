@@ -1377,6 +1377,7 @@ report-more-details = Mais detalhes
 report-note-changed-since-scan = Mudou desde a verificação: foi copiado como está agora.
 report-note-no-longer-there = Não está mais lá: foi movido, renomeado ou apagado no notebook antigo antes de poder ser enviado.
 report-note-time-not-kept = Data não mantida: esta unidade não consegue guardar a data da última alteração, por isso mostra a data em que foi copiado.
+report-note-no-permission = Não adicionado: esta pasta é compartilhada por todos neste notebook, e só um administrador pode adicionar itens nela. Peça a quem cuida deste notebook ou copie você mesmo.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Verificado lendo a cópia de volta do disco.

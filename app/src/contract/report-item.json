@@ -120,5 +120,16 @@
     "reason": "open-in-app",
     "source": "documents/11.txt",
     "status": "needs-action"
+  },
+  {
+    "bytes": 1200,
+    "destination": "12.txt",
+    "id": "00000000000000000000000000000012",
+    "kind": "documents",
+    "name": "12.txt",
+    "note": "no-permission",
+    "reason": "finish-by-hand",
+    "source": "documents/12.txt",
+    "status": "needs-action"
   }
 ]

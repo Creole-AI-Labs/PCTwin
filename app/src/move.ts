@@ -139,7 +139,7 @@ export type Outcome =
  * What the report adds beside a line's result (the shell's `ReportNote`): it changed on the old
  * laptop after the scan and was sent as it is now, or it was gone before it could be sent.
  */
-export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept"] as const;
+export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept", "no-permission"] as const;
 export type ReportNote = (typeof REPORT_NOTES)[number];
 
 /** The groups the report shows files in, like a phone's storage page (as the scan counts kinds). */

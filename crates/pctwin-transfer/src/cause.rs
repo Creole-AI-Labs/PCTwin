@@ -39,6 +39,10 @@ pub enum Cause {
     NameNotAllowed,
     /// The new laptop could not write it.
     CouldNotWrite,
+    /// The new laptop would not let this account write there: a folder shared by everyone on
+    /// it that only an administrator can add to (the Windows Public Desktop, found by the test
+    /// lab, 14 October 2026). The person's step, never a failure.
+    NoPermission,
     /// The drive it lands on is locked (BitLocker): unlock it, then move it again.
     DriveLocked,
     /// It was copied, then removed or changed at once, often by security software.
@@ -246,6 +250,7 @@ impl Cause {
                 io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::NoSpace,
                 io::ErrorKind::FileTooLarge => Self::TooBigForDrive,
                 io::ErrorKind::InvalidFilename => Self::NameNotAllowed,
+                io::ErrorKind::PermissionDenied => Self::NoPermission,
                 _ => Self::CouldNotWrite,
             },
         }
@@ -282,7 +287,7 @@ mod tests {
         assert_eq!(Cause::of_io(&full, Side::New), Cause::NoSpace);
         assert_eq!(Cause::of_io(&full, Side::Old), Cause::Unreadable);
         let denied = io::Error::from(io::ErrorKind::PermissionDenied);
-        assert_eq!(Cause::of_io(&denied, Side::New), Cause::CouldNotWrite);
+        assert_eq!(Cause::of_io(&denied, Side::New), Cause::NoPermission);
         let name = io::Error::from(io::ErrorKind::InvalidFilename);
         assert_eq!(Cause::of_io(&name, Side::New), Cause::NameNotAllowed);
     }

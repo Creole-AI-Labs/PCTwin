@@ -1212,6 +1212,7 @@ report-more-details = More details
 report-note-changed-since-scan = Changed since the scan: it was copied as it is now.
 report-note-no-longer-there = No longer there: it was moved, renamed or deleted on the old laptop before it could be sent.
 report-note-time-not-kept = Date not kept: this drive cannot store the date it was last changed, so it shows the date it was copied.
+report-note-no-permission = Not added: this folder is shared by everyone on this laptop, and only an administrator can add to it. Ask whoever looks after this laptop, or copy it there yourself.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Checked by reading it back from the drive.

@@ -1077,6 +1077,16 @@ fn report_items() -> Vec<ReportItem> {
             destination: None,
             ..line("11", ItemStatus::NeedsAction, Some(Reason::OpenInApp), None)
         },
+        // A folder shared by everyone that only an administrator can add to: the person's step.
+        ReportItem {
+            note: Some(ReportNote::NoPermission),
+            ..line(
+                "12",
+                ItemStatus::NeedsAction,
+                Some(Reason::FinishByHand),
+                None,
+            )
+        },
     ]
 }
 

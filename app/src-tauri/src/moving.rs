@@ -1950,12 +1950,18 @@ pub enum ReportNote {
     NoLongerThere,
     /// The drive would not take the date it was last changed, so it shows the date it was copied.
     TimeNotKept,
+    /// This laptop would not let the person's account add it to a folder shared by everyone.
+    NoPermission,
 }
 
 impl ReportNote {
     /// The note for a file that did not arrive, by its cause: only one that was gone has one.
     fn of_failure(f: &pctwin_transfer::Failure) -> Option<Self> {
-        (f.cause() == Cause::NoLongerThere).then_some(Self::NoLongerThere)
+        match f.cause() {
+            Cause::NoLongerThere => Some(Self::NoLongerThere),
+            Cause::NoPermission => Some(Self::NoPermission),
+            _ => None,
+        }
     }
 }
 
@@ -1969,6 +1975,8 @@ fn status_of(cause: Cause) -> (ItemStatus, Reason) {
         Cause::Unreadable | Cause::NoLongerThere => failed(Reason::Unreadable),
         // Never torn: it waits on the old laptop for its app to close (Task List 2.5).
         Cause::InUse => (ItemStatus::NeedsAction, Reason::OpenInApp),
+        // A shared folder only an administrator can add to: the person's step, said plainly.
+        Cause::NoPermission => (ItemStatus::NeedsAction, Reason::FinishByHand),
         Cause::OnlineOnly => (ItemStatus::NeedsAction, Reason::OnlineOnly),
         Cause::RefusedBySafetyCheck => failed(Reason::RefusedBySafetyCheck),
         Cause::NameNotAllowed => failed(Reason::NameNotAllowed),

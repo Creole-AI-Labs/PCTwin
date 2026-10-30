@@ -1373,6 +1373,7 @@ report-more-details = Más detalles
 report-note-changed-since-scan = Cambió después del análisis: se copió tal como está ahora.
 report-note-no-longer-there = Ya no está: se movió, se cambió de nombre o se eliminó en el portátil antiguo antes de poder enviarse.
 report-note-time-not-kept = Fecha no conservada: esta unidad no puede guardar la fecha en que se modificó por última vez, así que muestra la fecha en que se copió.
+report-note-no-permission = No añadido: esta carpeta la comparten todos en este portátil y solo un administrador puede añadir cosas. Pídeselo a quien se encarga de este portátil o cópialo tú.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Comprobado volviendo a leerlo del disco.

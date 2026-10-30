@@ -1382,6 +1382,7 @@ report-more-details = Plus de détails
 report-note-changed-since-scan = Modifié depuis l’analyse : il a été copié tel qu’il est maintenant.
 report-note-no-longer-there = N’est plus là : il a été déplacé, renommé ou supprimé sur l’ancien ordinateur portable avant de pouvoir être envoyé.
 report-note-time-not-kept = Date non conservée : ce disque ne peut pas enregistrer la date de sa dernière modification, il affiche donc la date de la copie.
+report-note-no-permission = Non ajouté : ce dossier est partagé par tous sur cet ordinateur, et seul un administrateur peut y ajouter des éléments. Demandez à la personne qui gère cet ordinateur, ou copiez-le vous-même.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Vérifié en le relisant depuis le disque.
