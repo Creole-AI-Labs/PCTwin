@@ -79,6 +79,12 @@
         "mark": "you-did-it",
         "name": "Mail",
         "what": "screens"
+      },
+      {
+        "id": "000000000000000000000000000000000000000000000000000000000000000d",
+        "mark": "open",
+        "name": "Mail",
+        "what": "open-once"
       }
     ]
   }

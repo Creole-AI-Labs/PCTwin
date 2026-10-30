@@ -610,6 +610,10 @@ keys! {
         /// The new laptop's screens: text size and layout are set again by the person (a saved
         /// arrangement fits only the exact screens it was saved for; `pctwin_settings`).
         Screens,
+        /// An app PCTwin installed: the person opens it once and checks it starts (the Product
+        /// Spec's launch test; the founder, 30 October 2026: PCTwin tells them, it never opens
+        /// their apps by itself). Their tick is their word, never a PCTwin check.
+        OpenOnce,
     }
 }
 
@@ -1697,6 +1701,9 @@ fn setup_view(m: &Move) -> SetupView {
     for x in &m.kept.lines {
         for what in setup_whats(x.status, x.reason, &x.notes) {
             push(what, x.name.clone(), false);
+        }
+        if x.kind == store::LineKind::App && x.status == ItemStatus::Reinstalled {
+            push(SetupWhat::OpenOnce, x.name.clone(), false);
         }
     }
     // Things tied to the old laptop (passkeys, authenticator apps): set up again.
@@ -2925,6 +2932,50 @@ mod tests {
         assert_eq!(
             v.tasks.iter().find(|t| t.id == id).unwrap().mark,
             SetupMark::YouDidIt
+        );
+    }
+
+    /// The launch test (Product Spec): an app PCTwin installed asks the person to open it once;
+    /// one that still needs them, and every other kind of line, does not; and every move asks
+    /// about its screens.
+    #[test]
+    fn an_installed_app_asks_to_be_opened_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut k = kept();
+        k.lines.push(KeptLine {
+            kind: LineKind::App,
+            name: "Drawer".into(),
+            count: 0,
+            status: ItemStatus::Reinstalled,
+            reason: None,
+            notes: vec![],
+        });
+        k.lines.push(KeptLine {
+            kind: LineKind::Special,
+            name: "Games".into(),
+            count: 3,
+            status: ItemStatus::Reinstalled,
+            reason: None,
+            notes: vec![],
+        });
+        let v = setup_view(&Move {
+            folder: dir.path().join("100-0"),
+            kept: k,
+        });
+        let opened: Vec<&str> = v
+            .tasks
+            .iter()
+            .filter(|t| t.what == SetupWhat::OpenOnce)
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(opened, ["Drawer"]);
+        assert!(v.tasks.iter().all(|t| t.mark == SetupMark::Open));
+        assert_eq!(
+            v.tasks
+                .iter()
+                .filter(|t| t.what == SetupWhat::Screens)
+                .count(),
+            1
         );
     }
 

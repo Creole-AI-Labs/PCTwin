@@ -2621,6 +2621,7 @@ finish-setup-export-first = Primero exporta desde { $name } en el portátil anti
 finish-setup-relink = Vuelve a vincular { $name } a tu cuenta
 finish-setup-look-at-it = Mira { $name } y comprueba que está bien
 finish-setup-screens = Revisa el tamaño del texto y la disposición de las pantallas en la configuración de pantalla de este portátil
+finish-setup-open-once = Abre { $name } una vez y comprueba que se inicia
 finish-setup-mark-open = Sin hacer
 finish-setup-mark-machine-checked = PCTwin lo comprobó
 finish-setup-mark-you-did-it = Dijiste que está hecho

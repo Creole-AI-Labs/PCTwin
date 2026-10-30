@@ -2904,6 +2904,7 @@ finish-setup-export-first = صدّر من { $name } على الحاسوب الم
 finish-setup-relink = اربط { $name } بحسابك مرة أخرى
 finish-setup-look-at-it = افتح { $name } وتأكد أنه سليم
 finish-setup-screens = تحقق من حجم النص وترتيب الشاشات في إعدادات العرض على هذا الحاسوب
+finish-setup-open-once = افتح { $name } مرة واحدة وتحقق من أنه يعمل
 finish-setup-mark-open = لم يتم
 finish-setup-mark-machine-checked = تحقق منه PCTwin
 finish-setup-mark-you-did-it = قلت إنه تم

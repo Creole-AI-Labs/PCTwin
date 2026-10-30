@@ -2419,6 +2419,7 @@ finish-setup-export-first = Export from { $name } on the old laptop first
 finish-setup-relink = Link { $name } to your account again
 finish-setup-look-at-it = Look at { $name } and check it is right
 finish-setup-screens = Check the text size and screen layout in this laptop’s display settings
+finish-setup-open-once = Open { $name } once and check it starts
 finish-setup-mark-open = Not done
 finish-setup-mark-machine-checked = PCTwin checked
 finish-setup-mark-you-did-it = You said it is done

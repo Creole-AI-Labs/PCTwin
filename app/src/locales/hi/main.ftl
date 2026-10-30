@@ -2541,6 +2541,7 @@ finish-setup-export-first = पहले पुराने लैपटॉप �
 finish-setup-relink = { $name } को अपने खाते से फिर से जोड़ें
 finish-setup-look-at-it = { $name } को देखें और जाँचें कि सब ठीक है
 finish-setup-screens = इस लैपटॉप की डिस्प्ले सेटिंग में टेक्स्ट का आकार और स्क्रीन की व्यवस्था जाँचें
+finish-setup-open-once = { $name } को एक बार खोलें और जाँचें कि यह चालू होता है
 finish-setup-mark-open = पूरा नहीं हुआ
 finish-setup-mark-machine-checked = PCTwin ने जाँचा
 finish-setup-mark-you-did-it = आपने कहा कि हो गया

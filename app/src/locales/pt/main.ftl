@@ -2625,6 +2625,7 @@ finish-setup-export-first = Exporte primeiro de { $name } no notebook antigo
 finish-setup-relink = Vincule { $name } à sua conta de novo
 finish-setup-look-at-it = Olhe { $name } e confira se está certo
 finish-setup-screens = Confira o tamanho do texto e a disposição das telas nas configurações de tela deste notebook
+finish-setup-open-once = Abra { $name } uma vez e confira se ele inicia
 finish-setup-mark-open = Não feito
 finish-setup-mark-machine-checked = O PCTwin conferiu
 finish-setup-mark-you-did-it = Você disse que está feito
