@@ -682,3 +682,132 @@ fn effects_of_one_move_are_listed_in_order_without_another_moves() {
         .collect();
     assert_eq!(ids, vec![a, b]);
 }
+
+fn file_id(n: u64) -> pctwin_journal::FileId {
+    pctwin_journal::FileId {
+        volume: 1,
+        index: std::num::NonZeroU64::new(n).unwrap(),
+        born: Some(pctwin_journal::Born { secs: 1, nanos: 0 }),
+    }
+}
+
+/// Undo of landed app data on Linux and macOS records each step of removing a file, exactly as
+/// file undo does, before it happens: only undo's own private names, single names in the file's
+/// folder, a path inside the destination; never "done" (the effect's own Done ends it); and once
+/// a removal is part way, undo cannot start over as if nothing had moved (closing waits for it).
+#[test]
+fn a_removal_of_landed_app_data_records_only_undos_own_names_in_order() {
+    use pctwin_journal::Undo;
+    let (_d, _p, j) = common::journal();
+    let id = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
+    j.settings(&keys().setting)
+        .observed(id, &Found::Setting(Some(SettingValue::Bool(true))), false)
+        .unwrap();
+    j.settings(&keys().setting)
+        .receipt(id, &Receipt::Done)
+        .unwrap();
+    let permit = j.begin_undo().unwrap();
+    let rec = j.settings(&keys().setting);
+    let private = ".pctwin-undo-0123456789abcdef0123456789abcdef".to_string();
+    let removing = |path: &str, stage: Undo| EffectUndo::Removing {
+        path: path.into(),
+        stage,
+    };
+    let first = Undo::Removing {
+        file: file_id(5),
+        dir_id: file_id(4),
+        private: private.clone(),
+    };
+    for bad in [
+        removing("../Code/User/keybindings.json", first.clone()),
+        removing("", first.clone()),
+        removing(
+            "Library/Code/keybindings.json",
+            Undo::Removing {
+                file: file_id(5),
+                dir_id: file_id(4),
+                private: "keybindings.json".into(),
+            },
+        ),
+        removing(
+            "Library/Code/keybindings.json",
+            Undo::Putting {
+                file: file_id(5),
+                dir_id: file_id(4),
+                private: private.clone(),
+                to: "../keybindings.json".into(),
+            },
+        ),
+        removing(
+            "Library/Code/keybindings.json",
+            Undo::Done {
+                outcome: pctwin_journal::UndoOutcome::Deleted,
+            },
+        ),
+    ] {
+        assert!(
+            matches!(
+                rec.record_undo(&permit, id, &bad),
+                Err(JournalError::BadName)
+            ),
+            "{bad:?}"
+        );
+    }
+    rec.record_undo(&permit, id, &EffectUndo::Reversing)
+        .unwrap();
+    rec.record_undo(
+        &permit,
+        id,
+        &removing("Library/Code/User/keybindings.json", first.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        j.effect_undo_of(id).unwrap(),
+        Some(removing("Library/Code/User/keybindings.json", first))
+    );
+    // Part way: closing undo waits, and undo cannot start over as if nothing had moved.
+    assert_eq!(j.effects_part_way().unwrap(), vec![id]);
+    assert!(matches!(
+        rec.record_undo(&permit, id, &EffectUndo::Reversing),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    // Nor "not done this time" over it: that would hide the private name from the next undo.
+    assert!(matches!(
+        rec.record_undo(
+            &permit,
+            id,
+            &EffectUndo::Done {
+                outcome: EffectUndoOutcome::NotDone {
+                    why: "the drive refused".into()
+                }
+            }
+        ),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    rec.record_undo(
+        &permit,
+        id,
+        &removing(
+            "Library/Code/User/keybindings.json",
+            Undo::Putting {
+                file: file_id(5),
+                dir_id: file_id(4),
+                private,
+                to: "keybindings (kept by PCTwin undo).json".into(),
+            },
+        ),
+    )
+    .unwrap();
+    rec.record_undo(
+        &permit,
+        id,
+        &EffectUndo::Done {
+            outcome: EffectUndoOutcome::Restored,
+        },
+    )
+    .unwrap();
+    assert!(j.effects_part_way().unwrap().is_empty());
+}

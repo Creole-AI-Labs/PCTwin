@@ -69,8 +69,12 @@ use serde::{Deserialize, Serialize};
 ///   nothing of effect undo: it would close undo, and allow the wipe, while a setting was half
 ///   put back, so it must refuse this journal instead. Each effect record and each record of undoing one is
 ///   stored sealed: a 32-byte keyed BLAKE3 tag ([`keystore`]), then its JSON (added 26 October
-///   2026, before format 3 shipped, so without a new number). Once format 3 ships, any change of shape
-///   of an effect record needs a new number.
+///   2026, before format 3 shipped, so without a new number). The undo step
+///   `EffectUndo::Removing { path, stage }` (removing landed app data on Linux and macOS the way
+///   file undo removes a copy) joined it on 31 October 2026, still before it shipped (no public
+///   release of PCTwin). An older PCTwin that met one would read it as damaged, count the effect
+///   as part way and keep undo from closing: it never acts on it. Once format 3 ships, any change
+///   of shape of an effect record needs a new number.
 /// - **2**: undo removes a copy through the handle it was checked on (Windows) or by first moving
 ///   its name aside to a private name and checking it there (Linux and macOS): the undo stages
 ///   `Undo::Removing{file, dir_id, private}`, `Undo::Putting`, `Undo::Salvaging` and

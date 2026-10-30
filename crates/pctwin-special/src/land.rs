@@ -29,8 +29,8 @@ use pctwin_grant::{
     CaptureEffect, CaptureGrant, Now, PlanSeal, RootRef, SecretEffect, SecretGrant,
 };
 use pctwin_journal::{
-    EffectState, FileHash, Found, ImportIntent, Imports, JournalError, PlannedEffect, Receipt,
-    Recorder, StoredEffect,
+    EffectState, EffectUndo, FileHash, Found, ImportIntent, Imports, JournalError, PlannedEffect,
+    Receipt, Recorder, StoredEffect,
 };
 use pctwin_recipe::{RelPath, SettingsPlace, SettingsRoot};
 use pctwin_types::Reason;
@@ -540,17 +540,24 @@ pub enum Undone {
 }
 
 /// Undoes landing `effect` (T25-054): each file PCTwin placed is removed only while it is still
-/// exactly what PCTwin wrote (compare before removing, through the gate); a file the person changed
-/// since is kept, and they are told. Folders are removed only when empty. Recorded in the journal
-/// (part way first, then how it ended), with leave from its undo gate. Windows first: the gate's
-/// checked removal is built for Windows; elsewhere it is "not done this time".
+/// exactly what PCTwin wrote (its full bytes checked against what the journal recorded as landed,
+/// through the gate, never following a link); a file the person changed since is kept, and they
+/// are told. Folders are removed only when empty. Recorded in the journal (part way first, then
+/// how it ended), with leave from its undo gate.
+///
+/// Windows removes through the handle it checked. Linux and macOS use exactly file undo's
+/// removal ([`pctwin_gate::Destination::check_copy`], [`pctwin_gate::Destination::remove_checked`]):
+/// the name is moved aside, never replacing, to a private name the journal recorded first
+/// ([`EffectUndo::Removing`]), proven there to be the very file unchanged, then removed under a
+/// write lease (Linux) or moved into the Trash on its drive (macOS, where nothing is deleted).
+/// A removal a crash left part way is finished from the disk first.
 pub fn undo_landing(
     rec: &Recorder<'_, Imports>,
     right: &impl pctwin_journal::UndoRight,
     dest: &Destination,
     effect: u64,
 ) -> Result<Undone, LandError> {
-    use pctwin_journal::{EffectUndo, EffectUndoOutcome};
+    use pctwin_journal::EffectUndoOutcome;
     let journal = rec.journal();
     if let Some(EffectUndo::Done { outcome }) = journal.effect_undo_of(effect)?
         && outcome.is_final()
@@ -573,10 +580,19 @@ pub fn undo_landing(
         ));
     };
     let folder = to.path.parts().collect::<Vec<_>>().join("/");
-    if !matches!(journal.effect_undo_of(effect)?, Some(EffectUndo::Reversing)) {
-        rec.record_undo(right, effect, &EffectUndo::Reversing)?;
+    match journal.effect_undo_of(effect)? {
+        Some(EffectUndo::Reversing) => {}
+        // A removal a crash (or a stop) left part way: finished from the disk first.
+        Some(EffectUndo::Removing { path, stage }) => {
+            if let Err(why) =
+                finish_part_way(rec, right, effect, dest, &folder, placed, &path, &stage)
+            {
+                return Ok(Undone::NotDone(why));
+            }
+        }
+        _ => rec.record_undo(right, effect, &EffectUndo::Reversing)?,
     }
-    let result = remove_placed(right, dest, &folder, placed);
+    let result = remove_placed(rec, right, effect, dest, &folder, placed);
     let (undone, outcome) = match result {
         Ok(0) => (Undone::Removed, EffectUndoOutcome::Restored),
         Ok(kept) => (
@@ -585,19 +601,51 @@ pub fn undo_landing(
                 why: format!("{kept} file(s) changed since the move were kept"),
             },
         ),
-        Err(why) => (
-            Undone::NotDone(why.clone()),
-            EffectUndoOutcome::NotDone { why },
-        ),
+        Err(why) => {
+            // A removal left part way (a file may be under a private name only) is never written
+            // over: the next undo finishes it from the disk with the name the journal holds.
+            if matches!(
+                journal.effect_undo_of(effect)?,
+                Some(EffectUndo::Removing { .. })
+            ) {
+                return Ok(Undone::NotDone(why));
+            }
+            (
+                Undone::NotDone(why.clone()),
+                EffectUndoOutcome::NotDone { why },
+            )
+        }
     };
     rec.record_undo(right, effect, &EffectUndo::Done { outcome })?;
     Ok(undone)
 }
 
+/// Windows removes through the handle it checked, so no removal is ever left part way under
+/// another name: nothing to finish.
+#[cfg(windows)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the same shape as on Linux and macOS"
+)]
+fn finish_part_way(
+    _rec: &Recorder<'_, Imports>,
+    _right: &impl pctwin_journal::UndoRight,
+    _effect: u64,
+    _dest: &Destination,
+    _folder: &str,
+    _placed: &[pctwin_journal::FileHash],
+    _path: &str,
+    _stage: &pctwin_journal::Undo,
+) -> Result<(), String> {
+    Ok(())
+}
+
 /// Removes the placed files still unchanged; returns how many were kept.
 #[cfg(windows)]
 fn remove_placed(
+    _rec: &Recorder<'_, Imports>,
     right: &impl pctwin_journal::UndoRight,
+    _effect: u64,
     dest: &Destination,
     folder: &str,
     placed: &[pctwin_journal::FileHash],
@@ -645,12 +693,267 @@ fn remove_placed(
     Ok(kept)
 }
 
-#[cfg(not(windows))]
+/// The words a file kept beside its own name carries (file undo's own, [`pctwin_gate::Context`]),
+/// and the room kept for them in any language.
+#[cfg(unix)]
+const KEPT_WORDS: &str = " (kept by PCTwin undo)";
+#[cfg(unix)]
+const KEPT_WORDS_ROOM: usize = 64;
+
+/// The placed file at the stored path `stored`, and what the journal recorded it held.
+#[cfg(unix)]
+fn placed_at<'a>(
+    dest: &'a Destination,
+    folder: &'a str,
+    placed: &'a [pctwin_journal::FileHash],
+) -> impl Iterator<Item = (String, [u8; 32])> + 'a {
+    placed.iter().filter_map(move |h| {
+        let (stored, _) = IncomingPath::parse(&format!("{folder}/{}", h.path))
+            .ok()
+            .and_then(|p| dest.find(&p))?;
+        Some((stored, h.hash))
+    })
+}
+
+/// "The very bytes PCTwin wrote": the whole file, read through the held handle, against the
+/// journal's record of what landed.
+#[cfg(unix)]
+fn same_bytes(want: [u8; 32]) -> impl FnOnce(&mut std::fs::File) -> std::io::Result<bool> {
+    move |f: &mut std::fs::File| {
+        use std::io::Seek;
+        f.seek(std::io::SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes)?;
+        Ok(pctwin_journal::content_hash(&bytes) == want)
+    }
+}
+
+/// Whether a removal's answer means the copy is no longer under its name for the person (gone,
+/// removed, or in the Trash): anything else is kept, and counted.
+#[cfg(unix)]
+fn gone(r: &pctwin_gate::Removed) -> bool {
+    use pctwin_gate::Removed;
+    matches!(
+        r,
+        Removed::Removed | Removed::Gone | Removed::Trashed { .. }
+    )
+}
+
+/// The journal's record of one step of removing the landed file at `path`.
+#[cfg(unix)]
+fn stage_of(
+    path: &str,
+    file: pctwin_gate::FileId,
+    dir_id: pctwin_gate::FileId,
+    step: pctwin_gate::Step<'_>,
+) -> EffectUndo {
+    use pctwin_gate::Step;
+    use pctwin_journal::Undo;
+    let stage = match step {
+        Step::NewPrivate { private } => Undo::Removing {
+            file,
+            dir_id,
+            private: private.into(),
+        },
+        Step::Putting { private, to } => Undo::Putting {
+            file,
+            dir_id,
+            private: private.into(),
+            to: to.into(),
+        },
+        Step::Salvaging { temp, to, complete } => Undo::Salvaging {
+            file,
+            dir_id,
+            temp: temp.into(),
+            to: to.into(),
+            complete,
+        },
+        Step::Trashing { private, trash, to } => Undo::Trashing {
+            file,
+            dir_id,
+            private: private.into(),
+            trash: trash.into(),
+            to: to.into(),
+        },
+    };
+    EffectUndo::Removing {
+        path: path.into(),
+        stage,
+    }
+}
+
+/// Removes the placed files still unchanged; returns how many were kept. Each file goes the way
+/// file undo removes a copy on this system (see [`undo_landing`]); every step is recorded before
+/// it happens and the folder it acted in is flushed before the next file is begun.
+#[cfg(unix)]
 fn remove_placed(
-    _right: &impl pctwin_journal::UndoRight,
-    _dest: &Destination,
-    _folder: &str,
-    _placed: &[pctwin_journal::FileHash],
+    rec: &Recorder<'_, Imports>,
+    right: &impl pctwin_journal::UndoRight,
+    effect: u64,
+    dest: &Destination,
+    folder: &str,
+    placed: &[pctwin_journal::FileHash],
 ) -> Result<usize, String> {
-    Err("undo of brought-in app data is built for Windows first".into())
+    use pctwin_gate::Check;
+    let mut kept = 0usize;
+    let mut folders = std::collections::BTreeSet::new();
+    for (stored, want) in placed_at(dest, folder, placed) {
+        let mut parts: Vec<&str> = stored.split('/').collect();
+        while parts.len() > 1 {
+            parts.pop();
+            folders.insert(parts.join("/"));
+        }
+        let Some(stat) = dest.stat(&stored).map_err(|e| e.kind().to_string())? else {
+            continue;
+        };
+        let copy = match dest.check_copy(&stored, stat.id, same_bytes(want)) {
+            Ok(Check::Ready(copy)) => copy,
+            Ok(Check::Done(r)) => {
+                if !gone(&r) {
+                    kept += 1;
+                }
+                continue;
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let (file, dir_id) = (copy.file(), copy.dir_id());
+        let private = pctwin_gate::private_name().map_err(|e| e.to_string())?;
+        // Recorded first: after a crash, undo knows the one hidden name the copy may be under.
+        rec.record_undo(
+            right,
+            effect,
+            &stage_of(
+                &stored,
+                file,
+                dir_id,
+                pctwin_gate::Step::NewPrivate { private: &private },
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+        let failed = std::cell::Cell::new(None);
+        let mut record = |step: pctwin_gate::Step<'_>| {
+            rec.record_undo(right, effect, &stage_of(&stored, file, dir_id, step))
+                .map_err(|e| {
+                    let message = e.to_string();
+                    failed.set(Some(message.clone()));
+                    std::io::Error::other(message)
+                })
+        };
+        let mut cx = pctwin_gate::Context {
+            kept_words: KEPT_WORDS,
+            room_for_words: KEPT_WORDS_ROOM,
+            journal: &mut record,
+        };
+        let removed = dest.remove_checked(right, *copy, &private, &mut cx);
+        if let Some(why) = failed.take() {
+            return Err(why);
+        }
+        match removed {
+            Ok(r) if gone(&r) => {}
+            Ok(_) => kept += 1,
+            // Not recorded as done: the next undo finishes it from the disk.
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    // Deepest first; only empty folders go.
+    let mut folders: Vec<String> = folders.into_iter().collect();
+    folders.sort_by_key(|f| std::cmp::Reverse(f.matches('/').count()));
+    for f in folders {
+        if f.matches('/').count() + 1 >= folder.split('/').count() {
+            let _ = dest.remove_empty_folder(&f);
+        }
+    }
+    Ok(kept)
+}
+
+/// Finishes, from the disk, the removal of the landed file at `path` that the journal recorded
+/// part way (`stage`), the way file undo finishes one (the gate's resolutions). Then the files
+/// are looked at again as usual. `Err`: not finished (its folder cannot be found, or the drive
+/// refused), said as not done this time.
+#[cfg(unix)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "exactly the journal's record and the landing"
+)]
+fn finish_part_way(
+    rec: &Recorder<'_, Imports>,
+    right: &impl pctwin_journal::UndoRight,
+    effect: u64,
+    dest: &Destination,
+    folder: &str,
+    placed: &[pctwin_journal::FileHash],
+    path: &str,
+    stage: &pctwin_journal::Undo,
+) -> Result<(), String> {
+    use pctwin_gate::Resolution;
+    use pctwin_journal::Undo;
+    // Only a file this very landing placed is ever looked for.
+    let Some(want) = placed_at(dest, folder, placed)
+        .find(|(stored, _)| stored == path)
+        .map(|(_, h)| h)
+    else {
+        return Err("a file undo was removing is not one this landing placed".into());
+    };
+    let (file, dir_id) = match stage {
+        Undo::Removing { file, dir_id, .. }
+        | Undo::Putting { file, dir_id, .. }
+        | Undo::Salvaging { file, dir_id, .. }
+        | Undo::Trashing { file, dir_id, .. } => (*file, *dir_id),
+        Undo::Done { .. } => return Ok(()),
+    };
+    let failed = std::cell::Cell::new(None);
+    let mut record = |step: pctwin_gate::Step<'_>| {
+        rec.record_undo(right, effect, &stage_of(path, file, dir_id, step))
+            .map_err(|e| {
+                let message = e.to_string();
+                failed.set(Some(message.clone()));
+                std::io::Error::other(message)
+            })
+    };
+    let mut cx = pctwin_gate::Context {
+        kept_words: KEPT_WORDS,
+        room_for_words: KEPT_WORDS_ROOM,
+        journal: &mut record,
+    };
+    let resolved = match stage {
+        Undo::Removing { private, .. } => dest.resolve_removing(
+            right,
+            path,
+            file,
+            dir_id,
+            private,
+            same_bytes(want),
+            &mut cx,
+        ),
+        Undo::Putting { private, to, .. } => {
+            dest.resolve_putting(right, path, file, dir_id, private, to, &mut cx)
+        }
+        Undo::Salvaging {
+            temp, to, complete, ..
+        } => dest.resolve_salvaging(right, path, dir_id, temp, to, *complete, &mut cx),
+        Undo::Trashing {
+            private, trash, to, ..
+        } => dest.resolve_trashing(
+            right,
+            path,
+            file,
+            dir_id,
+            private,
+            trash,
+            to,
+            same_bytes(want),
+            &mut cx,
+        ),
+        Undo::Done { .. } => return Ok(()),
+    };
+    if let Some(why) = failed.take() {
+        return Err(why);
+    }
+    match resolved {
+        Ok(Resolution::FolderMissing) => Err("its folder cannot be found on this drive".into()),
+        // Every other answer leaves nothing under a private name: what is under the file's own
+        // name (if anything) is looked at again with the rest.
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }

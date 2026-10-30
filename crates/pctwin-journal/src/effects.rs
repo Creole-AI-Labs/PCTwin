@@ -438,6 +438,13 @@ pub enum EffectUndo {
     /// its name (or beside it), or gone with the earlier version in its place, and the private
     /// name is no longer used. Recorded only after putting it back said so.
     PutBack { path: String, private: String },
+    /// Linux and macOS: a step of removing the file at `path` that this effect landed (its
+    /// stored path under the destination), the way file undo removes a copy there (move its name
+    /// aside, never replacing, then prove it; Linux removes under a write lease, macOS moves it to
+    /// the Trash): `stage` is exactly the step file undo records ([`crate::Undo`]), recorded
+    /// before it happens, so after a crash undo finds what may be under a private name and
+    /// finishes it from the disk. Recorded again for each file and each step.
+    Removing { path: String, stage: crate::Undo },
     /// Done; never written over, unless it could not be done this time.
     Done { outcome: EffectUndoOutcome },
 }
@@ -1130,6 +1137,11 @@ fn read_undo(id: u64, bytes: &[u8], key: &TagKey) -> Result<EffectUndo, JournalE
     {
         return Err(damaged("an undo record names a place outside its folder"));
     }
+    if let EffectUndo::Removing { path, stage } = &undo
+        && (path.is_empty() || settings_path(path).is_err() || !removal_stage_ok(stage))
+    {
+        return Err(damaged("an undo record names a place outside its folder"));
+    }
     Ok(undo)
 }
 
@@ -1183,9 +1195,40 @@ fn may_follow(before: Option<&EffectUndo>, next: &EffectUndo) -> bool {
         (Some(EffectUndo::Swapping { .. }), _) => false,
         (None, _) => true,
         (Some(EffectUndo::Done { outcome }), _) => !outcome.is_final(),
+        // A file may be under a private name only: nothing but another removal step, or the
+        // effect's end once every file is settled, may follow (never "not done", which would
+        // hide the private name from the next undo).
+        (Some(EffectUndo::Removing { .. }), next) => match next {
+            EffectUndo::Removing { .. } => true,
+            EffectUndo::Done { outcome } => outcome.is_final(),
+            _ => false,
+        },
         (Some(EffectUndo::Reversing | EffectUndo::PutBack { .. }), next) => {
             !matches!(next, EffectUndo::Reversing)
         }
+    }
+}
+
+/// Whether a removal step names only what a removal may: a private name of undo's own, single
+/// names in the file's own folder, and never "done" (the effect's own Done ends it).
+fn removal_stage_ok(stage: &crate::Undo) -> bool {
+    use crate::Undo;
+    let single = |n: &str| crate::plain_name(n).is_ok();
+    let salvage = |n: &str| {
+        n.strip_prefix(".pctwin-salvage-").is_some_and(|t| {
+            t.len() == 32
+                && t.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+    };
+    match stage {
+        Undo::Removing { private, .. } => is_private_name(private),
+        Undo::Putting { private, to, .. } => is_private_name(private) && single(to),
+        Undo::Salvaging { temp, to, .. } => salvage(temp) && single(to),
+        Undo::Trashing {
+            private, trash, to, ..
+        } => is_private_name(private) && single(to) && trash.starts_with('/'),
+        Undo::Done { .. } => false,
     }
 }
 
@@ -1194,6 +1237,7 @@ fn step_name(undo: &EffectUndo) -> &'static str {
         EffectUndo::Reversing => "reversing",
         EffectUndo::Swapping { .. } => "swapping",
         EffectUndo::PutBack { .. } => "put-back",
+        EffectUndo::Removing { .. } => "removing",
         EffectUndo::Done { .. } => "done",
     }
 }
@@ -1518,6 +1562,11 @@ impl Journal {
         self.check_right(right)?;
         if let EffectUndo::Swapping { path, private } | EffectUndo::PutBack { path, private } = undo
             && (settings_path(path).is_err() || !is_private_name(private))
+        {
+            return Err(JournalError::BadName);
+        }
+        if let EffectUndo::Removing { path, stage } = undo
+            && (path.is_empty() || settings_path(path).is_err() || !removal_stage_ok(stage))
         {
             return Err(JournalError::BadName);
         }

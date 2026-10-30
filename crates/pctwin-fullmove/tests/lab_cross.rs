@@ -972,6 +972,50 @@ impl Steps for NewPerson {
 
 /* ---------- The move ---------- */
 
+/// macOS: the home folder whose `.Trash` undo uses in these tests, on the build's drive (shared
+/// by every test of this run); the person's own Trash is never touched.
+#[cfg(target_os = "macos")]
+fn trash_home() -> &'static Path {
+    static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        tempfile::Builder::new()
+            .suffix(".noindex")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap()
+    })
+    .path()
+}
+
+/// macOS: whether the test Trash holds VS Code's shortcuts, as undo moved them there.
+#[cfg(target_os = "macos")]
+fn mac_trash_holds() -> bool {
+    std::fs::read_dir(trash_home().join(".Trash")).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().contains("keybindings"))
+    })
+}
+
+/// A folder for one move, on a drive undo removes from. On Linux and macOS it is under Cargo's
+/// own folder for test files (on the build's drive, like the gate's own undo tests), named
+/// `.noindex` so Spotlight never opens its files (undo leaves a file another program has open);
+/// on a Mac the Trash a proven copy goes to is a test Trash on that drive, never the person's.
+fn lab_dir() -> tempfile::TempDir {
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "macos")]
+        pctwin_gate::use_trash_home(trash_home().to_path_buf());
+        tempfile::Builder::new()
+            .suffix(".noindex")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap()
+    }
+    #[cfg(not(unix))]
+    {
+        tempfile::tempdir().unwrap()
+    }
+}
+
 /// What a direction is held to: everything ([`Strict::all`]), or one part of it (the tests named
 /// for that part).
 #[derive(Clone, Copy, Default)]
@@ -983,8 +1027,6 @@ struct Strict {
     data: bool,
     /// On a Mac, the same maker's edition is installed from its cask.
     mac_installs: bool,
-    /// Undo removes landed app data on a Mac or Linux laptop too.
-    unix_data_undo: bool,
 }
 
 impl Strict {
@@ -994,7 +1036,6 @@ impl Strict {
             settings: true,
             data: true,
             mac_installs: b == Kind::Mac,
-            unix_data_undo: false,
         }
     }
 }
@@ -1005,7 +1046,7 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         "the same-system directions are lab.rs and lab_unix.rs"
     );
     pctwin_parse::testing::install_readers();
-    let t = tempfile::tempdir().unwrap();
+    let t = lab_dir();
     let old = t.path().join("old");
     let new = t.path().join("new");
     let staging = t.path().join("staging");
@@ -1608,21 +1649,23 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         assert_eq!(read_row(&mut adapter, b, "appearance.theme"), theme_before);
     }
     if strict.data {
-        if cfg!(windows) || strict.unix_data_undo {
-            assert!(
-                !code_here.exists(),
-                "{a:?} to {b:?}: undo removed the app data that landed"
-            );
-        } else {
-            // Undoing landed app data is built for Windows (pctwin-special's land.rs): on a Mac
-            // or Linux it is said not done, and nothing is removed.
-            assert!(code_here.exists());
-            assert!(
-                lines.iter().any(|l| l.name.contains("Code")
-                    && matches!(l.result, undo::Result::NotDoneYet { .. })),
-                "{lines:#?}"
-            );
-        }
+        // Removed on Windows and Linux; on a Mac moved into the (test) Trash: gone from where
+        // VS Code reads it either way, and said as put back.
+        assert!(
+            !code_here.exists(),
+            "{a:?} to {b:?}: undo removed the app data that landed: {lines:#?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.name.contains("Code") && l.result == undo::Result::Restored),
+            "{lines:#?}"
+        );
+        #[cfg(target_os = "macos")]
+        assert!(
+            !b.is_host() || mac_trash_holds(),
+            "a Mac moves what undo removes into the Trash, never deletes it"
+        );
     }
     // The old laptop's settings are as they were.
     match a {
@@ -1766,14 +1809,12 @@ async fn linux_to_mac_installs_the_same_makers_edition_from_its_cask() {
     .await;
 }
 
-/// Engine gap: undoing app data that landed is built for Windows only
-/// (`pctwin-special/src/land.rs` `remove_placed`): on a Mac or Linux it is said "not done this
-/// time" and nothing is removed. The gate's move-aside-then-check removal for those systems
-/// (`pctwin_gate::Destination::check_copy`, `remove_checked`), with its journal record and the
-/// Mac's Trash, is not yet joined to the app data landing.
+/// On this Mac or Linux laptop: undo takes away the app data that landed only while each file is
+/// exactly what PCTwin wrote (moved aside, then proven, never following a link; removed under a
+/// write lease on Linux, into the Trash on a Mac), and a file the person changed since stays, said
+/// as kept.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "engine gap: undo of landed app data is built for Windows only"]
 async fn undo_removes_landed_app_data_on_mac_and_linux() {
     let here = if cfg!(target_os = "macos") {
         Kind::Mac
@@ -1790,7 +1831,6 @@ async fn undo_removes_landed_app_data_on_mac_and_linux() {
         here,
         Strict {
             data: true,
-            unix_data_undo: true,
             ..Strict::default()
         },
     )
