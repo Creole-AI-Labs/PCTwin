@@ -269,9 +269,9 @@ fn kind_of(base: &Path, rel: &str, browsing: bool) -> Option<Kind> {
     }
     if json_start(&h) {
         let bytes = crate::guard::read_all(&p, MAX_READ).ok()?;
-        // A bookmarks tree by its format's own keys (the parser reads it whole later); a file
-        // grouped with saved addresses is not one by being there.
-        if browsing && (contains(&bytes, b"\"roots\"") || contains(&bytes, b"text/x-moz-place")) {
+        // A bookmarks tree by its shape, read in the parser process; a file grouped with saved
+        // addresses, or one that only shares a word with the format, is not one.
+        if browsing && crate::content::json_facts_of(&bytes).is_ok_and(|f| f.bookmarks) {
             return Some(Kind::Bookmarks(BrowserRead::Json));
         }
         if contains(&bytes, b"\"addons\"") && contains(&bytes, b"\"defaultLocale\"") {

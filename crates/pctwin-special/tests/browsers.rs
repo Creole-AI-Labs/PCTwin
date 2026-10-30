@@ -178,6 +178,10 @@ fn chromium_shaped(root: &Path) {
         br#"{"extName":{"message":"Invented Tab Saver"}}"#,
     );
     put(&d.join("Sessions/Session_1"), b"SNSS\x03\0\0\0 invented");
+    // A newer settings file that only shares a word with the bookmarks format is not taken for
+    // the bookmarks.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    put(&d.join("Layout"), br#"{"roots":["sidebar"],"width":3}"#);
 }
 
 #[test]
