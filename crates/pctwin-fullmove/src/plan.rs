@@ -194,6 +194,14 @@ pub struct AppEntry {
     pub plan: AppPlan,
 }
 
+impl AppEntry {
+    /// The app the plan installs and checks against: for an app from another kind of laptop,
+    /// the same maker's edition for this one; else the old laptop's app.
+    pub fn subject(&self) -> &FoundApp {
+        self.plan.subject(&self.app)
+    }
+}
+
 /// What the apps the plan installs need from the internet, before the person approves (Task List
 /// 2.7): how many are downloaded. An installer found on the old laptop is never reused yet
 /// ([`crate::install`]), so every one is.
@@ -452,9 +460,15 @@ impl FullPlan {
             .found
             .iter()
             .filter(|a| movers(a, mover))
-            .map(|a| AppEntry {
-                app: a.clone(),
-                plan: routes::plan(a, here.target, &here_of(a, here.installed), &hints),
+            .map(|a| {
+                // An app from another kind of laptop: whether the same maker's edition is here.
+                let subject =
+                    routes::here_subject(a, here.target.system, routes::counterpart::shipped());
+                let is_here = here_of(subject.as_ref().unwrap_or(a), here.installed);
+                AppEntry {
+                    app: a.clone(),
+                    plan: routes::plan(a, here.target, &is_here, &hints),
+                }
             })
             .filter(|e| e.plan.disposition != Disposition::PartOfSystem)
             .collect();
@@ -1050,7 +1064,10 @@ mod tests {
                 sign_in: false,
                 registration: vec![],
                 why: None,
+                choices: vec![],
+                trail: None,
             },
+            stand_in: None,
         }
     }
 

@@ -175,7 +175,7 @@ impl LinuxInstaller<'_> {
                 key,
             } if pctwin_maker::linux::valid_app_id(app_id) => {
                 let wide = matches!(
-                    e.app.found,
+                    e.subject().found,
                     FoundWhere::Flatpak {
                         system_wide: true,
                         ..
@@ -311,7 +311,7 @@ fn same_package(a: &FoundWhere, b: &FoundWhere) -> bool {
 
 /// The honest result for `e` after its install, as the laptop's own `list` shows it now.
 pub fn verdict(e: &AppEntry, list: &AppList) -> AppResult {
-    let app: &FoundApp = &e.app;
+    let app: &FoundApp = e.subject();
     let Some(here) = list
         .found
         .iter()
@@ -431,6 +431,75 @@ mod tests {
         ] {
             assert!(!plain_name(bad), "{bad}");
         }
+    }
+
+    /// A Fedora-style laptop (dnf through PackageKit): an RPM app found on the old laptop is
+    /// planned from dnf, and reinstalled only when the laptop's own list shows it signed with
+    /// the same package key.
+    #[test]
+    fn a_fedora_package_is_reinstalled_only_with_the_same_key() {
+        use pctwin_apps::routes::{self, Hints, LinuxPackages, Route, Target, WingetBy};
+        use pctwin_record::{AppArch, AppSystem, Owner};
+        let rpm = |key: &str| FoundApp {
+            name: "lab-fedora".into(),
+            version: Some("1.0".into()),
+            publisher: None,
+            owner: Owner::Shared,
+            system: AppSystem::Linux,
+            found: FoundWhere::Rpm {
+                package: "lab-fedora".into(),
+            },
+            arch: AppArch::UNKNOWN,
+            maker: AppMaker::Rpm { key: key.into() },
+            web: None,
+            update_feed: None,
+            installers: vec![],
+            notes: vec![],
+        };
+        let fedora = Target {
+            system: AppSystem::Linux,
+            arch: AppArch::UNKNOWN,
+            linux: LinuxPackages::from_os_release(
+                "ID=nobara
+ID_LIKE=\"fedora\"
+",
+            ),
+        };
+        let none = |_: &FoundApp| Vec::<(String, WingetBy)>::new();
+        let app = rpm("809a8d7ceb10b464");
+        let plan = routes::plan(
+            &app,
+            fedora,
+            &routes::Here::Absent,
+            &Hints {
+                rows: routes::rows::shipped(),
+                winget: &none,
+                casks: None,
+            },
+        );
+        assert_eq!(
+            plan.routes,
+            vec![Route::Dnf {
+                package: "lab-fedora".into()
+            }]
+        );
+        let e = AppEntry { app, plan };
+        let list = |key: &str| AppList {
+            found: vec![rpm(key)],
+            not_read: vec![],
+        };
+        assert_eq!(
+            verdict(&e, &list("809A8D7CEB10B464")).result.status(),
+            ItemStatus::Reinstalled
+        );
+        assert_eq!(
+            verdict(&e, &list("0000000000000000")).result.reason(),
+            Some(Reason::FinishByHand)
+        );
+        assert_eq!(
+            verdict(&e, &AppList::default()).result.reason(),
+            Some(Reason::InstallFailed)
+        );
     }
 
     #[test]

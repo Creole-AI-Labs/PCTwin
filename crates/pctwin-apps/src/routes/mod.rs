@@ -20,10 +20,18 @@
 //! check. An app no route can verify (unsigned, its maker unreadable, from another system, or
 //! with nowhere to look) ends needs-action with its [`Card`]: its name, its maker, the web
 //! address the old laptop recorded, and what it needs after (a licence key, a sign-in).
+//!
+//! **An app from another kind of laptop** ([`counterpart`]): the same maker's edition for the new
+//! laptop is planned in its place (its stand-in, checked against the maker the signed catalogue
+//! names for that system), or else it ends needs-action with the choices that apply (the
+//! maker's web version, alternatives, a compatibility layer as information). The address the old
+//! laptop recorded is checked against the maker's own sites first ([`trail`]).
 
 pub mod brew;
+pub mod counterpart;
 pub mod feeds;
 pub mod rows;
+pub mod trail;
 pub mod winget;
 
 use pctwin_catalogue::Catalogue;
@@ -32,7 +40,9 @@ use pctwin_record::{
 };
 
 use crate::version::{Order, compare};
+use counterpart::{Choice, CounterpartRow};
 use rows::{AppRouteRow, FeedFormat, RowRoute, row_matches};
+use trail::Trail;
 
 /// The new laptop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +59,38 @@ pub struct Target {
 pub enum LinuxPackages {
     Apt,
     Dnf,
+}
+
+/// The system families whose package system PCTwin knows, by their `os-release` identifier.
+/// A derivative names its family in `ID_LIKE` (Linux Mint: `ubuntu`; Rocky and AlmaLinux:
+/// `rhel centos fedora`; Nobara: `fedora`), so new derivatives need no row.
+const FAMILIES: &[(&str, LinuxPackages)] = &[
+    ("debian", LinuxPackages::Apt),
+    ("ubuntu", LinuxPackages::Apt),
+    ("fedora", LinuxPackages::Dnf),
+    ("rhel", LinuxPackages::Dnf),
+    ("centos", LinuxPackages::Dnf),
+];
+
+impl LinuxPackages {
+    /// The package system an `/etc/os-release` names: its own `ID` first, then each `ID_LIKE`
+    /// in order (closest first, as the format says). `None` for a family PCTwin does not install
+    /// from (openSUSE's zypper, Arch's pacman).
+    pub fn from_os_release(text: &str) -> Option<LinuxPackages> {
+        let field = |name: &str| -> String {
+            text.lines()
+                .filter_map(|l| l.trim().split_once('='))
+                .filter(|(k, _)| k.trim() == name)
+                .map(|(_, v)| v.trim().trim_matches(['"', '\u{27}']).to_ascii_lowercase())
+                .next_back()
+                .unwrap_or_default()
+        };
+        let id = field("ID");
+        let like = field("ID_LIKE");
+        std::iter::once(id.as_str())
+            .chain(like.split_whitespace())
+            .find_map(|i| FAMILIES.iter().find(|(f, _)| *f == i).map(|(_, p)| *p))
+    }
 }
 
 /// Whether the app is on the new laptop already, as its own system says.
@@ -172,6 +214,9 @@ pub enum Flag {
     OlderHere { version: Option<String> },
     /// The new laptop could not say whether it has the app; the installer step looks again.
     HereUnknown { why: String },
+    /// The app was on another kind of laptop (`from`): the same maker's edition for this one is
+    /// planned in its place ([`AppPlan::stand_in`]).
+    Counterpart { from: AppSystem },
 }
 
 /// What happens to the app.
@@ -239,6 +284,11 @@ pub struct Card {
     /// Who it is registered to and its product ID, as the old laptop's own list holds them.
     pub registration: Vec<AppNote>,
     pub why: Option<NoRoute>,
+    /// For an app from another kind of laptop: the choices on this one (the maker's web
+    /// version, alternatives, a compatibility layer as information). PCTwin installs none.
+    pub choices: Vec<Choice>,
+    /// What the address the old laptop recorded turned out to be, when it recorded one.
+    pub trail: Option<Trail>,
 }
 
 /// The plan for one app.
@@ -248,6 +298,17 @@ pub struct AppPlan {
     pub routes: Vec<Route>,
     pub flags: Vec<Flag>,
     pub card: Card,
+    /// For an app from another kind of laptop: the same maker's edition for this laptop, which
+    /// the routes are for. Every check (the package's identity, the maker) is made against it,
+    /// never against the old laptop's edition.
+    pub stand_in: Option<FoundApp>,
+}
+
+impl AppPlan {
+    /// The app the routes install: the stand-in, or else the old laptop's app itself.
+    pub fn subject<'a>(&'a self, app: &'a FoundApp) -> &'a FoundApp {
+        self.stand_in.as_ref().unwrap_or(app)
+    }
 }
 
 /// Where hints come from.
@@ -289,6 +350,8 @@ fn card(app: &FoundApp, rows: &[&AppRouteRow]) -> Card {
         sign_in: rows.iter().any(|r| r.sign_in),
         registration: app.notes.clone(),
         why: None,
+        choices: Vec::new(),
+        trail: None,
     }
 }
 
@@ -348,8 +411,33 @@ fn needs_action(mut plan: AppPlan, why: NoRoute) -> AppPlan {
     plan
 }
 
-/// The plan for `app` going to `target`, whose own system says `here` about it.
+/// The plan for `app` going to `target`, whose own system says `here` about it (for an app from
+/// another kind of laptop, `here` is about its stand-in: [`here_subject`]).
 pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> AppPlan {
+    plan_with(app, target, here, hints, counterpart::shipped())
+}
+
+/// The app whose presence on the new laptop decides `here` for `app`: the same maker's edition
+/// for the new laptop when `app` is from another kind of laptop and has one, else `app`.
+pub fn here_subject(
+    app: &FoundApp,
+    target: AppSystem,
+    counterparts: &Catalogue<CounterpartRow>,
+) -> Option<FoundApp> {
+    if app.system == target {
+        return None;
+    }
+    counterpart::stand_in(app, counterpart::find(app, counterparts)?, target)
+}
+
+/// [`plan`], with the counterparts catalogue given.
+pub fn plan_with(
+    app: &FoundApp,
+    target: Target,
+    here: &Here,
+    hints: &Hints<'_>,
+    counterparts: &Catalogue<CounterpartRow>,
+) -> AppPlan {
     let reading = hints.rows.read([app], |a, r| row_matches(a, r));
     // Every row for this app, not only the first: each adds a place to look.
     let rows: Vec<&AppRouteRow> = hints
@@ -363,7 +451,17 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
         routes: Vec::new(),
         flags: Vec::new(),
         card: card(app, &rows),
+        stand_in: None,
     };
+    // The address the old laptop recorded: a clue, checked against the maker's own sites; one
+    // on none of them is said and never used.
+    if let Some(web) = &app.web {
+        let t = trail::check(app, web, counterparts);
+        if !t.usable() {
+            plan.card.web = None;
+        }
+        plan.card.trail = Some(t);
+    }
     if matches!(
         app.found,
         FoundWhere::WindowsPackage {
@@ -383,8 +481,11 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
     }
     match here {
         Here::Present { version } => {
+            // Versions of different systems' editions are not compared.
             let older_here = match (version.as_deref(), app.version.as_deref()) {
-                (Some(h), Some(had)) => compare(h, had) == Order::Older,
+                (Some(h), Some(had)) if app.system == target.system => {
+                    compare(h, had) == Order::Older
+                }
                 _ => false,
             };
             if older_here {
@@ -394,7 +495,7 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
                 // The routes the person may choose to update it by ("Update it"): worked out as
                 // for an app that is not here, never used unless they choose; the app stays as
                 // it is by default.
-                let fresh = self::plan(app, target, &Here::Absent, hints);
+                let fresh = plan_with(app, target, &Here::Absent, hints, counterparts);
                 if fresh.disposition == Disposition::Install {
                     plan.routes = fresh.routes;
                 }
@@ -411,7 +512,7 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
         Here::Absent => {}
     }
     if app.system != target.system {
-        return needs_action(plan, NoRoute::OtherSystem);
+        return other_system(app, target, here, hints, counterparts, plan);
     }
     match &app.maker {
         AppMaker::Unsigned => return needs_action(plan, NoRoute::Unsigned),
@@ -554,7 +655,7 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
             RowRoute::SignInPage { url } => Some(url.clone()),
             _ => None,
         })
-        .or_else(|| app.web.clone().filter(|w| rows::row_url_ok(w)));
+        .or_else(|| plan.card.web.clone().filter(|w| rows::row_url_ok(w)));
     // Only where the maker can be checked on the download (a signed program or a Mac app).
     if let (Some(url), AppMaker::Windows(_) | AppMaker::MacTeam { .. }) = (page, &app.maker) {
         plan.routes.push(Route::SignInPage { url });
@@ -583,6 +684,38 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
         return needs_action(plan, NoRoute::NoSource);
     }
     plan
+}
+
+/// An app from another kind of laptop: the same maker's edition for this one in its place, or
+/// else an honest card with the choices that apply. Never another maker's app.
+fn other_system(
+    app: &FoundApp,
+    target: Target,
+    here: &Here,
+    hints: &Hints<'_>,
+    counterparts: &Catalogue<CounterpartRow>,
+    mut plan: AppPlan,
+) -> AppPlan {
+    let Some(row) = counterpart::find(app, counterparts) else {
+        return needs_action(plan, NoRoute::OtherSystem);
+    };
+    plan.card.choices = row.choices_for(target.system);
+    if let Some(stand_in) = counterpart::stand_in(app, row, target.system) {
+        let mut theirs = plan_with(&stand_in, target, here, hints, counterparts);
+        if theirs.disposition != Disposition::NeedsAction {
+            theirs.flags.push(Flag::Counterpart { from: app.system });
+            // The person's card stays theirs: the old laptop's name, registration and clue,
+            // with the choices beside it.
+            theirs.card = Card {
+                licence_key: plan.card.licence_key || theirs.card.licence_key,
+                sign_in: plan.card.sign_in || theirs.card.sign_in,
+                ..plan.card
+            };
+            theirs.stand_in = Some(stand_in);
+            return theirs;
+        }
+    }
+    needs_action(plan, NoRoute::OtherSystem)
 }
 
 #[cfg(test)]

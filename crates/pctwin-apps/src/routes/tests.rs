@@ -463,3 +463,245 @@ fn feeds_and_pages_only_where_they_can_be_checked() {
         }]
     );
 }
+
+mod other_systems {
+    use super::super::counterpart::tests::{TUNES, rows as counterparts, windows_tunes};
+    use super::*;
+
+    fn linux_target() -> Target {
+        Target {
+            system: AppSystem::Linux,
+            arch: AppArch::UNKNOWN,
+            linux: Some(LinuxPackages::Dnf),
+        }
+    }
+
+    const ROUTES: &str = r#"{"id":"tunes-mac","system":"mac","match":{"team-id":"ABCDE12345"},"route":{"kind":"latest-link","url":"https://example-music.com/Tunes.dmg"}},
+        {"id":"tunes-win","system":"windows","match":{"windows-org":"Example Music AB","windows-country":"SE"},"route":{"kind":"winget","id":"ExampleMusic.Tunes"}}"#;
+
+    #[test]
+    fn a_windows_app_going_to_a_mac_becomes_its_makers_mac_edition() {
+        let c = counterparts(TUNES);
+        let r = rows(ROUTES);
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let p = plan_with(&windows_tunes(), mac_target(), &Here::Absent, &h, &c);
+        assert_eq!(p.disposition, Disposition::Install);
+        assert_eq!(
+            p.routes,
+            vec![Route::Maker(MakerLink::Latest {
+                url: "https://example-music.com/Tunes.dmg".into()
+            })]
+        );
+        assert!(p.flags.contains(&Flag::Counterpart {
+            from: AppSystem::Windows
+        }));
+        // Every check is against the maker the row names for the Mac.
+        let s = p.stand_in.as_ref().unwrap();
+        assert_eq!(
+            s.maker,
+            AppMaker::MacTeam {
+                team_id: "ABCDE12345".into()
+            }
+        );
+        assert_eq!(p.subject(&windows_tunes()), s);
+        // The person's card is still their app's, with the choices beside it.
+        assert_eq!(p.card.name, "Tunes");
+        assert_eq!(p.card.version.as_deref(), Some("1.2.3"));
+        assert_eq!(p.card.choices[0].name, "Tunes on the web");
+    }
+
+    #[test]
+    fn a_mac_app_going_to_windows_is_checked_against_the_pinned_signer() {
+        let c = counterparts(TUNES);
+        let r = rows(ROUTES);
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let mac =
+            super::super::counterpart::stand_in(&windows_tunes(), &c.rows()[0], AppSystem::Mac)
+                .unwrap();
+        let p = plan_with(&mac, win_target(), &Here::Absent, &h, &c);
+        assert_eq!(p.disposition, Disposition::Install);
+        assert_eq!(
+            p.routes,
+            vec![Route::Winget {
+                id: "ExampleMusic.Tunes".into(),
+                by: WingetBy::Row
+            }]
+        );
+        let AppMaker::Windows(s) = &p.stand_in.as_ref().unwrap().maker else {
+            panic!("not a Windows maker")
+        };
+        assert_eq!(s.issuer_organization.as_deref(), Some("Example CA Inc."));
+    }
+
+    #[test]
+    fn a_windows_app_going_to_linux_becomes_its_flatpak_from_the_named_remote() {
+        let c = counterparts(TUNES);
+        let r = rows("");
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let p = plan_with(&windows_tunes(), linux_target(), &Here::Absent, &h, &c);
+        assert_eq!(
+            p.routes,
+            vec![Route::Flatpak {
+                remote_url: "https://dl.flathub.org/repo/".into(),
+                app_id: "com.example.Tunes".into(),
+                key: [1; 32],
+            }]
+        );
+    }
+
+    #[test]
+    fn with_no_edition_it_ends_needs_action_with_the_choices_and_never_another_maker() {
+        // The maker makes no Mac edition PCTwin can check (no bundle ID).
+        let c = counterparts(&TUNES.replace(r#""bundle-id":"com.example.tunes","#, ""));
+        let r = rows(ROUTES);
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let p = plan_with(&windows_tunes(), mac_target(), &Here::Absent, &h, &c);
+        assert_eq!(p.disposition, Disposition::NeedsAction);
+        assert_eq!(p.card.why, Some(NoRoute::OtherSystem));
+        assert!(p.routes.is_empty());
+        assert_eq!(p.stand_in, None);
+        let names: Vec<_> = p.card.choices.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Tunes on the web", "Other Player", "Wine"]);
+
+        // An edition PCTwin could install, with nowhere to get it: the same card, never a
+        // route to anything else.
+        let full = counterparts(TUNES);
+        let none_rows = rows("");
+        let h = Hints {
+            rows: &none_rows,
+            winget: &none,
+            casks: None,
+        };
+        let p = plan_with(&windows_tunes(), mac_target(), &Here::Absent, &h, &full);
+        assert_eq!(p.disposition, Disposition::NeedsAction);
+        assert_eq!(p.card.why, Some(NoRoute::OtherSystem));
+        assert_eq!(p.stand_in, None);
+        assert!(
+            !p.flags
+                .iter()
+                .any(|f| matches!(f, Flag::Counterpart { .. }))
+        );
+
+        // No row at all.
+        let p = plan_with(
+            &windows_tunes(),
+            mac_target(),
+            &Here::Absent,
+            &h,
+            &counterparts(""),
+        );
+        assert_eq!(p.card.why, Some(NoRoute::OtherSystem));
+        assert!(p.card.choices.is_empty());
+    }
+
+    #[test]
+    fn the_edition_already_here_is_left_and_versions_are_not_compared_across_systems() {
+        let c = counterparts(TUNES);
+        let r = rows(ROUTES);
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let here = Here::Present {
+            version: Some("0.1".into()),
+        };
+        let p = plan_with(&windows_tunes(), mac_target(), &here, &h, &c);
+        assert_eq!(p.disposition, Disposition::AlreadyHere);
+        assert!(!p.flags.iter().any(|f| matches!(f, Flag::OlderHere { .. })));
+        // The stand-in is what decides "here".
+        assert!(here_subject(&windows_tunes(), AppSystem::Mac, &c).is_some());
+        assert!(here_subject(&windows_tunes(), AppSystem::Windows, &c).is_none());
+    }
+
+    #[test]
+    fn a_recorded_address_off_the_makers_sites_is_said_and_never_used() {
+        let c = counterparts(TUNES);
+        let r = rows("");
+        let h = Hints {
+            rows: &r,
+            winget: &none,
+            casks: None,
+        };
+        let mut app = windows_tunes();
+        app.web = Some("https://tunes-download.example.net/setup".into());
+        let p = plan_with(&app, win_target(), &Here::Absent, &h, &c);
+        assert_eq!(p.card.web, None);
+        assert!(
+            matches!(&p.card.trail, Some(trail::Trail::NotMakersSite { host }) if host == "tunes-download.example.net")
+        );
+        assert!(
+            !p.routes
+                .iter()
+                .any(|r| matches!(r, Route::SignInPage { .. }))
+        );
+
+        // On the maker's own site: used as the page.
+        let p = plan_with(&windows_tunes(), win_target(), &Here::Absent, &h, &c);
+        assert_eq!(
+            p.routes,
+            vec![Route::SignInPage {
+                url: "https://www.example-music.com/download".into()
+            }]
+        );
+        assert!(matches!(
+            p.card.trail,
+            Some(trail::Trail::OnMakersSite { .. })
+        ));
+    }
+}
+
+#[test]
+fn the_package_system_comes_from_os_release_and_its_family() {
+    let of = LinuxPackages::from_os_release;
+    assert_eq!(
+        of("NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=41\n"),
+        Some(LinuxPackages::Dnf)
+    );
+    assert_eq!(of("ID=ubuntu\nID_LIKE=debian\n"), Some(LinuxPackages::Apt));
+    assert_eq!(of("ID=debian\n"), Some(LinuxPackages::Apt));
+    // Derivatives, by their family.
+    assert_eq!(
+        of("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n"),
+        Some(LinuxPackages::Dnf)
+    );
+    assert_eq!(
+        of("ID=nobara\nID_LIKE=\"fedora\"\n"),
+        Some(LinuxPackages::Dnf)
+    );
+    assert_eq!(
+        of("ID=linuxmint\nID_LIKE=ubuntu\n"),
+        Some(LinuxPackages::Apt)
+    );
+    assert_eq!(
+        of("ID='almalinux'\nID_LIKE='rhel centos fedora'\n"),
+        Some(LinuxPackages::Dnf)
+    );
+    // Families PCTwin does not install from, and nothing at all.
+    assert_eq!(
+        of("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n"),
+        None
+    );
+    assert_eq!(of("ID=arch\n"), None);
+    assert_eq!(of(""), None);
+    // A name that only contains a family's is not that family.
+    assert_eq!(of("ID=fedorafake\n"), None);
+    // The own ID wins over a family named later.
+    assert_eq!(of("ID=ubuntu\nID_LIKE=fedora\n"), Some(LinuxPackages::Apt));
+}

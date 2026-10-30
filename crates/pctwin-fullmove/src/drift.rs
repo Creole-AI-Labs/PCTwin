@@ -109,7 +109,7 @@ pub fn place_is(path: &Path) -> Option<PlaceIs> {
 pub fn apps_here(apps: &[AppEntry], installed: &AppList) -> Vec<(u32, AppHere)> {
     apps.iter()
         .enumerate()
-        .map(|(i, e)| (i as u32, AppHere::from(&here_of(&e.app, installed))))
+        .map(|(i, e)| (i as u32, AppHere::from(&here_of(e.subject(), installed))))
         .collect()
 }
 
@@ -147,7 +147,7 @@ pub fn apps_changed(plan: &FullPlan, installed_now: &AppList) -> Vec<Drift> {
         let Some(e) = plan.apps.get(*at as usize) else {
             continue;
         };
-        let now = AppHere::from(&here_of(&e.app, installed_now));
+        let now = AppHere::from(&here_of(e.subject(), installed_now));
         if now == *was || now == AppHere::Unknown || *was == AppHere::Unknown {
             continue;
         }

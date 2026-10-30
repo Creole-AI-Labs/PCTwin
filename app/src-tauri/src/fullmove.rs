@@ -346,12 +346,21 @@ fn linux_packages() -> Option<pctwin_apps::routes::LinuxPackages> {
         return None;
     }
     let file = |p: &str| std::fs::metadata(p).is_ok_and(|m| m.is_file());
-    if file("/var/lib/dpkg/status") {
-        Some(LinuxPackages::Apt)
-    } else if file("/usr/bin/rpm") && file("/usr/bin/dnf") {
-        Some(LinuxPackages::Dnf)
-    } else {
-        None
+    let apt = || file("/var/lib/dpkg/status");
+    let dnf = || file("/usr/bin/rpm") && (file("/usr/bin/dnf") || file("/usr/bin/dnf5"));
+    // The system's own name for its family first (Fedora, Rocky, Nobara: ID or ID_LIKE), and
+    // only if that family's tools are really here; then the tools alone.
+    let named = std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .ok()
+        .and_then(|t| LinuxPackages::from_os_release(&t));
+    match named {
+        Some(LinuxPackages::Apt) if apt() => Some(LinuxPackages::Apt),
+        Some(LinuxPackages::Dnf) if dnf() => Some(LinuxPackages::Dnf),
+        Some(_) => None,
+        None if apt() => Some(LinuxPackages::Apt),
+        None if dnf() => Some(LinuxPackages::Dnf),
+        None => None,
     }
 }
 
