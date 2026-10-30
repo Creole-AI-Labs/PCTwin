@@ -20,6 +20,8 @@
 //!   fix-ups, cross-system places, stricter exceptions); with no rows everything is classified;
 //! - [`capture`]: consistent capture (SQLite's online backup from a steady snapshot; stores only
 //!   while their app is closed), on the old laptop, read-only;
+//! - [`mail`]: saved Apple Mail messages written as mbox files (read in the parser process) for
+//!   a move to another system, each mailbox with an honest result;
 //! - [`live`]: which files in the person's own folders an app keeps open while it runs (a
 //!   catalogue of kinds, each by ending and shape), so they are copied only once it is closed;
 //! - [`land`]: landing through the safety gate and the journal, never over an existing folder,
@@ -50,6 +52,7 @@ pub mod guard;
 pub mod handoff;
 pub mod land;
 pub mod live;
+pub mod mail;
 pub mod roots;
 pub mod select;
 pub mod sniff;

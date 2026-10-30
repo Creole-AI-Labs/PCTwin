@@ -68,6 +68,13 @@ pub enum Note {
     ToolSettingsReview,
     /// A secret: moves only if the person ticks it, by itself; never in a report, log or AI.
     SecretTickEach,
+    /// A mail archive (an Outlook data file) moved as a file: the person opens it in the mail
+    /// app on the new laptop (in Outlook: File, Open, Outlook Data File). PCTwin never opens it.
+    OpenArchiveInMailApp,
+    /// A server mailbox's offline copy: folders kept "on this computer only" are not on the
+    /// server, so before the old laptop is wiped the person exports them with the mail app's own
+    /// export to an archive file, which then moves like any file. PCTwin cannot see inside.
+    LocalOnlyFoldersExport,
 }
 
 fn any(c: &Component, f: impl Fn(&Evidence) -> bool) -> bool {
@@ -117,6 +124,10 @@ pub fn notes_for(report: &FolderReport, c: &Component) -> Vec<Note> {
     let folder = of_folder(report);
     if any(c, |e| *e == Evidence::ServerMailCache) {
         out.push(Note::ServerResync);
+        out.push(Note::LocalOnlyFoldersExport);
+    }
+    if c.custody == Custody::Portable && any(c, |e| *e == Evidence::MailArchive) {
+        out.push(Note::OpenArchiveInMailApp);
     }
     if c.custody == Custody::Portable && any(c, |e| *e == Evidence::MailStore) {
         out.push(Note::SearchRebuilds);

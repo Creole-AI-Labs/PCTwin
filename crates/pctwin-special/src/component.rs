@@ -53,6 +53,9 @@ pub enum Evidence {
     StructuredData,
     /// A mail store by its format (mbox, maildir, an Outlook data file).
     MailStore,
+    /// A mail archive the mail app opens as a file of its own (an Outlook data file): it moves,
+    /// and the person opens it in the mail app on the new laptop.
+    MailArchive,
     /// A mail program's copy of a server mailbox (an Outlook offline cache): the mail is on the
     /// server, but whether every item reached it cannot be read from the file.
     ServerMailCache,
@@ -125,6 +128,7 @@ impl Evidence {
             Evidence::LiveStore => "a store the app writes while it runs".into(),
             Evidence::StructuredData => "a settings or data file".into(),
             Evidence::MailStore => "saved mail".into(),
+            Evidence::MailArchive => "a mail archive your mail app opens".into(),
             Evidence::ServerMailCache => {
                 "a copy of mail kept on a server; anything never sent to the server may exist only here"
                     .into()

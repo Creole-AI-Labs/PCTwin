@@ -81,6 +81,8 @@ pub enum Request {
     DatabaseSnapshot { size: u64, log: u64 },
     /// Whether a `manifest.json` is a WebExtension's.
     AddOn { size: u64 },
+    /// One saved Apple Mail message's facts (2.5 mail).
+    Emlx { size: u64 },
 }
 
 impl Request {
@@ -92,7 +94,8 @@ impl Request {
             | Request::Archive { size }
             | Request::Database { size }
             | Request::Json { size }
-            | Request::AddOn { size } => size,
+            | Request::AddOn { size }
+            | Request::Emlx { size } => size,
             Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
                 size.saturating_add(log)
             }
@@ -140,6 +143,7 @@ pub enum Answer {
     /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
+    Emlx(Result<pctwin_special::mail::EmlxFacts, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -161,6 +165,7 @@ impl Answer {
                     Request::DatabaseSnapshot { .. }
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
+                | (Answer::Emlx(_), Request::Emlx { .. })
                 | (Answer::Failed(_), _)
         )
     }

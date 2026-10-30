@@ -1,6 +1,6 @@
 //! Every reader the parser process runs (adoption change 1): an installer's signer, the old
 //! laptop's own copy, a font's names, a ZIP index, a SQLite header, a JSON file's facts, a
-//! database with its log, each on any bytes, read
+//! database with its log, a saved mail message's facts, each on any bytes, read
 //! piece by piece through the parser's own code path. The first byte picks the reader.
 #![no_main]
 
@@ -13,13 +13,14 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let size = bytes.len() as u64;
-    let request = match pick % 7 {
+    let request = match pick % 8 {
         0 => Request::Installer { size },
         1 => Request::OldCopy { size },
         2 => Request::Font { size },
         3 => Request::Archive { size },
         4 => Request::Database { size },
         5 => Request::Json { size },
+        6 => Request::Emlx { size },
         // A database and its log: the second byte says where the log starts.
         _ => {
             let split = (data.get(1).copied().unwrap_or(0) as u64 * size / 255).min(size);

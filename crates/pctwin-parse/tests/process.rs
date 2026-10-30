@@ -60,7 +60,8 @@ fn in_process(request: Request, f: &File) -> Answer {
         Request::Json { .. }
         | Request::DatabaseFacts { .. }
         | Request::DatabaseSnapshot { .. }
-        | Request::AddOn { .. } => {
+        | Request::AddOn { .. }
+        | Request::Emlx { .. } => {
             let mut bytes = Vec::new();
             std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
             std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
@@ -69,7 +70,7 @@ fn in_process(request: Request, f: &File) -> Answer {
     }
 }
 
-fn every_request(size: u64) -> [Request; 9] {
+fn every_request(size: u64) -> [Request; 10] {
     [
         Request::Installer { size },
         Request::OldCopy { size },
@@ -84,6 +85,7 @@ fn every_request(size: u64) -> [Request; 9] {
         },
         Request::DatabaseSnapshot { size, log: 0 },
         Request::AddOn { size },
+        Request::Emlx { size },
     ]
 }
 
@@ -679,6 +681,15 @@ mod contents {
         let doc = br#"{"token": "abc", "file": "C:\\Users\\a\\b.txt", "command": "run.exe"}"#;
         assert_eq!(parser.json(doc).unwrap(), OWN.json(doc).unwrap());
         assert!(parser.json(b"{not json").is_err());
+    }
+
+    #[test]
+    fn saved_message_facts_come_back_as_in_process() {
+        let parser = real();
+        let msg = b"14\nSubject: a\n\nb\n<plist/>";
+        assert_eq!(parser.emlx(msg).unwrap(), OWN.emlx(msg).unwrap());
+        assert_eq!(parser.emlx(msg).unwrap().len, 14);
+        assert!(parser.emlx(b"99\nSubject: a\n").is_err());
     }
 
     #[test]

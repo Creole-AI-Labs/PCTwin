@@ -1,7 +1,7 @@
 {
   "format": 1,
   "catalogue": "special",
-  "version": 2,
+  "version": 3,
   "rows": [
     {"system": "windows", "root": "roaming", "folder": "Thunderbird", "name": "Thunderbird", "category": "email", "checked_on": "2026-10-29",
      "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Thunderbird"}, {"system": "linux", "root": "home-dot", "folder": ".thunderbird"}],
@@ -33,6 +33,18 @@
     {"system": "any", "root": "home-dot", "folder": ".cursor", "name": "Cursor", "category": "ai-tool", "checked_on": "2026-10-29"},
     {"system": "any", "root": "home-dot", "folder": ".vscode", "name": "Visual Studio Code add-ons", "category": "ai-tool", "checked_on": "2026-10-29"},
     {"system": "any", "root": "home-dot", "folder": ".ollama", "name": "Ollama", "category": "ai-tool", "checked_on": "2026-10-29"},
-    {"system": "any", "root": "home-dot", "folder": ".lmstudio", "name": "LM Studio", "category": "ai-tool", "checked_on": "2026-10-29"}
+    {"system": "any", "root": "home-dot", "folder": ".lmstudio", "name": "LM Studio", "category": "ai-tool", "checked_on": "2026-10-29"},
+    {"system": "any", "root": "home-dot", "folder": ".continue", "name": "Continue", "category": "ai-tool", "checked_on": "2026-10-30"},
+    {"system": "any", "root": "home-dot", "folder": ".codeium", "name": "Windsurf and Codeium", "category": "ai-tool", "checked_on": "2026-10-30"},
+    {"system": "windows", "root": "roaming", "folder": "Windsurf", "name": "Windsurf", "category": "ai-tool", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Windsurf"}, {"system": "linux", "root": "xdg-config", "folder": "Windsurf"}]},
+    {"system": "mac", "root": "application-support", "folder": "Windsurf", "name": "Windsurf", "category": "ai-tool", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "roaming", "folder": "Windsurf"}, {"system": "linux", "root": "xdg-config", "folder": "Windsurf"}]},
+    {"system": "linux", "root": "xdg-config", "folder": "Windsurf", "name": "Windsurf", "category": "ai-tool", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "roaming", "folder": "Windsurf"}, {"system": "mac", "root": "application-support", "folder": "Windsurf"}]},
+    {"system": "windows", "root": "roaming", "folder": "nomic.ai", "name": "GPT4All", "category": "ai-tool", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "nomic.ai"}]},
+    {"system": "mac", "root": "application-support", "folder": "nomic.ai", "name": "GPT4All", "category": "ai-tool", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "roaming", "folder": "nomic.ai"}]}
   ]
 }

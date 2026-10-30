@@ -187,6 +187,10 @@ pub fn answer<R: Read, W: Write>(
                 }
             }
         }
+        Request::Emlx { size } => Answer::Emlx(
+            whole(&mut file, size, pctwin_special::mail::MAX_MESSAGE)
+                .and_then(|b| pctwin_special::mail::emlx_facts(seal, &b)),
+        ),
         Request::AddOn { size } => Answer::AddOn(
             whole(&mut file, size, 1024 * 1024)
                 .is_ok_and(|b| pctwin_special::content::add_on_manifest(seal, &b)),

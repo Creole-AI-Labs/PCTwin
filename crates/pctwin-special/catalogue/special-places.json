@@ -7,7 +7,7 @@
     {"system": "windows", "root": "roaming", "path": "Microsoft/Signatures", "kind": "mail-signatures", "name": "Mail signatures", "step": "copy", "checked_on": "2026-10-29"},
     {"system": "windows", "root": "roaming", "path": "Microsoft/UProof", "kind": "dictionaries", "name": "Your own dictionary words", "step": "copy", "checked_on": "2026-10-29"},
     {"system": "windows", "root": "roaming", "path": "Microsoft/Templates", "kind": "office-templates", "name": "Office templates", "step": "copy", "checked_on": "2026-10-29"},
-    {"system": "windows", "under": "documents", "path": "Outlook Files", "kind": "mail-archives", "name": "Outlook mail kept on this laptop", "step": "copy", "checked_on": "2026-10-29"},
+    {"system": "windows", "under": "documents", "path": "Outlook Files", "kind": "mail-archives", "name": "Outlook mail kept on this laptop", "step": "open-in-mail-app", "checked_on": "2026-10-29"},
     {"system": "windows", "under": "documents", "path": "My Games", "kind": "game-saves", "name": "Game saves", "step": "copy", "checked_on": "2026-10-29"},
     {"system": "windows", "under": "program-files-x86", "path": "Steam/userdata", "kind": "game-saves", "name": "Game saves and settings kept by Steam", "step": "copy", "checked_on": "2026-10-29"},
     {"system": "windows", "under": "program-files-x86", "path": "Steam/steamapps", "kind": "game-library", "name": "Games installed by Steam", "step": "locate-verify", "checked_on": "2026-10-29"},

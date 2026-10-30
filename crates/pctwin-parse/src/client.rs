@@ -654,6 +654,16 @@ impl pctwin_special::content::ContentReader for Parser {
             Err(e) => Err(ContentError::Damaged(e.to_string())),
         }
     }
+    fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
+        let request = Request::Emlx {
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::Emlx(facts)) => facts,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
 }
 
 /// Several parser processes taking requests in turn, for readers that work on several threads
@@ -709,5 +719,8 @@ impl pctwin_special::content::ContentReader for Pool {
 
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError> {
         self.one().add_on_manifest(bytes)
+    }
+    fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
+        self.one().emlx(bytes)
     }
 }

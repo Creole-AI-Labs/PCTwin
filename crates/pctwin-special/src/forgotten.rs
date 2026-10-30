@@ -53,6 +53,9 @@ pub enum PlaceStep {
     LocateVerify,
     /// Not files: added again on the new laptop (printers).
     AddAgain,
+    /// Mail archives: copied, then the person opens each in the mail app on the new laptop
+    /// (an archive is not part of the mail app until it is opened there).
+    OpenInMailApp,
 }
 
 /// One row of the `special-places` catalogue: a place on one kind of system, under one of the
