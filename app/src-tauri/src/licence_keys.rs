@@ -9,6 +9,7 @@
 use pctwin_apps::keys::{self, ThisLaptop};
 use pctwin_record::AppSystem;
 use serde::Serialize;
+use zeroize::Zeroizing;
 
 /// One app with a licence key found here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -49,9 +50,37 @@ pub fn licence_keys_found() -> Vec<KeyPlaceView> {
         .collect()
 }
 
+/// A key on its way to the screen: wiped from this process's memory once it is sent.
+pub struct ShownKey(Zeroizing<String>);
+
+impl Serialize for ShownKey {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl std::fmt::Debug for ShownKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ShownKey(hidden)")
+    }
+}
+
 /// The key at place `id`, read again now, for the person who asked to see it.
 #[tauri::command]
-pub fn licence_key_show(id: String) -> Option<String> {
+pub fn licence_key_show(id: String) -> Option<ShownKey> {
     let laptop = here()?;
-    keys::read_one(keys::shipped(), this_system(), &id, &laptop).map(|k| k.reveal().to_owned())
+    keys::read_one(keys::shipped(), this_system(), &id, &laptop)
+        .map(|k| ShownKey(Zeroizing::new(k.reveal().to_owned())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shown_key_goes_out_as_its_text_and_never_prints() {
+        let k = ShownKey(Zeroizing::new("ABCD-1234".into()));
+        assert_eq!(serde_json::to_string(&k).unwrap(), "\"ABCD-1234\"");
+        assert_eq!(format!("{k:?}"), "ShownKey(hidden)");
+    }
 }

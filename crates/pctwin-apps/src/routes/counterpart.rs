@@ -186,22 +186,28 @@ impl Edition {
         let m = &self.matches;
         // Each system's edition is recognised by that system's own kind of identity.
         let fits = match self.system {
+            // The product itself, never only its maker (who makes other apps too): a product
+            // code, or the exact entry name with the maker.
             AppSystem::Windows => {
-                (m.product_code.is_some() || m.windows_org.is_some())
+                (m.product_code.is_some() || (m.entry_name.is_some() && m.windows_org.is_some()))
                     && m.bundle_id.is_none()
                     && m.team_id.is_none()
                     && m.flatpak_id.is_none()
             }
+            // The bundle ID names the product; the Team ID only its maker.
             AppSystem::Mac => {
                 m.team_id
                     .as_deref()
                     .is_some_and(pctwin_maker::facts::valid_team_id)
+                    && m.bundle_id.is_some()
+                    && m.entry_name.is_none()
                     && m.product_code.is_none()
                     && m.windows_org.is_none()
                     && m.flatpak_id.is_none()
             }
             AppSystem::Linux => {
                 m.flatpak_id.is_some()
+                    && m.entry_name.is_none()
                     && m.product_code.is_none()
                     && m.windows_org.is_none()
                     && m.bundle_id.is_none()
@@ -262,7 +268,11 @@ impl Edition {
     /// the maker check needs on its system.
     pub fn installable(&self) -> bool {
         match self.system {
-            AppSystem::Windows => self.signer.is_some() && self.publisher.is_some(),
+            AppSystem::Windows => {
+                self.signer.is_some()
+                    && self.publisher.is_some()
+                    && (self.matches.entry_name.is_some() || self.matches.product_code.is_some())
+            }
             AppSystem::Mac => self.matches.bundle_id.is_some() && self.matches.team_id.is_some(),
             AppSystem::Linux => self.flatpak.is_some() && self.matches.flatpak_id.is_some(),
         }
@@ -377,13 +387,20 @@ pub fn find<'c>(app: &FoundApp, rows: &'c Catalogue<CounterpartRow>) -> Option<&
 pub fn stand_in(app: &FoundApp, row: &CounterpartRow, system: AppSystem) -> Option<FoundApp> {
     row.edition_of(app)?;
     let e = row.edition_for(system).filter(|e| e.installable())?;
+    // On Windows the stand-in is known by its exact entry name, so "here" and the result look
+    // for exactly that product.
+    let windows_name = e
+        .matches
+        .entry_name
+        .clone()
+        .unwrap_or_else(|| e.name.clone());
     let (found, maker) = match system {
         AppSystem::Windows => {
             let s = e.signer.as_ref()?;
             (
                 FoundWhere::WindowsEntry {
                     view: RegistryView::Machine,
-                    key: e.name.clone(),
+                    key: windows_name.clone(),
                     product_code: e.matches.product_code.clone(),
                 },
                 AppMaker::Windows(Box::new(SignerId {
@@ -426,7 +443,11 @@ pub fn stand_in(app: &FoundApp, row: &CounterpartRow, system: AppSystem) -> Opti
         }
     };
     Some(FoundApp {
-        name: e.name.clone(),
+        name: if system == AppSystem::Windows {
+            windows_name
+        } else {
+            e.name.clone()
+        },
         // Versions are not comparable between systems' editions: no version is carried over.
         version: None,
         publisher: e.publisher.clone().or_else(|| Some(row.maker.clone())),
@@ -465,7 +486,7 @@ pub(crate) mod tests {
         "domains":["example-music.com"],
         "editions":[
           {"system":"windows","name":"Tunes","publisher":"Example Music AB",
-           "match":{"windows-org":"Example Music AB","windows-country":"SE"},
+           "match":{"windows-org":"Example Music AB","windows-country":"SE","entry-name":"Tunes"},
            "signer":{"common-name":"Example Music AB","organization":"Example Music AB","country":"SE","issuer-organization":"Example CA Inc."}},
           {"system":"mac","name":"Tunes","match":{"bundle-id":"com.example.tunes","team-id":"ABCDE12345"}},
           {"system":"linux","name":"Tunes","match":{"flatpak-id":"com.example.Tunes"},
@@ -547,17 +568,16 @@ pub(crate) mod tests {
 
     #[test]
     fn an_edition_without_everything_the_maker_check_needs_is_not_installed() {
-        // The Mac edition names no bundle ID; the Windows edition no signer.
+        // The Windows edition names no signer: never installed in another edition's place.
         let c = rows(
             r#"{"id":"t","maker":"M","editions":[
-                {"system":"windows","name":"T","publisher":"M","match":{"windows-org":"M","windows-country":"SE"}},
-                {"system":"mac","name":"T","match":{"team-id":"ABCDE12345"}}]}"#,
+                {"system":"windows","name":"T","publisher":"M","match":{"windows-org":"M","windows-country":"SE","entry-name":"T"}},
+                {"system":"mac","name":"T","match":{"bundle-id":"x.y","team-id":"ABCDE12345"}}]}"#,
         );
         assert!(c.report().is_clean(), "{:?}", c.report());
         let row = &c.rows()[0];
-        assert!(!row.edition_for(AppSystem::Mac).unwrap().installable());
         assert!(!row.edition_for(AppSystem::Windows).unwrap().installable());
-        assert!(stand_in(&windows_tunes_of("M"), row, AppSystem::Mac).is_none());
+        assert!(row.edition_for(AppSystem::Mac).unwrap().installable());
         let mut mac = windows_tunes();
         mac.system = AppSystem::Mac;
         mac.found = FoundWhere::MacBundle {
@@ -570,6 +590,57 @@ pub(crate) mod tests {
         };
         assert!(row.edition_of(&mac).is_some());
         assert!(stand_in(&mac, row, AppSystem::Windows).is_none());
+    }
+
+    #[test]
+    fn an_edition_is_the_product_never_only_its_maker() {
+        // Recognised by the maker alone (a Windows maker, a Team ID): refused.
+        for bad in [
+            r#"{"id":"t","maker":"M","editions":[{"system":"windows","name":"T","match":{"windows-org":"M","windows-country":"SE"}}]}"#,
+            r#"{"id":"t","maker":"M","editions":[{"system":"mac","name":"T","match":{"team-id":"ABCDE12345"}}]}"#,
+            // A name with nothing else.
+            r#"{"id":"t","maker":"M","editions":[{"system":"windows","name":"T","match":{"entry-name":"T"}}]}"#,
+        ] {
+            assert!(rows(bad).rows().is_empty(), "{bad}");
+        }
+        // Another app by the same maker matches no row.
+        let c = rows(TUNES);
+        let mut recorder = windows_tunes();
+        recorder.name = "Tunes Recorder".into();
+        assert!(find(&recorder, &c).is_none());
+        let mut mac_other = stand_in(&windows_tunes(), &c.rows()[0], AppSystem::Mac).unwrap();
+        mac_other.found = FoundWhere::MacBundle {
+            bundle_id: "com.example.recorder".into(),
+            folder: "Recorder.app".into(),
+            app_store_id: None,
+        };
+        assert!(find(&mac_other, &c).is_none());
+    }
+
+    /// The shipped rows: Mozilla's and Google's other apps are not Firefox or Chrome.
+    #[test]
+    fn the_same_makers_other_apps_match_no_shipped_row() {
+        let signed = |name: &str, org: &str| {
+            let mut a = windows_tunes();
+            a.name = name.into();
+            a.maker = AppMaker::Windows(Box::new(SignerId {
+                organization: Some(org.into()),
+                country: Some("US".into()),
+                ..Default::default()
+            }));
+            a
+        };
+        for other in [
+            signed("Mozilla Thunderbird (x64 en-US)", "Mozilla Corporation"),
+            signed("Google Drive", "Google LLC"),
+            signed("Google Earth Pro", "Google LLC"),
+        ] {
+            assert!(find(&other, shipped()).is_none(), "{}", other.name);
+        }
+        assert_eq!(
+            find(&signed("Google Chrome", "Google LLC"), shipped()).map(|r| r.id.as_str()),
+            Some("chrome")
+        );
     }
 
     fn windows_tunes_of(org: &str) -> FoundApp {

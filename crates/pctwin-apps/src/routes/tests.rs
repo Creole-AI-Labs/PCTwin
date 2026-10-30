@@ -563,8 +563,12 @@ mod other_systems {
 
     #[test]
     fn with_no_edition_it_ends_needs_action_with_the_choices_and_never_another_maker() {
-        // The maker makes no Mac edition PCTwin can check (no bundle ID).
-        let c = counterparts(&TUNES.replace(r#""bundle-id":"com.example.tunes","#, ""));
+        // The maker makes no Mac edition.
+        let c = counterparts(&TUNES.replace(
+            r#"{"system":"mac","name":"Tunes","match":{"bundle-id":"com.example.tunes","team-id":"ABCDE12345"}},"#,
+            "",
+        ));
+        assert_eq!(c.rows().len(), 1);
         let r = rows(ROUTES);
         let h = Hints {
             rows: &r,

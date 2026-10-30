@@ -4,6 +4,6 @@
   "version": 1,
   "rows": [
     {"id": "putty-msi", "system": "windows", "match": {"product-code": "{3B0346D3-155D-43E5-9561-B9BE51CF2EB6}"}, "route": {"kind": "winget", "id": "PuTTY.PuTTY"}},
-    {"id": "firefox-winget", "system": "windows", "match": {"windows-org": "Mozilla Corporation", "windows-country": "US"}, "route": {"kind": "winget", "id": "Mozilla.Firefox"}}
+    {"id": "firefox-winget", "system": "windows", "match": {"windows-org": "Mozilla Corporation", "windows-country": "US", "entry-name": "Mozilla Firefox (x64 en-US)"}, "route": {"kind": "winget", "id": "Mozilla.Firefox"}}
   ]
 }

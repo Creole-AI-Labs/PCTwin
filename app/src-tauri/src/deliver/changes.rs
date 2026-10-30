@@ -182,7 +182,8 @@ pub fn approve_now(k: &mut Kept, installed_now: &pctwin_record::AppList) -> Vec<
         let Some(e) = k.last.plan.apps.get(at as usize) else {
             continue;
         };
-        match pctwin_fullmove::plan::here_of(&e.app, installed_now) {
+        // For an app from another kind of laptop, its edition here is what counts.
+        match pctwin_fullmove::plan::here_of(e.subject(), installed_now) {
             Here::Present { .. } => here_now.push(Title::Name(name(&e.app.name))),
             _ => release.push(at),
         }
@@ -488,6 +489,34 @@ mod tests {
         assert_eq!(k.last.plan.held, [0]);
         assert!(k.last.drift.is_empty());
         assert_ne!(k.generation, G, "a new version");
+    }
+
+    /// Review finding (30 October 2026): a held app from another kind of laptop is judged by its
+    /// edition here, so it is never released to install over that edition already here.
+    #[test]
+    fn a_held_app_from_another_system_is_judged_by_its_edition_here() {
+        let mut k = kept();
+        let mut edition = k.last.plan.apps[1].app.clone();
+        edition.system = AppSystem::Mac;
+        edition.found = FoundWhere::MacBundle {
+            bundle_id: "org.example.notes".into(),
+            folder: "Notes.app".into(),
+            app_store_id: None,
+        };
+        k.last.plan.apps[1].plan.stand_in = Some(edition.clone());
+        let release = approve_now(
+            &mut k,
+            &AppList {
+                found: vec![edition],
+                not_read: vec![],
+            },
+        );
+        assert_eq!(
+            release,
+            [0],
+            "Notes' edition is here: only Writer is released"
+        );
+        assert_eq!(k.last.plan.held, [1]);
     }
 
     fn empty() -> AppList {

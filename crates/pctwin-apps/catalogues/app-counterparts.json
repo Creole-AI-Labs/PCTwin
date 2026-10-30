@@ -5,7 +5,7 @@
   "rows": [
     {"id": "spotify", "maker": "Spotify AB", "domains": ["spotify.com"],
      "editions": [
-       {"system": "windows", "name": "Spotify", "match": {"windows-org": "Spotify AB", "windows-country": "SE"}},
+       {"system": "windows", "name": "Spotify", "match": {"windows-org": "Spotify AB", "windows-country": "SE", "entry-name": "Spotify"}},
        {"system": "mac", "name": "Spotify", "match": {"bundle-id": "com.spotify.client", "team-id": "2FNC3A47ZF"}},
        {"system": "linux", "name": "Spotify", "match": {"flatpak-id": "com.spotify.Client"}}
      ],
@@ -15,20 +15,20 @@
     {"id": "firefox", "maker": "Mozilla Corporation", "domains": ["mozilla.org", "mozilla.net"],
      "editions": [
        {"system": "windows", "name": "Mozilla Firefox", "publisher": "Mozilla",
-        "match": {"windows-org": "Mozilla Corporation", "windows-country": "US"},
+        "match": {"windows-org": "Mozilla Corporation", "windows-country": "US", "entry-name": "Mozilla Firefox (x64 en-US)"},
         "signer": {"common-name": "Mozilla Corporation", "organization": "Mozilla Corporation", "country": "US", "issuer-organization": "DigiCert, Inc."}},
        {"system": "mac", "name": "Firefox", "match": {"bundle-id": "org.mozilla.firefox", "team-id": "43AQ936H96"}},
        {"system": "linux", "name": "Firefox", "match": {"flatpak-id": "org.mozilla.firefox"}}
      ]},
     {"id": "chrome", "maker": "Google LLC", "domains": ["google.com"],
      "editions": [
-       {"system": "windows", "name": "Google Chrome", "match": {"windows-org": "Google LLC", "windows-country": "US"}},
+       {"system": "windows", "name": "Google Chrome", "match": {"windows-org": "Google LLC", "windows-country": "US", "entry-name": "Google Chrome"}},
        {"system": "mac", "name": "Google Chrome", "match": {"bundle-id": "com.google.Chrome", "team-id": "EQHXZ8M8AV"}},
        {"system": "linux", "name": "Google Chrome", "match": {"flatpak-id": "com.google.Chrome"}}
      ]},
     {"id": "vlc", "maker": "VideoLAN", "domains": ["videolan.org"],
      "editions": [
-       {"system": "windows", "name": "VLC media player", "match": {"windows-org": "VideoLAN", "windows-country": "FR"}},
+       {"system": "windows", "name": "VLC media player", "match": {"windows-org": "VideoLAN", "windows-country": "FR", "entry-name": "VLC media player"}},
        {"system": "mac", "name": "VLC", "match": {"bundle-id": "org.videolan.vlc", "team-id": "75GAHG3SZQ"}},
        {"system": "linux", "name": "VLC", "match": {"flatpak-id": "org.videolan.VLC"}}
      ]}
