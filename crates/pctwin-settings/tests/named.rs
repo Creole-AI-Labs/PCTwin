@@ -120,10 +120,13 @@ const NAMED: [&str; 7] = [
     "apps.default-browser",
 ];
 
+/// From one system to another, each named setting's (outcome, action).
+type Pair = (&'static str, &'static str, [(Outcome, &'static str); 7]);
+
 /// Every named setting from every system to every system: (outcome, action) in the order of
 /// [`NAMED`]. Same system first in each block.
 #[rustfmt::skip]
-const EXPECTED: [(&str, &str, [(Outcome, &str); 7]); 9] = {
+const EXPECTED: [Pair; 9] = {
     use Outcome::{Equivalent as Eq, Exact as Ex, Guided as G};
     [
         // Windows: theme, picture and mouse are written; scaling, screens and layouts are the
