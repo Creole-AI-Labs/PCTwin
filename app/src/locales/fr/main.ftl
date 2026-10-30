@@ -3267,3 +3267,10 @@ fullmove-rebuilding-waiting-wifi = { $minutes ->
         [many] En attente d’un Wi-Fi gratuit avant de télécharger les applis : encore { $minutes } minutes au plus
        *[other] En attente d’un Wi-Fi gratuit avant de télécharger les applis : encore { $minutes } minutes au plus
     }
+
+# 2.5 games
+special-note-saves-in-launcher-cloud = Le lanceur de votre jeu garde ces sauvegardes en ligne. Elles reviennent quand vous vous connectez à lui sur votre nouvel ordinateur portable, donc PCTwin ne les copie pas sauf si vous les cochez. La copie de l'ancien ordinateur portable reste telle quelle.
+special-note-save-may-not-work-here = Ces sauvegardes viennent d'un autre type de système. PCTwin les garde sur votre nouvel ordinateur portable, mais le jeu ne pourra peut-être pas les ouvrir.
+special-note-store-protected-saves = La boutique garde ces sauvegardes pour elle-même, donc PCTwin ne peut pas les copier. Elles reviennent quand vous vous connectez à la boutique sur votre nouvel ordinateur portable et installez le jeu.
+special-note-mod-programs-held = Certains modules de ce jeu sont des programmes. PCTwin les liste, mais ne les copie pas et ne les active pas. Récupérez-les auprès de leur créateur.
+special-note-launcher-verify = Installez le lanceur sur votre nouvel ordinateur portable et connectez-vous. Utilisez ensuite sa propre étape de vérification ou de localisation pour qu'il trouve et vérifie vos jeux. PCTwin ne copie les jeux installés que si vous le choisissez.

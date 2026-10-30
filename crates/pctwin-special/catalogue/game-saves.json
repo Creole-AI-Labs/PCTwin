@@ -1,0 +1,145 @@
+{
+  "format": 1,
+  "catalogue": "game-saves",
+  "version": 1,
+  "rows": [
+    {
+      "name": "Stardew Valley",
+      "files": {
+        "<winAppData>/StardewValley/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "windows"
+            }
+          ]
+        },
+        "<home>/.config/StardewValley/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "mac"
+            }
+          ]
+        },
+        "<xdgConfig>/StardewValley/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "linux"
+            }
+          ]
+        }
+      },
+      "installDir": {
+        "Stardew Valley": {}
+      },
+      "cloud": {
+        "steam": true
+      },
+      "steam": {
+        "id": 413150
+      },
+      "checked_on": "2026-10-30"
+    },
+    {
+      "name": "Hollow Knight",
+      "files": {
+        "<winLocalAppDataLow>/Team Cherry/Hollow Knight": {
+          "tags": [
+            "save",
+            "config"
+          ],
+          "when": [
+            {
+              "os": "windows"
+            }
+          ]
+        },
+        "<home>/Library/Application Support/unity.Team Cherry.Hollow Knight": {
+          "tags": [
+            "save",
+            "config"
+          ],
+          "when": [
+            {
+              "os": "mac"
+            }
+          ]
+        },
+        "<xdgConfig>/unity3d/Team Cherry/Hollow Knight": {
+          "tags": [
+            "save",
+            "config"
+          ],
+          "when": [
+            {
+              "os": "linux"
+            }
+          ]
+        }
+      },
+      "installDir": {
+        "Hollow Knight": {}
+      },
+      "cloud": {
+        "steam": true
+      },
+      "steam": {
+        "id": 367520
+      },
+      "checked_on": "2026-10-30"
+    },
+    {
+      "name": "Celeste",
+      "files": {
+        "<base>/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "windows"
+            }
+          ]
+        },
+        "<home>/Library/Application Support/Celeste/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "mac"
+            }
+          ]
+        },
+        "<xdgData>/Celeste/Saves": {
+          "tags": [
+            "save"
+          ],
+          "when": [
+            {
+              "os": "linux"
+            }
+          ]
+        }
+      },
+      "installDir": {
+        "Celeste": {}
+      },
+      "cloud": {
+        "steam": true
+      },
+      "steam": {
+        "id": 504230
+      },
+      "checked_on": "2026-10-30"
+    }
+  ]
+}

@@ -214,6 +214,22 @@ pub fn answer<R: Read, W: Write>(
                 pctwin_special::browser_read::read(seal, what, &b, s.as_deref())
             }))
         }
+        Request::GameRecord { size, format } => Answer::GameRecord(
+            whole(&mut file, size, pctwin_special::gamefmt::MAX_RECORD)
+                .and_then(|b| pctwin_special::gamefmt::record_tree(seal, format, &b)),
+        ),
+        Request::SaveManifest { wanted, size } => Answer::SaveManifest(
+            whole(&mut file, wanted, pctwin_special::gamefmt::MAX_WANTED)
+                .and_then(|w| {
+                    serde_json::from_slice::<pctwin_special::gamefmt::Wanted>(&w)
+                        .map_err(|e| pctwin_special::content::ContentError::Damaged(e.to_string()))
+                })
+                .and_then(|w| {
+                    // The list is read line by line as it comes, never held whole.
+                    let mut lines = std::io::BufReader::new(&mut file);
+                    pctwin_special::gamefmt::save_manifest(seal, &mut lines, size, &w)
+                }),
+        ),
         Request::DatabaseFacts { size, log, millis } => {
             let until = std::time::Instant::now() + request.own_time();
             let _ = millis;

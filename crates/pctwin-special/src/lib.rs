@@ -62,3 +62,6 @@ pub mod mail;
 pub mod roots;
 pub mod select;
 pub mod sniff;
+// Games and launchers (Task List 2.5; plan section 8).
+pub mod gamefmt;
+pub mod games;

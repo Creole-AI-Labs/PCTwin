@@ -87,6 +87,22 @@ pub enum Note {
     /// Open pages kept in a form PCTwin cannot list: the browser's own sync, or its option to
     /// open the pages from last time, brings them back.
     OpenPagesBySync,
+    /// Game saves the game's launcher keeps online: they come back from the launcher on the new
+    /// laptop, so they are not copied by default (never over the launcher's own copy), and the
+    /// old laptop's copy is left as it is (`games`).
+    SavesInLauncherCloud,
+    /// Game saves from another kind of system: kept on the new laptop, but the game there may
+    /// not read them, since no row says the format is the same (`games`).
+    SaveMayNotWorkHere,
+    /// Saves a store keeps protected for itself (the Microsoft Store and Xbox app): not copied;
+    /// they come back from the store's own sync once signed in (`games`).
+    StoreProtectedSaves,
+    /// Programs inside a game's saves or add-ons: listed apart, never copied as data or turned
+    /// on; they come again from their maker (`games`).
+    ModProgramsHeld,
+    /// Installed games: the launcher on the new laptop finds and checks them with its own
+    /// "locate" and "verify"; the games' own files are not copied unless the person chooses.
+    LauncherVerify,
 }
 
 fn any(c: &Component, f: impl Fn(&Evidence) -> bool) -> bool {

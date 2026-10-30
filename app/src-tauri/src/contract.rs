@@ -351,7 +351,14 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             },
             ChangeView {
                 category: Some(Category::Game),
-                notes: vec![Note::CloudSavesMayDiffer],
+                notes: vec![
+                    Note::CloudSavesMayDiffer,
+                    Note::SavesInLauncherCloud,
+                    Note::SaveMayNotWorkHere,
+                    Note::StoreProtectedSaves,
+                    Note::ModProgramsHeld,
+                    Note::LauncherVerify,
+                ],
                 ..change(
                     Title::Name("Quest".into()),
                     Kind::Special,

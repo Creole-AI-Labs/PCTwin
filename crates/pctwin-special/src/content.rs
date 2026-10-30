@@ -464,15 +464,6 @@ impl ContentReader for InThisProcess {
     fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
         crate::mail::emlx_facts(self.0, bytes)
     }
-}
-
-/// One saved Apple Mail message's facts, read in the parser process.
-pub fn emlx_facts_of(bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
-    if bytes.len() as u64 > crate::mail::MAX_MESSAGE {
-        return Err(ContentError::TooLarge);
-    }
-    reader()?.emlx(bytes)
-}
     fn browser(
         &self,
         what: crate::browser_read::BrowserRead,
@@ -490,6 +481,14 @@ pub fn browser_of(
     second: Option<&[u8]>,
 ) -> Result<crate::browser_read::Found, ContentError> {
     reader()?.browser(what, bytes, second)
+}
+
+/// One saved Apple Mail message's facts, read in the parser process.
+pub fn emlx_facts_of(bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError> {
+    if bytes.len() as u64 > crate::mail::MAX_MESSAGE {
+        return Err(ContentError::TooLarge);
+    }
+    reader()?.emlx(bytes)
 }
 
 /// The capture's consistent copy of a database, made in the parser process from the bytes of

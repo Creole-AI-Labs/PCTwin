@@ -38,6 +38,11 @@ export const SPECIAL_NOTES = [
   "history-own-import",
   "pages-and-add-ons-listed",
   "open-pages-by-sync",
+  "saves-in-launcher-cloud",
+  "save-may-not-work-here",
+  "store-protected-saves",
+  "mod-programs-held",
+  "launcher-verify",
 ] as const;
 export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };
 

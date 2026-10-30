@@ -113,3 +113,10 @@ path = "fuzz_targets/browser_readers.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "game_formats"
+path = "fuzz_targets/game_formats.rs"
+test = false
+doc = false
+bench = false

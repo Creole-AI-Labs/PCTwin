@@ -62,7 +62,9 @@ fn in_process(request: Request, f: &File) -> Answer {
         | Request::DatabaseSnapshot { .. }
         | Request::AddOn { .. }
         | Request::Emlx { .. }
-        | Request::Browser { .. } => {
+        | Request::Browser { .. }
+        | Request::GameRecord { .. }
+        | Request::SaveManifest { .. } => {
             let mut bytes = Vec::new();
             std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
             std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
@@ -696,6 +698,52 @@ mod contents {
         assert_eq!(parser.emlx(msg).unwrap(), OWN.emlx(msg).unwrap());
         assert_eq!(parser.emlx(msg).unwrap().len, 14);
         assert!(parser.emlx(b"99\nSubject: a\n").is_err());
+    }
+
+    #[test]
+    fn game_records_and_save_lists_come_back_as_in_process() {
+        use pctwin_special::gamefmt::{RecordFormat, Wanted};
+        use pctwin_special::games::GameReader;
+        let own = pctwin_special::games::InThisProcess::new(in_child());
+        let parser = real();
+        let vdf = b"\"AppState\" { \"appid\" \"7\" \"name\" \"A Game\" \"installdir\" \"AGame\" }";
+        let tree = parser.record(RecordFormat::Vdf, vdf).unwrap();
+        assert_eq!(tree, own.record(RecordFormat::Vdf, vdf).unwrap());
+        assert_eq!(
+            tree.at(&["AppState".into(), "name".into()])
+                .and_then(|t| t.text()),
+            Some("A Game")
+        );
+        let json = br#"{"DisplayName":"B","InstallLocation":"D:/B"}"#;
+        assert_eq!(
+            parser.record(RecordFormat::Json, json).unwrap(),
+            own.record(RecordFormat::Json, json).unwrap()
+        );
+        assert!(parser.record(RecordFormat::Vdf, b"\"a\" {").is_err());
+        let list = b"---
+A Game:
+  steam:
+    id: 7
+Other:
+  steam:
+    id: 8
+";
+        let wanted = Wanted {
+            steam: vec![7],
+            ..Wanted::default()
+        };
+        let read = parser.save_manifest(list, &wanted).unwrap();
+        assert_eq!(read, own.save_manifest(list, &wanted).unwrap());
+        assert_eq!(read.entries.len(), 1);
+        assert_eq!(read.entries[0].name, "A Game");
+        assert!(
+            parser
+                .save_manifest(
+                    b"x: 1
+", &wanted
+                )
+                .is_err()
+        );
     }
 
     #[test]
