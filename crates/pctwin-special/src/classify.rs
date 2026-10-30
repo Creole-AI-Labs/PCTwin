@@ -85,6 +85,9 @@ pub enum Skip {
     NotAFile,
     /// Past the walk's depth or count limit: found, not read.
     NotRead,
+    /// A file that must never be shared between laptops (GnuPG's random seed,
+    /// [`crate::roots::Trusted::NeverCopied`]).
+    NeverShared,
 }
 
 impl Skip {
@@ -103,6 +106,7 @@ impl Skip {
                 "kept online by a cloud app: not downloaded or moved here; it stays in its cloud"
             }
             Skip::NotAFile => "not a file (a pipe, socket or device): nothing to move",
+            Skip::NeverShared => "made for this laptop alone: never shared with another one",
         }
     }
 }
@@ -802,6 +806,46 @@ fn classify_within(
         }
     }
 
+    // Files the system trusts one by one (the shared table, `roots::TRUSTED_PLACES`): one never
+    // shared is left out; those that decide who may sign in remotely or can run a program are a
+    // component of their own, which the new laptop keeps in its folder of things brought over,
+    // never put to use, so the rest of the folder (the person's keys) lands whole in place.
+    let mut aside: Vec<String> = Vec::new();
+    let left: Vec<String> = by_rel
+        .keys()
+        .filter(|rel| !used.contains(*rel))
+        .cloned()
+        .collect();
+    for rel in left {
+        let path = if folder.rel.is_empty() {
+            rel.clone()
+        } else {
+            format!("{}/{}", folder.rel, rel)
+        };
+        match crate::roots::trusted_in(folder.root, &path, false) {
+            Some(crate::roots::Trusted::NeverCopied) => {
+                used.insert(rel.clone());
+                not_moved.push(NotMoved {
+                    rel,
+                    why: Skip::NeverShared,
+                });
+            }
+            Some(crate::roots::Trusted::KeptAside) => {
+                used.insert(rel.clone());
+                aside.push(rel);
+            }
+            _ => {}
+        }
+    }
+    if !aside.is_empty() {
+        b.push(
+            aside,
+            Custody::Portable,
+            false,
+            vec![Evidence::GrantsOrRuns],
+        );
+    }
+
     // LevelDB stores: the whole folder of a `CURRENT` file that names a manifest present there.
     let level_dirs: BTreeSet<String> = by_rel
         .values()
@@ -1374,8 +1418,11 @@ fn merge(components: Vec<Component>) -> Vec<Component> {
         })
     };
     let model = |c: &Component| c.evidence.contains(&Evidence::ModelData);
+    // Files kept aside, never put to use (`Evidence::GrantsOrRuns`), stay a class of their own,
+    // so the rest of the folder lands in place.
+    let aside = |c: &Component| c.evidence.contains(&Evidence::GrantsOrRuns);
     let mut out: Vec<Component> = Vec::new();
-    let mut at: BTreeMap<(u8, bool, bool, bool), usize> = BTreeMap::new();
+    let mut at: BTreeMap<(u8, bool, bool, bool, bool), usize> = BTreeMap::new();
     for c in components {
         if c.secret {
             out.push(c);
@@ -1386,6 +1433,7 @@ fn merge(components: Vec<Component>) -> Vec<Component> {
             needs_a_look(&c),
             model(&c),
             c.preserve,
+            aside(&c),
         );
         match at.get(&key) {
             Some(&i) => {
@@ -1572,11 +1620,17 @@ pub fn placement(report: &FolderReport, from: System, to: System) -> Placement {
 pub fn placement_of(
     root: RootKind,
     folder: &str,
+    members: &[String],
     app: &str,
     from: System,
     to: System,
     catalogue: &Catalogue<SpecialRow>,
 ) -> Placement {
+    // A file the system trusts one by one (who may sign in remotely, what runs when connecting,
+    // a seed never shared): the component is kept aside whole, never put to use.
+    if keeps_aside(root, folder, members) {
+        return Placement::PreservedOnly;
+    }
     let named: Vec<&SpecialRow> = catalogue
         .rows()
         .iter()
@@ -1593,6 +1647,19 @@ pub fn placement_of(
         return Placement::PreservedOnly;
     }
     place_by_row(root, folder, row, from, to)
+}
+
+/// Whether any of `members` (paths inside `folder` of `root`) is a file the system trusts one
+/// by one ([`crate::roots::Trusted::is_file`]): such a component is kept aside, never put to use.
+pub fn keeps_aside(root: RootKind, folder: &str, members: &[String]) -> bool {
+    members.iter().any(|m| {
+        let path = if folder.is_empty() {
+            m.clone()
+        } else {
+            format!("{folder}/{m}")
+        };
+        crate::roots::trusted_in(root, &path, false).is_some_and(crate::roots::Trusted::is_file)
+    })
 }
 
 /// The one rule both [`placement`] and [`placement_of`] follow. A place the system runs at

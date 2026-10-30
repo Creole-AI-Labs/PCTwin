@@ -372,10 +372,25 @@ pub enum Trusted {
     /// when a file of some kind is opened (T26-026: a moved setting must never switch a command
     /// on). Never found as app data, never landed.
     SignIn,
-    /// The system trusts what is there: who may sign in remotely, the keys that sign and decrypt,
-    /// Windows' own secrets. Found and moved (the person's own keys), but only ever kept aside,
-    /// never landed where the system would trust it.
+    /// The system trusts what is there as a whole (certificates, Windows' own protected
+    /// secrets): kept aside, never landed where the system would trust it.
     Trust,
+    /// One file that decides who may sign in to this laptop remotely, or that can run a program
+    /// when the person connects or signs (`~/.ssh/authorized_keys`, `~/.ssh/config`, GnuPG's
+    /// `*.conf`): moved, but only ever kept in PCTwin's own folder of things brought over, never
+    /// put to use. The folder it is in is not trusted as a whole: the person's keys beside it
+    /// land in place.
+    KeptAside,
+    /// One file that must never be shared between laptops (GnuPG's `random_seed`): never read
+    /// as app data, never landed.
+    NeverCopied,
+}
+
+impl Trusted {
+    /// Whether this is about single files (the folder they are in is not trusted as a whole).
+    pub fn is_file(self) -> bool {
+        matches!(self, Trusted::KeptAside | Trusted::NeverCopied)
+    }
 }
 
 /// Every place in a person's home that the system runs at sign-in or trusts, home-relative as
@@ -414,9 +429,20 @@ pub const TRUSTED_PLACES: &[(&str, Trusted)] = &[
     // Windows: the Start menu (its Startup folder) and the rest of Windows' own per-person tree.
     ("AppData/Roaming/Microsoft/Windows", Trusted::SignIn),
     ("AppData/Local/Microsoft/Windows", Trusted::SignIn),
-    // Trusted: remote sign-in and keys, certificates, Windows' own protected secrets.
-    (".ssh", Trusted::Trust),
-    (".gnupg", Trusted::Trust),
+    // Single files, the rest of their folder landing in place (decided with the founder, 31
+    // October 2026): who may sign in remotely and what runs when connecting (OpenSSH), what the
+    // agent may run or turn into (GnuPG: `pinentry-program` names any program), and GnuPG's
+    // random seed, which is never shared between machines.
+    (".ssh/authorized_keys", Trusted::KeptAside),
+    (".ssh/authorized_keys2", Trusted::KeptAside),
+    (".ssh/config", Trusted::KeptAside),
+    (".ssh/config.d", Trusted::KeptAside),
+    (".ssh/rc", Trusted::KeptAside),
+    (".ssh/environment", Trusted::KeptAside),
+    (".gnupg/*.conf", Trusted::KeptAside),
+    (".gnupg/sshcontrol", Trusted::KeptAside),
+    (".gnupg/random_seed", Trusted::NeverCopied),
+    // Trusted as a whole: certificates, Windows' own protected secrets.
     (".pki", Trusted::Trust),
     ("AppData/Roaming/Microsoft/Protect", Trusted::Trust),
     ("AppData/Roaming/Microsoft/Credentials", Trusted::Trust),
@@ -436,15 +462,27 @@ fn names_of(path: &str) -> Vec<String> {
         .collect()
 }
 
+/// Whether a name matches one of the table's names: equal (letter case ignored), or `*` then a
+/// suffix (`*.conf`).
+fn name_matches(have: &str, want: &str) -> bool {
+    match want.strip_prefix('*') {
+        Some(suffix) => have.len() > suffix.len() && have.ends_with(suffix),
+        None => have == want,
+    }
+}
+
 /// What the place at the home-relative `path` (or anything in it) is to the system: the place
-/// itself or a folder inside one ([`TRUSTED_PLACES`]), or, with `holding`, also a folder that
-/// holds one (landing `.config` whole would land its `autostart`). `None`: none of these.
+/// itself or something inside one ([`TRUSTED_PLACES`]), or, with `holding`, also a folder that
+/// holds a place trusted as a whole (landing `.config` whole would land its `autostart`; a
+/// folder holding only single trusted files, such as `.ssh`, is not refused for them: each file
+/// is). `None`: none of these.
 pub fn trusted_place(path: &str, holding: bool) -> Option<Trusted> {
     let have = names_of(path);
     TRUSTED_PLACES.iter().find_map(|(place, what)| {
         let want = names_of(place);
-        let within = have.len() >= want.len() && have[..want.len()] == want[..];
-        let holds = holding && want.len() > have.len() && want[..have.len()] == have[..];
+        let same = |n: usize| (0..n).all(|i| name_matches(&have[i], &want[i]));
+        let within = have.len() >= want.len() && same(want.len());
+        let holds = holding && !what.is_file() && want.len() > have.len() && same(have.len());
         (within || holds).then_some(*what)
     })
 }

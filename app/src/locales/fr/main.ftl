@@ -2311,6 +2311,7 @@ special-note-passkeys-guided = Les clés d'accès enregistrées dans un compte r
 special-note-cloud-saves-may-differ = Le lanceur du jeu peut aussi garder vos sauvegardes en ligne. S'il vous demande lesquelles garder, regardez d'abord les dates.
 special-note-models-checked-not-run = Les modèles d'IA sont vérifiés fichier par fichier à leur arrivée. PCTwin ne les lance jamais.
 special-note-tool-settings-review = Ces réglages peuvent lancer des programmes ou accéder à Internet. Vérifiez-les avant de les utiliser sur le nouvel ordinateur.
+special-note-sign-in-files-kept-aside = Certains fichiers de connexion et de réglages ont été gardés dans le dossier « PCTwin brought over » au lieu d'être utilisés.
 special-note-secret-tick-each = Ceci ne bouge que si vous le cochez. Il n'apparaît jamais dans un rapport.
 browser-file-bookmarks = Favoris.html
 browser-file-lists = Pages ouvertes et extensions.html

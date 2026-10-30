@@ -179,6 +179,34 @@ fn refuse_trusted(root: SettingsRoot, folder: &str) -> Result<(), LandError> {
     Ok(())
 }
 
+/// Refuses landing `capture` in `folder` of `root` when any of its files would be a file the
+/// system trusts one by one in place (`~/.ssh/authorized_keys`, `~/.ssh/config`, GnuPG's
+/// `*.conf` and `random_seed`; [`crate::roots::Trusted::is_file`]), whoever chose the folder:
+/// such files are only ever kept in PCTwin's own folder of things brought over.
+fn refuse_trusted_files(
+    root: SettingsRoot,
+    folder: &str,
+    capture: &Capture,
+) -> Result<(), LandError> {
+    let trusted = capture.files.iter().any(|f| {
+        homes_of(root).iter().any(|base| {
+            let path = [*base, folder, f.rel.as_str()]
+                .iter()
+                .filter(|p| !p.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join("/");
+            crate::roots::trusted_place(&path, false).is_some_and(crate::roots::Trusted::is_file)
+        })
+    });
+    if trusted {
+        return Err(LandError::Denied(
+            "PCTwin never puts a file that decides who may sign in, or runs a program, to use",
+        ));
+    }
+    Ok(())
+}
+
 /// The folder name to land in: the target's, or a new one beside it.
 fn choose(
     dest: &Destination,
@@ -243,6 +271,7 @@ pub fn land(
     now: Now,
 ) -> Result<Landed, LandError> {
     check_import(&grant, seal, root, now)?;
+    refuse_trusted_files(target.root, &target.folder, capture)?;
     let (folder, beside) = choose(dest, target, conflict)?;
     write(
         rec, planned, dest, target, &folder, beside, capture, work, stop, None,
@@ -281,6 +310,7 @@ pub fn land_secret(
     if capture.component != approved.component {
         return Err(LandError::Denied("the capture is of another component"));
     }
+    refuse_trusted_files(target.root, &target.folder, capture)?;
     // A secret never joins a folder made earlier (it may not be owner-only): its own private
     // folder, beside one that is already there.
     let fresh = Target {

@@ -46,6 +46,7 @@ export const SPECIAL_NOTES = [
   "cloud-saves-may-differ",
   "models-checked-not-run",
   "tool-settings-review",
+  "sign-in-files-kept-aside",
   "secret-tick-each",
   "open-archive-in-mail-app",
   "local-only-folders-export",

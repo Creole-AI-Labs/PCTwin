@@ -172,22 +172,14 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
         Conflict::KeepBoth,
         Now::real(),
     );
-    // Kept aside (the system trusts `~/.ssh`; the fresh-context security review, finding 1): the
-    // person's keys come, never into `~/.ssh`, and the result says where they are, as the
-    // person's step (never "copied" into the app's place).
+    // The person's keys land in `~/.ssh` itself (decided with the founder, 31 October 2026).
     assert_eq!(
         applied.result.status(),
-        ItemStatus::NeedsAction,
+        ItemStatus::Copied,
         "{}",
         applied.words
     );
-    assert!(
-        applied.words.contains("PCTwin brought over"),
-        "{}",
-        applied.words
-    );
-    assert!(new.join("PCTwin brought over/.ssh/work_key").is_file());
-    assert!(!new.join(".ssh").exists());
+    assert!(new.join(".ssh/work_key").is_file());
     for (i, p) in plan.landing_order().into_iter().enumerate() {
         if p.component.id == key.component.id {
             continue;
@@ -260,10 +252,7 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
             .is_file()
     );
     // The public keys joined the secret's owner-only folder.
-    assert!(
-        new.join("PCTwin brought over/.ssh/id_ed25519.pub")
-            .is_file()
-    );
+    assert!(new.join(".ssh/id_ed25519.pub").is_file());
     // Nothing machine-bound arrived.
     assert!(
         !new.join("AppData/Local/Chromey/User Data/Default/Cookies")

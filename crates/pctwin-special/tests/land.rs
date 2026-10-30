@@ -537,11 +537,11 @@ fn a_chosen_secret_lands_owner_only() {
     )
     .unwrap();
     let rec = j.imports(&keys().capture);
-    // Kept aside, where the new laptop's placement puts a folder the system trusts (the
-    // fresh-context security review, finding 1): the person's keys come, never into `~/.ssh`.
+    // The person's keys land in `~/.ssh` itself, owner-only (decided with the founder, 31
+    // October 2026); only the files that grant access or run something are kept aside.
     let target = Target {
         root: SettingsRoot::Home,
-        folder: "PCTwin brought over/.ssh".into(),
+        folder: ".ssh".into(),
         made: None,
     };
     // A read grant does not land it.
@@ -598,8 +598,7 @@ fn a_chosen_secret_lands_owner_only() {
     )
     .unwrap();
     assert!(landed.verified);
-    assert!(!new.join(".ssh").exists());
-    let folder = new.join("PCTwin brought over").join(".ssh");
+    let folder = new.join(".ssh");
     let file = folder.join("work_key");
     assert_eq!(
         std::fs::read(&file).unwrap(),
@@ -657,7 +656,6 @@ fn the_landing_refuses_every_place_the_system_runs_or_trusts_at_sign_in() {
         (SettingsRoot::Config, "environment.d"),
         (SettingsRoot::Home, ".config/autostart"),
         (SettingsRoot::Home, ".config"),
-        (SettingsRoot::Home, ".ssh"),
         (SettingsRoot::Home, "Library/LaunchAgents"),
         (
             SettingsRoot::Config,
@@ -694,4 +692,145 @@ fn the_landing_refuses_every_place_the_system_runs_or_trusts_at_sign_in() {
         0,
         "nothing was made"
     );
+}
+
+/// The files in `~/.ssh` that decide who may sign in remotely or can run a program when connecting
+/// (`authorized_keys`, `config`...) are a component of their own, apart from the person's keys,
+/// and the landing refuses to put them in `~/.ssh` by itself, whoever asks; kept in PCTwin's own
+/// folder of things brought over, they land.
+#[test]
+fn ssh_files_that_grant_access_or_run_something_never_land_in_ssh() {
+    pctwin_special::content::install_reader(&OWN_READERS);
+    let t = temp();
+    let home = t.path().join("old");
+    ssh_folder(&home.join(".ssh"));
+    put(
+        &home.join(".ssh/authorized_keys"),
+        b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAISyntheticKey friend@elsewhere\n",
+    );
+    put(
+        &home.join(".ssh/config"),
+        b"Host work\n  ProxyCommand /usr/bin/nc %h %p\n",
+    );
+    let r = found(&home);
+    let (f, kept) = component(&r, "authorized_keys");
+    assert!(kept.members.iter().any(|m| m == "config"), "{kept:?}");
+    assert!(
+        !kept
+            .members
+            .iter()
+            .any(|m| m.starts_with("id_") || m == "known_hosts")
+    );
+    let (_, keys_c) = component(&r, "id_ed25519.pub");
+    assert!(
+        !keys_c
+            .members
+            .iter()
+            .any(|m| m == "authorized_keys" || m == "config")
+    );
+    let work = t.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let g = keys()
+        .capture
+        .grant(
+            seal(),
+            vec![source_root()],
+            CaptureEffect::ReadPrivate,
+            MINUTE,
+            Now::real(),
+        )
+        .unwrap();
+    let cap = capture(
+        g,
+        &approve(f, kept),
+        kept,
+        &f.folder.path(),
+        &work,
+        &Free,
+        &Stop::new(),
+        Now::real(),
+    )
+    .unwrap();
+    let new = t.path().join("new");
+    std::fs::create_dir(&new).unwrap();
+    let dest = Destination::open(&new).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
+    let rec = j.imports(&keys().capture);
+    let to = |folder: &str| Target {
+        root: SettingsRoot::Home,
+        folder: folder.into(),
+        made: None,
+    };
+    let got = land(
+        &rec,
+        import(),
+        seal(),
+        target_root(),
+        &planned(0),
+        &dest,
+        &to(".ssh"),
+        &cap,
+        &work,
+        Conflict::KeepBoth,
+        &Stop::new(),
+        Now::real(),
+    );
+    assert!(matches!(got, Err(LandError::Denied(_))), "{got:?}");
+    assert!(!new.join(".ssh").exists());
+    let aside = land(
+        &rec,
+        import(),
+        seal(),
+        target_root(),
+        &planned(1),
+        &dest,
+        &to("PCTwin brought over/.ssh"),
+        &cap,
+        &work,
+        Conflict::KeepBoth,
+        &Stop::new(),
+        Now::real(),
+    )
+    .unwrap();
+    assert!(aside.verified);
+    assert!(
+        new.join("PCTwin brought over/.ssh/authorized_keys")
+            .is_file()
+    );
+}
+
+/// GnuPG's `random_seed` never crosses (it must never be shared between laptops); its keyrings
+/// are found as data, and its settings files (`*.conf`, `sshcontrol`) are a component of their own.
+#[test]
+fn gnupg_keyrings_move_its_settings_are_apart_and_its_random_seed_never_crosses() {
+    pctwin_special::content::install_reader(&OWN_READERS);
+    let t = temp();
+    let home = t.path().join("old");
+    let g = home.join(".gnupg");
+    put(&g.join("pubring.kbx"), b"KBXf synthetic keyring");
+    put(&g.join("trustdb.gpg"), b"synthetic trust db");
+    put(&g.join("random_seed"), &[7u8; 600]);
+    put(
+        &g.join("gpg-agent.conf"),
+        b"pinentry-program /usr/bin/pinentry-gtk\n",
+    );
+    put(&g.join("sshcontrol"), b"# none\n");
+    let r = found(&home);
+    let every: Vec<&String> = r
+        .iter()
+        .flat_map(|f| f.components.iter().flat_map(|c| c.members.iter()))
+        .collect();
+    assert!(
+        !every.iter().any(|m| m.ends_with("random_seed")),
+        "{every:?}"
+    );
+    let (_, conf) = component(&r, "gpg-agent.conf");
+    assert!(conf.members.iter().any(|m| m == "sshcontrol"));
+    assert!(!conf.members.iter().any(|m| m == "pubring.kbx"));
+    let (_, ring) = component(&r, "pubring.kbx");
+    assert!(!ring.members.iter().any(|m| m.ends_with(".conf")));
 }

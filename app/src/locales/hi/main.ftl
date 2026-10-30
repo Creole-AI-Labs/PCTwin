@@ -2232,6 +2232,7 @@ special-note-passkeys-guided = किसी खाते में सेव क
 special-note-cloud-saves-may-differ = गेम का लॉन्चर आपकी सेव फ़ाइलें ऑनलाइन भी रख सकता है। अगर वह पूछे कि कौन-सी सेव रखनी हैं, तो पहले तारीखें देख लें।
 special-note-models-checked-not-run = AI मॉडल पहुँचने पर एक-एक फ़ाइल करके जाँचे जाते हैं। PCTwin उन्हें कभी नहीं चलाता।
 special-note-tool-settings-review = ये सेटिंग्स प्रोग्राम शुरू कर सकती हैं या इंटरनेट से जुड़ सकती हैं। नए लैपटॉप पर इस्तेमाल करने से पहले इन्हें देख लें।
+special-note-sign-in-files-kept-aside = कुछ साइन-इन और सेटिंग फ़ाइलें इस्तेमाल में लाने के बजाय "PCTwin brought over" फ़ोल्डर में रखी गईं।
 special-note-secret-tick-each = यह तभी जाएगा जब आप इस पर टिक करेंगे। यह किसी रिपोर्ट में कभी नहीं दिखता।
 browser-file-bookmarks = बुकमार्क.html
 browser-file-lists = खुले पेज और ऐड-ऑन.html

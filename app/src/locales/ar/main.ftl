@@ -2555,6 +2555,7 @@ special-note-passkeys-guided = مفاتيح المرور المحفوظة في �
 special-note-cloud-saves-may-differ = قد يحتفظ مشغّل اللعبة بحفظاتك على الإنترنت أيضًا. إذا سألك أيّ الحفظات تبقي، فانظر إلى التواريخ أولًا.
 special-note-models-checked-not-run = تُفحص نماذج الذكاء الاصطناعي ملفًا ملفًا عند وصولها. لا يشغّلها PCTwin أبدًا.
 special-note-tool-settings-review = قد تشغّل هذه الإعدادات برامج أو تتصل بالإنترنت. راجعها قبل استخدامها على الحاسوب الجديد.
+special-note-sign-in-files-kept-aside = احتُفظ ببعض ملفات تسجيل الدخول والإعدادات في مجلد "PCTwin brought over" بدلًا من استخدامها.
 special-note-secret-tick-each = لا ينتقل هذا إلا إذا وضعت علامة عليه. ولا يظهر أبدًا في أي تقرير.
 browser-file-bookmarks = الإشارات المرجعية.html
 browser-file-lists = الصفحات المفتوحة والإضافات.html

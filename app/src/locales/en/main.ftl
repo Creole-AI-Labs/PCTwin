@@ -2110,6 +2110,7 @@ special-note-passkeys-guided = Passkeys saved in an account come back when you s
 special-note-cloud-saves-may-differ = The game's launcher may also keep your saves online. If it asks which saves to keep, check the dates first.
 special-note-models-checked-not-run = AI models are checked file by file when they arrive. PCTwin never runs them.
 special-note-tool-settings-review = These settings can start programs or reach the internet. Check them before you use them on the new laptop.
+special-note-sign-in-files-kept-aside = Some sign-in and settings files were kept in the "PCTwin brought over" folder instead of being put to use.
 special-note-secret-tick-each = This moves only if you tick it. It never appears in a report.
 browser-file-bookmarks = Bookmarks.html
 browser-file-lists = Open pages and add-ons.html

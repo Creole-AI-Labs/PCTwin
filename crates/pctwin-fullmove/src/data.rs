@@ -939,6 +939,16 @@ pub fn land_all(
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
         }
+        // Files the system trusts one by one (`~/.ssh/authorized_keys`, `config`, GnuPG's
+        // `*.conf`): kept quietly in PCTwin's own folder of things brought over; the line's own
+        // note says so in its details, and nothing is asked of the person (decided with the
+        // founder, 31 October 2026).
+        let quietly_aside = match &r.placement {
+            PlacementWire::Same { root, folder } => {
+                pctwin_special::classify::keeps_aside(*root, folder, &r.component.members)
+            }
+            _ => false,
+        };
         // Where it goes here, decided here (the old laptop planned for its own kind of system),
         // for the app the plan the person approved named for it.
         let placed = placed_here(
@@ -959,7 +969,15 @@ pub fn land_all(
             }
             _ => r,
         };
-        out.push(laptop.land(id, r, step as u32, secret, &sink.folder(id)));
+        let mut landed = laptop.land(id, r, step as u32, secret, &sink.folder(id));
+        if quietly_aside && matches!(landed.why, Some(DataWhy::Placed { .. })) {
+            // Landed whole, checked, where it was meant to be: its normal result.
+            if let Ok(copied) = ItemResult::done(pctwin_types::ItemStatus::Copied) {
+                landed.result = copied;
+                landed.why = None;
+            }
+        }
+        out.push(landed);
     }
     out
 }
@@ -981,9 +999,16 @@ pub fn placed_here(
         PlacementWire::Same { .. } if approved != Some(r.app.as_str()) => {
             PlacementWire::PreservedOnly
         }
-        PlacementWire::Same { root, folder } => {
-            (&pctwin_special::classify::placement_of(*root, folder, &r.app, from, to, rows)).into()
-        }
+        PlacementWire::Same { root, folder } => (&pctwin_special::classify::placement_of(
+            *root,
+            folder,
+            &r.component.members,
+            &r.app,
+            from,
+            to,
+            rows,
+        ))
+            .into(),
         PlacementWire::Translated { .. } | PlacementWire::PreservedOnly => {
             PlacementWire::PreservedOnly
         }
@@ -1383,7 +1408,6 @@ mod placed_tests {
             (RootKind::XdgConfig, "autostart"),
             (RootKind::XdgConfig, "systemd"),
             (RootKind::XdgConfig, "environment.d"),
-            (RootKind::HomeDot, ".ssh"),
             (RootKind::HomeDot, ".config"),
         ] {
             let r = untied(folder, root, folder);
@@ -1391,6 +1415,32 @@ mod placed_tests {
                 placed_here(&r, Some(folder), System::Linux, System::Linux, &rows).placement,
                 PlacementWire::PreservedOnly,
                 "{folder}"
+            );
+        }
+        // The person's keys in `~/.ssh` land in place; a component holding a file that decides
+        // who may sign in, or runs a program, is kept aside whole.
+        let mut keys = untied(".ssh", RootKind::HomeDot, ".ssh");
+        keys.component.members = vec!["id_ed25519.pub".into(), "known_hosts".into()];
+        assert_eq!(
+            placed_here(&keys, Some(".ssh"), System::Linux, System::Linux, &rows).placement,
+            PlacementWire::Same {
+                root: RootKind::HomeDot,
+                folder: ".ssh".into()
+            }
+        );
+        for file in [
+            "authorized_keys",
+            "config",
+            "config.d/work",
+            "rc",
+            "environment",
+        ] {
+            let mut grants = keys.clone();
+            grants.component.members = vec!["id_ed25519.pub".into(), file.into()];
+            assert_eq!(
+                placed_here(&grants, Some(".ssh"), System::Linux, System::Linux, &rows).placement,
+                PlacementWire::PreservedOnly,
+                "{file}"
             );
         }
         let start = untied("Microsoft/Windows", RootKind::Roaming, "Microsoft/Windows");

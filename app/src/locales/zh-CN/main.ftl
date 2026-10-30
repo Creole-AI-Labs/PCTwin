@@ -1987,6 +1987,7 @@ special-note-passkeys-guided = 保存在账户中的通行密钥，登录该账�
 special-note-cloud-saves-may-differ = 游戏启动器也可能在线保存你的存档。如果它问要保留哪些存档，请先看看日期。
 special-note-models-checked-not-run = AI 模型到达时会逐个文件检查。PCTwin 从不运行它们。
 special-note-tool-settings-review = 这些设置可能会启动程序或连接互联网。在新笔记本电脑上使用前请先检查。
+special-note-sign-in-files-kept-aside = 部分登录文件和设置文件已保存在 “PCTwin brought over” 文件夹中，没有被投入使用。
 special-note-secret-tick-each = 只有勾选后才会转移。它从不出现在报告中。
 browser-file-bookmarks = 书签.html
 browser-file-lists = 打开的网页和扩展.html

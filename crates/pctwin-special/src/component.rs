@@ -87,6 +87,10 @@ pub enum Evidence {
     CredentialValues,
     /// A cache the app rebuilds (by an OS cache place, a cache marker or a cache format).
     Cache,
+    /// Files that decide who may sign in to the laptop remotely, or can run a program when the
+    /// person connects or signs (`roots::Trusted::KeptAside`): kept in PCTwin's own folder of
+    /// things brought over, never put to use.
+    GrantsOrRuns,
     /// A file named by its own hash; `verified` once its bytes were hashed and matched.
     ContentAddressed { verified: bool },
     /// A file named by a hash its bytes do not have: damaged or replaced.
@@ -170,6 +174,10 @@ impl Evidence {
             Evidence::CredentialStore => "saved passwords".into(),
             Evidence::CredentialValues => "passwords, keys or sign-in tokens inside a file".into(),
             Evidence::Cache => "a cache the app rebuilds by itself".into(),
+            Evidence::GrantsOrRuns => {
+                "decides who may sign in remotely, or can run a program: kept, not put to use"
+                    .into()
+            }
             Evidence::ContentAddressed { verified: true } => {
                 "a file named by its own fingerprint, checked".into()
             }

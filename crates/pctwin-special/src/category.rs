@@ -66,6 +66,11 @@ pub enum Note {
     /// Settings that start programs or reach the internet (tool servers, hooks): moved as data
     /// and held for the person to look at before the app on the new laptop uses them.
     ToolSettingsReview,
+    /// Sign-in and settings files that decide who may sign in remotely or can run a program
+    /// (`~/.ssh/authorized_keys`, `config`, GnuPG's `*.conf`) were kept in PCTwin's own folder of
+    /// things brought over instead of being put to use: said once, in the details; nothing for
+    /// the person to do.
+    SignInFilesKeptAside,
     /// A secret: moves only if the person ticks it, by itself; never in a report, log or AI.
     SecretTickEach,
     /// A mail archive (an Outlook data file) moved as a file: the person opens it in the mail
@@ -160,6 +165,9 @@ pub fn of(report: &FolderReport, c: &Component) -> Category {
 pub fn notes_for(report: &FolderReport, c: &Component) -> Vec<Note> {
     let mut out = Vec::new();
     let folder = of_folder(report);
+    if any(c, |e| *e == Evidence::GrantsOrRuns) {
+        out.push(Note::SignInFilesKeptAside);
+    }
     if any(c, |e| *e == Evidence::ServerMailCache) {
         out.push(Note::ServerResync);
         out.push(Note::LocalOnlyFoldersExport);

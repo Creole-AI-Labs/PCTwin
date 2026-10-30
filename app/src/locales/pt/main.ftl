@@ -2306,6 +2306,7 @@ special-note-passkeys-guided = Chaves de acesso salvas em uma conta voltam quand
 special-note-cloud-saves-may-differ = O inicializador do jogo também pode guardar seus jogos salvos online. Se ele perguntar quais manter, confira as datas primeiro.
 special-note-models-checked-not-run = Os modelos de IA são verificados arquivo por arquivo quando chegam. O PCTwin nunca os executa.
 special-note-tool-settings-review = Estas configurações podem iniciar programas ou acessar a internet. Confira antes de usá-las no novo notebook.
+special-note-sign-in-files-kept-aside = Alguns arquivos de acesso e de configurações foram guardados na pasta "PCTwin brought over" em vez de serem colocados em uso.
 special-note-secret-tick-each = Isto só vai se você marcar. Nunca aparece em um relatório.
 browser-file-bookmarks = Favoritos.html
 browser-file-lists = Páginas abertas e extensões.html
