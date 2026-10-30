@@ -248,6 +248,7 @@ fn launch_daemon(
 /// administrator said no. `plan`: the approved plan's seal (`<generation>:<digest>`), for the
 /// helper's permission broker (Phase 2); then `approve` may be empty.
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn launch_elevated(
     mover: &str,
     approve: &[String],
