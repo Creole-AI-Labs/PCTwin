@@ -11,10 +11,12 @@
 //!   before, and is only ever a page the person opens (the maker check still decides).
 //!
 //! Which clues exist: the address the old laptop's own list of programs records for the app
-//! (`FoundApp::web`). A download mark's recorded address (Windows' `Zone.Identifier`
-//! `HostUrl`/`ReferrerUrl`, a Mac's `kMDItemWhereFroms`) is **not read**: the Security Design
-//! (Part C, "What the scan reads") checks a mark by its presence only, never by reading it. If
-//! that rule changes, a mark's address goes through [`check`] exactly like any other clue.
+//! (`FoundApp::web`), and the address an installer's download mark records (Windows'
+//! `Zone.Identifier` `HostUrl`, else `ReferrerUrl`; a Mac's `kMDItemWhereFroms`). The mark is
+//! read only to compare its site with the maker's own sites (founder's decision and Security
+//! Design scan rules, 30 October 2026): [`MarkAddress`] cannot be printed or serialised, and
+//! only the yes or no is kept, as a note on the app (`found::note_download_marks`). The app is
+//! still installed only from its maker's source; a missing or unreadable mark says nothing.
 
 use pctwin_catalogue::Catalogue;
 use pctwin_record::FoundApp;
