@@ -711,3 +711,58 @@ impl pctwin_special::content::ContentReader for Pool {
         self.one().add_on_manifest(bytes)
     }
 }
+
+/// Game launchers' records and save lists (2.5 games), read in the parser process.
+impl pctwin_special::games::GameReader for Parser {
+    fn record(
+        &self,
+        format: pctwin_special::gamefmt::RecordFormat,
+        bytes: &[u8],
+    ) -> Result<pctwin_special::gamefmt::Tree, ContentError> {
+        let request = Request::GameRecord {
+            size: bytes.len() as u64,
+            format,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes)]) {
+            Ok(Answer::GameRecord(tree)) => tree,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn save_manifest(
+        &self,
+        bytes: &[u8],
+        wanted: &pctwin_special::gamefmt::Wanted,
+    ) -> Result<pctwin_special::gamefmt::ManifestRead, ContentError> {
+        let wanted =
+            serde_json::to_vec(wanted).map_err(|e| ContentError::Damaged(e.to_string()))?;
+        let request = Request::SaveManifest {
+            wanted: wanted.len() as u64,
+            size: bytes.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(&wanted), Source::Bytes(bytes)]) {
+            Ok(Answer::SaveManifest(read)) => read,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+}
+
+impl pctwin_special::games::GameReader for Pool {
+    fn record(
+        &self,
+        format: pctwin_special::gamefmt::RecordFormat,
+        bytes: &[u8],
+    ) -> Result<pctwin_special::gamefmt::Tree, ContentError> {
+        self.one().record(format, bytes)
+    }
+
+    fn save_manifest(
+        &self,
+        bytes: &[u8],
+        wanted: &pctwin_special::gamefmt::Wanted,
+    ) -> Result<pctwin_special::gamefmt::ManifestRead, ContentError> {
+        self.one().save_manifest(bytes, wanted)
+    }
+}

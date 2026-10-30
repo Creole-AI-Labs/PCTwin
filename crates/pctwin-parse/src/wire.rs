@@ -81,6 +81,14 @@ pub enum Request {
     DatabaseSnapshot { size: u64, log: u64 },
     /// Whether a `manifest.json` is a WebExtension's.
     AddOn { size: u64 },
+    /// A game launcher's install record, as a tree of names and texts (2.5 games).
+    GameRecord {
+        size: u64,
+        format: pctwin_special::gamefmt::RecordFormat,
+    },
+    /// The entries a save list in the Ludusavi manifest format holds for some games (2.5
+    /// games): `wanted` bytes of the games asked about (JSON), then `size` bytes of the list.
+    SaveManifest { wanted: u64, size: u64 },
 }
 
 impl Request {
@@ -92,7 +100,9 @@ impl Request {
             | Request::Archive { size }
             | Request::Database { size }
             | Request::Json { size }
-            | Request::AddOn { size } => size,
+            | Request::AddOn { size }
+            | Request::GameRecord { size, .. } => size,
+            Request::SaveManifest { wanted, size } => wanted.saturating_add(size),
             Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
                 size.saturating_add(log)
             }
@@ -140,6 +150,8 @@ pub enum Answer {
     /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
+    GameRecord(Result<pctwin_special::gamefmt::Tree, ContentError>),
+    SaveManifest(Result<pctwin_special::gamefmt::ManifestRead, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -161,6 +173,8 @@ impl Answer {
                     Request::DatabaseSnapshot { .. }
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
+                | (Answer::GameRecord(_), Request::GameRecord { .. })
+                | (Answer::SaveManifest(_), Request::SaveManifest { .. })
                 | (Answer::Failed(_), _)
         )
     }
