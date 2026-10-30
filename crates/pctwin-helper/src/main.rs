@@ -39,6 +39,7 @@ struct Args {
     plan: Option<pctwin_helper::broker::LaunchSeal>,
     /// `--wifi yes`: the administrator approved reading this laptop's saved Wi-Fi networks with
     /// their passwords (old laptop, Windows), once.
+    #[cfg_attr(not(windows), allow(dead_code))]
     wifi: bool,
 }
 
