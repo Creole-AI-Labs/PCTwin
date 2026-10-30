@@ -153,7 +153,7 @@ describe("the only way to the shell", () => {
 
   it("outside the app, the window and tray requests do nothing", async () => {
     await setWindowMode("mini");
-    await setTrayLabels("Show", "Quit");
+    await setTrayLabels("Show", "Send files", "Quit");
     expect(tauri.invoke).not.toHaveBeenCalled();
   });
 
@@ -275,7 +275,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     try {
       await setWindowMode("mini");
       await windowDrag();
-      await setTrayLabels("Show", "Quit");
+      await setTrayLabels("Show", "Send files", "Quit");
       await pairingOldStart(null);
       await pairingOldPick(1, 42);
       await pairingOldDecline(1);

@@ -5,7 +5,9 @@
 //! access, and `NSBonjourServices` lists each Bonjour service type the app announces or browses
 //! for. Without them the question may come without PCTwin's reason, and browsing for an unlisted
 //! service type can fail, so the laptops may not find each other. CI also reads the keys back from
-//! the built PCTwin.app (ci.yml, "The Mac app declares the local network").
+//! the built PCTwin.app (ci.yml, "The Mac app declares the local network"). `CFBundleDocumentTypes`
+//! (rank "Alternate") offers PCTwin in Open With for any file or folder without making it the
+//! default app (Quick Send, handed.rs).
 
 use std::path::PathBuf;
 
@@ -84,6 +86,43 @@ fn the_plist_only_adds_keys_and_never_overrides_what_tauri_writes() {
         .collect();
     assert_eq!(
         keys,
-        ["NSLocalNetworkUsageDescription", "NSBonjourServices"]
+        [
+            "NSLocalNetworkUsageDescription",
+            "NSBonjourServices",
+            "CFBundleDocumentTypes",
+            "CFBundleTypeName",
+            "CFBundleTypeRole",
+            "LSHandlerRank",
+            "LSItemContentTypes"
+        ]
+    );
+}
+
+#[test]
+fn finders_open_with_offers_pctwin_but_pctwin_never_becomes_the_default() {
+    // Quick Send's Mac entry point (handed.rs): Open With and a drop on the Dock icon. "Alternate"
+    // lists PCTwin without taking over any file type; "Owner" or "Default" would make a double
+    // click on someone's files open PCTwin.
+    let text = plist();
+    // Everything from the key on: the entry holds an array of its own, so `value_of` would stop early.
+    let docs = &text[text
+        .find("<key>CFBundleDocumentTypes</key>")
+        .expect("declared")..];
+    assert_eq!(strings(&value_of(docs, "LSHandlerRank")), ["Alternate"]);
+    assert_eq!(strings(&value_of(docs, "CFBundleTypeRole")), ["Viewer"]);
+    assert_eq!(
+        strings(&value_of(docs, "LSItemContentTypes")),
+        ["public.item", "public.folder"]
+    );
+    for never in ["Owner", "Default"] {
+        assert!(
+            !docs.contains(never),
+            "{never} would make PCTwin the default app"
+        );
+    }
+    assert_eq!(
+        docs.matches("<dict>").count(),
+        1,
+        "one entry for everything"
     );
 }
