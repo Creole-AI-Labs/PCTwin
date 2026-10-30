@@ -23,6 +23,8 @@ pctwin-record = { path = "../crates/pctwin-record" }
 pctwin-transfer = { path = "../crates/pctwin-transfer" }
 pctwin-recipe = { path = "../crates/pctwin-recipe" }
 pctwin-settings = { path = "../crates/pctwin-settings" }
+# The game readers' formats (2.5 games).
+pctwin-special = { path = "../crates/pctwin-special" }
 pctwin-types = { path = "../crates/pctwin-types" }
 serde_json = "1"
 
@@ -102,6 +104,13 @@ bench = false
 [[bin]]
 name = "parser_wire"
 path = "fuzz_targets/parser_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "game_formats"
+path = "fuzz_targets/game_formats.rs"
 test = false
 doc = false
 bench = false
