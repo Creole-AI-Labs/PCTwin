@@ -337,3 +337,25 @@ impl pctwin_settings::wifi::PrivateFolders for PlainFolders {
         Some("S-1-5-21-1-2-3-1001".into())
     }
 }
+
+/// Only the networks the person ticked are read with their passwords: macOS asks for no other.
+#[test]
+fn only_the_ticked_networks_passwords_are_asked_for() {
+    let m = mac(
+        &["Home", "Cafe", "Work"],
+        &[("Home", "a"), ("Cafe", "b"), ("Work", "c")],
+    );
+    let found =
+        pctwin_settings::wifi::export_mac_where(&mut m.clone(), true, &|s| s == "Cafe").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].ssid, "Cafe");
+    let asked: Vec<String> = m
+        .argv
+        .borrow()
+        .iter()
+        .filter(|l| l.contains("-w"))
+        .cloned()
+        .collect();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(asked[0].contains("Cafe"), "{asked:?}");
+}

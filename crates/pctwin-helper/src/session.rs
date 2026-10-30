@@ -22,6 +22,9 @@ pub type Scanner<'a> = dyn FnMut(&str) -> Result<crate::person::PersonScan, Refu
 /// Makes an approved person's account (see [`crate::account::create_account`]).
 pub type AccountMaker<'a> = dyn FnMut(&str, &str) -> Result<crate::account::Made, Refusal> + 'a;
 
+/// Reads this laptop's saved Wi-Fi networks with their passwords (see [`crate::wifi`]).
+pub type WifiReader<'a> = dyn FnMut() -> Result<Vec<crate::protocol::Secret>, Refusal> + 'a;
+
 /// What the helper was started for.
 pub struct Session<'s> {
     /// The token the app was given when it started the helper.
@@ -46,6 +49,9 @@ pub struct Session<'s> {
     asked: usize,
     /// Phase 2: the permission broker, when the helper was started with an approved plan.
     broker: Option<crate::broker::Broker<'s>>,
+    /// The saved Wi-Fi networks, when the helper was started with `--wifi yes`; read at most
+    /// once (then `None`).
+    wifi: Option<&'s mut WifiReader<'s>>,
 }
 
 impl<'s> Session<'s> {
@@ -64,7 +70,15 @@ impl<'s> Session<'s> {
             system_only: Vec::new(),
             asked: 0,
             broker: None,
+            wifi: None,
         }
+    }
+
+    /// With the saved Wi-Fi networks to read once, for a helper the administrator started for
+    /// them (`--wifi yes`). Without, [`Request::WifiProfiles`] is refused.
+    pub fn with_wifi(mut self, reader: &'s mut WifiReader<'s>) -> Self {
+        self.wifi = Some(reader);
+        self
     }
 
     /// With the permission broker for the plan it was started with (Phase 2.2).
@@ -368,6 +382,17 @@ impl<'s> Session<'s> {
                 | Request::StagePackage { .. }
                 | Request::StageBytes { .. }) => {
                     let answer = self.broker_answer(request);
+                    send_answer(channel, &answer)?;
+                }
+                Request::WifiProfiles => {
+                    // Once, and only for a helper started for it.
+                    let answer = match self.wifi.take() {
+                        Some(read) => match read() {
+                            Ok(profiles) => Answer::WifiProfiles { profiles },
+                            Err(why) => Answer::Refused(why),
+                        },
+                        None => Answer::Refused(Refusal::NotApproved),
+                    };
                     send_answer(channel, &answer)?;
                 }
                 Request::Bye => {

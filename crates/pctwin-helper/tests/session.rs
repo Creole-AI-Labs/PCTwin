@@ -474,3 +474,85 @@ fn holding_and_handing_over_only_for_approved_people() {
     assert_eq!(fake.handed[0].1, "bea");
     assert_eq!(fake.handed[0].2, Path::new("/area").join("p1"));
 }
+
+/// Runs one session on `requests` with the saved Wi-Fi networks to read (`wifi`), counting how
+/// often they were read.
+fn wifi_session(requests: &[Request], wifi: bool) -> (Vec<FromHelper>, usize) {
+    let mut scanner = |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
+        Err(Refusal::NotApproved)
+    };
+    let mut reads = 0usize;
+    let mut reader = || {
+        reads += 1;
+        Ok(vec![pctwin_helper::Secret::from("<WLANProfile/>")])
+    };
+    let mut wire = Vec::new();
+    for r in requests {
+        send_request(&mut wire, r).unwrap();
+    }
+    let mut channel = Channel {
+        from_app: Cursor::new(wire),
+        to_app: Vec::new(),
+    };
+    {
+        let session = Session::new("token".into(), BTreeSet::new(), &mut scanner);
+        let mut session = if wifi {
+            session.with_wifi(&mut reader)
+        } else {
+            session
+        };
+        session.serve(&mut channel).unwrap();
+    }
+    let mut out = Vec::new();
+    let mut read = channel.to_app.as_slice();
+    while !read.is_empty() {
+        out.push(read_from_helper(&mut read).unwrap());
+    }
+    (out, reads)
+}
+
+/// 2.4: the saved Wi-Fi networks are read only by a helper the administrator started for them,
+/// only inside the session, and only once.
+#[test]
+fn saved_wifi_is_read_once_and_only_when_the_administrator_approved_it() {
+    let (out, reads) = wifi_session(
+        &[hello(), Request::WifiProfiles, Request::WifiProfiles],
+        true,
+    );
+    assert_eq!(reads, 1);
+    assert_eq!(
+        out[1],
+        FromHelper::Answer(Answer::WifiProfiles {
+            profiles: vec![pctwin_helper::Secret::from("<WLANProfile/>")]
+        })
+    );
+    assert_eq!(
+        out[2],
+        FromHelper::Answer(Answer::Refused(Refusal::NotApproved))
+    );
+    // Not started for them: refused, never read.
+    let (out, reads) = wifi_session(&[hello(), Request::WifiProfiles], false);
+    assert_eq!(reads, 0);
+    assert_eq!(
+        out[1],
+        FromHelper::Answer(Answer::Refused(Refusal::NotApproved))
+    );
+    // Before the session's token: nothing.
+    let (out, reads) = wifi_session(&[Request::WifiProfiles], true);
+    assert_eq!(reads, 0);
+    assert_eq!(
+        out,
+        [FromHelper::Answer(Answer::Refused(Refusal::NoSession))]
+    );
+}
+
+/// The profiles' passwords never show in a debug print of the answer.
+#[test]
+fn a_wifi_answer_never_prints_its_passwords() {
+    let a = Answer::WifiProfiles {
+        profiles: vec![pctwin_helper::Secret::from(
+            "<keyMaterial>hunter22</keyMaterial>",
+        )],
+    };
+    assert!(!format!("{a:?}").contains("hunter22"));
+}

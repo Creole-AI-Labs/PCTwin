@@ -37,11 +37,15 @@ struct Args {
     dir: Option<String>,
     laptop: LaptopId,
     plan: Option<pctwin_helper::broker::LaunchSeal>,
+    /// `--wifi yes`: the administrator approved reading this laptop's saved Wi-Fi networks with
+    /// their passwords (old laptop, Windows), once.
+    wifi: bool,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let (mut session, mut mover, mut approve, mut channel, mut dir, mut laptop, mut plan) =
         (None, None, None, None, None, None, None);
+    let mut wifi = None;
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(format!("{flag} needs a value"))?;
         let slot = match flag.as_str() {
@@ -52,6 +56,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--dir" => &mut dir,
             "--laptop" => &mut laptop,
             "--plan" => &mut plan,
+            "--wifi" => &mut wifi,
             _ => return Err(format!("unknown {flag}")),
         };
         if slot.replace(value).is_some() {
@@ -65,6 +70,11 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         ),
         None => None,
     };
+    let wifi = match wifi.as_deref() {
+        None => false,
+        Some("yes") => true,
+        Some(_) => return Err("--wifi takes only yes".into()),
+    };
     let approve: BTreeSet<String> = match (approve, plan) {
         (Some(list), _) => {
             let approve: BTreeSet<String> = list
@@ -77,8 +87,10 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             approve
         }
-        // A move of one person with an approved plan: nobody else's files are read.
+        // A move of one person with an approved plan, or one whose administrator approved only
+        // the saved Wi-Fi networks: nobody else's files are read.
         (None, Some(_)) => BTreeSet::new(),
+        (None, None) if wifi => BTreeSet::new(),
         (None, None) => return Err("--approve is needed".into()),
     };
     Ok(Args {
@@ -95,6 +107,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             None => LaptopId::from_hex(&"0".repeat(32)).map_err(|_| "no laptop ID")?,
         },
         plan,
+        wifi,
     })
 }
 
@@ -231,9 +244,17 @@ fn run(args: &Args) -> Result<(), String> {
         pctwin_helper::broker::BuiltInAdapters,
     );
     let clock = pctwin_grant::Now::real;
+    // A crash's Wi-Fi folder (it holds passwords in plain text) is gone before anything else.
+    pctwin_helper::wifi::sweep_leftovers(&std::env::temp_dir());
+    let mut wifi = pctwin_helper::wifi::export_profiles;
     let session = Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
         .with_account_maker(&mut maker)
         .with_new_laptop(&mut system);
+    let session = if args.wifi {
+        session.with_wifi(&mut wifi)
+    } else {
+        session
+    };
     let mut session = match args.plan {
         Some(seal) => {
             let packages = pctwin_helper::broker::staging::HelperFolder::admin_only("packages")?;
@@ -733,5 +754,32 @@ mod tests {
         let mut twice = with_plan.clone();
         twice.extend(["--plan", &seal]);
         assert!(args(&twice).is_err());
+    }
+
+    /// The saved Wi-Fi networks (2.4): read only by a helper the administrator started for
+    /// them, `--wifi yes`, alone or beside other people; nothing else is taken for yes.
+    #[test]
+    fn wifi_is_read_from_the_command_line_strictly() {
+        let base = ["--session", "t", "--mover", "1000", "--channel", "c"];
+        assert!(
+            !args(&[&base[..], &["--approve", "1001"]].concat())
+                .unwrap()
+                .wifi
+        );
+        let alone = args(&[&base[..], &["--wifi", "yes"]].concat()).unwrap();
+        assert!(alone.wifi);
+        assert!(alone.approve.is_empty());
+        let both = args(&[&base[..], &["--wifi", "yes", "--approve", "1001"]].concat()).unwrap();
+        assert!(both.wifi);
+        assert_eq!(both.approve.len(), 1);
+        // Still never the mover approved for themselves.
+        assert!(args(&[&base[..], &["--wifi", "yes", "--approve", "1000"]].concat()).is_err());
+        for bad in ["no", "true", "YES", ""] {
+            assert!(
+                args(&[&base[..], &["--wifi", bad]].concat()).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(args(&[&base[..], &["--wifi", "yes", "--wifi", "yes"]].concat()).is_err());
     }
 }

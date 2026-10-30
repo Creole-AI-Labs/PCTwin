@@ -138,6 +138,78 @@ pub fn offer(mover_is_admin: bool) -> Offer {
     }
 }
 
+/* ---------- Whether the person moving is the laptop's administrator ---------- */
+
+/// The administrators group of every Windows laptop, by its SID (the same in every language).
+pub const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
+/// The administrators group of every Mac, by its number.
+pub const MAC_ADMIN_GROUP: &str = "80";
+/// The groups a Linux system's own prompt (polkit) asks a member of for administrator rights:
+/// `sudo` (Debian, Ubuntu), `wheel` (Fedora, Arch and most others), `admin` (older Ubuntu).
+pub const LINUX_ADMIN_GROUPS: [&str; 3] = ["sudo", "wheel", "admin"];
+
+/// The fields of one line of `whoami /fo csv`: each in double quotes, a quote inside doubled.
+fn csv_fields(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = line.trim_end_matches('\r').chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            ('"', _) => quoted = !quoted,
+            (',', false) => out.push(std::mem::take(&mut field)),
+            (c, _) => field.push(c),
+        }
+    }
+    out.push(field);
+    out
+}
+
+/// Whether `whoami /groups /fo csv /nh` lists the administrators group (its third field, the
+/// SID): the person is one of this laptop's administrators, whether or not this program runs
+/// with those rights now (while it does not, Windows lists the group "for deny only").
+pub fn admin_in_whoami(csv: &str) -> bool {
+    csv.lines().any(|l| {
+        csv_fields(l)
+            .get(2)
+            .is_some_and(|sid| sid == ADMINISTRATORS_SID)
+    })
+}
+
+/// Whether `id -G` (a Mac: group numbers) or `id -Gn` (Linux: group names) lists an
+/// administrators group of `system`.
+pub fn admin_in_groups(groups: &str, mac: bool) -> bool {
+    groups.split_whitespace().any(|g| {
+        if mac {
+            g == MAC_ADMIN_GROUP
+        } else {
+            LINUX_ADMIN_GROUPS.contains(&g)
+        }
+    })
+}
+
+/// Whether the person running PCTwin is one of this laptop's administrators, as the system's
+/// own tools say (Windows `whoami`, Mac and Linux `id`). Not known: not one (the Wi-Fi networks
+/// are then offered unticked, with "ask whoever looks after this laptop").
+pub fn mover_is_admin(runner: &mut dyn Runner) -> bool {
+    let out = if cfg!(windows) {
+        runner.run(Tool::Whoami, &["/groups", "/fo", "csv", "/nh"])
+    } else if cfg!(target_os = "macos") {
+        runner.run(Tool::Id, &["-G"])
+    } else {
+        runner.run(Tool::Id, &["-Gn"])
+    };
+    match out {
+        Ok(o) if o.ok && cfg!(windows) => admin_in_whoami(&o.stdout),
+        Ok(o) if o.ok => admin_in_groups(&o.stdout, cfg!(target_os = "macos")),
+        _ => false,
+    }
+}
+
 const NS: &str = "http://www.microsoft.com/networking/WLAN/profile/v1";
 use pctwin_types::limits::{WIFI_PROFILE_BYTES as MAX_PROFILE, WIFI_PROFILES as MAX_PROFILES};
 
@@ -599,6 +671,16 @@ fn nm_security(key_mgmt: &str) -> Security {
 /// is wiped; it is never on a command line. NetworkManager itself decides whether the person may
 /// see each password (its system prompt, polkit); one it will not show moves without it.
 pub fn export_nm(runner: &mut dyn Runner, with_keys: bool) -> Result<Vec<Network>, WifiError> {
+    export_nm_where(runner, with_keys, &|_| true)
+}
+
+/// [`export_nm`] for only the networks whose names `keep` says yes to: no other network's
+/// password is asked for.
+pub fn export_nm_where(
+    runner: &mut dyn Runner,
+    with_keys: bool,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<Vec<Network>, WifiError> {
     let list = runner
         .run(
             Tool::Nmcli,
@@ -621,7 +703,7 @@ pub fn export_nm(runner: &mut dyn Runner, with_keys: bool) -> Result<Vec<Network
         let Some((kind, name)) = line.split_once(':') else {
             continue;
         };
-        if kind != "802-11-wireless" || !nm_plain(name) {
+        if kind != "802-11-wireless" || !nm_plain(name) || !keep(name) {
             continue;
         }
         let mut fields = vec![
@@ -840,8 +922,18 @@ pub fn mac_saved(runner: &mut dyn Runner) -> Result<Vec<String>, WifiError> {
 /// (see the module notes): macOS asks for the administrator for each one; a network whose
 /// password it does not give moves without it.
 pub fn export_mac(runner: &mut dyn Runner, with_keys: bool) -> Result<Vec<Network>, WifiError> {
+    export_mac_where(runner, with_keys, &|_| true)
+}
+
+/// [`export_mac`] for only the networks whose names `keep` says yes to: macOS asks for no other
+/// network's password.
+pub fn export_mac_where(
+    runner: &mut dyn Runner,
+    with_keys: bool,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<Vec<Network>, WifiError> {
     let mut nets = Vec::new();
-    for ssid in mac_saved(runner)? {
+    for ssid in mac_saved(runner)?.into_iter().filter(|s| keep(s)) {
         // The item's attributes only: no password, no prompt.
         let item = runner.run(
             Tool::Security,
