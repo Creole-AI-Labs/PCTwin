@@ -177,6 +177,11 @@ pub struct Extras {
     /// and printers; `None` when it did not run.
     #[serde(default)]
     pub forgotten: Option<pctwin_special::forgotten::Finding>,
+    /// The saved Wi-Fi networks found, by name, and which ones the person ticked and were read
+    /// (move protocol 8 and later; never a password). `None`: not offered (an older new laptop,
+    /// or none found). Left out of the bytes when `None`, so an older new laptop reads them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wifi: Option<Vec<crate::wifi::WifiListed>>,
 }
 
 /// Why the old laptop's extras were refused.
@@ -220,6 +225,7 @@ impl Extras {
             links: 0,
             left_out_by_person: false,
             forgotten: None,
+            wifi: None,
         }
     }
 
@@ -285,6 +291,13 @@ impl Extras {
             .special
             .iter()
             .any(|s| !text_ok(&s.name) || s.notes.len() > MAX_NOTES || !s.notes.iter().all(note_ok))
+        {
+            return limit;
+        }
+        if self
+            .wifi
+            .as_ref()
+            .is_some_and(|w| !crate::wifi::listed_ok(w))
         {
             return limit;
         }
@@ -407,6 +420,7 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         links: 0,
         left_out_by_person: false,
         forgotten: None,
+        wifi: None,
     }
 }
 

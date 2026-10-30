@@ -119,10 +119,15 @@ fn a_range_must_start_at_one_or_later_and_not_run_backwards() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_laptops_on_this_release_agree_on_version_seven() {
+async fn two_laptops_on_this_release_agree_on_version_eight() {
     let (a, b) = agree(MOVE_PROTOCOL, MOVE_PROTOCOL).await;
+    assert_eq!(a.unwrap(), 8);
+    assert_eq!(b.unwrap(), 8);
+    // A laptop on the release before (3 to 7) is spoken to on 7: no Wi-Fi networks cross.
+    let (a, b) = agree(MOVE_PROTOCOL, v(3, 7)).await;
     assert_eq!(a.unwrap(), 7);
     assert_eq!(b.unwrap(), 7);
+    assert!(7 < pctwin_transfer::WIFI_SINCE);
     // A laptop on the release before (3 to 6) is spoken to on 6: no own folder is named for it.
     let (a, b) = agree(MOVE_PROTOCOL, v(3, 6)).await;
     assert_eq!(a.unwrap(), 6);
@@ -220,9 +225,9 @@ async fn the_message_form_is_fixed_for_every_release() {
     // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33, 35).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
-    // A later laptop that speaks versions 1 to 8 still agrees with this one on 7, and one that
+    // A later laptop that speaks versions 1 to 9 still agrees with this one on 8, and one that
     // speaks 1 to 4 on 4.
-    assert_eq!(receive(&[kind, 0, 1, 0, 8]).await.unwrap(), 7);
+    assert_eq!(receive(&[kind, 0, 1, 0, 9]).await.unwrap(), 8);
     assert_eq!(receive(&[kind, 0, 1, 0, 4]).await.unwrap(), 4);
 }
 
@@ -312,6 +317,6 @@ async fn a_laptop_that_never_answers_is_given_up_on() {
         tokio::time::sleep(VERSION_WAIT - Duration::from_secs(1)).await;
         agree_version(&mut y, MOVE_PROTOCOL).await
     });
-    assert_eq!(a.unwrap(), 7);
-    assert_eq!(b.unwrap(), 7);
+    assert_eq!(a.unwrap(), 8);
+    assert_eq!(b.unwrap(), 8);
 }

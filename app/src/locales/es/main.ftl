@@ -3293,3 +3293,37 @@ special-note-save-may-not-work-here = Estas partidas vienen de otro tipo de sist
 special-note-store-protected-saves = La tienda guarda estas partidas por su cuenta, así que PCTwin no puede copiarlas. Vuelven cuando inicias sesión en la tienda en tu nuevo portátil e instalas el juego.
 special-note-mod-programs-held = Algunos complementos de este juego son programas. PCTwin los muestra en la lista, pero no los copia ni los activa. Vuelve a obtenerlos de su creador.
 special-note-launcher-verify = Instala el lanzador en tu nuevo portátil e inicia sesión. Después usa su propio paso de verificar o localizar para que encuentre y compruebe tus juegos. PCTwin copia los juegos instalados solo si tú lo eliges.
+choose-wifi-title = Redes Wi-Fi guardadas
+choose-wifi-admin = Las redes marcadas se mueven con su contraseña, así el portátil nuevo se conecta a ellas por sí mismo. Para leer las contraseñas, este portátil puede pedir la aprobación de un administrador en su propia ventana.
+choose-wifi-ask-admin = Leer las contraseñas Wi-Fi necesita un administrador de este portátil, por eso no hay ninguna marcada. Para traerlas, pide ayuda a quien se ocupa de este portátil y márcalas: este portátil le pide su aprobación en su propia ventana.
+choose-wifi-open = Sin contraseña
+choose-wifi-organisation = Configurada por una organización: vuelve a conectarte en el portátil nuevo con sus datos
+choose-wifi-other = PCTwin no mueve este tipo de red: vuelve a conectarte en el portátil nuevo
+move-wait-wifi-title = Leyendo tus contraseñas Wi-Fi guardadas
+move-wait-wifi-body = Este portátil puede pedir la aprobación de un administrador en su propia ventana. Respóndela para traer las redes Wi-Fi que marcaste. No se cambia nada en este portátil.
+fullmove-group-wifi = Redes Wi-Fi guardadas: { $count }
+fullmove-wifi-step-add = PCTwin la añade aquí con su contraseña, que se envía cifrada después de que apruebes.
+fullmove-wifi-step-add-by-profile = La añades aquí una sola vez, en Ajustes del Sistema, para todas estas redes. PCTwin abre la página.
+fullmove-wifi-step-skipped = No se marcó en el portátil antiguo, así que se queda allí.
+fullmove-wifi-step-organisation = Configurada por una organización: vuelve a conectarte aquí con sus datos.
+fullmove-wifi-step-not-this-kind = PCTwin no mueve este tipo de red: vuelve a conectarte aquí.
+fullmove-wifi-step-no-password = No se pudo leer su contraseña en el portátil antiguo: escríbela una vez al conectarte a esta red aquí.
+fullmove-wifi-why-organisation = Configurada por una organización: vuelve a conectarte con sus datos.
+fullmove-wifi-why-not-this-kind = PCTwin no mueve este tipo de red: vuelve a conectarte aquí.
+fullmove-wifi-why-no-password = No se pudo leer su contraseña en el portátil antiguo: escríbela una vez al conectarte a esta red.
+fullmove-wifi-why-did-not-arrive = No llegó del portátil antiguo: escribe su contraseña una vez al conectarte a esta red.
+fullmove-wifi-why-already-here = Ya había una red con este nombre guardada aquí, así que PCTwin la dejó como estaba. Si no se conecta, escribe su contraseña una vez.
+fullmove-wifi-why-not-added = Este portátil no la añadió: escribe su contraseña una vez al conectarte a esta red.
+fullmove-wifi-why-install-profile = No se añadió: el perfil “Wi-Fi networks from your old laptop (PCTwin)” no se instaló a tiempo en Ajustes del Sistema. Escribe su contraseña una vez al conectarte a esta red.
+fullmove-rebuilding-wifi = Añadiendo tus redes Wi-Fi guardadas
+fullmove-rebuilding-wifi-profile = { $minutes ->
+        [one] Para añadir tus redes Wi-Fi, instala el perfil “Wi-Fi networks from your old laptop (PCTwin)” en la página de Ajustes del Sistema que abrió PCTwin: 1 minuto más como máximo
+        [many] Para añadir tus redes Wi-Fi, instala el perfil “Wi-Fi networks from your old laptop (PCTwin)” en la página de Ajustes del Sistema que abrió PCTwin: { $minutes } minutos más como máximo
+       *[other] Para añadir tus redes Wi-Fi, instala el perfil “Wi-Fi networks from your old laptop (PCTwin)” en la página de Ajustes del Sistema que abrió PCTwin: { $minutes } minutos más como máximo
+    }
+report-group-wifi = Redes Wi-Fi
+report-count-wifi = { $count ->
+        [one] 1 red
+        [many] { $count } redes
+       *[other] { $count } redes
+    }

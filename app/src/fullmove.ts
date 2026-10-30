@@ -11,7 +11,7 @@ import { ITEM_STATUSES, parseResult, type ItemStatus, type Reason } from "./move
 export const OWN_TITLES = ["fullmove-special-not-yet", "fullmove-special-not-checked", "fullmove-extras-refused", "fullmove-left-by-person"] as const;
 export type Title = { kind: "name"; value: string } | { kind: "key"; value: (typeof OWN_TITLES)[number] };
 
-export const CHANGE_KINDS = ["app", "settings", "special"] as const;
+export const CHANGE_KINDS = ["app", "settings", "special", "wifi"] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
 export const SPECIAL_STEPS = ["copy", "export-first", "sign-in", "relink", "not-yet", "look-at-it"] as const;
@@ -133,7 +133,17 @@ export type LineNote =
   | { note: "sites" }
   | { note: "rosetta" }
   | { note: "data"; why: DataWhy; folder?: string }
-  | { note: "came-from"; makersSite: boolean };
+  | { note: "came-from"; makersSite: boolean }
+  | { note: "wifi"; why: WifiWhy };
+
+/** Why a saved Wi-Fi network needs the person (`WifiWhy`, 2.4). */
+export const WIFI_WHYS = ["organisation", "not-this-kind", "no-password", "did-not-arrive", "already-here", "not-added", "install-profile"] as const;
+export type WifiWhy = (typeof WIFI_WHYS)[number];
+
+/** What the plan says will happen to one of the old laptop's saved Wi-Fi networks (`WifiStep`, 2.4). */
+export const WIFI_STEPS = ["add", "add-by-profile", "skipped", "organisation", "not-this-kind", "no-password"] as const;
+export type WifiStep = (typeof WIFI_STEPS)[number];
+export type WifiPlanLine = { name: string; step: WifiStep };
 
 /** An app already on this laptop, left as it is (`HereLine`). */
 export type HereLine = { name: string; older: string | null };
@@ -149,6 +159,8 @@ export type RebuildPlan = {
   restorePoint: boolean;
   /** What the forgotten-things finder found on the old laptop (2.5). */
   forgotten: Forgotten | null;
+  /** The old laptop's saved Wi-Fi networks, by name, each with what happens to it (2.4); never a password. */
+  wifi: WifiPlanLine[];
   /** What needs the internet: apps PCTwin downloads (sizes known once downloaded) and things to sign in to again. */
   internet: { downloads: number; signIns: number };
   /** Room beyond the files at the busiest moment, in bytes; margins, so shown as "about". */
@@ -193,7 +205,7 @@ export type Rebuilt = {
   undoId: string | null;
 };
 
-export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number } | { step: "waiting-free-wifi"; minutesLeft: number };
+export type RebuildStep = { step: "permission" } | { step: "apps" | "settings"; done: number; total: number } | { step: "waiting-free-wifi"; minutesLeft: number } | { step: "wifi" } | { step: "wifi-profile"; minutesLeft: number };
 
 type Fields = Record<string, unknown>;
 
@@ -252,6 +264,10 @@ function parseLineNote(v: unknown): LineNote | null {
   if (kind === "registration") {
     const f = exactly(v, ["note", "owner", "company", "productId"]);
     return f && nameOrNull(f.owner) && nameOrNull(f.company) && nameOrNull(f.productId) ? { note: kind, owner: f.owner, company: f.company, productId: f.productId } : null;
+  }
+  if (kind === "wifi") {
+    const f = exactly(v, ["note", "why"]);
+    return f && oneOf(f.why, WIFI_WHYS) ? { note: kind, why: f.why } : null;
   }
   if (kind === "came-from") {
     const f = exactly(v, ["note", "makersSite"]);
@@ -347,7 +363,7 @@ function parseChange(v: unknown): ChangeView | null {
 
 /** The plan section (`RebuildPlanView`). */
 export function parseRebuildPlan(v: unknown): RebuildPlan | null {
-  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint", "forgotten", "internet", "room", "downloads"]);
+  const f = exactly(v, ["changes", "more", "notMoved", "specialNotMoved", "links", "prompt", "restorePoint", "forgotten", "wifi", "internet", "room", "downloads"]);
   if (!f || !isCount(f.more) || !isCount(f.specialNotMoved) || !isCount(f.links) || typeof f.prompt !== "boolean" || typeof f.restorePoint !== "boolean") return null;
   const net = exactly(f.internet, ["downloads", "signIns"]);
   const room = exactly(f.room, ["installs", "appData"]);
@@ -360,7 +376,11 @@ export function parseRebuildPlan(v: unknown): RebuildPlan | null {
   const forgotten = f.forgotten === null ? null : parseForgotten(f.forgotten);
   if (f.forgotten !== null && !forgotten) return null;
   const downloads = parseDownloads(f.downloads);
-  return changes && notMoved && downloads ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint, forgotten, internet: { downloads: net.downloads, signIns: net.signIns }, room: { installs: room.installs, appData: room.appData }, downloads } : null;
+  const wifi = listOf(f.wifi, (x) => {
+    const w = exactly(x, ["name", "step"]);
+    return w && typeof w.name === "string" && w.name.length > 0 && oneOf(w.step, WIFI_STEPS) ? { name: w.name, step: w.step } : null;
+  });
+  return changes && notMoved && downloads && wifi ? { changes, more: f.more, notMoved, specialNotMoved: f.specialNotMoved, links: f.links, prompt: f.prompt, restorePoint: f.restorePoint, forgotten, wifi, internet: { downloads: net.downloads, signIns: net.signIns }, room: { installs: room.installs, appData: room.appData }, downloads } : null;
 }
 
 function parseLine(v: unknown): RebuiltLine | null {
@@ -371,8 +391,9 @@ function parseLine(v: unknown): RebuiltLine | null {
   const notes = listOf(f.notes, parseLineNote);
   const specialNotes = listOf(f.specialNotes, parseSpecialNote);
   if (!title || !result || !notes || !specialNotes) return null;
-  // Only a special category's line is told about its category.
+  // Only a special category's line is told about its category, and only a Wi-Fi network's line why it needs the person.
   if (specialNotes.length > 0 && f.kind !== "special") return null;
+  if (notes.some((n) => n.note === "wifi") !== (f.kind === "wifi" && notes.length > 0)) return null;
   return { title, kind: f.kind, count: f.count, status: result.status, reason: "reason" in result ? (result.reason ?? null) : null, notes, specialNotes };
 }
 
@@ -393,12 +414,12 @@ export function parseRebuilt(v: unknown): Rebuilt | null {
 export function parseRebuildStep(v: unknown): RebuildStep | null {
   if (typeof v !== "object" || v === null) return null;
   const step = (v as Fields).step;
-  if (step === "permission") return exactly(v, ["step"]) ? { step } : null;
+  if (step === "permission" || step === "wifi") return exactly(v, ["step"]) ? { step } : null;
   if (step === "apps" || step === "settings") {
     const f = exactly(v, ["step", "done", "total"]);
     return f && isCount(f.done) && isCount(f.total) && f.done <= f.total ? { step, done: f.done, total: f.total } : null;
   }
-  if (step === "waiting-free-wifi") {
+  if (step === "waiting-free-wifi" || step === "wifi-profile") {
     const f = exactly(v, ["step", "minutesLeft"]);
     return f && isCount(f.minutesLeft) ? { step, minutesLeft: f.minutesLeft } : null;
   }

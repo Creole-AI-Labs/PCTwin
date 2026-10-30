@@ -3069,3 +3069,35 @@ special-note-save-may-not-work-here = These saves come from a different kind of 
 special-note-store-protected-saves = The store keeps these saves for itself, so PCTwin cannot copy them. They come back when you sign in to the store on your new laptop and install the game.
 special-note-mod-programs-held = Some of this game's add-ons are programs. PCTwin lists them but does not copy them or turn them on. Get them again from their maker.
 special-note-launcher-verify = Install the launcher on your new laptop and sign in. Then use its own verify or locate step so it finds and checks your games. PCTwin copies installed games only if you choose to.
+choose-wifi-title = Saved Wi-Fi networks
+choose-wifi-admin = Ticked networks move with their passwords, so the new laptop joins them by itself. To read the passwords, this laptop may ask for an administrator’s approval in its own window.
+choose-wifi-ask-admin = Reading Wi-Fi passwords needs an administrator of this laptop, so none is ticked. To bring them, ask whoever looks after this laptop, then tick them: this laptop asks for their approval in its own window.
+choose-wifi-open = No password
+choose-wifi-organisation = Set up with an organisation: join it again on the new laptop with their details
+choose-wifi-other = PCTwin does not move this kind of network: join it again on the new laptop
+move-wait-wifi-title = Reading your saved Wi-Fi passwords
+move-wait-wifi-body = This laptop may ask for an administrator’s approval in its own window. Answer it to bring the Wi-Fi networks you ticked. Nothing on this laptop is changed.
+fullmove-group-wifi = Saved Wi-Fi networks: { $count }
+fullmove-wifi-step-add = PCTwin adds it here with its password, which is sent encrypted after you approve.
+fullmove-wifi-step-add-by-profile = You add it here once, in System Settings, for all these networks. PCTwin opens the page.
+fullmove-wifi-step-skipped = Not ticked on the old laptop, so it stays there.
+fullmove-wifi-step-organisation = Set up with an organisation: join it again here with their details.
+fullmove-wifi-step-not-this-kind = PCTwin does not move this kind of network: join it again here.
+fullmove-wifi-step-no-password = Its password could not be read on the old laptop: type it once when you join this network here.
+fullmove-wifi-why-organisation = Set up with an organisation: join it again with their details.
+fullmove-wifi-why-not-this-kind = PCTwin does not move this kind of network: join it again here.
+fullmove-wifi-why-no-password = Its password could not be read on the old laptop: type it once when you join this network.
+fullmove-wifi-why-did-not-arrive = It did not arrive from the old laptop: type its password once when you join this network.
+fullmove-wifi-why-already-here = A network with this name was already saved here, so PCTwin left it as it is. If it does not join, type its password once.
+fullmove-wifi-why-not-added = This laptop did not add it: type its password once when you join this network.
+fullmove-wifi-why-install-profile = Not added: the profile “Wi-Fi networks from your old laptop (PCTwin)” was not installed in System Settings in time. Type its password once when you join this network.
+fullmove-rebuilding-wifi = Adding your saved Wi-Fi networks
+fullmove-rebuilding-wifi-profile = { $minutes ->
+        [one] To add your Wi-Fi networks, install the profile “Wi-Fi networks from your old laptop (PCTwin)” on the System Settings page PCTwin opened: up to 1 more minute
+       *[other] To add your Wi-Fi networks, install the profile “Wi-Fi networks from your old laptop (PCTwin)” on the System Settings page PCTwin opened: up to { $minutes } more minutes
+    }
+report-group-wifi = Wi-Fi networks
+report-count-wifi = { $count ->
+        [one] 1 network
+       *[other] { $count } networks
+    }

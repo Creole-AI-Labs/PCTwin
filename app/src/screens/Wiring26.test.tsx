@@ -103,7 +103,7 @@ describe("files kept only online, on the old laptop", () => {
   it("none come unless ticked; each cloud has its own tick, and the one for a connection that may charge only once it is ticked", async () => {
     const onContinue = vi.fn<(c: Choice) => void>();
     inApp(<ChooseWhat view={choice()} onContinue={onContinue} />);
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(text("choose-online-only-title"));
+    expect(screen.getByRole("heading", { level: 2, name: text("choose-online-only-title") })).toBeTruthy();
     const oneDrive = screen.getByRole("checkbox", { name: (n) => plain(n).includes("OneDrive") });
     // A cloud PCTwin cannot name is said plainly.
     expect(screen.getByRole("checkbox", { name: (n) => plain(n).includes(text("choose-online-only-unnamed")) })).toBeTruthy();

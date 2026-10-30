@@ -65,6 +65,8 @@ pub enum Kind {
     App,
     Settings,
     Special,
+    /// A saved Wi-Fi network (2.4).
+    Wifi,
 }
 
 /// A change's title: a name shown exactly as it is, or one of PCTwin's own lines, by its key.
@@ -349,6 +351,9 @@ pub struct FullPlan {
     /// Apps held out of the run because they changed here after approval, by their place in
     /// [`Self::apps`]: never installed until approved again.
     pub held: Vec<u32>,
+    /// The old laptop's saved Wi-Fi networks, by name, as its extras listed them (move protocol
+    /// 8): which its person ticked and which were read. Never a password.
+    pub wifi: Vec<crate::wifi::WifiListed>,
 }
 
 /// What the move needs from the internet (the 2.9 preview).
@@ -534,6 +539,7 @@ impl FullPlan {
                 extras_digest: Some(digest),
                 links: x.links,
                 forgotten: x.forgotten.clone(),
+                wifi: x.wifi.clone().unwrap_or_default(),
 
                 to: Some(here.target.system),
                 here_then,
@@ -605,6 +611,7 @@ impl FullPlan {
             to: Some(here.target.system),
             here_then,
             held: Vec::new(),
+            wifi: x.wifi.clone().unwrap_or_default(),
         }
     }
 

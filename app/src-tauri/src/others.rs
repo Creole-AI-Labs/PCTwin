@@ -160,11 +160,13 @@ fn launch(
     approve: &[String],
     laptop: LaptopId,
     prompt: &str,
+    wifi: bool,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Launched, MoveProblem> {
     #[cfg(target_os = "macos")]
     {
-        let _ = mover;
+        // A Mac reads saved Wi-Fi passwords in macOS's own prompt, never through the helper.
+        let _ = (mover, wifi);
         launch_daemon(approve, laptop, prompt, stopped)
     }
     #[cfg(not(target_os = "macos"))]
@@ -184,7 +186,7 @@ fn launch(
             return Ok(Launched::Refused);
         }
         Ok(
-            match launch_elevated(mover, approve, laptop, None, stopped)? {
+            match launch_elevated_with(mover, approve, laptop, None, wifi, stopped)? {
                 Some(c) => Launched::Connected(c),
                 None => Launched::Refused,
             },
@@ -253,6 +255,20 @@ pub(crate) fn launch_elevated(
     plan: Option<&str>,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Option<Client<pctwin_helper::client::Channel>>, MoveProblem> {
+    launch_elevated_with(mover, approve, laptop, plan, false, stopped)
+}
+
+/// [`launch_elevated`]; `wifi`: the administrator also approves reading this laptop's saved
+/// Wi-Fi networks with their passwords (`--wifi yes`, Windows; Task List 2.4), once.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn launch_elevated_with(
+    mover: &str,
+    approve: &[String],
+    laptop: LaptopId,
+    plan: Option<&str>,
+    wifi: bool,
+    stopped: &dyn Fn() -> bool,
+) -> Result<Option<Client<pctwin_helper::client::Channel>>, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
     let channel = format!("pctwin-helper-{}", hex(8)?);
     let dir = if cfg!(windows) {
@@ -281,6 +297,9 @@ pub(crate) fn launch_elevated(
     }
     if let Some(seal) = plan {
         args.extend(["--plan", seal]);
+    }
+    if wifi {
+        args.extend(["--wifi", "yes"]);
     }
     let dir_text = dir.as_ref().map(|d| d.display().to_string());
     if let Some(d) = &dir_text {
@@ -327,17 +346,21 @@ pub(crate) fn launch_elevated(
 
 /// Starts the helper for `others` with the system's prompt (a Mac's showing `prompt`), connects,
 /// and scans each one.
+///
+/// `wifi` (Windows): the same prompt also approves reading the saved Wi-Fi networks, so a mover
+/// who is the laptop's administrator and ticks them later is not asked again.
 pub fn ask_for(
     mover: &str,
     others: &[String],
     laptop: LaptopId,
     prompt: &str,
+    wifi: bool,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Asked, MoveProblem> {
     if !CAN_MOVE_OTHERS || others.is_empty() {
         return Ok(Asked::NotApproved);
     }
-    let mut client = match launch(mover, others, laptop, prompt, stopped)? {
+    let mut client = match launch(mover, others, laptop, prompt, wifi, stopped)? {
         Launched::Connected(c) => c,
         Launched::Refused => return Ok(Asked::NotApproved),
         Launched::AllowInSettings => return Ok(Asked::AllowInSettings),
@@ -631,11 +654,14 @@ impl NewHelper {
         pctwin_helper::harden_engine().map_err(|_| MoveProblem::Failed)?;
         let approve: Vec<String> = names.iter().chain(accounts).cloned().collect();
         let laptop = LaptopId::from_hex(&"0".repeat(32)).map_err(|_| MoveProblem::Failed)?;
-        Ok(match launch(me, &approve, laptop, prompt, stopped)? {
-            Launched::Connected(client) => Started::Helper(NewHelper { client }),
-            Launched::Refused => Started::Refused,
-            Launched::AllowInSettings => Started::AllowInSettings,
-        })
+        // The new laptop reads no Wi-Fi passwords.
+        Ok(
+            match launch(me, &approve, laptop, prompt, false, stopped)? {
+                Launched::Connected(client) => Started::Helper(NewHelper { client }),
+                Launched::Refused => Started::Refused,
+                Launched::AllowInSettings => Started::AllowInSettings,
+            },
+        )
     }
 
     /// Makes the account `name`, shown as `full`; its temporary password is shown once with

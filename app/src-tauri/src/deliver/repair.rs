@@ -283,6 +283,9 @@ pub fn retry_of(plan: &FullPlan, line: &RebuiltLine, installs: bool) -> Option<V
             Title::Key(_) => None,
             Title::Name(_) => Some(vec![Prerequisite::OldLaptop]),
         },
+        // A Wi-Fi network's password is never kept after the move: the line says the person's
+        // step (join it, typing its password once), and nothing is retried.
+        Kind::Wifi => None,
     }
 }
 
@@ -400,6 +403,7 @@ pub fn run_part<R: Runtime>(
         None,
         files,
         crate::fullmove::InstallChoices::default(),
+        None,
     );
     Ok((lines, view.undo_id))
 }

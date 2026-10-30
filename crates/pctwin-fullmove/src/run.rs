@@ -166,6 +166,14 @@ pub enum Progress {
     WaitingFreeWifi {
         minutes_left: u64,
     },
+    /// Adding the old laptop's saved Wi-Fi networks.
+    Wifi,
+    /// A Mac: waiting, at most this many minutes more, for the person to install the profile
+    /// "Wi-Fi networks from your old laptop" in System Settings.
+    #[serde(rename_all = "camelCase")]
+    WifiProfile {
+        minutes_left: u64,
+    },
 }
 
 /// What undo needs to find and check this move's settings again, saved beside the journal.

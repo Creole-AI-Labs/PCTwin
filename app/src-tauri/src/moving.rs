@@ -373,6 +373,10 @@ pub struct ChoiceView {
     /// Whether this laptop can download online-only files to move them and make them online only
     /// again afterwards (Windows; a Mac not yet, said so).
     pub keep_local_here: bool,
+    /// The saved Wi-Fi networks found here (2.4), each ticked by default when the person moving
+    /// is this laptop's administrator; `None`: none found, or the new laptop cannot take them (an
+    /// older PCTwin there).
+    pub wifi: Option<crate::wifi::WifiChoice>,
 }
 
 /// The mover's online-only files in one cloud.
@@ -514,6 +518,10 @@ pub struct Choice {
     /// consent); none by default.
     #[serde(default)]
     pub keep_local: Vec<KeepLocalAnswer>,
+    /// The saved Wi-Fi networks the person ticked, by their place on the page (2.4); none by
+    /// default. Only networks offered and movable count.
+    #[serde(default)]
+    pub wifi: Vec<u32>,
 }
 
 /// One folder of the tree: its group and the folders inside it.
@@ -614,6 +622,7 @@ fn choice_view(record: &Record) -> ChoiceView {
             .collect(),
         online_only: Vec::new(),
         keep_local_here: KEEP_LOCAL_HERE,
+        wifi: None,
     }
 }
 
@@ -1083,6 +1092,9 @@ pctwin_types::listed_enum! {
         /// The old laptop: the files are found; the app data scan is finishing (within its
         /// time budget).
         AppData,
+        /// The old laptop: reading the saved Wi-Fi networks the person ticked, with their
+        /// passwords (2.4); the system's own prompt may be up.
+        WifiPasswords,
     }
 }
 
@@ -2321,6 +2333,9 @@ struct AppSteps<R: Runtime> {
     sink: Option<pctwin_fullmove::data::Sink>,
     /// The secret lines the person ticked.
     picked: Vec<u32>,
+    /// The old laptop's saved Wi-Fi networks, as their record arrived (move protocol 8), until
+    /// they are added after the files.
+    wifi: crate::wifi::WifiArrival,
     /// The files the plan proposes leaving on the old laptop (2.6), and those the person accepted.
     proposed: std::collections::BTreeSet<ItemId>,
     leaving: std::collections::BTreeSet<ItemId>,
@@ -2755,6 +2770,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
             .as_mut()
             .map(|s| s as &mut dyn pctwin_move::extras::DataIn)
     }
+
+    fn wifi_in(&mut self) -> Option<&mut dyn pctwin_move::wifi::WifiIn> {
+        Some(&mut self.wifi)
+    }
 }
 
 /// Sends the progress until `done`.
@@ -2872,6 +2891,17 @@ async fn run_old<R: Runtime>(
     })
     .await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
+    // Saved Wi-Fi networks (2.4), only for a new laptop that can take them (move protocol 8):
+    // found by name beside the files, read without any prompt, and whether the person moving is
+    // this laptop's administrator (the 20 October 2026 rule).
+    let wifi_finding = (link.greeting().version >= pctwin_transfer::WIFI_SINCE)
+        .then(|| {
+            std::thread::Builder::new()
+                .name("pctwin-wifi-found".into())
+                .spawn(crate::wifi::WifiFound::here)
+                .ok()
+        })
+        .flatten();
     // Files an earlier move made local and did not put back (it stopped part way) go back online
     // only first: the old laptop ends as it was.
     crate::keep_local::put_back_left(app);
@@ -2935,6 +2965,9 @@ async fn run_old<R: Runtime>(
             Err(_) => return Err(Stop::Cancelled.into()),
         }
     }
+    let wifi_found = wifi_finding
+        .and_then(|t| t.join().ok())
+        .filter(|f| !f.offered.is_empty());
     let approve_words = others.approve;
     let others = crate::others::checked_others(&sweep.census, &others.ids)
         .map_err(|_| TransferError::Protocol("someone ticked is not on this laptop".into()))?;
@@ -2968,7 +3001,10 @@ async fn run_old<R: Runtime>(
                 .filter_map(|id| Some(sweep.census.by_account(id)?.suggested_name.clone()))
                 .collect();
             let prompt = crate::others::approve_prompt(&approve_words, &names).unwrap_or_default();
-            match crate::others::ask_for(&mover, &others, laptop, &prompt, &|| {
+            // A mover who is this laptop's administrator approves reading the saved Wi-Fi
+            // networks in the same prompt (Windows), so ticking them later asks nothing more.
+            let wifi = wifi_found.as_ref().is_some_and(|f| f.admin);
+            match crate::others::ask_for(&mover, &others, laptop, &prompt, wifi, &|| {
                 scan_stop.load(Ordering::Acquire)
             }) {
                 Ok(crate::others::Asked::Approved(client, scanned)) => {
@@ -3019,6 +3055,7 @@ async fn run_old<R: Runtime>(
     // only ever leaves things out of what was found; the new laptop still accepts what comes.
     let mut view = choice_view(&record);
     view.online_only = online_only_groups(&record, &mover, KEEP_LOCAL_HERE);
+    view.wifi = wifi_found.as_ref().and_then(crate::wifi::WifiFound::view);
     let (choice_depth, _) = folder_tree(&record);
     let shown = shown_folders(&record);
     let answer = moving.wait_for_choice(shown);
@@ -3037,7 +3074,45 @@ async fn run_old<R: Runtime>(
         Vec::new()
     };
     let special = if choice.apps { special } else { None };
-    let extras = crate::fullmove::extras_here(special.as_ref(), sweep.links, choice.apps);
+    // The saved Wi-Fi networks the person ticked, read now with their passwords (the system's own
+    // prompt where it needs one, once); held in wiped memory and sent only once the new laptop's
+    // person approves the plan.
+    let wifi_held = match wifi_found {
+        Some(found) if !found.ticked_names(&choice.wifi).is_empty() => {
+            let _ = app.emit(STAGE_EVENT, Stage::WifiPasswords);
+            let (ticked, helper, mover, control) = (
+                choice.wifi.clone(),
+                helper.clone(),
+                mover.clone(),
+                live.control.clone(),
+            );
+            let read = tauri::async_runtime::spawn_blocking(move || {
+                crate::wifi::read_ticked(&found, &ticked, helper.as_ref(), &mover, laptop, &|| {
+                    control.stopped()
+                })
+            });
+            Some(
+                pctwin_move::or_stop(&live.control, async {
+                    read.await.map_err(|_| MoveError::from(Stop::Cancelled))
+                })
+                .await?,
+            )
+        }
+        Some(found) => Some(pctwin_fullmove::wifi::WifiHeld::new(
+            &found.offered,
+            &[],
+            Vec::new(),
+        )),
+        None => None,
+    };
+    let extras = crate::fullmove::extras_here(
+        special.as_ref(),
+        sweep.links,
+        choice.apps,
+        wifi_held
+            .as_ref()
+            .map(pctwin_fullmove::wifi::WifiHeld::listed),
+    );
     // The app data the new laptop chooses is captured from these (read only), after its approval.
     let mut source = crate::fullmove::data_source(app, moving, special.as_ref());
     // Files in the mover's own folders that are live while their app runs (a mail store, a
@@ -3176,7 +3251,9 @@ async fn run_old<R: Runtime>(
         mover: &mover,
         people: &named,
         extras: &extras,
-        wifi: None,
+        wifi: wifi_held
+            .as_ref()
+            .map(|h| h as &dyn pctwin_move::wifi::WifiOut),
     };
     let sent = pctwin_move::send_by_rules(
         &mut link,
@@ -3417,6 +3494,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         full: None,
         sink: None,
         picked: Vec::new(),
+        wifi: crate::wifi::WifiArrival::default(),
         proposed: Default::default(),
         leaving: Default::default(),
         // The old laptops whose moves are here already (an unreadable journal offers nothing).
@@ -3466,6 +3544,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             .changes()
             .iter()
             .any(|c| c.action != pctwin_fullmove::plan::Action::LeaveAlone)
+            || full.wifi.iter().any(|w| w.read)
         {
             let _ = app.emit(STAGE_EVENT, Stage::Rebuilding);
         }
@@ -3484,6 +3563,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             data.as_ref().map(|s| (s, picked)),
             files,
             crate::fullmove::InstallChoices { wait_free_wifi },
+            std::mem::take(&mut steps.wifi),
         ));
     }
     let finish = crate::finish::seed(
@@ -4357,6 +4437,7 @@ mod tests {
                 }],
                 apps: false,
                 keep_local: vec![],
+                wifi: vec![],
             },
         );
         let inclusion = |name: &str| {
@@ -4428,6 +4509,7 @@ mod tests {
                 folders: chosen,
                 apps: false,
                 keep_local: vec![],
+                wifi: vec![],
             },
         );
         let folder = |role, name: &str| {
@@ -4488,6 +4570,7 @@ mod tests {
                     folders: vec![wrong],
                     apps: true,
                     keep_local: vec![],
+                    wifi: vec![],
                 }),
                 Err(MoveProblem::PlanChanged)
             );
@@ -4498,6 +4581,7 @@ mod tests {
                 folders: vec![key(FolderRole::Documents, &[])],
                 apps: true,
                 keep_local: vec![],
+                wifi: vec![],
             })
             .unwrap();
         assert_eq!(

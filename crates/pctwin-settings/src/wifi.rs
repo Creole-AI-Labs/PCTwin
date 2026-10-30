@@ -65,6 +65,12 @@ impl Secret {
     fn expose(&self) -> &str {
         &self.0
     }
+
+    /// The password itself, only for the move's sealed record (the full move's Wi-Fi record,
+    /// built in a buffer wiped when dropped) and nowhere else.
+    pub fn for_session(&self) -> &str {
+        &self.0
+    }
 }
 
 impl std::fmt::Debug for Secret {

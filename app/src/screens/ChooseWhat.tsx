@@ -1,7 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { useState } from "react";
 import { Badge, Banner, Button, Checkbox, Row, RowList, Segmented } from "../components/kit";
-import type { Choice, ChoiceFolder, ChoiceView, KeepLocalAnswer } from "../bridge";
+import type { Choice, ChoiceFolder, ChoiceView, KeepLocalAnswer, WifiKind } from "../bridge";
 import { formatBytes, pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
@@ -34,7 +34,7 @@ export function stateOf(view: ChoiceView, top: ChoiceFolder, ticked: ReadonlySet
 }
 
 /** The folders that move for a mode and the person's ticks (a tick means "moves"). */
-export function choiceOf(view: ChoiceView, mode: ChooseMode, ticked: ReadonlySet<string>, appsTicked: boolean, keep: Readonly<Record<string, KeepAnswer>> = {}): Choice {
+export function choiceOf(view: ChoiceView, mode: ChooseMode, ticked: ReadonlySet<string>, appsTicked: boolean, keep: Readonly<Record<string, KeepAnswer>> = {}, wifiTicked: ReadonlySet<number> = new Set()): Choice {
   const folders = mode === "everything" ? view.folders : view.folders.filter((f) => ticked.has(keyOf(f)));
   // Only clouds the laptop offered, and only where it can keep local copies; none unless ticked.
   const keepLocal: KeepLocalAnswer[] = [];
@@ -45,7 +45,18 @@ export function choiceOf(view: ChoiceView, mode: ChooseMode, ticked: ReadonlySet
     }
   }
   const apps = view.apps > 0 && (mode === "everything" || appsTicked);
-  return { folders: folders.map((f) => ({ role: f.role, parts: f.parts })), apps, ...(keepLocal.length > 0 ? { keepLocal } : {}) };
+  // Saved Wi-Fi networks: only ones offered that can move, each by its place on the page.
+  const wifi = (view.wifi?.networks ?? []).flatMap((n, i) => (wifiMovable(n.kind) && wifiTicked.has(i) ? [i] : []));
+  return { folders: folders.map((f) => ({ role: f.role, parts: f.parts })), apps, ...(keepLocal.length > 0 ? { keepLocal } : {}), ...(wifi.length > 0 ? { wifi } : {}) };
+}
+
+/** Whether a saved Wi-Fi network of this kind can move (open and password networks). */
+export const wifiMovable = (kind: WifiKind): boolean => kind === "open" || kind === "password";
+
+/** The saved Wi-Fi networks that start ticked: every one that can move, when the person moving is this laptop's administrator (decided 20 October 2026); none otherwise. */
+export function wifiStart(view: ChoiceView): Set<number> {
+  const w = view.wifi;
+  return new Set(w?.ticked ? w.networks.flatMap((n, i) => (wifiMovable(n.kind) ? [i] : [])) : []);
 }
 
 /** One cloud's ticks: bring a real copy of its online-only files, and also on a connection that may charge. */
@@ -69,6 +80,8 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
   const [mode, setMode] = useState<ChooseMode>("everything");
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set(view.folders.map(keyOf)));
   const [appsTicked, setAppsTicked] = useState(true);
+  // Saved Wi-Fi networks: ticked by default only for this laptop's administrator; none with Only what I choose.
+  const [wifiTicked, setWifiTicked] = useState<ReadonlySet<number>>(() => wifiStart(view));
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // Files kept only online: none come unless ticked, cloud by cloud.
   const [keep, setKeep] = useState<Readonly<Record<string, KeepAnswer>>>({});
@@ -80,9 +93,10 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
     // Everything except starts with everything ticked; Only what I choose with nothing.
     setTicked(new Set(m === "only" ? [] : view.folders.map(keyOf)));
     setAppsTicked(m !== "only");
+    setWifiTicked(m === "only" ? new Set() : wifiStart(view));
     setOpen(new Set());
   };
-  const choice = choiceOf(view, mode, ticked, appsTicked, keep);
+  const choice = choiceOf(view, mode, ticked, appsTicked, keep, wifiTicked);
   const nothing = choice.folders.length === 0 && !choice.apps;
   const size = (files: number, bytes: number) => l10n.getString("choose-group-size", { files, size: formatBytes(bytes, pageLocale()) });
   const toggle = (top: ChoiceFolder) => {
@@ -225,6 +239,37 @@ export default function ChooseWhat({ view, onContinue }: { view: ChoiceView; onC
                 </li>
               );
             })}
+          </ul>
+        </section>
+      )}
+      {view.wifi && (
+        <section aria-labelledby="choose-wifi-title">
+          <h2 id="choose-wifi-title" className="plan-box-title">
+            {l10n.getString("choose-wifi-title")}
+          </h2>
+          <p className="subhead">{l10n.getString(view.wifi.ticked ? "choose-wifi-admin" : "choose-wifi-ask-admin")}</p>
+          <ul className="mv-people">
+            {view.wifi.networks.map((n, i) =>
+              wifiMovable(n.kind) ? (
+                <li key={i}>
+                  <Checkbox
+                    checked={wifiTicked.has(i)}
+                    onChange={(on) => {
+                      setWifiTicked((t) => {
+                        const next = new Set(t);
+                        if (on) next.add(i);
+                        else next.delete(i);
+                        return next;
+                      });
+                    }}
+                    label={<bdi dir="auto">{n.name}</bdi>}
+                    hint={n.kind === "open" ? l10n.getString("choose-wifi-open") : undefined}
+                  />
+                </li>
+              ) : (
+                <Row key={i} title={<bdi dir="auto">{n.name}</bdi>} detail={l10n.getString(`choose-wifi-${n.kind}`)} />
+              ),
+            )}
           </ul>
         </section>
       )}

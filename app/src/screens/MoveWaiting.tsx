@@ -10,8 +10,8 @@ import { useRescueDrive } from "./rescueContext";
 
 /** The words for each wait, by which laptop this is. */
 const WORDS: Record<"old" | "new", Record<WaitStage, string>> = {
-  old: { scanning: "move-wait-scanning", waiting: "move-wait-approval", moving: "move-wait-starting", administrator: "move-wait-admin", "app-data": "move-wait-appdata" },
-  new: { scanning: "move-wait-list", waiting: "move-wait-list", moving: "move-wait-starting", administrator: "move-wait-admin", "app-data": "move-wait-list" },
+  old: { scanning: "move-wait-scanning", waiting: "move-wait-approval", moving: "move-wait-starting", administrator: "move-wait-admin", "app-data": "move-wait-appdata", "wifi-passwords": "move-wait-wifi" },
+  new: { scanning: "move-wait-list", waiting: "move-wait-list", moving: "move-wait-starting", administrator: "move-wait-admin", "app-data": "move-wait-list", "wifi-passwords": "move-wait-list" },
 };
 
 /**

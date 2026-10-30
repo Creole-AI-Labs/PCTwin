@@ -168,10 +168,14 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// links and junctions the scan found among their files (`links`: never followed, never moved).
 /// `settings`: whether the person chose to bring their apps, settings and app data (when not, none
 /// of the settings found are sent).
+///
+/// `wifi`: the saved Wi-Fi networks found here, by name, and which were ticked and read (move
+/// protocol 8; `None`: not offered). Never a password.
 pub fn extras_here(
     special: Option<&pctwin_fullmove::extras::SpecialFound>,
     links: u64,
     settings: bool,
+    wifi: Option<&[pctwin_fullmove::wifi::WifiListed]>,
 ) -> Vec<u8> {
     let folders = pctwin_scan::find_special_folders()
         .into_iter()
@@ -196,6 +200,8 @@ pub fn extras_here(
         x.special_not_checked = 0;
         x.left_out_by_person = true;
     }
+    // Wi-Fi networks are their own choice on the choose page, apart from apps and settings.
+    x.wifi = wifi.map(<[_]>::to_vec);
     x.encode()
 }
 
@@ -258,6 +264,9 @@ pub struct RebuildPlanView {
     /// What the forgotten-things finder found on the old laptop: places with their counts and
     /// steps, and printers to add again (2.5).
     pub forgotten: Option<pctwin_special::forgotten::Finding>,
+    /// The old laptop's saved Wi-Fi networks, each with what happens to it (2.4; move protocol
+    /// 8): by name, never a password.
+    pub wifi: Vec<crate::wifi::WifiPlanLine>,
 
     /// What the move needs from the internet.
     pub internet: pctwin_fullmove::plan::Internet,
@@ -517,6 +526,16 @@ pub fn plan_view(plan: &FullPlan) -> RebuildPlanView {
         prompt: asks,
         restore_point: asks && cfg!(windows),
         forgotten: plan.forgotten.clone(),
+        wifi: bounded(
+            crate::wifi::plan_lines(&plan.wifi)
+                .into_iter()
+                .map(|l| crate::wifi::WifiPlanLine {
+                    name: name(&l.name),
+                    ..l
+                })
+                .collect(),
+        )
+        .0,
 
         internet: plan.internet(),
         room: {
@@ -724,6 +743,8 @@ pub enum LineNote {
     /// mark said: only this yes or no, never the address.
     #[serde(rename_all = "camelCase")]
     CameFrom { makers_site: bool },
+    /// Why a saved Wi-Fi network needs the person (2.4).
+    Wifi { why: pctwin_fullmove::wifi::WifiWhy },
 }
 
 /// An app already on this laptop, left as it is.
@@ -827,6 +848,8 @@ pub struct RebuiltView {
 /// laptop since the plan was made is held, not installed, and ends needs-action; the person is
 /// asked about it again (`move-changed`, [`crate::deliver::changes`]). What finished and what did
 /// not is kept for "Fix these" ([`crate::deliver::repair`]).
+// Each part of the move it rebuilds is its own argument.
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_here<R: Runtime>(
     app: &AppHandle<R>,
     plan: &FullPlan,
@@ -835,6 +858,7 @@ pub fn rebuild_here<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
     choices: InstallChoices,
+    wifi: crate::wifi::WifiArrival,
 ) -> RebuiltView {
     let mut drift = pctwin_fullmove::drift::apps_changed(plan, &installed_here(me));
     // App data the old laptop refused because it was edited there after the approval: nothing of
@@ -849,7 +873,16 @@ pub fn rebuild_here<R: Runtime>(
     // Kept until the results are remembered (re-check of 2.9): an undo waiting for the gate then
     // spends them after, never before, so they are never put back once spent.
     let _keeping = crate::deliver::safe_stop::hold(crate::deliver::safe_stop::BusyWith::Rebuilding);
-    let (view, lines) = rebuild_full(app, &held, journal, me, data, files.clone(), choices);
+    let (view, lines) = rebuild_full(
+        app,
+        &held,
+        journal,
+        me,
+        data,
+        files.clone(),
+        choices,
+        Some(wifi),
+    );
     crate::deliver::repair::remember(
         app,
         crate::deliver::repair::Last {
@@ -864,7 +897,11 @@ pub fn rebuild_here<R: Runtime>(
 }
 
 /// Rebuilds `plan` as [`rebuild_here`] does, with no check for changes: the view, and every line
-/// unbounded and in plan order (for "Fix these" to merge into).
+/// unbounded and in plan order (for "Fix these" to merge into). `wifi`: the old laptop's saved
+/// Wi-Fi networks as they arrived, added here; `None` ("Fix these"): none is added again, their
+/// passwords are never kept after the move.
+// Each part of the move it rebuilds is its own argument.
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_full<R: Runtime>(
     app: &AppHandle<R>,
     plan: &FullPlan,
@@ -873,6 +910,7 @@ pub fn rebuild_full<R: Runtime>(
     data: Option<(&pctwin_fullmove::data::Sink, Vec<u32>)>,
     files: Vec<(String, String)>,
     choices: InstallChoices,
+    wifi: Option<crate::wifi::WifiArrival>,
 ) -> (RebuiltView, Vec<RebuiltLine>) {
     use crate::deliver::safe_stop::{BusyWith, hold};
     // Installing, putting settings in place and placing app data must not be cut part way.
@@ -1170,6 +1208,28 @@ pub fn rebuild_full<R: Runtime>(
             notes: data_notes(s),
             special_notes: s.notes.clone(),
         });
+    }
+    // The old laptop's saved Wi-Fi networks (2.4), each through the system's own tool: copied
+    // only once the system lists it, never one already saved here added over.
+    if let Some(wifi) = wifi
+        && !plan.wifi.is_empty()
+    {
+        let _ = app.emit(REBUILD_EVENT, Progress::Wifi);
+        let told = app.clone();
+        let done = crate::wifi::add_here(&plan.wifi, wifi, &|| false, &mut |minutes_left| {
+            let _ = told.emit(REBUILD_EVENT, Progress::WifiProfile { minutes_left });
+        });
+        for d in done {
+            lines.push(RebuiltLine {
+                title: Title::Name(name(&d.name)),
+                kind: Kind::Wifi,
+                count: 0,
+                status: d.result.status(),
+                reason: d.result.reason(),
+                notes: crate::wifi::why_note(d.why),
+                special_notes: Vec::new(),
+            });
+        }
     }
     let (here, here_more) = bounded(
         done.here

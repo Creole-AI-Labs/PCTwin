@@ -3302,3 +3302,37 @@ special-note-save-may-not-work-here = Ces sauvegardes viennent d'un autre type d
 special-note-store-protected-saves = La boutique garde ces sauvegardes pour elle-même, donc PCTwin ne peut pas les copier. Elles reviennent quand vous vous connectez à la boutique sur votre nouvel ordinateur portable et installez le jeu.
 special-note-mod-programs-held = Certains modules de ce jeu sont des programmes. PCTwin les liste, mais ne les copie pas et ne les active pas. Récupérez-les auprès de leur créateur.
 special-note-launcher-verify = Installez le lanceur sur votre nouvel ordinateur portable et connectez-vous. Utilisez ensuite sa propre étape de vérification ou de localisation pour qu'il trouve et vérifie vos jeux. PCTwin ne copie les jeux installés que si vous le choisissez.
+choose-wifi-title = Réseaux Wi-Fi enregistrés
+choose-wifi-admin = Les réseaux cochés partent avec leur mot de passe, et le nouveau portable s’y connecte de lui-même. Pour lire les mots de passe, ce portable peut demander l’accord d’un administrateur dans sa propre fenêtre.
+choose-wifi-ask-admin = Lire les mots de passe Wi-Fi demande un administrateur de ce portable : aucun réseau n’est donc coché. Pour les apporter, demandez à la personne qui s’occupe de ce portable, puis cochez-les : ce portable lui demande son accord dans sa propre fenêtre.
+choose-wifi-open = Sans mot de passe
+choose-wifi-organisation = Configuré par une organisation : reconnectez-vous sur le nouveau portable avec ses informations
+choose-wifi-other = PCTwin ne déplace pas ce type de réseau : reconnectez-vous sur le nouveau portable
+move-wait-wifi-title = Lecture de vos mots de passe Wi-Fi enregistrés
+move-wait-wifi-body = Ce portable peut demander l’accord d’un administrateur dans sa propre fenêtre. Répondez-y pour apporter les réseaux Wi-Fi cochés. Rien n’est modifié sur ce portable.
+fullmove-group-wifi = Réseaux Wi-Fi enregistrés : { $count }
+fullmove-wifi-step-add = PCTwin l’ajoute ici avec son mot de passe, envoyé chiffré après votre accord.
+fullmove-wifi-step-add-by-profile = Vous l’ajoutez ici une seule fois, dans Réglages Système, pour tous ces réseaux. PCTwin ouvre la page.
+fullmove-wifi-step-skipped = Non coché sur l’ancien portable : il y reste.
+fullmove-wifi-step-organisation = Configuré par une organisation : reconnectez-vous ici avec ses informations.
+fullmove-wifi-step-not-this-kind = PCTwin ne déplace pas ce type de réseau : reconnectez-vous ici.
+fullmove-wifi-step-no-password = Son mot de passe n’a pas pu être lu sur l’ancien portable : tapez-le une fois en vous connectant à ce réseau ici.
+fullmove-wifi-why-organisation = Configuré par une organisation : reconnectez-vous avec ses informations.
+fullmove-wifi-why-not-this-kind = PCTwin ne déplace pas ce type de réseau : reconnectez-vous ici.
+fullmove-wifi-why-no-password = Son mot de passe n’a pas pu être lu sur l’ancien portable : tapez-le une fois en vous connectant à ce réseau.
+fullmove-wifi-why-did-not-arrive = Il n’est pas arrivé de l’ancien portable : tapez son mot de passe une fois en vous connectant à ce réseau.
+fullmove-wifi-why-already-here = Un réseau de ce nom était déjà enregistré ici : PCTwin l’a laissé tel quel. S’il ne se connecte pas, tapez son mot de passe une fois.
+fullmove-wifi-why-not-added = Ce portable ne l’a pas ajouté : tapez son mot de passe une fois en vous connectant à ce réseau.
+fullmove-wifi-why-install-profile = Non ajouté : le profil “Wi-Fi networks from your old laptop (PCTwin)” n’a pas été installé à temps dans Réglages Système. Tapez son mot de passe une fois en vous connectant à ce réseau.
+fullmove-rebuilding-wifi = Ajout de vos réseaux Wi-Fi enregistrés
+fullmove-rebuilding-wifi-profile = { $minutes ->
+        [one] Pour ajouter vos réseaux Wi-Fi, installez le profil “Wi-Fi networks from your old laptop (PCTwin)” sur la page de Réglages Système ouverte par PCTwin : encore 1 minute au plus
+        [many] Pour ajouter vos réseaux Wi-Fi, installez le profil “Wi-Fi networks from your old laptop (PCTwin)” sur la page de Réglages Système ouverte par PCTwin : encore { $minutes } minutes au plus
+       *[other] Pour ajouter vos réseaux Wi-Fi, installez le profil “Wi-Fi networks from your old laptop (PCTwin)” sur la page de Réglages Système ouverte par PCTwin : encore { $minutes } minutes au plus
+    }
+report-group-wifi = Réseaux Wi-Fi
+report-count-wifi = { $count ->
+        [one] { $count } réseau
+        [many] { $count } de réseaux
+       *[other] { $count } réseaux
+    }

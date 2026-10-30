@@ -32,5 +32,8 @@
   },
   {
     "kind": "app-data"
+  },
+  {
+    "kind": "wifi-passwords"
   }
 ]

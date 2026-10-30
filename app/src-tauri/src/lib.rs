@@ -54,6 +54,7 @@ mod restart;
 mod sessions;
 mod undo_books;
 mod updates;
+mod wifi;
 
 /// Other apps' data files (their JSON and databases) are read in parser processes too, one per
 /// folder read at once; each starts only when first asked.

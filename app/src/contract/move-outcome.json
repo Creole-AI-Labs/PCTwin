@@ -392,6 +392,149 @@
             "kind": "key",
             "value": "fullmove-special-not-yet"
           }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [],
+          "reason": null,
+          "specialNotes": [],
+          "status": "copied",
+          "title": {
+            "kind": "name",
+            "value": "Home"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [],
+          "reason": null,
+          "specialNotes": [],
+          "status": "skipped-by-user",
+          "title": {
+            "kind": "name",
+            "value": "Gran's"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "organisation"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network Organisation"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "not-this-kind"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network NotThisKind"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "no-password"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network NoPassword"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "did-not-arrive"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network DidNotArrive"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "already-here"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network AlreadyHere"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "not-added"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network NotAdded"
+          }
+        },
+        {
+          "count": 0,
+          "kind": "wifi",
+          "notes": [
+            {
+              "note": "wifi",
+              "why": "install-profile"
+            }
+          ],
+          "reason": "finish-by-hand",
+          "specialNotes": [],
+          "status": "needs-action",
+          "title": {
+            "kind": "name",
+            "value": "Network InstallProfile"
+          }
         }
       ],
       "more": 0,
