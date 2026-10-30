@@ -83,6 +83,13 @@ pub enum Request {
     AddOn { size: u64 },
     /// One saved Apple Mail message's facts (2.5 mail).
     Emlx { size: u64 },
+    /// What a browser's file holds (2.5 browsers): `size` bytes of the file, then `second` bytes
+    /// of a second one (a database's log, or a manifest's messages; none when 0).
+    Browser {
+        size: u64,
+        second: u64,
+        what: pctwin_special::browser_read::BrowserRead,
+    },
 }
 
 impl Request {
@@ -99,6 +106,7 @@ impl Request {
             Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
                 size.saturating_add(log)
             }
+            Request::Browser { size, second, .. } => size.saturating_add(second),
         }
     }
 
@@ -144,6 +152,7 @@ pub enum Answer {
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
     Emlx(Result<pctwin_special::mail::EmlxFacts, ContentError>),
+    Browser(Result<pctwin_special::browser_read::Found, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -166,6 +175,7 @@ impl Answer {
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
                 | (Answer::Emlx(_), Request::Emlx { .. })
+                | (Answer::Browser(_), Request::Browser { .. })
                 | (Answer::Failed(_), _)
         )
     }

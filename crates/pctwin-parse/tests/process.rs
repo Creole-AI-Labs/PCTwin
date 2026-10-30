@@ -61,7 +61,8 @@ fn in_process(request: Request, f: &File) -> Answer {
         | Request::DatabaseFacts { .. }
         | Request::DatabaseSnapshot { .. }
         | Request::AddOn { .. }
-        | Request::Emlx { .. } => {
+        | Request::Emlx { .. }
+        | Request::Browser { .. } => {
             let mut bytes = Vec::new();
             std::io::Seek::seek(&mut r, std::io::SeekFrom::Start(0)).unwrap();
             std::io::Read::read_to_end(&mut r, &mut bytes).unwrap();
@@ -70,7 +71,7 @@ fn in_process(request: Request, f: &File) -> Answer {
     }
 }
 
-fn every_request(size: u64) -> [Request; 10] {
+fn every_request(size: u64) -> [Request; 11] {
     [
         Request::Installer { size },
         Request::OldCopy { size },
@@ -86,6 +87,11 @@ fn every_request(size: u64) -> [Request; 10] {
         Request::DatabaseSnapshot { size, log: 0 },
         Request::AddOn { size },
         Request::Emlx { size },
+        Request::Browser {
+            size,
+            second: 0,
+            what: pctwin_special::browser_read::BrowserRead::Json,
+        },
     ]
 }
 

@@ -379,6 +379,18 @@
             {
               "note": "own-sync",
               "page": "https://example.org/sync"
+            },
+            {
+              "note": "bookmarks-file"
+            },
+            {
+              "note": "history-own-import"
+            },
+            {
+              "note": "pages-and-add-ons-listed"
+            },
+            {
+              "note": "open-pages-by-sync"
             }
           ],
           "secret": null,

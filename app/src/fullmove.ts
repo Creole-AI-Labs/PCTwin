@@ -34,6 +34,10 @@ export const SPECIAL_NOTES = [
   "secret-tick-each",
   "open-archive-in-mail-app",
   "local-only-folders-export",
+  "bookmarks-file",
+  "history-own-import",
+  "pages-and-add-ons-listed",
+  "open-pages-by-sync",
 ] as const;
 export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };
 

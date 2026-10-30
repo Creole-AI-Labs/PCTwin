@@ -391,6 +391,17 @@ pub trait ContentReader: Sync {
     fn add_on_manifest(&self, bytes: &[u8]) -> Result<bool, ContentError>;
     /// One saved Apple Mail message's facts ([`crate::mail::emlx_facts`]).
     fn emlx(&self, bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentError>;
+    /// What a browser's file holds (2.5 browsers, [`crate::browser_read`]): `second` is a
+    /// database's log or a manifest's messages. A reader that does not know it reads nothing.
+    fn browser(
+        &self,
+        what: crate::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<crate::browser_read::Found, ContentError> {
+        let _ = (what, bytes, second);
+        Err(ContentError::Damaged(NO_READER.into()))
+    }
 }
 
 static READER: OnceLock<&'static dyn ContentReader> = OnceLock::new();
@@ -461,6 +472,24 @@ pub fn emlx_facts_of(bytes: &[u8]) -> Result<crate::mail::EmlxFacts, ContentErro
         return Err(ContentError::TooLarge);
     }
     reader()?.emlx(bytes)
+}
+    fn browser(
+        &self,
+        what: crate::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<crate::browser_read::Found, ContentError> {
+        crate::browser_read::read(self.0, what, bytes, second)
+    }
+}
+
+/// What a browser's file holds, read in the parser process (2.5 browsers).
+pub fn browser_of(
+    what: crate::browser_read::BrowserRead,
+    bytes: &[u8],
+    second: Option<&[u8]>,
+) -> Result<crate::browser_read::Found, ContentError> {
+    reader()?.browser(what, bytes, second)
 }
 
 /// The capture's consistent copy of a database, made in the parser process from the bytes of

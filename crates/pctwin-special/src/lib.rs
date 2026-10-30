@@ -36,10 +36,16 @@
 //! - [`handoff`]: the person's step for each component, pages and apps opened as the person, the
 //!   app's own export tool only from a signed row and only if the maker check passes.
 //!
+//! - [`browser`] and [`browser_read`]: a browser's bookmarks written as the standard bookmarks
+//!   file any browser imports, and its add-ons and open pages listed for the person (2.5
+//!   browsers; read only in the parser process).
+//!
 //! **Never**: no app-bound encryption, DPAPI or keychain is bypassed; no cookie, session or token
 //! is copied; nothing is sent, connected, launched or run as a check; the old laptop is only read.
 
 pub mod api;
+pub mod browser;
+pub mod browser_read;
 pub mod capture;
 pub mod catalogue;
 pub mod category;

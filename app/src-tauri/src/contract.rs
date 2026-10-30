@@ -329,9 +329,15 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             },
             ChangeView {
                 category: Some(Category::Browser),
-                notes: vec![Note::OwnSync {
-                    page: Some("https://example.org/sync".into()),
-                }],
+                notes: vec![
+                    Note::OwnSync {
+                        page: Some("https://example.org/sync".into()),
+                    },
+                    Note::BookmarksFile,
+                    Note::HistoryOwnImport,
+                    Note::PagesAndAddOnsListed,
+                    Note::OpenPagesBySync,
+                ],
                 ..change(
                     Title::Name("Browser".into()),
                     Kind::Special,

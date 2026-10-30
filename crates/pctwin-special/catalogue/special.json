@@ -45,6 +45,18 @@
     {"system": "windows", "root": "roaming", "folder": "nomic.ai", "name": "GPT4All", "category": "ai-tool", "checked_on": "2026-10-30",
      "elsewhere": [{"system": "mac", "root": "application-support", "folder": "nomic.ai"}]},
     {"system": "mac", "root": "application-support", "folder": "nomic.ai", "name": "GPT4All", "category": "ai-tool", "checked_on": "2026-10-30",
-     "elsewhere": [{"system": "windows", "root": "roaming", "folder": "nomic.ai"}]}
+     "elsewhere": [{"system": "windows", "root": "roaming", "folder": "nomic.ai"}]},
+    {"system": "windows", "root": "local", "folder": "Google/Chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Google/Chrome"}, {"system": "linux", "root": "xdg-config", "folder": "google-chrome"}]},
+    {"system": "mac", "root": "application-support", "folder": "Google/Chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Google/Chrome"}, {"system": "linux", "root": "xdg-config", "folder": "google-chrome"}]},
+    {"system": "linux", "root": "xdg-config", "folder": "google-chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Google/Chrome"}, {"system": "mac", "root": "application-support", "folder": "Google/Chrome"}]},
+    {"system": "windows", "root": "local", "folder": "Microsoft/Edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Microsoft Edge"}, {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge"}]},
+    {"system": "mac", "root": "application-support", "folder": "Microsoft Edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Microsoft/Edge"}, {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge"}]},
+    {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Microsoft/Edge"}, {"system": "mac", "root": "application-support", "folder": "Microsoft Edge"}]}
   ]
 }

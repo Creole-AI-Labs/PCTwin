@@ -195,6 +195,25 @@ pub fn answer<R: Read, W: Write>(
             whole(&mut file, size, 1024 * 1024)
                 .is_ok_and(|b| pctwin_special::content::add_on_manifest(seal, &b)),
         ),
+        Request::Browser { size, second, what } => {
+            use pctwin_special::browser_read::BrowserRead;
+            let most = match what {
+                BrowserRead::Places => pctwin_special::content::MAX_DB,
+                BrowserRead::PropertyList => pctwin_special::browser_read::MAX_PLIST as u64,
+                BrowserRead::Json | BrowserRead::Session => {
+                    pctwin_special::content::MAX_JSON as u64
+                }
+            };
+            let most_second = match what {
+                BrowserRead::Places => pctwin_special::content::MAX_LOG,
+                _ => pctwin_special::content::MAX_JSON as u64,
+            };
+            Answer::Browser(whole(&mut file, size, most).and_then(|b| {
+                let s = whole(&mut file, second, most_second)?;
+                let s = (!s.is_empty()).then_some(s);
+                pctwin_special::browser_read::read(seal, what, &b, s.as_deref())
+            }))
+        }
         Request::DatabaseFacts { size, log, millis } => {
             let until = std::time::Instant::now() + request.own_time();
             let _ = millis;

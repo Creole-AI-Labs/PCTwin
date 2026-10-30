@@ -664,6 +664,25 @@ impl pctwin_special::content::ContentReader for Parser {
             Err(e) => Err(ContentError::Damaged(e.to_string())),
         }
     }
+
+    fn browser(
+        &self,
+        what: pctwin_special::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<pctwin_special::browser_read::Found, ContentError> {
+        let second = second.unwrap_or_default();
+        let request = Request::Browser {
+            size: bytes.len() as u64,
+            second: second.len() as u64,
+            what,
+        };
+        match self.ask_about(request, &[Source::Bytes(bytes), Source::Bytes(second)]) {
+            Ok(Answer::Browser(found)) => found,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
 }
 
 /// Several parser processes taking requests in turn, for readers that work on several threads
@@ -722,5 +741,14 @@ impl pctwin_special::content::ContentReader for Pool {
     }
     fn emlx(&self, bytes: &[u8]) -> Result<pctwin_special::mail::EmlxFacts, ContentError> {
         self.one().emlx(bytes)
+    }
+
+    fn browser(
+        &self,
+        what: pctwin_special::browser_read::BrowserRead,
+        bytes: &[u8],
+        second: Option<&[u8]>,
+    ) -> Result<pctwin_special::browser_read::Found, ContentError> {
+        self.one().browser(what, bytes, second)
     }
 }
