@@ -112,6 +112,18 @@ pub enum Evidence {
     Unreadable { why: String },
     /// A signed catalogue row adds knowledge (a native route, an exception, a friendly name).
     Catalogue { row: String },
+    /// A browser's bookmarks, written as the standard bookmarks file any browser imports, and its
+    /// add-ons and open pages listed for the person, for each of these profile folders (2.5
+    /// browsers, [`crate::browser`]).
+    ForAnotherBrowser { profiles: Vec<String> },
+    /// What was written for another browser: counts only (the lists are the person's own).
+    WrittenForAnotherBrowser {
+        bookmarks: u32,
+        add_ons: u32,
+        pages: u32,
+        /// Bookmarks or pages left out (past a limit, or not a page on the web).
+        left_out: u32,
+    },
 }
 
 impl Evidence {
@@ -177,6 +189,18 @@ impl Evidence {
             Evidence::NoSpecialShape => "a data file".into(),
             Evidence::Unreadable { why } => format!("it could not be read ({why})"),
             Evidence::Catalogue { row } => format!("known: {row}"),
+            Evidence::ForAnotherBrowser { .. } => {
+                "your bookmarks as a file any browser can import, and a list of your add-ons and open pages"
+                    .into()
+            }
+            Evidence::WrittenForAnotherBrowser {
+                bookmarks,
+                add_ons,
+                pages,
+                left_out,
+            } => format!(
+                "{bookmarks} bookmark(s), {add_ons} add-on(s) and {pages} open page(s) written; {left_out} left out"
+            ),
         }
     }
 }

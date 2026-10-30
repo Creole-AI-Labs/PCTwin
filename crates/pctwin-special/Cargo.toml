@@ -37,6 +37,12 @@ pctwin-parse-seal = { path = "../pctwin-parse-seal" }
 tempfile = "3"
 # Files named by their own SHA-256 (model libraries) are checked against it.
 sha2 = "0.10.9"
+# 2.5 browsers: a property list of bookmarks, read in the parser process (already used by
+# pctwin-apps and pctwin-scan; MIT).
+plist = "1.10"
+# 2.5 browsers: a Mozilla session file is an LZ4 block; decoded in the parser process with the
+# safe decoder only (no unsafe code; MIT).
+lz4_flex = { version = "0.14.0", default-features = false, features = ["alloc", "safe-decode", "safe-encode", "checked-decode"] }
 
 [target.'cfg(windows)'.dependencies]
 # The printers the system lists (names only, read only) for the forgotten-things finder, through

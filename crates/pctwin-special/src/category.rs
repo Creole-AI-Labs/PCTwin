@@ -68,6 +68,18 @@ pub enum Note {
     ToolSettingsReview,
     /// A secret: moves only if the person ticks it, by itself; never in a report, log or AI.
     SecretTickEach,
+    /// A browser's bookmarks are also written as the standard bookmarks file: in a different
+    /// browser on the new laptop, use its own "import bookmarks from an HTML file" (2.5 browsers).
+    BookmarksFile,
+    /// History has no shared format between different browsers: the new browser's own import
+    /// (while both browsers are on one laptop) or the browser's sync brings it.
+    HistoryOwnImport,
+    /// The browser's add-ons and open pages are listed in a page beside its bookmarks file, for
+    /// the person only; nothing in it is opened for them.
+    PagesAndAddOnsListed,
+    /// Open pages kept in a form PCTwin cannot list: the browser's own sync, or its option to
+    /// open the pages from last time, brings them back.
+    OpenPagesBySync,
 }
 
 fn any(c: &Component, f: impl Fn(&Evidence) -> bool) -> bool {

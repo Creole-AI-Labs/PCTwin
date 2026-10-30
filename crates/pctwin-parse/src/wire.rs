@@ -81,6 +81,13 @@ pub enum Request {
     DatabaseSnapshot { size: u64, log: u64 },
     /// Whether a `manifest.json` is a WebExtension's.
     AddOn { size: u64 },
+    /// What a browser's file holds (2.5 browsers): `size` bytes of the file, then `second` bytes
+    /// of a second one (a database's log, or a manifest's messages; none when 0).
+    Browser {
+        size: u64,
+        second: u64,
+        what: pctwin_special::browser_read::BrowserRead,
+    },
 }
 
 impl Request {
@@ -96,6 +103,7 @@ impl Request {
             Request::DatabaseFacts { size, log, .. } | Request::DatabaseSnapshot { size, log } => {
                 size.saturating_add(log)
             }
+            Request::Browser { size, second, .. } => size.saturating_add(second),
         }
     }
 
@@ -140,6 +148,7 @@ pub enum Answer {
     /// The database's length, its bytes having come in [`TAG_PIECE`] frames.
     DatabaseSnapshot(Result<u64, ContentError>),
     AddOn(bool),
+    Browser(Result<pctwin_special::browser_read::Found, ContentError>),
     /// The reading could not finish (a piece of the file could not be read): why.
     Failed(String),
 }
@@ -161,6 +170,7 @@ impl Answer {
                     Request::DatabaseSnapshot { .. }
                 )
                 | (Answer::AddOn(_), Request::AddOn { .. })
+                | (Answer::Browser(_), Request::Browser { .. })
                 | (Answer::Failed(_), _)
         )
     }
