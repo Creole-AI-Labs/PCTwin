@@ -166,6 +166,14 @@ pub enum Progress {
     WaitingFreeWifi {
         minutes_left: u64,
     },
+    /// Adding the old laptop's saved Wi-Fi networks.
+    Wifi,
+    /// A Mac: waiting, at most this many minutes more, for the person to install the profile
+    /// "Wi-Fi networks from your old laptop" in System Settings.
+    #[serde(rename_all = "camelCase")]
+    WifiProfile {
+        minutes_left: u64,
+    },
 }
 
 /// What undo needs to find and check this move's settings again, saved beside the journal.
@@ -245,6 +253,9 @@ pub struct SpecialDone {
     pub why: Option<crate::data::DataWhy>,
     /// It holds saved sign-ins to websites or accounts: the person signs in again here.
     pub sites: bool,
+    /// What the person is told because of its special category (2.5), as the plan said it: the
+    /// report keeps saying it after the move.
+    pub notes: Vec<pctwin_special::category::Note>,
 }
 
 impl SpecialDone {
@@ -254,6 +265,7 @@ impl SpecialDone {
             result,
             why: None,
             sites: false,
+            notes: Vec::new(),
         }
     }
 }
@@ -307,6 +319,7 @@ fn converted_lines(s: &crate::extras::SpecialLine, data: &DataDone) -> Vec<Speci
             result: ItemResult::because(Reason::Permission),
             why: Some(crate::data::DataWhy::MailNoAccess),
             sites: false,
+            notes: s.notes.clone(),
         }];
     }
     if data.mail.is_empty() {
@@ -315,6 +328,7 @@ fn converted_lines(s: &crate::extras::SpecialLine, data: &DataDone) -> Vec<Speci
             result: ItemResult::because(Reason::FinishByHand),
             why: Some(crate::data::DataWhy::DidNotArrive),
             sites: false,
+            notes: s.notes.clone(),
         }];
     }
     data.mail
@@ -324,6 +338,7 @@ fn converted_lines(s: &crate::extras::SpecialLine, data: &DataDone) -> Vec<Speci
             result: l.result,
             why: l.why.clone(),
             sites: false,
+            notes: s.notes.clone(),
         })
         .collect()
 }
@@ -818,6 +833,7 @@ pub fn rebuild(
                 result,
                 why,
                 sites: s.sites,
+                notes: s.notes.clone(),
             }]
         })
         .collect();

@@ -3654,3 +3654,43 @@ special-note-store-protected-saves = يحتفظ المتجر بهذه الحفظ
 special-note-mod-programs-held = بعض إضافات هذه اللعبة برامج. يعرضها PCTwin في قائمة، لكنه لا ينسخها ولا يشغّلها. احصل عليها مرة أخرى من صانعها.
 special-note-mod-programs-as-files = بعض إضافات هذه اللعبة برامج. تنتقل مع ملفاتك الأخرى كملفات عادية، ولا يشغّلها PCTwin أبدًا. احصل على نسخ تعمل من صانعها.
 special-note-launcher-verify = ثبّت المشغّل على حاسوبك المحمول الجديد وسجّل الدخول. ثم استخدم خطوة التحقق أو تحديد الموقع الخاصة به ليعثر على ألعابك ويتحقق منها. لا ينسخ PCTwin الألعاب المثبّتة إلا إذا اخترت ذلك.
+choose-wifi-title = شبكات Wi-Fi المحفوظة
+choose-wifi-admin = تنتقل الشبكات المحددة مع كلمات مرورها، فيتصل بها الحاسوب الجديد من تلقاء نفسه. لقراءة كلمات المرور قد يطلب هذا الحاسوب موافقة المسؤول في نافذته الخاصة.
+choose-wifi-ask-admin = قراءة كلمات مرور Wi-Fi تحتاج إلى مسؤول هذا الحاسوب، لذلك لم تُحدَّد أي شبكة. لإحضارها اطلب ممن يعتني بهذا الحاسوب، ثم حددها: يطلب هذا الحاسوب موافقته في نافذته الخاصة.
+choose-wifi-open = بلا كلمة مرور
+choose-wifi-organisation = أعدّتها مؤسسة: اتصل بها مجددًا على الحاسوب الجديد باستخدام بياناتها
+choose-wifi-other = لا ينقل PCTwin هذا النوع من الشبكات: اتصل بها مجددًا على الحاسوب الجديد
+move-wait-wifi-title = جارٍ قراءة كلمات مرور Wi-Fi المحفوظة
+move-wait-wifi-body = قد يطلب هذا الحاسوب موافقة المسؤول في نافذته الخاصة. أجب فيها لإحضار شبكات Wi-Fi التي حددتها. لا يتغير أي شيء على هذا الحاسوب.
+fullmove-group-wifi = شبكات Wi-Fi المحفوظة: { $count }
+fullmove-wifi-step-add = يضيفها PCTwin هنا مع كلمة مرورها، التي تُرسل مشفّرة بعد موافقتك.
+fullmove-wifi-step-add-by-profile = تضيفها هنا مرة واحدة في إعدادات النظام لكل هذه الشبكات. يفتح PCTwin الصفحة.
+fullmove-wifi-step-skipped = لم تُحدَّد على الحاسوب القديم، لذلك تبقى هناك.
+fullmove-wifi-step-organisation = أعدّتها مؤسسة: اتصل بها مجددًا هنا باستخدام بياناتها.
+fullmove-wifi-step-not-this-kind = لا ينقل PCTwin هذا النوع من الشبكات: اتصل بها مجددًا هنا.
+fullmove-wifi-step-no-password = تعذّرت قراءة كلمة مرورها على الحاسوب القديم: اكتبها مرة واحدة عند الاتصال بهذه الشبكة هنا.
+fullmove-wifi-why-organisation = أعدّتها مؤسسة: اتصل بها مجددًا باستخدام بياناتها.
+fullmove-wifi-why-not-this-kind = لا ينقل PCTwin هذا النوع من الشبكات: اتصل بها مجددًا هنا.
+fullmove-wifi-why-no-password = تعذّرت قراءة كلمة مرورها على الحاسوب القديم: اكتبها مرة واحدة عند الاتصال بهذه الشبكة.
+fullmove-wifi-why-did-not-arrive = لم تصل من الحاسوب القديم: اكتب كلمة مرورها مرة واحدة عند الاتصال بهذه الشبكة.
+fullmove-wifi-why-already-here = كانت شبكة بهذا الاسم محفوظة هنا من قبل، لذلك تركها PCTwin كما هي. إذا لم تتصل، فاكتب كلمة مرورها مرة واحدة.
+fullmove-wifi-why-not-added = لم يُضفها هذا الحاسوب: اكتب كلمة مرورها مرة واحدة عند الاتصال بهذه الشبكة.
+fullmove-wifi-why-install-profile = لم تُضف: لم يُثبَّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في إعدادات النظام في الوقت المناسب. اكتب كلمة مرورها مرة واحدة عند الاتصال بهذه الشبكة.
+fullmove-rebuilding-wifi = جارٍ إضافة شبكات Wi-Fi المحفوظة
+fullmove-rebuilding-wifi-profile = { $minutes ->
+        [zero] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: لحظات
+        [one] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: دقيقة واحدة أخرى على الأكثر
+        [two] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: دقيقتان أخريان على الأكثر
+        [few] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: { $minutes } دقائق أخرى على الأكثر
+        [many] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: { $minutes } دقيقة أخرى على الأكثر
+       *[other] لإضافة شبكات Wi-Fi، ثبّت ملف التعريف “Wi-Fi networks from your old laptop (PCTwin)” في صفحة إعدادات النظام التي فتحها PCTwin: { $minutes } دقيقة أخرى على الأكثر
+    }
+report-group-wifi = شبكات Wi-Fi
+report-count-wifi = { $count ->
+        [zero] لا شبكات
+        [one] شبكة واحدة
+        [two] شبكتان
+        [few] { $count } شبكات
+        [many] { $count } شبكة
+       *[other] { $count } شبكة
+    }

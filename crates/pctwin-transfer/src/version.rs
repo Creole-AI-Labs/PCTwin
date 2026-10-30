@@ -45,10 +45,19 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// name a folder of the old laptop's own ("From Bea's laptop") that every file of the mover's
 /// lands in ([`OWN_FOLDER_SINCE`]). With a laptop on 6 or older the rules never name one, and its
 /// files land as they always did (a clashing name gets "name (2)").
+///
+/// Version 8 (30 October 2026) moves saved Wi-Fi networks ([`WIFI_SINCE`]): the old laptop's
+/// extras list the networks found, by name only, and which ones its person ticked; once the
+/// plan is approved, after the app data, the old laptop sends one sealed record of the ticked
+/// networks with their passwords. With a laptop on 7 or older the old laptop offers none (its
+/// person is not asked), and nothing more is sent.
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 3,
-    newest: 7,
+    newest: 8,
 };
+
+/// The first move protocol version that moves saved Wi-Fi networks with their passwords.
+pub const WIFI_SINCE: u16 = 8;
 
 /// The first move protocol version whose landing rules may name the old laptop's own folder.
 pub const OWN_FOLDER_SINCE: u16 = 7;

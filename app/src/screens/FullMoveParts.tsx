@@ -30,6 +30,24 @@ export function specialNotes(c: Pick<ChangeView, "notes">, l10n: ReturnType<type
   return c.notes.map((n) => l10n.getString(`special-note-${n.note}`));
 }
 
+/**
+ * The old laptop's saved Wi-Fi networks on the plan (2.4): each by name, with what happens to it.
+ * Never a password: those come only after the approval, inside the encrypted link.
+ */
+function WifiBox({ lines }: { lines: RebuildPlan["wifi"] }) {
+  const { l10n } = useLocalization();
+  if (lines.length === 0) return null;
+  return (
+    <PlanBox title={l10n.getString("fullmove-group-wifi", { count: lines.length })}>
+      <RowList>
+        {lines.map((w, i) => (
+          <Row key={i} title={<Name>{w.name}</Name>} detail={l10n.getString(`fullmove-wifi-step-${w.step}`)} />
+        ))}
+      </RowList>
+    </PlanBox>
+  );
+}
+
 /** What a change still needs from the person, or what it does, in words; an app made for Intel Macs says it needs Rosetta after that. */
 function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
   const what = changeWhat(c, l10n);
@@ -185,6 +203,7 @@ export function RebuildPlanSection({
           </ul>
         </PlanBox>
       )}
+      <WifiBox lines={rebuild.wifi} />
       <Changes titleId="fullmove-group-needs" changes={needs} />
       <Changes titleId="fullmove-group-here" changes={here} />
       {older.length > 0 && onUpdate && (
@@ -281,7 +300,11 @@ export function Rebuilding({ step, waitsForFreeWifi = false }: { step: RebuildSt
         ? l10n.getString("fullmove-rebuilding-permission")
         : step.step === "waiting-free-wifi"
           ? l10n.getString("fullmove-rebuilding-waiting-wifi", { minutes: step.minutesLeft })
-          : l10n.getString(`fullmove-rebuilding-${step.step}`, { done: step.done.toLocaleString(pageLocale()), total: step.total.toLocaleString(pageLocale()) });
+          : step.step === "wifi"
+            ? l10n.getString("fullmove-rebuilding-wifi")
+            : step.step === "wifi-profile"
+              ? l10n.getString("fullmove-rebuilding-wifi-profile", { minutes: step.minutesLeft })
+              : l10n.getString(`fullmove-rebuilding-${step.step}`, { done: step.done.toLocaleString(pageLocale()), total: step.total.toLocaleString(pageLocale()) });
   return (
     <>
       <TopStrip labelId="outcome-eyebrow" />
@@ -292,7 +315,7 @@ export function Rebuilding({ step, waitsForFreeWifi = false }: { step: RebuildSt
           {line}
         </p>
       )}
-      {waitsForFreeWifi && step?.step !== "settings" && step?.step !== "waiting-free-wifi" && (
+      {waitsForFreeWifi && (step?.step === "permission" || step?.step === "apps" || step === null) && (
         <div className="mv-note">
           <Banner tone="info">{l10n.getString("fullmove-rebuilding-wait-wifi")}</Banner>
         </div>
@@ -331,6 +354,8 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
     }
     case "came-from":
       return l10n.getString(n.makersSite ? "fullmove-note-came-from-maker" : "fullmove-note-came-from-elsewhere");
+    case "wifi":
+      return l10n.getString(`fullmove-wifi-why-${n.why}`);
   }
 }
 
@@ -341,6 +366,8 @@ export function lineDetail(l: RebuiltLine, l10n: L10n): string {
   const why = l.notes.some((n) => n.note === "data");
   if (l.reason && !why) parts.push(l10n.getString(l.kind === "special" && l.reason === "finish-by-hand" ? "fullmove-special-finish" : `reason-${l.reason}`));
   for (const n of l.notes) parts.push(noteText(n, l, l10n));
+  // What its special category tells the person (2.5), said as the plan said it.
+  parts.push(...specialNotes({ notes: l.specialNotes }, l10n));
   return parts.filter(Boolean).join(" ");
 }
 

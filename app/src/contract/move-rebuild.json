@@ -15,5 +15,12 @@
   {
     "minutesLeft": 18,
     "step": "waiting-free-wifi"
+  },
+  {
+    "step": "wifi"
+  },
+  {
+    "minutesLeft": 6,
+    "step": "wifi-profile"
   }
 ]

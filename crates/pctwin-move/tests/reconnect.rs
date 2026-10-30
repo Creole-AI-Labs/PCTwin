@@ -380,6 +380,7 @@ async fn old_side<C: Channel, B: Comeback>(
         mover: "1000",
         people: &[],
         extras: &[],
+        wifi: None,
     };
     let (sent, _) = pctwin_move::send_by_rules(
         &mut link,
@@ -1223,6 +1224,7 @@ async fn a_drop_during_the_app_data_loses_only_the_app_data_and_the_files_carry_
                     mover: "1000",
                     people: &[],
                     extras: &[],
+                    wifi: None,
                 };
                 pctwin_move::send_by_rules(
                     &mut link,
@@ -1273,4 +1275,135 @@ async fn a_drop_during_the_app_data_loses_only_the_app_data_and_the_files_carry_
     assert_eq!(sent.ended, Ended::Finished);
     assert_eq!(received.ended, Ended::Finished);
     assert_eq!(landed_true(&w, &received), FILES);
+}
+
+/// The old laptop's saved Wi-Fi networks (2.4): the record, and how often it was asked for.
+#[derive(Debug)]
+struct WifiHere {
+    record: Vec<u8>,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl pctwin_move::wifi::WifiOut for WifiHere {
+    fn record(&self) -> zeroize::Zeroizing<Vec<u8>> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        zeroize::Zeroizing::new(self.record.clone())
+    }
+}
+
+/// The new laptop's person, keeping the Wi-Fi record that arrives (`approves`: or says no).
+struct WithWifi {
+    person: Person,
+    approves: bool,
+    arrived: Vec<Vec<u8>>,
+}
+
+impl Steps for WithWifi {
+    async fn person(&mut self, r: &Record, a: &str) -> Result<PersonTarget, Stop> {
+        self.person.person(r, a).await
+    }
+    async fn approve(&mut self, r: &Record, p: &Preview) -> Result<(), Stop> {
+        if !self.approves {
+            return Err(Stop::NotApproved);
+        }
+        self.person.approve(r, p).await
+    }
+    fn landing(&self, item: &Item) -> Option<LandingPlace> {
+        self.person.landing(item)
+    }
+    fn wifi_in(&mut self) -> Option<&mut dyn pctwin_move::wifi::WifiIn> {
+        Some(self)
+    }
+}
+
+impl pctwin_move::wifi::WifiIn for WithWifi {
+    fn arrived(&mut self, record: zeroize::Zeroizing<Vec<u8>>) {
+        self.arrived.push(record.to_vec());
+    }
+}
+
+async fn wifi_move(approves: bool) -> (WithWifi, Arc<WifiHere>, bool, bool) {
+    let mut w = world();
+    let mut table = std::mem::take(&mut w.table);
+    let (mut back, mut dial, _wire, _) = way_back(Way::Open);
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let (mut old, new) = mem_pair();
+    let here = Arc::new(WifiHere {
+        record: (0..70_000u32).map(|i| (i % 253) as u8).collect(),
+        asked: Default::default(),
+    });
+    let mut steps = WithWifi {
+        person: Person {
+            rules: rules(),
+            at_approval: None,
+        },
+        approves,
+        arrived: Vec::new(),
+    };
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            async {
+                let mut link = greeted(&mut old, pctwin_move::greeting::Side::Old).await?;
+                let who = Who {
+                    mover: "1000",
+                    people: &[],
+                    extras: &[],
+                    wifi: Some(here.as_ref()),
+                };
+                pctwin_move::send_by_rules(
+                    &mut link,
+                    &w.record,
+                    &who,
+                    |i| Some(source_in(w.old.path(), i)),
+                    &old_live,
+                    Arc::new(pctwin_transfer::FsOpener),
+                    &mut back,
+                    None,
+                )
+                .await
+                .map(|(s, _)| s)
+            },
+            async {
+                // This laptop's end goes with its side: a no ends the link for the old laptop too.
+                let mut new = new;
+                let mut link = greeted(&mut new, pctwin_move::greeting::Side::New).await?;
+                pctwin_move::receive_by_rules(
+                    &mut link,
+                    &mut steps,
+                    |s, _| s.person.rules.clone(),
+                    &mut table,
+                    Here {
+                        journal: &w.journal,
+                        account: "1001",
+                    },
+                    &new_live,
+                    &mut dial,
+                )
+                .await
+            }
+        )
+    })
+    .await;
+    let landed = received
+        .as_ref()
+        .is_ok_and(|r| landed_true(&w, r) == FILES && r.ended == Ended::Finished);
+    (steps, here, sent.is_ok(), landed)
+}
+
+/// Move protocol 8: once the plan is approved, the ticked networks' record crosses whole, once,
+/// inside the sealed link, and every file still lands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_wifi_record_crosses_once_after_the_approval() {
+    let (steps, here, sent, landed) = wifi_move(true).await;
+    assert!(sent && landed);
+    assert_eq!(here.asked.load(Ordering::SeqCst), 1);
+    assert_eq!(steps.arrived, std::slice::from_ref(&here.record));
+}
+
+/// The new laptop's person says no: the record is never even made, and nothing of it crosses.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn no_wifi_record_crosses_without_the_approval() {
+    let (steps, here, _, _) = wifi_move(false).await;
+    assert_eq!(here.asked.load(Ordering::SeqCst), 0);
+    assert!(steps.arrived.is_empty());
 }

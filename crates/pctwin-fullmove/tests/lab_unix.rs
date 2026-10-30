@@ -722,6 +722,7 @@ async fn full_move(kind: Kind) {
                 mover: MOVER,
                 people: &[],
                 extras: &extras_bytes,
+                wifi: None,
             };
             let mut back = pctwin_move::resume::NoComeback;
             pctwin_move::send_by_rules(

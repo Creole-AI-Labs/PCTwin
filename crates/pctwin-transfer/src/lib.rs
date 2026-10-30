@@ -119,8 +119,8 @@ pub use undo::{
 };
 pub use version::{
     APPS_SINCE, COPY_SINCE, EXTRAS_SINCE, HOLD_SINCE, KEYED_SINCE, MOVE_PROTOCOL, OWN_FOLDER_SINCE,
-    PERSONAL_SINCE, SET_DOWN_SINCE, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version,
-    choose_version,
+    PERSONAL_SINCE, SET_DOWN_SINCE, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, WIFI_SINCE,
+    agree_version, choose_version,
 };
 
 use std::fs::File;

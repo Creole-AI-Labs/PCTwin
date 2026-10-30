@@ -8,7 +8,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import chooses from "../contract/move-choose.json";
 import plans from "../contract/plan-view.json";
-import { parseChoiceView, parsePlanView, type ChoiceView } from "../bridge";
+import { parseChoiceView, parsePlanView, type Choice, type ChoiceView } from "../bridge";
 import { localization } from "../i18n";
 import { violations } from "../testing/a11y";
 import AcceptMove from "./AcceptMove";
@@ -19,7 +19,7 @@ import { RebuildPlanSection } from "./FullMoveParts";
 import plansFull from "../contract/plan-view.json";
 import outcomes from "../contract/move-outcome.json";
 import { parseMoveOutcome } from "../bridge";
-import ChooseWhat, { choiceOf, keyOf, stateOf } from "./ChooseWhat";
+import ChooseWhat, { choiceOf, keyOf, stateOf, wifiStart } from "./ChooseWhat";
 import { next } from "./MoveHost";
 
 const l10n = localization("en");
@@ -59,7 +59,7 @@ describe("choosing what moves, on the old laptop", () => {
     expect(parseChoiceView({ groups: [], folders: [{ role: "documents", parts: [1], files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
     expect(parseChoiceView({ groups: [{ role: "nowhere", files: 1, bytes: 1 }], apps: 0, leftBehind: [] })).toBeNull();
     // Online-only files (2.6): offered only where this laptop can keep local copies, each cloud by a plain ID.
-    const ok = { groups: [], folders: [], apps: 0, leftBehind: [], keepLocalHere: true, onlineOnly: [{ provider: "one-drive", name: "OneDrive", files: 2, bytes: 9 }] };
+    const ok = { groups: [], folders: [], apps: 0, leftBehind: [], keepLocalHere: true, wifi: null, onlineOnly: [{ provider: "one-drive", name: "OneDrive", files: 2, bytes: 9 }] };
     expect(parseChoiceView(ok)?.onlineOnly).toEqual(ok.onlineOnly);
     expect(parseChoiceView({ ...ok, keepLocalHere: false })).toBeNull();
     expect(parseChoiceView({ ...ok, onlineOnly: [{ provider: "One Drive", name: null, files: 2, bytes: 9 }] })).toBeNull();
@@ -88,6 +88,7 @@ describe("choosing what moves, on the old laptop", () => {
       leftBehind: [],
       onlineOnly: [],
       keepLocalHere: true,
+      wifi: null,
     };
     expect(stateOf(v, v.folders[0], new Set([keyOf(v.folders[1])]))).toBe("on");
     expect(stateOf(v, v.folders[0], new Set())).toBe("off");
@@ -133,6 +134,53 @@ describe("choosing what moves, on the old laptop", () => {
     fireEvent.click(screen.getByRole("radio", { name: text("choose-except") }));
     fireEvent.click(screen.getByRole("button", { name: text("choose-open", { name: text("plan-role-documents") }) }));
     expect(await violations()).toEqual([]);
+  });
+
+  it("saved Wi-Fi networks start ticked only for the laptop's administrator, and only those that can move are offered", () => {
+    const v = found();
+    if (!v.wifi) throw new Error("the engine's example offers Wi-Fi");
+    expect(v.wifi.ticked).toBe(true);
+    // An administrator: the open and password networks start ticked; the organisation's cannot be.
+    expect([...wifiStart(v)]).toEqual([0, 1]);
+    const onContinue = vi.fn<(c: Choice) => void>();
+    const { unmount } = inApp(<ChooseWhat view={v} onContinue={onContinue} />);
+    expect(screen.getByRole("heading", { level: 2, name: text("choose-wifi-title") })).toBeTruthy();
+    expect(screen.getByText(text("choose-wifi-admin"))).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: (n) => n.startsWith("Office") })).toBeNull();
+    expect(screen.getByText(text("choose-wifi-organisation"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("choose-continue") }));
+    expect(onContinue.mock.calls[0][0].wifi).toEqual([0, 1]);
+    // Unticked one by one.
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith("Home") }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-continue") }));
+    expect(onContinue.mock.calls[1][0].wifi).toEqual([1]);
+    // Only what I choose: none starts ticked.
+    fireEvent.click(screen.getByRole("radio", { name: text("choose-only") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.startsWith(text("plan-role-pictures")) }));
+    fireEvent.click(screen.getByRole("button", { name: text("choose-continue") }));
+    expect(onContinue.mock.calls[2][0].wifi).toBeUndefined();
+    unmount();
+    // Not an administrator: none starts ticked, and the page says whom to ask.
+    const notAdmin: ChoiceView = { ...v, wifi: { ...v.wifi, ticked: false } };
+    expect(wifiStart(notAdmin).size).toBe(0);
+    inApp(<ChooseWhat view={notAdmin} onContinue={onContinue} />);
+    expect(screen.getByText(text("choose-wifi-ask-admin"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("choose-continue") }));
+    expect(onContinue.mock.calls[3][0].wifi).toBeUndefined();
+    // A tick on a network that cannot move, or one not offered, counts for nothing.
+    expect(choiceOf(v, "everything", new Set(), true, {}, new Set([0, 2, 9])).wifi).toEqual([0]);
+  });
+
+  it("refuses saved Wi-Fi networks out of shape", () => {
+    const base = chooses[0] as Record<string, unknown>;
+    expect(parseChoiceView({ ...base, wifi: { networks: [], ticked: true } })).toBeNull();
+    expect(parseChoiceView({ ...base, wifi: { networks: [{ name: "Home", kind: "radio" }], ticked: true } })).toBeNull();
+    expect(parseChoiceView({ ...base, wifi: { networks: [{ name: "", kind: "open" }], ticked: true } })).toBeNull();
+    expect(parseChoiceView({ ...base, wifi: { networks: [{ name: "Home", kind: "open", password: "x" }], ticked: true } })).toBeNull();
+    expect(parseChoiceView({ ...base, wifi: { networks: [{ name: "Home", kind: "open" }] } })).toBeNull();
+    const without: Record<string, unknown> = { ...base };
+    delete without.wifi;
+    expect(parseChoiceView(without)).toBeNull();
   });
 
   it("a choice page is only left by the person's answer", () => {

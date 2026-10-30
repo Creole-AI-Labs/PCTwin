@@ -35,6 +35,11 @@ pub enum Tool {
     Security,
     /// macOS `open` (only a file PCTwin wrote, or a System Settings page).
     Open,
+    /// Windows `whoami` (only `/groups`: whether the person is one of this laptop's
+    /// administrators, for the 20 October 2026 Wi-Fi rule).
+    Whoami,
+    /// Mac and Linux `id` (only `-G` and `-Gn`: the person's groups, for the same rule).
+    Id,
 }
 
 impl Tool {
@@ -52,15 +57,19 @@ impl Tool {
             Tool::Networksetup => "/usr/sbin/networksetup".into(),
             Tool::Security => "/usr/bin/security".into(),
             Tool::Open => "/usr/bin/open".into(),
-            Tool::Netsh => {
-                let root = std::env::var_os("SystemRoot")
-                    .map(|r| r.to_string_lossy().into_owned())
-                    .filter(|r| r.len() > 2 && r.as_bytes()[1] == b':')
-                    .unwrap_or_else(|| "C:\\Windows".into());
-                format!("{root}\\System32\\netsh.exe")
-            }
+            Tool::Id => "/usr/bin/id".into(),
+            Tool::Netsh => format!("{}\\System32\\netsh.exe", windows_folder()),
+            Tool::Whoami => format!("{}\\System32\\whoami.exe", windows_folder()),
         }
     }
+}
+
+/// The Windows folder, from `SystemRoot` when it names a drive's folder, else its usual place.
+fn windows_folder() -> String {
+    std::env::var_os("SystemRoot")
+        .map(|r| r.to_string_lossy().into_owned())
+        .filter(|r| r.len() > 2 && r.as_bytes()[1] == b':')
+        .unwrap_or_else(|| "C:\\Windows".into())
 }
 
 /// What a tool printed.

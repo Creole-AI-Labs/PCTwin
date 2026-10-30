@@ -3853,6 +3853,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "winreg",
+ "zeroize",
 ]
 
 [[package]]
@@ -4105,6 +4106,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

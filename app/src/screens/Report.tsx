@@ -10,9 +10,9 @@ import { Heading, EvidenceLine, ReasonText } from "./ProgressParts";
 import { shownName } from "../names";
 
 /** What a laptop holds beyond files (decided 29 October 2026), in the order the report lists them. */
-const BEYOND = ["apps", "settings", "special", "people"] as const;
+const BEYOND = ["apps", "settings", "wifi", "special", "people"] as const;
 type Beyond = (typeof BEYOND)[number];
-const KIND_OF: Record<Exclude<Beyond, "people">, ChangeKind> = { apps: "app", settings: "settings", special: "special" };
+const KIND_OF: Record<Exclude<Beyond, "people">, ChangeKind> = { apps: "app", settings: "settings", wifi: "wifi", special: "special" };
 
 /** A line of the full move that needs the person: it failed, or it waits for them. */
 const needsYou = (l: RebuiltLine) => l.status === "failed" || l.status === "needs-action";

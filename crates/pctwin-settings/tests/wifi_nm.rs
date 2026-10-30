@@ -307,3 +307,35 @@ fn the_real_network_manager_keeps_a_password_given_only_on_standard_input() {
         .unwrap();
     assert!(gone.ok);
 }
+
+/// Only the networks the person ticked are read with their passwords: NetworkManager is asked
+/// for no other network's secrets.
+#[test]
+fn only_the_ticked_networks_passwords_are_asked_for() {
+    let old = Nm::default();
+    for (name, psk) in [("Home", "aaaaaaaa"), ("Cafe", "bbbbbbbb")] {
+        old.profiles.borrow_mut().insert(
+            name.into(),
+            Profile {
+                ssid: name.into(),
+                hidden: false,
+                auto: true,
+                key_mgmt: "wpa-psk".into(),
+                psk: psk.into(),
+            },
+        );
+    }
+    let found =
+        pctwin_settings::wifi::export_nm_where(&mut old.clone(), true, &|n| n == "Home").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].name, "Home");
+    let secrets: Vec<String> = old
+        .argv
+        .borrow()
+        .iter()
+        .filter(|l| l.contains("--show-secrets"))
+        .cloned()
+        .collect();
+    assert_eq!(secrets.len(), 1, "{secrets:?}");
+    assert!(secrets[0].ends_with("Home"), "{secrets:?}");
+}

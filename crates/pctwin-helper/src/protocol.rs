@@ -29,6 +29,10 @@ pub const MAX_READ: u32 = 16 * 1024 * 1024;
 pub const MAX_HANDLES: usize = 1_000_000;
 /// Longest frame either way: the handles of [`MAX_HANDLES`] files, with room for its header.
 pub const MAX_FRAME: usize = 1 + 4 + MAX_HANDLES * 16;
+/// The most saved Wi-Fi networks one answer carries.
+pub const MAX_WIFI_PROFILES: usize = pctwin_types::limits::WIFI_PROFILES;
+/// The most bytes of Wi-Fi profiles one answer carries (well inside [`MAX_FRAME`]).
+pub const MAX_WIFI_BYTES: usize = 8 * 1024 * 1024;
 /// Items in one frame of a person's items (well inside [`MAX_FRAME`] however long their names).
 pub const ITEMS_PER_FRAME: usize = 1000;
 
@@ -137,6 +141,10 @@ pub enum Request {
     StageBytes { bytes: String },
     /// Phase 2 broker: the move was stopped; no new change starts in this session.
     Revoke,
+    /// Old laptop, Windows: this laptop's saved Wi-Fi networks with their passwords, read with
+    /// the system's own tool (Task List 2.4, decided 20 October 2026). Only for a helper started
+    /// with `--wifi yes` (the administrator approved it at the system's prompt), and once.
+    WifiProfiles,
     /// The move is over: the helper ends.
     Bye,
 }
@@ -235,6 +243,12 @@ pub enum Answer {
     Receipt(Box<crate::broker::receipt::Receipt>),
     /// The broker did not act, and why.
     Denied(crate::broker::Denial),
+    /// Each saved Wi-Fi network as the system's tool wrote it (its profile, password in plain
+    /// text), each cleared from memory when dropped; at most [`MAX_WIFI_PROFILES`], in all at
+    /// most [`MAX_WIFI_BYTES`]. Never logged; the app reads only the networks its person ticked.
+    WifiProfiles {
+        profiles: Vec<Secret>,
+    },
     Goodbye,
 }
 

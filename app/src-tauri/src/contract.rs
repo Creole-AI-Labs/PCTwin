@@ -154,6 +154,7 @@ fn stages() -> Vec<Stage> {
         },
         Stage::Rebuilding,
         Stage::AppData,
+        Stage::WifiPasswords,
     ]
 }
 
@@ -162,6 +163,7 @@ fn stages() -> Vec<Stage> {
 fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
     use crate::fullmove::ChangeView;
     use crate::guard_views::{ChangeAction, UndoPromise};
+    use crate::wifi::WifiStep;
     use pctwin_fullmove::extras::{NotMovedCount, NotMovedGroup, SpecialStep};
     use pctwin_fullmove::plan::{Kind, Title};
     let change = |title, kind, action, undo, count, needs, special, files| ChangeView {
@@ -515,6 +517,21 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
             ],
             not_checked: vec![("Library/Mail".into(), "permission denied".into())],
         }),
+        // Saved Wi-Fi networks (2.4): each step the plan can say.
+        wifi: [
+            ("Home", WifiStep::Add),
+            ("Studio 5G", WifiStep::AddByProfile),
+            ("Gran's", WifiStep::Skipped),
+            ("Office", WifiStep::Organisation),
+            ("Old router", WifiStep::NotThisKind),
+            ("Lab", WifiStep::NoPassword),
+        ]
+        .into_iter()
+        .map(|(name, step)| crate::wifi::WifiPlanLine {
+            name: name.into(),
+            step,
+        })
+        .collect(),
         internet: pctwin_fullmove::plan::Internet {
             downloads: 2,
             sign_ins: 2,
@@ -545,6 +562,18 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
         status,
         reason,
         notes,
+        special_notes: Vec::new(),
+    };
+    use pctwin_fullmove::wifi::WifiWhy;
+    let wifi = |why: WifiWhy| {
+        line(
+            Title::Name(format!("Network {why:?}")),
+            Kind::Wifi,
+            0,
+            ItemStatus::NeedsAction,
+            Some(Reason::FinishByHand),
+            vec![LineNote::Wifi { why }],
+        )
     };
     let data = |why| {
         line(
@@ -596,14 +625,22 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                 None,
                 vec![],
             ),
-            line(
-                Title::Name("Browser".into()),
-                Kind::Special,
-                0,
-                ItemStatus::NeedsAction,
-                Some(Reason::FinishByHand),
-                vec![LineNote::Sites],
-            ),
+            RebuiltLine {
+                special_notes: vec![
+                    pctwin_special::category::Note::OwnSync {
+                        page: Some("https://support.example.org/sync".into()),
+                    },
+                    pctwin_special::category::Note::PasswordsGuided,
+                ],
+                ..line(
+                    Title::Name("Browser".into()),
+                    Kind::Special,
+                    0,
+                    ItemStatus::NeedsAction,
+                    Some(Reason::FinishByHand),
+                    vec![LineNote::Sites],
+                )
+            },
             data(DataWhy::Lost),
             data(DataWhy::DidNotArrive),
             data(DataWhy::AppOpen),
@@ -638,6 +675,30 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                 Some(Reason::FinishByHand),
                 vec![],
             ),
+            // Saved Wi-Fi networks (2.4): copied, skipped by the person, and each reason.
+            line(
+                Title::Name("Home".into()),
+                Kind::Wifi,
+                0,
+                ItemStatus::Copied,
+                None,
+                vec![],
+            ),
+            line(
+                Title::Name("Gran's".into()),
+                Kind::Wifi,
+                0,
+                ItemStatus::SkippedByUser,
+                None,
+                vec![],
+            ),
+            wifi(WifiWhy::Organisation),
+            wifi(WifiWhy::NotThisKind),
+            wifi(WifiWhy::NoPassword),
+            wifi(WifiWhy::DidNotArrive),
+            wifi(WifiWhy::AlreadyHere),
+            wifi(WifiWhy::NotAdded),
+            wifi(WifiWhy::InstallProfile),
         ],
         more: 0,
         here: vec![
@@ -1398,6 +1459,23 @@ fn families() -> Vec<(&'static str, Value)> {
                         },
                     ],
                     keep_local_here: true,
+                    wifi: Some(crate::wifi::WifiChoice {
+                        networks: vec![
+                            crate::wifi::WifiOffered {
+                                name: "Home".into(),
+                                kind: pctwin_fullmove::wifi::WifiKind::Password,
+                            },
+                            crate::wifi::WifiOffered {
+                                name: "Cafe".into(),
+                                kind: pctwin_fullmove::wifi::WifiKind::Open,
+                            },
+                            crate::wifi::WifiOffered {
+                                name: "Office".into(),
+                                kind: pctwin_fullmove::wifi::WifiKind::Organisation,
+                            },
+                        ],
+                        ticked: true,
+                    }),
                 },
                 // A Mac: keeping local copies is not built there yet.
                 crate::moving::ChoiceView {
@@ -1407,6 +1485,7 @@ fn families() -> Vec<(&'static str, Value)> {
                     left_behind: Vec::new(),
                     online_only: Vec::new(),
                     keep_local_here: false,
+                    wifi: None,
                 },
             ]),
         ),
@@ -1420,6 +1499,8 @@ fn families() -> Vec<(&'static str, Value)> {
                     total: 120,
                 },
                 pctwin_fullmove::run::Progress::WaitingFreeWifi { minutes_left: 18 },
+                pctwin_fullmove::run::Progress::Wifi,
+                pctwin_fullmove::run::Progress::WifiProfile { minutes_left: 6 },
             ]),
         ),
         ("report-item", json(report_items())),

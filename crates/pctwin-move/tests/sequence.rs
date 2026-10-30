@@ -54,6 +54,7 @@ async fn send_greeted(
         mover,
         people,
         extras: &extras,
+        wifi: None,
     };
     let mut no_way_back = pctwin_move::resume::NoComeback;
     pctwin_move::send_by_rules(

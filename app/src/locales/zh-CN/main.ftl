@@ -2926,3 +2926,33 @@ special-note-store-protected-saves = 商店会自己保管这些存档，所以 
 special-note-mod-programs-held = 这个游戏的一些附加内容是程序。PCTwin 会列出它们，但不会复制或启用它们。请从它们的制作者那里重新获取。
 special-note-mod-programs-as-files = 这个游戏的一些附加内容是程序。它们会作为普通文件随你的其他文件一起迁移，PCTwin 从不启用它们。请从它们的制作者那里获取可用的副本。
 special-note-launcher-verify = 在新笔记本电脑上安装启动器并登录。然后使用它自己的验证或定位步骤，让它找到并检查你的游戏。只有在你选择时，PCTwin 才会复制已安装的游戏。
+choose-wifi-title = 已保存的 Wi-Fi 网络
+choose-wifi-admin = 勾选的网络会连同密码一起移动，新笔记本电脑会自己连接它们。为了读取密码，这台笔记本电脑可能会在它自己的窗口中请求管理员批准。
+choose-wifi-ask-admin = 读取 Wi-Fi 密码需要这台笔记本电脑的管理员，所以没有勾选任何网络。要带走它们，请询问负责这台笔记本电脑的人，然后勾选：这台笔记本电脑会在它自己的窗口中请求其批准。
+choose-wifi-open = 无密码
+choose-wifi-organisation = 由组织设置：在新笔记本电脑上使用组织提供的信息重新连接
+choose-wifi-other = PCTwin 不移动这类网络：在新笔记本电脑上重新连接
+move-wait-wifi-title = 正在读取已保存的 Wi-Fi 密码
+move-wait-wifi-body = 这台笔记本电脑可能会在它自己的窗口中请求管理员批准。请作答，以带走你勾选的 Wi-Fi 网络。这台笔记本电脑上的任何内容都不会改变。
+fullmove-group-wifi = 已保存的 Wi-Fi 网络：{ $count }
+fullmove-wifi-step-add = PCTwin 会在这里添加它及其密码，密码在你批准后加密发送。
+fullmove-wifi-step-add-by-profile = 你在“系统设置”中为所有这些网络添加一次即可。PCTwin 会打开该页面。
+fullmove-wifi-step-skipped = 在旧笔记本电脑上未勾选，所以留在那里。
+fullmove-wifi-step-organisation = 由组织设置：在这里使用组织提供的信息重新连接。
+fullmove-wifi-step-not-this-kind = PCTwin 不移动这类网络：在这里重新连接。
+fullmove-wifi-step-no-password = 无法在旧笔记本电脑上读取它的密码：在这里连接此网络时输入一次密码。
+fullmove-wifi-why-organisation = 由组织设置：使用组织提供的信息重新连接。
+fullmove-wifi-why-not-this-kind = PCTwin 不移动这类网络：在这里重新连接。
+fullmove-wifi-why-no-password = 无法在旧笔记本电脑上读取它的密码：连接此网络时输入一次密码。
+fullmove-wifi-why-did-not-arrive = 它没有从旧笔记本电脑送达：连接此网络时输入一次密码。
+fullmove-wifi-why-already-here = 这里已经保存了同名网络，所以 PCTwin 保持原样。如果连接不上，请输入一次密码。
+fullmove-wifi-why-not-added = 这台笔记本电脑没有添加它：连接此网络时输入一次密码。
+fullmove-wifi-why-install-profile = 未添加：描述文件 “Wi-Fi networks from your old laptop (PCTwin)” 没有及时在“系统设置”中安装。连接此网络时输入一次密码。
+fullmove-rebuilding-wifi = 正在添加已保存的 Wi-Fi 网络
+fullmove-rebuilding-wifi-profile = { $minutes ->
+       *[other] 要添加 Wi-Fi 网络，请在 PCTwin 打开的“系统设置”页面上安装描述文件 “Wi-Fi networks from your old laptop (PCTwin)”：最多还剩 { $minutes } 分钟
+    }
+report-group-wifi = Wi-Fi 网络
+report-count-wifi = { $count ->
+       *[other] { $count } 个网络
+    }

@@ -123,6 +123,75 @@ describe("the approval screen's apps, settings and app data", () => {
   });
 });
 
+describe("saved Wi-Fi networks (2.4)", () => {
+  it("the plan names each network with what happens to it, and never a password", async () => {
+    const plan = fullPlan();
+    expect(plan.wifi.map((w) => w.step)).toEqual(["add", "add-by-profile", "skipped", "organisation", "not-this-kind", "no-password"]);
+    const { container } = inApp(<RebuildPlanSection rebuild={plan} />);
+    const body = plain(container.textContent);
+    expect(body).toContain(plain(text("fullmove-group-wifi", { count: 6 })));
+    for (const w of plan.wifi) {
+      expect(body).toContain(w.name);
+      expect(body).toContain(plain(text(`fullmove-wifi-step-${w.step}`)));
+    }
+    expect(await violations()).toEqual([]);
+    // No networks: no box.
+    const none = inApp(<RebuildPlanSection rebuild={{ ...plan, wifi: [] }} />);
+    expect(plain(none.container.textContent)).not.toContain(plain(text("fullmove-group-wifi", { count: 0 })));
+  });
+
+  it("refuses a plan line with an unknown step or a field it does not know", () => {
+    for (const bad of [{ name: "Home", step: "copy" }, { name: "", step: "add" }, { name: "Home", step: "add", password: "x" }]) {
+      const p = structuredClone(plans[1]) as { rebuild: { wifi: unknown[] } };
+      p.rebuild.wifi = [bad];
+      expect(parsePlanView(p)).toBeNull();
+    }
+  });
+
+  it("each network's result says why it needs the person, in words", () => {
+    const { rebuilt } = fullOutcome();
+    const wifi = rebuilt.lines.filter((l) => l.kind === "wifi");
+    expect(wifi.map((l) => l.status)).toContain("copied");
+    expect(wifi.map((l) => l.status)).toContain("skipped-by-user");
+    const { container } = inApp(<RebuiltSection rebuilt={rebuilt} />);
+    const body = plain(container.textContent);
+    for (const why of ["organisation", "not-this-kind", "no-password", "did-not-arrive", "already-here", "not-added", "install-profile"]) {
+      expect(body).toContain(plain(text(`fullmove-wifi-why-${why}`)));
+    }
+    // The finish-by-hand reason is said by the network's own words, never as app data's.
+    expect(wifi.filter((l) => l.status === "needs-action").every((l) => l.notes.length === 1 && l.notes[0].note === "wifi")).toBe(true);
+  });
+
+  it("refuses a Wi-Fi note on another line, or an unknown why", () => {
+    const at = (outcomes[1] as { rebuilt: { lines: { kind: string; notes: unknown[] }[] } }).rebuilt.lines.findIndex((l) => l.kind === "wifi" && l.notes.length > 0);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const onApp = structuredClone(outcomes[1]) as { rebuilt: { lines: { kind: string; notes: unknown[] }[] } };
+    onApp.rebuilt.lines[at].kind = "app";
+    expect(parseMoveOutcome(onApp)).toBeNull();
+    const unknown = structuredClone(outcomes[1]) as { rebuilt: { lines: { notes: { why?: string }[] }[] } };
+    unknown.rebuilt.lines[at].notes[0].why = "all-good";
+    expect(parseMoveOutcome(unknown)).toBeNull();
+    const other = structuredClone(outcomes[1]) as { rebuilt: { lines: { notes: unknown[] }[] } };
+    other.rebuilt.lines[at].notes = [{ note: "sign-in" }];
+    expect(parseMoveOutcome(other)).toBeNull();
+  });
+
+  it("says when it adds the networks, and on a Mac how long it waits for the profile", () => {
+    const parsed = steps.map(parseRebuildStep);
+    const adding = parsed.find((s) => s?.step === "wifi") ?? null;
+    const waiting = parsed.find((s) => s?.step === "wifi-profile") ?? null;
+    const first = inApp(<Rebuilding step={adding} waitsForFreeWifi />);
+    expect(plain(screen.getByRole("status").textContent)).toBe(plain(text("fullmove-rebuilding-wifi")));
+    // Waiting for free Wi-Fi is about apps: not said while the networks are added.
+    expect(plain(first.container.textContent)).not.toContain(plain(text("fullmove-rebuilding-wait-wifi")));
+    first.unmount();
+    inApp(<Rebuilding step={waiting} />);
+    expect(plain(screen.getByRole("status").textContent)).toBe(plain(text("fullmove-rebuilding-wifi-profile", { minutes: 6 })));
+    expect(parseRebuildStep({ step: "wifi-profile" })).toBeNull();
+    expect(parseRebuildStep({ step: "wifi", minutesLeft: 1 })).toBeNull();
+  });
+});
+
 describe("after the files", () => {
   it("says what it is setting up, measured", () => {
     const parsed = steps.map(parseRebuildStep);
@@ -157,7 +226,8 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(text("status-converted"));
     expect(body).toContain(text("reason-manual-install"));
     expect(body).toContain(text("fullmove-special-finish"));
-    expect(rebuiltNeedsAction(rebuilt)).toBe(18);
+    expect(rebuiltNeedsAction(rebuilt)).toBe(rebuilt.lines.filter((l) => l.status === "needs-action").length);
+    expect(rebuiltNeedsAction(rebuilt)).toBe(25);
     fireEvent.click(screen.getByRole("button", { name: text("fullmove-outcome-undo") }));
     expect(onUndo).toHaveBeenCalledOnce();
     expect(await violations()).toEqual([]);
@@ -193,6 +263,9 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(text("fullmove-data-mail-no-access"));
     // R1: website sign-ins are said on the browser's line.
     expect(body).toContain(text("fullmove-step-sites"));
+    // 2.5: a special line's category notes stay on the outcome, as the plan said them.
+    expect(body).toContain(text("special-note-own-sync"));
+    expect(body).toContain(text("special-note-passwords-guided"));
     // Gap 7: apps already here are listed, left as they are, never counted as reinstalled.
     expect(body).toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
     expect(body).toContain(text("fullmove-outcome-here"));
@@ -202,9 +275,10 @@ describe("the outcome's apps, settings and app data", () => {
 
   it("a line with no step to take says nothing more", () => {
     const { rebuilt } = fullOutcome();
-    const bare = { ...rebuilt, lines: rebuilt.lines.map((l) => ({ ...l, notes: [] })), here: [], fresh: false };
+    const bare = { ...rebuilt, lines: rebuilt.lines.map((l) => ({ ...l, notes: [], specialNotes: [] })), here: [], fresh: false };
     const { container } = inApp(<RebuiltSection rebuilt={bare} />);
     const body = plain(container.textContent);
+    expect(body).not.toContain(text("special-note-own-sync"));
     expect(body).not.toContain(text("fullmove-outcome-fresh"));
     expect(body).not.toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
   });
@@ -213,6 +287,20 @@ describe("the outcome's apps, settings and app data", () => {
     const bad = structuredClone(outcomes[1]) as { rebuilt: { lines: { notes: unknown[] }[] } };
     bad.rebuilt.lines[0].notes.push({ note: "all-done" });
     expect(parseMoveOutcome(bad)).toBeNull();
+  });
+
+  it("refuses an unknown special note, or one on a line that is not a special category", () => {
+    const at = (outcomes[1] as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } }).rebuilt.lines.findIndex((l) => l.specialNotes.length > 0);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const unknown = structuredClone(outcomes[1]) as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } };
+    unknown.rebuilt.lines[at].specialNotes.push({ note: "all-done" });
+    expect(parseMoveOutcome(unknown)).toBeNull();
+    const onApp = structuredClone(outcomes[1]) as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } };
+    onApp.rebuilt.lines[at].kind = "app";
+    expect(parseMoveOutcome(onApp)).toBeNull();
+    const missing = structuredClone(outcomes[1]) as { rebuilt: { lines: Record<string, unknown>[] } };
+    delete missing.rebuilt.lines[at].specialNotes;
+    expect(parseMoveOutcome(missing)).toBeNull();
   });
 
   it("offers no Undo when nothing can be put back", () => {

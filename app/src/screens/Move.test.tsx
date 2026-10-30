@@ -424,7 +424,10 @@ describe("who's moving, on the old laptop", () => {
     send("move-stage", { kind: "others-not-moved", why: "not-approved" });
     send("move-stage", { kind: "waiting" });
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-approval-title"));
-    expect(screen.getByText(text("move-others-not-approved"))).toBeTruthy();
+    expect(screen.getByText(text("move-others-not-approved"))).toBeTruthy();    // Reading the saved Wi-Fi passwords the person ticked (2.4): said while the system may ask.
+    send("move-stage", { kind: "wifi-passwords" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-wifi-title"));
+    expect(screen.getByText(text("move-wait-wifi-body"))).toBeTruthy();
   });
 
   it("where other people cannot be moved yet, they are listed without a tick and the page says so", async () => {

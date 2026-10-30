@@ -160,7 +160,7 @@ pub fn decline(k: &mut Kept) {
         let held = match l.kind {
             Kind::App => names.contains(&l.title),
             Kind::Special => data.contains(&l.title),
-            Kind::Settings => false,
+            Kind::Settings | Kind::Wifi => false,
         };
         if held {
             l.status = skipped.status();
@@ -332,6 +332,7 @@ mod tests {
             status,
             reason: Some(Reason::FinishByHand),
             notes: vec![],
+            special_notes: vec![],
         }
     }
 

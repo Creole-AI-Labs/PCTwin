@@ -256,7 +256,7 @@ export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed"
 export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 
 /** What the move is at before files move (`Stage`): `administrator` while the system's approval prompt is up (M25). */
-export type WaitStage = "scanning" | "waiting" | "moving" | "administrator" | "app-data";
+export type WaitStage = "scanning" | "waiting" | "moving" | "administrator" | "app-data" | "wifi-passwords";
 
 /** Why the other people ticked were not moved this time (`OthersWhy`). */
 export const OTHERS_WHY = ["not-approved", "failed", "not-here", "allow-in-settings"] as const;
@@ -436,7 +436,7 @@ export function parseMoveStage(value: unknown): MoveStage | null {
     return f && oneOf(f.why, OTHERS_WHY) ? { kind, why: f.why } : null;
   }
   if (kind === "rebuilding") return exactly(value, ["kind"]) ? { kind } : null;
-  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator", "app-data"] as const);
+  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator", "app-data", "wifi-passwords"] as const);
 }
 
 export function parsePeopleHere(value: unknown): PeopleHere | null {
@@ -795,15 +795,36 @@ export type ChoiceFolder = { role: FolderRole; parts: string[]; files: number; b
  */
 export type OnlineOnlyGroup = { provider: string; name: string | null; files: number; bytes: number };
 /** `keepLocalHere`: whether this laptop can keep local copies (Windows; not yet on a Mac, said so). */
-export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[]; onlineOnly: OnlineOnlyGroup[]; keepLocalHere: boolean };
+export type ChoiceView = { groups: ChoiceGroup[]; folders: ChoiceFolder[]; apps: number; leftBehind: LeftBehind[]; onlineOnly: OnlineOnlyGroup[]; keepLocalHere: boolean; wifi: WifiChoice | null };
+/** How a saved Wi-Fi network is protected (`WifiKind`): only open and password networks can be ticked. */
+export const WIFI_KINDS = ["open", "password", "organisation", "other"] as const;
+export type WifiKind = (typeof WIFI_KINDS)[number];
+/**
+ * The saved Wi-Fi networks found on this laptop (`WifiChoice`, 2.4), by name only. `ticked`: the
+ * person moving is this laptop's administrator, so they start ticked (one system prompt when
+ * read); otherwise none starts ticked, and the page says to ask whoever looks after this laptop.
+ */
+export type WifiChoice = { networks: { name: string; kind: WifiKind }[]; ticked: boolean };
 /** The person's consent to bring one cloud's online-only files, also on a connection that may charge (`onMetered`). */
 export type KeepLocalAnswer = { provider: string; onMetered: boolean };
 /** The person's choice: the folders whose files move, whether apps, settings and app data do, and the clouds whose online-only files also come (`keepLocal`, none by default). */
-export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean; keepLocal?: KeepLocalAnswer[] };
+export type Choice = { folders: { role: FolderRole; parts: string[] }[]; apps: boolean; keepLocal?: KeepLocalAnswer[]; wifi?: number[] };
 
 export function parseChoiceView(v: unknown): ChoiceView | null {
-  const f = exactly(v, ["groups", "folders", "apps", "leftBehind", "onlineOnly", "keepLocalHere"]);
+  const f = exactly(v, ["groups", "folders", "apps", "leftBehind", "onlineOnly", "keepLocalHere", "wifi"]);
   if (!f || !isCount(f.apps) || typeof f.keepLocalHere !== "boolean") return null;
+  let wifi: WifiChoice | null = null;
+  if (f.wifi !== null) {
+    const w = exactly(f.wifi, ["networks", "ticked"]);
+    const networks = w
+      ? listOf(w.networks, (x) => {
+          const n = exactly(x, ["name", "kind"]);
+          return n && typeof n.name === "string" && n.name !== "" && oneOf(n.kind, WIFI_KINDS) ? { name: n.name, kind: n.kind } : null;
+        })
+      : null;
+    if (!w || !networks || networks.length === 0 || typeof w.ticked !== "boolean") return null;
+    wifi = { networks, ticked: w.ticked };
+  }
   const onlineOnly = listOf(f.onlineOnly, (x) => {
     const o = exactly(x, ["provider", "name", "files", "bytes"]);
     return o && typeof o.provider === "string" && /^[a-z0-9](?:[a-z0-9-]{0,13}[a-z0-9])?$/.test(o.provider) && (o.name === null || (typeof o.name === "string" && o.name !== "")) && isCount(o.files) && isCount(o.bytes) && o.files > 0
@@ -825,7 +846,7 @@ export function parseChoiceView(v: unknown): ChoiceView | null {
     const parts = d ? listOf(d.parts, (p) => (typeof p === "string" ? p : null)) : null;
     return d && parts && oneOf(d.role, FOLDER_ROLES) && isCount(d.files) && isCount(d.bytes) ? { role: d.role, parts, files: d.files, bytes: d.bytes } : null;
   });
-  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind, onlineOnly, keepLocalHere: f.keepLocalHere } : null;
+  return groups && folders && leftBehind ? { groups, folders, apps: f.apps, leftBehind, onlineOnly, keepLocalHere: f.keepLocalHere, wifi } : null;
 }
 /** The old laptop: the person's choice of what moves. */
 export const moveChooseWhat = (choice: Choice) => run("move_choose_what", { choice });

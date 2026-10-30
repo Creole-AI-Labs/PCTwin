@@ -28,6 +28,7 @@ pub mod person;
 pub mod protocol;
 pub mod read;
 pub mod session;
+pub mod wifi;
 
 pub use client::{Acted, Client, ClientError, HandedOver, MadeAccount, Scanned, connect};
 pub use protocol::{Answer, FromHelper, Handle, Refusal, Request, Secret};

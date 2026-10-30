@@ -119,6 +119,31 @@ describe("R02 beyond files", () => {
     expect(plain(body?.textContent ?? "")).toContain(plain(text("outcome-person-copied", { count: 120 })));
   });
 
+  it("app data keeps each special category's notes from the plan on its own page", () => {
+    const o = full();
+    inApp(<Report items={[]} rebuilt={o.rebuilt} people={o.people} onBack={noop} />);
+    fireEvent.click(head("report-group-special"));
+    const body = document.querySelector<HTMLElement>(".rp-body");
+    if (!body) throw new Error("the app data group opened");
+    expect(plain(body.textContent)).toContain(plain(text("special-note-own-sync")));
+    expect(plain(body.textContent)).toContain(plain(text("special-note-passwords-guided")));
+    // The help page's address is never shown as text.
+    expect(body.textContent).not.toContain("support.example.org");
+  });
+
+  it("saved Wi-Fi networks are their own group, each with its result", () => {
+    const o = full();
+    const wifi = o.rebuilt?.lines.filter((l) => l.kind === "wifi") ?? [];
+    expect(wifi.length).toBeGreaterThan(0);
+    inApp(<Report items={[]} rebuilt={o.rebuilt} people={o.people} onBack={noop} />);
+    expect(plain(head("report-group-wifi").textContent)).toContain(plain(text("report-count-wifi", { count: wifi.length })));
+    fireEvent.click(head("report-group-wifi"));
+    const body = document.querySelector<HTMLElement>(".rp-body");
+    if (!body) throw new Error("the Wi-Fi group opened");
+    expect(within(body).getByText("Home")).toBeTruthy();
+    expect(plain(body.textContent)).toContain(plain(text("fullmove-wifi-why-already-here")));
+  });
+
   it("is accessible right to left, with a group open", async () => {
     document.documentElement.dir = "rtl";
     const o = full();

@@ -3309,3 +3309,37 @@ special-note-store-protected-saves = A loja guarda esses jogos salvos para si, e
 special-note-mod-programs-held = Alguns complementos deste jogo são programas. O PCTwin os lista, mas não os copia nem os ativa. Obtenha-os de novo com quem os criou.
 special-note-mod-programs-as-files = Alguns complementos deste jogo são programas. Eles vão com seus outros arquivos como arquivos comuns, e o PCTwin nunca os ativa. Obtenha cópias que funcionem com quem os criou.
 special-note-launcher-verify = Instale o inicializador no seu novo notebook e entre nele. Depois use a etapa própria dele de verificar ou localizar, para que ele encontre e confira seus jogos. O PCTwin só copia jogos instalados se você escolher.
+choose-wifi-title = Redes Wi-Fi salvas
+choose-wifi-admin = As redes marcadas vão com a senha, então o notebook novo se conecta a elas sozinho. Para ler as senhas, este notebook pode pedir a aprovação de um administrador na própria janela dele.
+choose-wifi-ask-admin = Ler senhas de Wi-Fi exige um administrador deste notebook, por isso nenhuma está marcada. Para trazê-las, peça a quem cuida deste notebook e marque-as: este notebook pede a aprovação dessa pessoa na própria janela dele.
+choose-wifi-open = Sem senha
+choose-wifi-organisation = Configurada por uma organização: conecte-se de novo no notebook novo com os dados dela
+choose-wifi-other = O PCTwin não move este tipo de rede: conecte-se de novo no notebook novo
+move-wait-wifi-title = Lendo suas senhas de Wi-Fi salvas
+move-wait-wifi-body = Este notebook pode pedir a aprovação de um administrador na própria janela dele. Responda para trazer as redes Wi-Fi que você marcou. Nada neste notebook é alterado.
+fullmove-group-wifi = Redes Wi-Fi salvas: { $count }
+fullmove-wifi-step-add = O PCTwin a adiciona aqui com a senha, enviada criptografada depois que você aprovar.
+fullmove-wifi-step-add-by-profile = Você a adiciona aqui uma vez, nos Ajustes do Sistema, para todas estas redes. O PCTwin abre a página.
+fullmove-wifi-step-skipped = Não foi marcada no notebook antigo, então fica lá.
+fullmove-wifi-step-organisation = Configurada por uma organização: conecte-se de novo aqui com os dados dela.
+fullmove-wifi-step-not-this-kind = O PCTwin não move este tipo de rede: conecte-se de novo aqui.
+fullmove-wifi-step-no-password = A senha dela não pôde ser lida no notebook antigo: digite-a uma vez ao se conectar a esta rede aqui.
+fullmove-wifi-why-organisation = Configurada por uma organização: conecte-se de novo com os dados dela.
+fullmove-wifi-why-not-this-kind = O PCTwin não move este tipo de rede: conecte-se de novo aqui.
+fullmove-wifi-why-no-password = A senha dela não pôde ser lida no notebook antigo: digite-a uma vez ao se conectar a esta rede.
+fullmove-wifi-why-did-not-arrive = Ela não chegou do notebook antigo: digite a senha uma vez ao se conectar a esta rede.
+fullmove-wifi-why-already-here = Uma rede com este nome já estava salva aqui, então o PCTwin a deixou como estava. Se ela não conectar, digite a senha uma vez.
+fullmove-wifi-why-not-added = Este notebook não a adicionou: digite a senha uma vez ao se conectar a esta rede.
+fullmove-wifi-why-install-profile = Não adicionada: o perfil “Wi-Fi networks from your old laptop (PCTwin)” não foi instalado a tempo nos Ajustes do Sistema. Digite a senha uma vez ao se conectar a esta rede.
+fullmove-rebuilding-wifi = Adicionando suas redes Wi-Fi salvas
+fullmove-rebuilding-wifi-profile = { $minutes ->
+        [one] Para adicionar suas redes Wi-Fi, instale o perfil “Wi-Fi networks from your old laptop (PCTwin)” na página dos Ajustes do Sistema que o PCTwin abriu: no máximo mais 1 minuto
+        [many] Para adicionar suas redes Wi-Fi, instale o perfil “Wi-Fi networks from your old laptop (PCTwin)” na página dos Ajustes do Sistema que o PCTwin abriu: no máximo mais { $minutes } minutos
+       *[other] Para adicionar suas redes Wi-Fi, instale o perfil “Wi-Fi networks from your old laptop (PCTwin)” na página dos Ajustes do Sistema que o PCTwin abriu: no máximo mais { $minutes } minutos
+    }
+report-group-wifi = Redes Wi-Fi
+report-count-wifi = { $count ->
+        [one] { $count } rede
+        [many] { $count } redes
+       *[other] { $count } redes
+    }

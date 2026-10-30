@@ -439,6 +439,25 @@ impl<S: Read + Write> Client<S> {
         Ok(())
     }
 
+    /// Old laptop, Windows: this laptop's saved Wi-Fi networks with their passwords, each profile
+    /// as the system's tool wrote it, wiped from memory when dropped. Refused unless the helper
+    /// was started for them (`--wifi yes`), and after the first time.
+    pub fn wifi_profiles(&mut self) -> Result<Vec<zeroize::Zeroizing<String>>, ClientError> {
+        send_request(&mut self.stream, &Request::WifiProfiles)?;
+        let Answer::WifiProfiles { profiles } =
+            self.expect_answer(|a| matches!(a, Answer::WifiProfiles { .. }))?
+        else {
+            return Err(ClientError::OutOfTurn);
+        };
+        if profiles.len() > crate::protocol::MAX_WIFI_PROFILES {
+            return Err(ClientError::OutOfTurn);
+        }
+        Ok(profiles
+            .into_iter()
+            .map(crate::Secret::into_inner)
+            .collect())
+    }
+
     /// Ends the session: the helper ends with it.
     pub fn bye(mut self) -> Result<(), ClientError> {
         send_request(&mut self.stream, &Request::Bye)?;

@@ -33,3 +33,4 @@ pub mod plan;
 pub mod run;
 pub mod undo;
 pub mod unix;
+pub mod wifi;

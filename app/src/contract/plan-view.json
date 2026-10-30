@@ -694,7 +694,33 @@
         "appData": 58720256,
         "installs": 2097152000
       },
-      "specialNotMoved": 7
+      "specialNotMoved": 7,
+      "wifi": [
+        {
+          "name": "Home",
+          "step": "add"
+        },
+        {
+          "name": "Studio 5G",
+          "step": "add-by-profile"
+        },
+        {
+          "name": "Gran's",
+          "step": "skipped"
+        },
+        {
+          "name": "Office",
+          "step": "organisation"
+        },
+        {
+          "name": "Old router",
+          "step": "not-this-kind"
+        },
+        {
+          "name": "Lab",
+          "step": "no-password"
+        }
+      ]
     },
     "revision": 2,
     "space": {

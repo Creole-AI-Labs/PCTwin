@@ -56,7 +56,24 @@
         "name": null,
         "provider": "nextcloud"
       }
-    ]
+    ],
+    "wifi": {
+      "networks": [
+        {
+          "kind": "password",
+          "name": "Home"
+        },
+        {
+          "kind": "open",
+          "name": "Cafe"
+        },
+        {
+          "kind": "organisation",
+          "name": "Office"
+        }
+      ],
+      "ticked": true
+    }
   },
   {
     "apps": 0,
@@ -64,6 +81,7 @@
     "groups": [],
     "keepLocalHere": false,
     "leftBehind": [],
-    "onlineOnly": []
+    "onlineOnly": [],
+    "wifi": null
   }
 ]
