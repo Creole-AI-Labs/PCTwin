@@ -700,6 +700,45 @@ impl pctwin_special::content::ContentReader for Parser {
             Err(e) => Err(ContentError::Damaged(e.to_string())),
         }
     }
+
+    fn stored_value(
+        &self,
+        db: &[u8],
+        want: &pctwin_special::stored::StoredKey,
+    ) -> Result<Option<String>, ContentError> {
+        let wanted = serde_json::to_vec(want).map_err(|e| ContentError::Damaged(e.to_string()))?;
+        let request = Request::StoredValue {
+            wanted: wanted.len() as u64,
+            size: db.len() as u64,
+        };
+        match self.ask_about(request, &[Source::Bytes(&wanted), Source::Bytes(db)]) {
+            Ok(Answer::StoredValue(read)) => read,
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
+
+    fn replace_value(
+        &self,
+        db: &[u8],
+        change: &pctwin_special::stored::StoredChange,
+    ) -> Result<Vec<u8>, ContentError> {
+        let wanted =
+            serde_json::to_vec(change).map_err(|e| ContentError::Damaged(e.to_string()))?;
+        let request = Request::ReplaceValue {
+            wanted: wanted.len() as u64,
+            size: db.len() as u64,
+        };
+        match self.ask_with_back(request, &[Source::Bytes(&wanted), Source::Bytes(db)]) {
+            Ok((Answer::ReplaceValue(Ok(len)), back)) if len == back.len() as u64 => Ok(back),
+            Ok((Answer::ReplaceValue(Ok(_)), _)) => Err(ContentError::Damaged(
+                "it handed back another length than it said".into(),
+            )),
+            Ok((Answer::ReplaceValue(Err(e)), _)) => Err(e),
+            Ok(_) => Err(ContentError::Damaged("it answered another question".into())),
+            Err(e) => Err(ContentError::Damaged(e.to_string())),
+        }
+    }
 }
 
 /// Several parser processes taking requests in turn, for readers that work on several threads
@@ -774,6 +813,22 @@ impl pctwin_special::content::ContentReader for Pool {
         second: Option<&[u8]>,
     ) -> Result<pctwin_special::browser_read::Found, ContentError> {
         self.one().browser(what, bytes, second)
+    }
+
+    fn stored_value(
+        &self,
+        db: &[u8],
+        want: &pctwin_special::stored::StoredKey,
+    ) -> Result<Option<String>, ContentError> {
+        self.one().stored_value(db, want)
+    }
+
+    fn replace_value(
+        &self,
+        db: &[u8],
+        change: &pctwin_special::stored::StoredChange,
+    ) -> Result<Vec<u8>, ContentError> {
+        self.one().replace_value(db, change)
     }
 }
 

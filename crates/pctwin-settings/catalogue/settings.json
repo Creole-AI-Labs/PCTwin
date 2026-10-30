@@ -1885,7 +1885,8 @@
     {
      "root": "config",
      "path": "Code/User/globalStorage/state.vscdb",
-     "key": "history.recentlyOpenedPathsList"
+     "key": "history.recentlyOpenedPathsList",
+     "table": "ItemTable"
     }
    ],
    "documents": [

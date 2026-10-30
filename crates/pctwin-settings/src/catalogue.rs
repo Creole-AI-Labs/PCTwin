@@ -746,6 +746,10 @@ pub struct RecentList {
     pub root: SettingsRoot,
     pub path: String,
     pub key: String,
+    /// When the file is a SQLite database: the table of `key` and `value` rows that holds the
+    /// list (VS Code's `ItemTable`). Only that one row is ever read or changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
 }
 
 /// A kind of the person's own document, by its file ending, whose fields at `at` (`/`-separated

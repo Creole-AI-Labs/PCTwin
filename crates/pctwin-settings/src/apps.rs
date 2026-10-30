@@ -59,7 +59,17 @@ pub fn check_entry(a: &AppEntry) -> Result<(), String> {
     }
     if a.recent.len() > 16
         || a.recent.iter().any(|r| {
-            !pattern_ok(&r.path) || r.key.is_empty() || r.key.len() > 128 || !text_ok(&r.key)
+            !pattern_ok(&r.path)
+                || r.key.is_empty()
+                || r.key.len() > 128
+                || !text_ok(&r.key)
+                // A database table: letters, digits and `_`, not starting with a digit.
+                || r.table.as_ref().is_some_and(|t| {
+                    t.is_empty()
+                        || t.len() > 64
+                        || t.starts_with(|c: char| c.is_ascii_digit())
+                        || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
         })
     {
         return Err("a recent list is a plain file and key".into());
