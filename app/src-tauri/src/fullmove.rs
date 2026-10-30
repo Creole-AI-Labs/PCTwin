@@ -692,6 +692,9 @@ pub struct RebuiltLine {
     pub reason: Option<Reason>,
     /// What else the person should know or do for it, each a word the screens translate.
     pub notes: Vec<LineNote>,
+    /// What the person is told because of its special category (2.5), as on the plan: each said
+    /// in the screens' own words (none for apps and settings).
+    pub special_notes: Vec<pctwin_special::category::Note>,
 }
 
 /// One thing to know or do for an outcome line.
@@ -1140,6 +1143,7 @@ pub fn rebuild_full<R: Runtime>(
             status: a.result.status(),
             reason: a.result.reason(),
             notes: todo_notes(&a.todo),
+            special_notes: Vec::new(),
         });
     }
     for (label, count, r) in &done.settings {
@@ -1150,6 +1154,7 @@ pub fn rebuild_full<R: Runtime>(
             status: r.status(),
             reason: r.reason(),
             notes: Vec::new(),
+            special_notes: Vec::new(),
         });
     }
     for s in &done.special {
@@ -1163,6 +1168,7 @@ pub fn rebuild_full<R: Runtime>(
             status: s.result.status(),
             reason: s.result.reason(),
             notes: data_notes(s),
+            special_notes: s.notes.clone(),
         });
     }
     let (here, here_more) = bounded(

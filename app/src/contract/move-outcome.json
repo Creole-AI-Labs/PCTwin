@@ -141,6 +141,7 @@
             }
           ],
           "reason": "manual-install",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -165,6 +166,7 @@
             }
           ],
           "reason": "sign-in",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -176,6 +178,7 @@
           "kind": "settings",
           "notes": [],
           "reason": null,
+          "specialNotes": [],
           "status": "converted",
           "title": {
             "kind": "name",
@@ -191,6 +194,15 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [
+            {
+              "note": "own-sync",
+              "page": "https://support.example.org/sync"
+            },
+            {
+              "note": "passwords-guided"
+            }
+          ],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -207,6 +219,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -223,6 +236,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -239,6 +253,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -255,6 +270,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -271,6 +287,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -287,6 +304,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -303,6 +321,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -319,6 +338,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -336,6 +356,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -353,6 +374,7 @@
             }
           ],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "name",
@@ -364,6 +386,7 @@
           "kind": "special",
           "notes": [],
           "reason": "finish-by-hand",
+          "specialNotes": [],
           "status": "needs-action",
           "title": {
             "kind": "key",

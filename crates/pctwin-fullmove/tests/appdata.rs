@@ -598,6 +598,16 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
             "{sites:#?}"
         );
     }
+    // Each line's category notes (2.5) reach the result as the plan said them, so the report
+    // keeps telling the person (a browser's own sync, its passwords' own export...).
+    for (planned, done) in plan.special.iter().zip(&rebuilt.special) {
+        assert_eq!(planned.notes, done.notes, "{}", planned.name);
+    }
+    assert!(
+        rebuilt.special.iter().any(|s| !s.notes.is_empty()),
+        "no line carries a note: {:#?}",
+        rebuilt.special
+    );
     // A line copied whole carries no reason to act; one that needs the person and landed is said
     // with why (never the generic "follow the steps" with no steps).
     for s in &rebuilt.special {

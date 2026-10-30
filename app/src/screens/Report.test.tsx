@@ -119,6 +119,18 @@ describe("R02 beyond files", () => {
     expect(plain(body?.textContent ?? "")).toContain(plain(text("outcome-person-copied", { count: 120 })));
   });
 
+  it("app data keeps each special category's notes from the plan on its own page", () => {
+    const o = full();
+    inApp(<Report items={[]} rebuilt={o.rebuilt} people={o.people} onBack={noop} />);
+    fireEvent.click(head("report-group-special"));
+    const body = document.querySelector<HTMLElement>(".rp-body");
+    if (!body) throw new Error("the app data group opened");
+    expect(plain(body.textContent)).toContain(plain(text("special-note-own-sync")));
+    expect(plain(body.textContent)).toContain(plain(text("special-note-passwords-guided")));
+    // The help page's address is never shown as text.
+    expect(body.textContent).not.toContain("support.example.org");
+  });
+
   it("is accessible right to left, with a group open", async () => {
     document.documentElement.dir = "rtl";
     const o = full();

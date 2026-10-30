@@ -172,7 +172,8 @@ function parseDownloads(v: unknown): Downloads | null {
     : null;
 }
 
-export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[] };
+/** `specialNotes`: what the person is told because of a special category (2.5), as on the plan; none for apps and settings. */
+export type RebuiltLine = { title: Title; kind: ChangeKind; count: number; status: ItemStatus; reason: Reason | null; notes: LineNote[]; specialNotes: SpecialNote[] };
 
 export const RESTORE_WORDS = ["made", "earlier-exists", "not-made", "not-windows", "not-asked"] as const;
 export type RestoreWord = (typeof RESTORE_WORDS)[number];
@@ -363,13 +364,16 @@ export function parseRebuildPlan(v: unknown): RebuildPlan | null {
 }
 
 function parseLine(v: unknown): RebuiltLine | null {
-  const f = exactly(v, ["title", "kind", "count", "status", "reason", "notes"]);
+  const f = exactly(v, ["title", "kind", "count", "status", "reason", "notes", "specialNotes"]);
   if (!f || !oneOf(f.kind, CHANGE_KINDS) || !isCount(f.count) || !oneOf(f.status, ITEM_STATUSES)) return null;
   const title = parseTitle(f.title);
   const result = parseResult(f.reason === null ? { status: f.status } : { status: f.status, reason: f.reason });
   const notes = listOf(f.notes, parseLineNote);
-  if (!title || !result || !notes) return null;
-  return { title, kind: f.kind, count: f.count, status: result.status, reason: "reason" in result ? (result.reason ?? null) : null, notes };
+  const specialNotes = listOf(f.specialNotes, parseSpecialNote);
+  if (!title || !result || !notes || !specialNotes) return null;
+  // Only a special category's line is told about its category.
+  if (specialNotes.length > 0 && f.kind !== "special") return null;
+  return { title, kind: f.kind, count: f.count, status: result.status, reason: "reason" in result ? (result.reason ?? null) : null, notes, specialNotes };
 }
 
 /** The outcome section (`RebuiltView`). */

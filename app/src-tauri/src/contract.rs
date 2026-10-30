@@ -509,6 +509,7 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
         status,
         reason,
         notes,
+        special_notes: Vec::new(),
     };
     let data = |why| {
         line(
@@ -560,14 +561,22 @@ fn rebuilt() -> crate::fullmove::RebuiltView {
                 None,
                 vec![],
             ),
-            line(
-                Title::Name("Browser".into()),
-                Kind::Special,
-                0,
-                ItemStatus::NeedsAction,
-                Some(Reason::FinishByHand),
-                vec![LineNote::Sites],
-            ),
+            RebuiltLine {
+                special_notes: vec![
+                    pctwin_special::category::Note::OwnSync {
+                        page: Some("https://support.example.org/sync".into()),
+                    },
+                    pctwin_special::category::Note::PasswordsGuided,
+                ],
+                ..line(
+                    Title::Name("Browser".into()),
+                    Kind::Special,
+                    0,
+                    ItemStatus::NeedsAction,
+                    Some(Reason::FinishByHand),
+                    vec![LineNote::Sites],
+                )
+            },
             data(DataWhy::Lost),
             data(DataWhy::DidNotArrive),
             data(DataWhy::AppOpen),

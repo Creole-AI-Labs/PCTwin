@@ -245,6 +245,9 @@ pub struct SpecialDone {
     pub why: Option<crate::data::DataWhy>,
     /// It holds saved sign-ins to websites or accounts: the person signs in again here.
     pub sites: bool,
+    /// What the person is told because of its special category (2.5), as the plan said it: the
+    /// report keeps saying it after the move.
+    pub notes: Vec<pctwin_special::category::Note>,
 }
 
 impl SpecialDone {
@@ -254,6 +257,7 @@ impl SpecialDone {
             result,
             why: None,
             sites: false,
+            notes: Vec::new(),
         }
     }
 }
@@ -780,6 +784,7 @@ pub fn rebuild(
                 result,
                 why,
                 sites: s.sites,
+                notes: s.notes.clone(),
             }
         })
         .collect();

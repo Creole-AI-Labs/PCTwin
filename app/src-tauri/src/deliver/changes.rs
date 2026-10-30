@@ -332,6 +332,7 @@ mod tests {
             status,
             reason: Some(Reason::FinishByHand),
             notes: vec![],
+            special_notes: vec![],
         }
     }
 

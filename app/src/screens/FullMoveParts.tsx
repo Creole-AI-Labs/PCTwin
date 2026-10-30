@@ -331,6 +331,8 @@ export function lineDetail(l: RebuiltLine, l10n: L10n): string {
   const why = l.notes.some((n) => n.note === "data");
   if (l.reason && !why) parts.push(l10n.getString(l.kind === "special" && l.reason === "finish-by-hand" ? "fullmove-special-finish" : `reason-${l.reason}`));
   for (const n of l.notes) parts.push(noteText(n, l, l10n));
+  // What its special category tells the person (2.5), said as the plan said it.
+  parts.push(...specialNotes({ notes: l.specialNotes }, l10n));
   return parts.filter(Boolean).join(" ");
 }
 

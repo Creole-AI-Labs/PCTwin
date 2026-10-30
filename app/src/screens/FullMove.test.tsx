@@ -183,6 +183,9 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(plain(text("fullmove-data-placed", { folder: "Mail" })));
     // R1: website sign-ins are said on the browser's line.
     expect(body).toContain(text("fullmove-step-sites"));
+    // 2.5: a special line's category notes stay on the outcome, as the plan said them.
+    expect(body).toContain(text("special-note-own-sync"));
+    expect(body).toContain(text("special-note-passwords-guided"));
     // Gap 7: apps already here are listed, left as they are, never counted as reinstalled.
     expect(body).toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
     expect(body).toContain(text("fullmove-outcome-here"));
@@ -192,9 +195,10 @@ describe("the outcome's apps, settings and app data", () => {
 
   it("a line with no step to take says nothing more", () => {
     const { rebuilt } = fullOutcome();
-    const bare = { ...rebuilt, lines: rebuilt.lines.map((l) => ({ ...l, notes: [] })), here: [], fresh: false };
+    const bare = { ...rebuilt, lines: rebuilt.lines.map((l) => ({ ...l, notes: [], specialNotes: [] })), here: [], fresh: false };
     const { container } = inApp(<RebuiltSection rebuilt={bare} />);
     const body = plain(container.textContent);
+    expect(body).not.toContain(text("special-note-own-sync"));
     expect(body).not.toContain(text("fullmove-outcome-fresh"));
     expect(body).not.toContain(plain(text("fullmove-outcome-here-title", { count: 2 })));
   });
@@ -203,6 +207,20 @@ describe("the outcome's apps, settings and app data", () => {
     const bad = structuredClone(outcomes[1]) as { rebuilt: { lines: { notes: unknown[] }[] } };
     bad.rebuilt.lines[0].notes.push({ note: "all-done" });
     expect(parseMoveOutcome(bad)).toBeNull();
+  });
+
+  it("refuses an unknown special note, or one on a line that is not a special category", () => {
+    const at = (outcomes[1] as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } }).rebuilt.lines.findIndex((l) => l.specialNotes.length > 0);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const unknown = structuredClone(outcomes[1]) as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } };
+    unknown.rebuilt.lines[at].specialNotes.push({ note: "all-done" });
+    expect(parseMoveOutcome(unknown)).toBeNull();
+    const onApp = structuredClone(outcomes[1]) as { rebuilt: { lines: { kind: string; specialNotes: unknown[] }[] } };
+    onApp.rebuilt.lines[at].kind = "app";
+    expect(parseMoveOutcome(onApp)).toBeNull();
+    const missing = structuredClone(outcomes[1]) as { rebuilt: { lines: Record<string, unknown>[] } };
+    delete missing.rebuilt.lines[at].specialNotes;
+    expect(parseMoveOutcome(missing)).toBeNull();
   });
 
   it("offers no Undo when nothing can be put back", () => {

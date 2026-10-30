@@ -521,6 +521,7 @@ pub(crate) mod tests {
             status,
             reason,
             notes: Vec::new(),
+            special_notes: Vec::new(),
         }
     }
 
