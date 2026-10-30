@@ -59,7 +59,7 @@ describe("the approval screen's apps, settings and app data", () => {
     expect(body).toContain(text("fullmove-plan-title"));
     expect(body).toContain(plain(text("fullmove-group-install", { count: 2 })));
     expect(body).toContain(plain(text("fullmove-group-settings", { count: 1 })));
-    expect(body).toContain(plain(text("fullmove-group-needs", { count: 4 })));
+    expect(body).toContain(plain(text("fullmove-group-needs", { count: 5 })));
     // The app installed: PCTwin does not remove apps yet, and says so before the approval.
     expect(body).toContain(text("guard-undo-remove-yourself"));
     expect(body).toContain(text("guard-undo-removes-if-package"));
@@ -73,6 +73,10 @@ describe("the approval screen's apps, settings and app data", () => {
     // What each special category adds is said beside its step (2.5).
     expect(body).toContain(text("special-note-search-rebuilds"));
     expect(body).toContain(text("special-note-tool-settings-review"));
+    // Apple Mail: written out here for the person to import; a Mac whose mail could not be looked into says so.
+    expect(body).toContain(text("fullmove-step-convert"));
+    expect(body).toContain(text("special-note-mail-import"));
+    expect(body).toContain(text("special-note-mail-no-access"));
     // What stays behind is counted and said.
     expect(body).toContain(plain(text("fullmove-not-moved-private", { count: 40 })));
     expect(body).toContain(plain(text("fullmove-special-not-moved", { count: 7 })));
@@ -100,7 +104,7 @@ describe("the approval screen's apps, settings and app data", () => {
     fireEvent.click(tick);
     expect(onPick).toHaveBeenCalledWith(2, true);
     // App data that copies is listed with its undo promise.
-    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-group-appdata", { count: 5 })));
+    expect(plain(document.body.textContent)).toContain(plain(text("fullmove-group-appdata", { count: 6 })));
   });
 
   it("an older old laptop's plan has no section, and the files-only plan is unchanged", () => {
@@ -153,7 +157,7 @@ describe("the outcome's apps, settings and app data", () => {
     expect(body).toContain(text("status-converted"));
     expect(body).toContain(text("reason-manual-install"));
     expect(body).toContain(text("fullmove-special-finish"));
-    expect(rebuiltNeedsAction(rebuilt)).toBe(14);
+    expect(rebuiltNeedsAction(rebuilt)).toBe(18);
     fireEvent.click(screen.getByRole("button", { name: text("fullmove-outcome-undo") }));
     expect(onUndo).toHaveBeenCalledOnce();
     expect(await violations()).toEqual([]);
@@ -181,6 +185,12 @@ describe("the outcome's apps, settings and app data", () => {
     }
     expect(body).toContain(plain(text("fullmove-data-beside", { folder: "Mail (from old laptop)" })));
     expect(body).toContain(plain(text("fullmove-data-placed", { folder: "Mail" })));
+    // Apple Mail (2.5): messages ready with the folder, what is missing counted, accounts to sign in to, and mail that could not be looked into.
+    const folder = "Documents/Mail from Ada's Mac";
+    expect(body).toContain(plain(text("fullmove-data-mail-ready", { messages: 120, folder })));
+    expect(body).toContain(plain(text("fullmove-data-mail-parts-missing", { messages: 40, missing: 2, failed: 1, folder })));
+    expect(body).toContain(plain(text("fullmove-data-mail-sign-in", { accounts: 2 })));
+    expect(body).toContain(text("fullmove-data-mail-no-access"));
     // R1: website sign-ins are said on the browser's line.
     expect(body).toContain(text("fullmove-step-sites"));
     // Gap 7: apps already here are listed, left as they are, never counted as reinstalled.

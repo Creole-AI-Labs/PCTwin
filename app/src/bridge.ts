@@ -1553,8 +1553,17 @@ export const windowDrag = (): Promise<void> => runInApp("window_drag", {});
 export const setTrayLabels = (show: string, send: string, quit: string): Promise<void> =>
   runInApp("set_tray_labels", { show, send, quit });
 
-/** The words of the files PCTwin writes beside a browser's data, in the person's language (2.5). */
-export const setFileWords = (w: { bookmarksFile: string; listsFile: string; bookmarksTitle: string; addOns: string; openPages: string }): Promise<void> =>
+/** The words of the files PCTwin writes for the person, in their language (2.5): beside a browser's data, and the mail it writes out (`{laptop}` and `{n}` are filled in by the engine). */
+export const setFileWords = (w: {
+  bookmarksFile: string;
+  listsFile: string;
+  bookmarksTitle: string;
+  addOns: string;
+  openPages: string;
+  mailFolder: string;
+  onThisMac: string;
+  mailAccount: string;
+}): Promise<void> =>
   runInApp("set_file_words", w);
 
 /** Our own site in the person's browser (the shell allows https://getpctwin.com/ only). Outside the app, a new tab. */

@@ -51,6 +51,18 @@
         [
           "openPages",
           "Open pages"
+        ],
+        [
+          "mailFolder",
+          "Mail from {laptop}"
+        ],
+        [
+          "onThisMac",
+          "On My Mac"
+        ],
+        [
+          "mailAccount",
+          "Mail account {n}"
         ]
       ],
       "name": "set_file_words"

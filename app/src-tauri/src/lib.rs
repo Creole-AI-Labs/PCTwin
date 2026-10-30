@@ -251,23 +251,36 @@ fn set_tray_labels<R: Runtime>(
 }
 
 /// The words of the files PCTwin writes for the person beside a browser's data (its bookmarks
-/// file and the list of its add-ons and open pages, 2.5), in the person's language, from the
+/// file and the list of its add-ons and open pages, 2.5) and of the mail it writes out (its
+/// folder, and the names its mailboxes are shown under), in the person's language, from the
 /// screens' translation files. False when a word is not safe: the English words stay.
 #[tauri::command]
+// Each word is its own argument of the bridge's contract (contract/shell/calls.json).
+#[allow(clippy::too_many_arguments)]
 fn set_file_words(
     bookmarks_file: String,
     lists_file: String,
     bookmarks_title: String,
     add_ons: String,
     open_pages: String,
+    mail_folder: String,
+    on_this_mac: String,
+    mail_account: String,
 ) -> bool {
-    pctwin_special::browser::set_words(pctwin_special::browser::Words {
+    let browser = pctwin_special::browser::set_words(pctwin_special::browser::Words {
         bookmarks_file,
         lists_file,
         bookmarks_title,
         add_ons,
         open_pages,
-    })
+    });
+    // The mail written out for the person (2.5 mail): its folder's and mailboxes' names.
+    let mail = pctwin_special::applemail::set_words(pctwin_special::applemail::Words {
+        folder: mail_folder,
+        on_this_mac,
+        account: mail_account,
+    });
+    browser && mail
 }
 
 fn tray_menu<R: Runtime>(

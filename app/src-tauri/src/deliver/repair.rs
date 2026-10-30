@@ -400,6 +400,8 @@ pub fn run_part<R: Runtime>(
         None,
         files,
         crate::fullmove::InstallChoices::default(),
+        // No app data is carried again by a retry, so no mail is written out.
+        "",
     );
     Ok((lines, view.undo_id))
 }
@@ -722,6 +724,8 @@ pub(crate) mod tests {
             sites: false,
             category: Default::default(),
             notes: Vec::new(),
+            bytes: 0,
+            parts: Vec::new(),
         }];
         plan.special_not_checked = 2;
         plan.extras_refused = true;

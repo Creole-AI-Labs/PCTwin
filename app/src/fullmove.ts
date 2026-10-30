@@ -14,7 +14,7 @@ export type Title = { kind: "name"; value: string } | { kind: "key"; value: (typ
 export const CHANGE_KINDS = ["app", "settings", "special"] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
-export const SPECIAL_STEPS = ["copy", "export-first", "sign-in", "relink", "not-yet", "look-at-it"] as const;
+export const SPECIAL_STEPS = ["copy", "export-first", "sign-in", "relink", "not-yet", "look-at-it", "convert"] as const;
 export type SpecialStep = (typeof SPECIAL_STEPS)[number];
 
 /** A special category the person sees (2.5): its words are `special-category-<category>`. */
@@ -43,11 +43,13 @@ export const SPECIAL_NOTES = [
   "store-protected-saves",
   "mod-programs-held",
   "launcher-verify",
+  "mail-import",
+  "mail-no-access",
 ] as const;
 export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };
 
 /** What the person does about a forgotten-things place (2.5). */
-export const PLACE_STEPS = ["copy", "install", "locate-verify", "add-again", "open-in-mail-app"] as const;
+export const PLACE_STEPS = ["copy", "install", "locate-verify", "add-again", "open-in-mail-app", "export-first"] as const;
 export type PlaceStep = (typeof PLACE_STEPS)[number];
 
 /** One place the forgotten-things finder found: `kind` has words `forgotten-kind-<kind>` when the screens know it, else `name` is shown. */
@@ -121,7 +123,22 @@ export type Tested = {
 export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" } | { note: "intel-only" };
 
 /** Why an app's data needs the person (`DataWhy`). */
-export const DATA_WHYS = ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed", "beside", "placed"] as const;
+export const DATA_WHYS = [
+  "lost",
+  "did-not-arrive",
+  "app-open",
+  "changing",
+  "unreadable",
+  "not-read",
+  "not-whole",
+  "not-landed",
+  "beside",
+  "placed",
+  "mail-ready",
+  "mail-parts-missing",
+  "mail-sign-in",
+  "mail-no-access",
+] as const;
 export type DataWhy = (typeof DATA_WHYS)[number];
 
 /** One thing to know or do for an outcome line (`LineNote`). */
@@ -132,7 +149,7 @@ export type LineNote =
   | { note: "extras"; apps: string[] }
   | { note: "sites" }
   | { note: "rosetta" }
-  | { note: "data"; why: DataWhy; folder?: string }
+  | { note: "data"; why: DataWhy; folder?: string; messages?: number; missing?: number; failed?: number; accounts?: number }
   | { note: "came-from"; makersSite: boolean };
 
 /** An app already on this laptop, left as it is (`HereLine`). */
@@ -266,6 +283,20 @@ function parseLineNote(v: unknown): LineNote | null {
     if (why === "beside" || why === "placed") {
       const f = exactly(v, ["note", "why", "folder"]);
       return f && typeof f.folder === "string" ? { note: kind, why, folder: f.folder } : null;
+    }
+    if (why === "mail-ready") {
+      const f = exactly(v, ["note", "why", "messages", "folder"]);
+      return f && isCount(f.messages) && typeof f.folder === "string" ? { note: kind, why, messages: f.messages, folder: f.folder } : null;
+    }
+    if (why === "mail-parts-missing") {
+      const f = exactly(v, ["note", "why", "messages", "missing", "failed", "folder"]);
+      return f && isCount(f.messages) && isCount(f.missing) && isCount(f.failed) && typeof f.folder === "string"
+        ? { note: kind, why, messages: f.messages, missing: f.missing, failed: f.failed, folder: f.folder }
+        : null;
+    }
+    if (why === "mail-sign-in") {
+      const f = exactly(v, ["note", "why", "accounts"]);
+      return f && isCount(f.accounts) ? { note: kind, why, accounts: f.accounts } : null;
     }
     return oneOf(why, DATA_WHYS) && exactly(v, ["note", "why"]) ? { note: kind, why } : null;
   }

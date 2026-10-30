@@ -3423,6 +3423,8 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
         version: 0,
         made_here: made_here(&journal),
     };
+    // The old laptop's name, for the folder the mail written out for the person lands in.
+    let old_laptop = old_laptop_name(other.as_ref());
     // A stop ends the greeting at once.
     let mut link = pctwin_move::or_stop(&live.control, async {
         Ok(greet(app, link, pctwin_move::greeting::Side::New, other).await?)
@@ -3483,6 +3485,7 @@ async fn receive_here<R: Runtime, C: pctwin_transfer::Channel, D: pctwin_move::r
             data.as_ref().map(|s| (s, picked)),
             files,
             crate::fullmove::InstallChoices { wait_free_wifi },
+            &old_laptop,
         ));
     }
     let finish = crate::finish::seed(
@@ -3669,6 +3672,16 @@ fn people_outcome(
             })
         })
         .collect()
+}
+
+/// The old laptop's name as a folder may carry it (the mail written out for the person lands in
+/// a folder named for it): its typed name, else its colour and animal.
+fn old_laptop_name(label: Option<&LabelView>) -> String {
+    match label {
+        Some(LabelView::Named { name }) => name.clone(),
+        Some(LabelView::Picked { colour, animal }) => format!("{colour} {animal}"),
+        None => String::new(),
+    }
 }
 
 /// Runs this laptop's side of the move on a thread of its own, then tells the screens how it
