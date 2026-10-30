@@ -123,7 +123,10 @@ describe("Finish your move (the hub)", () => {
   it("names the move, tells its state in words, and takes focus to the heading", async () => {
     host(null);
     const h1 = await heading(text("finish-title"));
-    expect(document.activeElement).toBe(h1);
+    // Focus moves once the page has its words; under load that is a moment after the heading shows.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(h1);
+    });
     expect(api.finishOverview).toHaveBeenCalledWith(null);
     expect(screen.getByRole("heading", { level: 2, name: text("finish-headline-ready-for-selected-work") })).toBeTruthy();
     expect(screen.getByText(plain(text("finish-others", { count: "120" })))).toBeTruthy();
