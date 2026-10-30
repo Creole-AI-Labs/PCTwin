@@ -141,10 +141,13 @@ pub enum Request {
     StageBytes { bytes: String },
     /// Phase 2 broker: the move was stopped; no new change starts in this session.
     Revoke,
-    /// Old laptop, Windows: this laptop's saved Wi-Fi networks with their passwords, read with
-    /// the system's own tool (Task List 2.4, decided 20 October 2026). Only for a helper started
-    /// with `--wifi yes` (the administrator approved it at the system's prompt), and once.
-    WifiProfiles,
+    /// Old laptop, Windows: the saved Wi-Fi networks the person ticked (`names`, at most
+    /// [`MAX_WIFI_PROFILES`], each plain text, see [`crate::wifi::name_ok`]) with their
+    /// passwords, read one by one with the system's own tool (Task List 2.4, decided 20 October
+    /// 2026; the fresh-context security review, finding 2: never every network). Only for a
+    /// helper started with `--wifi yes` (the administrator approved it at the system's prompt),
+    /// and once.
+    WifiProfiles { names: Vec<String> },
     /// The move is over: the helper ends.
     Bye,
 }

@@ -537,9 +537,11 @@ fn a_chosen_secret_lands_owner_only() {
     )
     .unwrap();
     let rec = j.imports(&keys().capture);
+    // Kept aside, where the new laptop's placement puts a folder the system trusts (the
+    // fresh-context security review, finding 1): the person's keys come, never into `~/.ssh`.
     let target = Target {
         root: SettingsRoot::Home,
-        folder: ".ssh".into(),
+        folder: "PCTwin brought over/.ssh".into(),
         made: None,
     };
     // A read grant does not land it.
@@ -596,7 +598,8 @@ fn a_chosen_secret_lands_owner_only() {
     )
     .unwrap();
     assert!(landed.verified);
-    let folder = new.join(".ssh");
+    assert!(!new.join(".ssh").exists());
+    let folder = new.join("PCTwin brought over").join(".ssh");
     let file = folder.join("work_key");
     assert_eq!(
         std::fs::read(&file).unwrap(),
@@ -629,3 +632,66 @@ fn a_chosen_secret_lands_owner_only() {
 /// tests may).
 static OWN_READERS: pctwin_special::content::InThisProcess =
     pctwin_special::content::InThisProcess::new(pctwin_parse_seal::in_child());
+
+/// Phase 2 fresh-context security review, finding 1 (31 October 2026), defence in depth: whatever
+/// a caller asks, the landing itself never writes where the system runs or trusts something at the
+/// next sign-in (one shared table, `roots::trusted_place`), nor into a folder holding one; nothing
+/// is made there.
+#[test]
+fn the_landing_refuses_every_place_the_system_runs_or_trusts_at_sign_in() {
+    pctwin_special::content::install_reader(&OWN_READERS);
+    let t = temp();
+    let (cap, work) = captured(&t);
+    let new = t.path().join("new");
+    std::fs::create_dir(&new).unwrap();
+    let dest = Destination::open(&new).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
+    let rec = j.imports(&keys().capture);
+    for (root, folder) in [
+        (SettingsRoot::Config, "autostart"),
+        (SettingsRoot::Config, "systemd/user"),
+        (SettingsRoot::Config, "environment.d"),
+        (SettingsRoot::Home, ".config/autostart"),
+        (SettingsRoot::Home, ".config"),
+        (SettingsRoot::Home, ".ssh"),
+        (SettingsRoot::Home, "Library/LaunchAgents"),
+        (
+            SettingsRoot::Config,
+            "Microsoft/Windows/Start Menu/Programs/Startup",
+        ),
+        (SettingsRoot::Home, "AppData/Roaming/Microsoft/Windows"),
+        (SettingsRoot::LocalData, "systemd/user"),
+    ] {
+        let got = land(
+            &rec,
+            import(),
+            seal(),
+            target_root(),
+            &planned(0),
+            &dest,
+            &Target {
+                root,
+                folder: folder.into(),
+                made: None,
+            },
+            &cap,
+            &work,
+            Conflict::KeepBoth,
+            &Stop::new(),
+            Now::real(),
+        );
+        assert!(
+            matches!(got, Err(LandError::Denied(_))),
+            "{root:?} {folder}: {got:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(&new).unwrap().count(),
+        0,
+        "nothing was made"
+    );
+}

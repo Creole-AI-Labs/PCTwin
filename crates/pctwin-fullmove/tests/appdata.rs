@@ -640,8 +640,8 @@ async fn browser_profiles_land_consistent_cookies_never_move_and_secrets_only_wh
     .unwrap();
     assert!(!lines.is_empty());
     let after = files_under(&new.join("AppData"));
-    // Undoing brought-in app data is built for Windows first (pctwin-special's land.rs);
-    // elsewhere it says so and removes nothing.
+    // On Linux and macOS undo goes the gate's way for copies, which keeps a database an app
+    // holds open while it runs (`places.sqlite`: said as kept, never removed from under the app).
     assert!(
         cfg!(not(windows)) || !after.iter().any(|f| f.ends_with("places.sqlite")),
         "undo removed what landed: {after:#?}"

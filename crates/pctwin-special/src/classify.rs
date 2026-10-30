@@ -1556,14 +1556,23 @@ pub fn placement(report: &FolderReport, from: System, to: System) -> Placement {
     place_by_row(f.root, &f.rel, report.row.as_ref(), from, to)
 }
 
-/// Where data found in `folder` of `root` on a laptop of `from` goes on a laptop of `to`, as
-/// the new laptop decides it from its own catalogue (never the old laptop's word, decided 31
-/// October 2026): between laptops of the same kind, and in the home's hidden folders every
-/// system keeps alike, the same place; otherwise the place the one row about that folder names
-/// for `to` (`elsewhere`), and with no such row (or two, which would be ambiguous), kept aside.
+/// Where data found in `folder` of `root` on a laptop of `from`, which the plan the person
+/// approved names as the app `app`, goes on a laptop of `to`. The new laptop decides it, every
+/// time, from its own catalogue (never the old laptop's word: decided 31 October 2026, and the
+/// fresh-context security review's finding 1): the folder is only a key to look up.
+///
+/// - Never a place the system runs at sign-in or trusts ([`crate::roots::trusted_in`]), nor a
+///   folder holding one: kept aside, whatever any row says.
+/// - The one row about that folder on `from`: the same place between laptops of the same kind
+///   (and in the home's hidden folders every system keeps alike), otherwise the place it names
+///   for `to` (`elsewhere`).
+/// - No row (or two, which would be ambiguous): the same place only between laptops of the same
+///   kind, and only for the app's own folder (its name is the folder's own, as 2.5 names a folder
+///   no row describes); anything else is kept aside.
 pub fn placement_of(
     root: RootKind,
     folder: &str,
+    app: &str,
     from: System,
     to: System,
     catalogue: &Catalogue<SpecialRow>,
@@ -1579,10 +1588,15 @@ pub fn placement_of(
         [one] => Some(*one),
         _ => None,
     };
+    let own = row.is_some() || (from == to && app.eq_ignore_ascii_case(folder));
+    if !own {
+        return Placement::PreservedOnly;
+    }
     place_by_row(root, folder, row, from, to)
 }
 
-/// The one rule both [`placement`] and [`placement_of`] follow.
+/// The one rule both [`placement`] and [`placement_of`] follow. A place the system runs at
+/// sign-in or trusts, or a folder holding one, is never a placement: kept aside.
 fn place_by_row(
     root: RootKind,
     folder: &str,
@@ -1590,6 +1604,10 @@ fn place_by_row(
     from: System,
     to: System,
 ) -> Placement {
+    let trusted = |root, folder: &str| crate::roots::trusted_in(root, folder, true).is_some();
+    if trusted(root, folder) {
+        return Placement::PreservedOnly;
+    }
     if from == to || root == RootKind::HomeDot {
         return Placement::Same {
             root,
@@ -1597,6 +1615,7 @@ fn place_by_row(
         };
     }
     row.and_then(|r| r.elsewhere.iter().find(|p| p.system == to))
+        .filter(|p| !trusted(p.root, &p.folder))
         .map_or(Placement::PreservedOnly, |p| Placement::Translated {
             root: p.root,
             folder: p.folder.clone(),

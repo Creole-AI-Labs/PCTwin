@@ -365,18 +365,131 @@ fn not_looked_into(kind: crate::guard::Kind) -> Option<&'static str> {
 /// Why a start-up place is not moved.
 pub const STARTS_AT_SIGN_IN: &str = "programs or commands that start when you sign in: PCTwin never turns these on for you; set up the ones you want yourself";
 
-/// Whether `name` in `root` is a place the system or the desktop runs from at sign-in (T26-026:
-/// a moved setting must never switch a command on): the freedesktop autostart folder, systemd's
-/// per-person services and environment, and KDE's sign-in and sign-out scripts and environment.
-/// The system's own rule, so code (the deny region), never a catalogue row.
-pub fn starts_at_sign_in(root: RootKind, name: &str) -> bool {
-    match root {
-        RootKind::XdgConfig => matches!(
-            name,
-            "autostart" | "autostart-scripts" | "systemd" | "environment.d" | "plasma-workspace"
-        ),
-        _ => false,
+/// What a place in a person's home is to the system ([`TRUSTED_PLACES`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trusted {
+    /// The system or the desktop runs what is there at sign-in, or at every shell's start, or
+    /// when a file of some kind is opened (T26-026: a moved setting must never switch a command
+    /// on). Never found as app data, never landed.
+    SignIn,
+    /// The system trusts what is there: who may sign in remotely, the keys that sign and decrypt,
+    /// Windows' own secrets. Found and moved (the person's own keys), but only ever kept aside,
+    /// never landed where the system would trust it.
+    Trust,
+}
+
+/// Every place in a person's home that the system runs at sign-in or trusts, home-relative as
+/// each system lays out a home by default (`/` between names; compared ignoring letter case). One
+/// table, the system's own rules (the deny region, never a catalogue row): the old laptop's scan
+/// leaves out what is here ([`starts_at_sign_in`]), the new laptop never places app data here
+/// (`classify::placement_of`), and the landing refuses to write here or into a folder holding
+/// one of these (`land`), whoever asks.
+pub const TRUSTED_PLACES: &[(&str, Trusted)] = &[
+    // Linux: the freedesktop autostart folder, systemd's per-person services and environment,
+    // KDE's sign-in scripts and environment, D-Bus services and desktop entries (run when asked
+    // for, or to open a file), and shell start-up folders.
+    (".config/autostart", Trusted::SignIn),
+    (".config/autostart-scripts", Trusted::SignIn),
+    (".config/systemd", Trusted::SignIn),
+    (".config/environment.d", Trusted::SignIn),
+    (".config/plasma-workspace", Trusted::SignIn),
+    (".config/fish", Trusted::SignIn),
+    (".local/share/systemd", Trusted::SignIn),
+    (".local/share/dbus-1", Trusted::SignIn),
+    (".local/share/applications", Trusted::SignIn),
+    (".kde/Autostart", Trusted::SignIn),
+    (".kde/env", Trusted::SignIn),
+    (".kde4/Autostart", Trusted::SignIn),
+    (".kde4/env", Trusted::SignIn),
+    (".bashrc.d", Trusted::SignIn),
+    (".profile.d", Trusted::SignIn),
+    (".zshrc.d", Trusted::SignIn),
+    // macOS: what launchd starts at sign-in, and the sign-in window's own hooks.
+    ("Library/LaunchAgents", Trusted::SignIn),
+    ("Library/Preferences/loginwindow.plist", Trusted::SignIn),
+    (
+        "Library/Preferences/com.apple.loginwindow.plist",
+        Trusted::SignIn,
+    ),
+    // Windows: the Start menu (its Startup folder) and the rest of Windows' own per-person tree.
+    ("AppData/Roaming/Microsoft/Windows", Trusted::SignIn),
+    ("AppData/Local/Microsoft/Windows", Trusted::SignIn),
+    // Trusted: remote sign-in and keys, certificates, Windows' own protected secrets.
+    (".ssh", Trusted::Trust),
+    (".gnupg", Trusted::Trust),
+    (".pki", Trusted::Trust),
+    ("AppData/Roaming/Microsoft/Protect", Trusted::Trust),
+    ("AppData/Roaming/Microsoft/Credentials", Trusted::Trust),
+    ("AppData/Roaming/Microsoft/Crypto", Trusted::Trust),
+    (
+        "AppData/Roaming/Microsoft/SystemCertificates",
+        Trusted::Trust,
+    ),
+    ("AppData/Local/Microsoft/Credentials", Trusted::Trust),
+];
+
+/// The names of a home-relative path, for comparing (letter case ignored).
+fn names_of(path: &str) -> Vec<String> {
+    path.split(['/', '\\'])
+        .filter(|p| !p.is_empty() && *p != ".")
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// What the place at the home-relative `path` (or anything in it) is to the system: the place
+/// itself or a folder inside one ([`TRUSTED_PLACES`]), or, with `holding`, also a folder that
+/// holds one (landing `.config` whole would land its `autostart`). `None`: none of these.
+pub fn trusted_place(path: &str, holding: bool) -> Option<Trusted> {
+    let have = names_of(path);
+    TRUSTED_PLACES.iter().find_map(|(place, what)| {
+        let want = names_of(place);
+        let within = have.len() >= want.len() && have[..want.len()] == want[..];
+        let holds = holding && want.len() > have.len() && want[..have.len()] == have[..];
+        (within || holds).then_some(*what)
+    })
+}
+
+/// Where each root is in a home, as each system lays it out by default (home-relative).
+pub fn default_places(kind: RootKind) -> &'static [&'static str] {
+    match kind {
+        RootKind::Roaming => &["AppData/Roaming"],
+        RootKind::Local => &["AppData/Local"],
+        RootKind::LocalLow => &["AppData/LocalLow"],
+        RootKind::Packages => &["AppData/Local/Packages"],
+        RootKind::SavedGames => &["Saved Games"],
+        RootKind::ApplicationSupport => &["Library/Application Support"],
+        RootKind::Containers => &["Library/Containers"],
+        RootKind::GroupContainers => &["Library/Group Containers"],
+        RootKind::Preferences => &["Library/Preferences"],
+        RootKind::XdgConfig => &[".config"],
+        RootKind::XdgData => &[".local/share"],
+        RootKind::XdgState => &[".local/state"],
+        RootKind::Flatpak => &[".var/app"],
+        RootKind::Snap => &["snap"],
+        RootKind::HomeDot => &[""],
+        RootKind::SystemCache => &["AppData/Local/Temp", "Library/Caches", ".cache"],
+        RootKind::MacMail => &["Library/Mail"],
     }
+}
+
+/// What `folder` (one or two names) in `root` is to the system, wherever that root is in a home
+/// ([`trusted_place`]).
+pub fn trusted_in(root: RootKind, folder: &str, holding: bool) -> Option<Trusted> {
+    default_places(root).iter().find_map(|base| {
+        let path = if base.is_empty() {
+            folder.to_string()
+        } else {
+            format!("{base}/{folder}")
+        };
+        trusted_place(&path, holding)
+    })
+}
+
+/// Whether `name` in `root` is a place the system or the desktop runs from at sign-in (T26-026:
+/// a moved setting must never switch a command on): [`TRUSTED_PLACES`]' sign-in places, and
+/// anything inside one.
+pub fn starts_at_sign_in(root: RootKind, name: &str) -> bool {
+    trusted_in(root, name, false) == Some(Trusted::SignIn)
 }
 
 /// Lower-case letters and digits only: how names are compared with what the old laptop recorded.

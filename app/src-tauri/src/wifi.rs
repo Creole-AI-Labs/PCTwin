@@ -128,12 +128,12 @@ pub fn read_ticked(
             Some(h) => h
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .wifi_profiles()
+                .wifi_profiles(&names)
                 .ok(),
             None => {
                 match crate::others::launch_elevated_with(mover, &[], laptop, None, true, stopped) {
                     Ok(Some(mut client)) => {
-                        let got = client.wifi_profiles().ok();
+                        let got = client.wifi_profiles(&names).ok();
                         let _ = client.bye();
                         got
                     }

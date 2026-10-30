@@ -439,11 +439,20 @@ impl<S: Read + Write> Client<S> {
         Ok(())
     }
 
-    /// Old laptop, Windows: this laptop's saved Wi-Fi networks with their passwords, each profile
-    /// as the system's tool wrote it, wiped from memory when dropped. Refused unless the helper
-    /// was started for them (`--wifi yes`), and after the first time.
-    pub fn wifi_profiles(&mut self) -> Result<Vec<zeroize::Zeroizing<String>>, ClientError> {
-        send_request(&mut self.stream, &Request::WifiProfiles)?;
+    /// Old laptop, Windows: the saved Wi-Fi networks `names` (the ones the person ticked) with
+    /// their passwords, each profile as the system's tool wrote it, wiped from memory when
+    /// dropped; no other network is read. Refused unless the helper was started for them
+    /// (`--wifi yes`), and after the first time.
+    pub fn wifi_profiles(
+        &mut self,
+        names: &[String],
+    ) -> Result<Vec<zeroize::Zeroizing<String>>, ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::WifiProfiles {
+                names: names.to_vec(),
+            },
+        )?;
         let Answer::WifiProfiles { profiles } =
             self.expect_answer(|a| matches!(a, Answer::WifiProfiles { .. }))?
         else {

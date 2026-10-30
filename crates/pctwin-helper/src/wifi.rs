@@ -4,8 +4,10 @@
 //! when, and only when, the helper was started with `--wifi yes` through the system's own
 //! prompt.
 //!
-//! Read with Windows' own tool, `netsh wlan export profile key=clear`, from Windows' own folder
-//! (never a path from the environment or the app), which writes each network's profile to a file.
+//! Read with Windows' own tool, `netsh wlan export profile name="<network>" key=clear`, from
+//! Windows' own folder (never a path from the environment or the app), once for each network the
+//! person ticked and for no other (the fresh-context security review, finding 2: never every
+//! saved network's password); each writes that network's profile to a file.
 //! The files go into a fresh folder only the helper's account and the system may open, made so
 //! from its first moment (`pctwin_helper_os::private_folder`); each file is read into memory that
 //! is wiped when dropped and deleted at once; the folder is removed when reading ends, also on
@@ -90,34 +92,75 @@ fn fresh_folder(parent: &Path) -> Result<Folder, Refusal> {
     Err(Refusal::Unreadable)
 }
 
-/// The saved Wi-Fi networks of this laptop with their passwords (see the module notes): Windows.
+/// Whether `name` may be put to Windows' tool as a network's name: plain text of 1 to 32
+/// characters (a network's name is at most 32 bytes), without a quote, a control character or a
+/// `%` (which the command line could expand), so `name="<name>"` names exactly that network.
+pub fn name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 32
+        && name.len() <= 128
+        && !name.contains(['"', '%'])
+        && !name.chars().any(char::is_control)
+}
+
+/// What Windows' tool is told, once for each network named, in order: each always names its one
+/// network (`name="..."`), never every network. `None` if any name is not plain text
+/// ([`name_ok`]) or the folder has a quote or a control character.
+pub fn export_args(names: &[String], folder: &str) -> Option<Vec<Vec<String>>> {
+    if folder.contains('"') || folder.chars().any(char::is_control) {
+        return None;
+    }
+    names
+        .iter()
+        .map(|n| {
+            name_ok(n).then(|| {
+                vec![
+                    "wlan export profile".to_string(),
+                    format!("name=\"{n}\""),
+                    "key=clear".to_string(),
+                    format!("folder=\"{folder}\""),
+                ]
+            })
+        })
+        .collect()
+}
+
+/// The saved Wi-Fi networks `names` (the ones the person ticked) with their passwords, and no
+/// other (see the module notes): Windows.
 #[cfg(windows)]
-pub fn export_profiles() -> Result<Vec<Secret>, Refusal> {
+pub fn export_profiles(names: &[String]) -> Result<Vec<Secret>, Refusal> {
+    if names.len() > MAX_WIFI_PROFILES {
+        return Err(Refusal::TooMuch);
+    }
     let netsh = pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows)
         .map_err(|_| Refusal::Unreadable)?
         .join("System32")
         .join("netsh.exe");
     let folder = fresh_folder(&std::env::temp_dir())?;
     let text = folder.0.to_str().ok_or(Refusal::Unreadable)?;
-    if text.contains('"') || text.chars().any(char::is_control) {
-        return Err(Refusal::Unreadable);
+    let calls = export_args(names, text).ok_or(Refusal::NotPlain)?;
+    let mut any = false;
+    for args in calls {
+        let mut command =
+            pctwin_helper_os::clean_command(&netsh).map_err(|_| Refusal::Unreadable)?;
+        {
+            use std::os::windows::process::CommandExt;
+            // netsh reads `name="..."` and `folder="..."` itself: both plain, without quotes.
+            for a in &args {
+                command.raw_arg(a);
+            }
+        }
+        let ran = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|_| Refusal::Unreadable)?;
+        any |= ran.success();
     }
-    let mut command = pctwin_helper_os::clean_command(&netsh).map_err(|_| Refusal::Unreadable)?;
-    {
-        use std::os::windows::process::CommandExt;
-        // netsh reads `folder="..."` itself; the folder is the helper's own, without quotes.
-        command.raw_arg("wlan export profile key=clear");
-        command.raw_arg(format!("folder=\"{text}\""));
-    }
-    let ran = command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|_| Refusal::Unreadable)?;
     let profiles = take_profiles(&folder.0);
     drop(folder);
-    if !ran.success() && profiles.is_empty() {
+    if !any && profiles.is_empty() && !names.is_empty() {
         return Err(Refusal::Unreadable);
     }
     Ok(profiles)
@@ -125,7 +168,7 @@ pub fn export_profiles() -> Result<Vec<Secret>, Refusal> {
 
 /// Only Windows needs the helper for this (a Mac asks in macOS's own prompt, Linux in its own).
 #[cfg(not(windows))]
-pub fn export_profiles() -> Result<Vec<Secret>, Refusal> {
+pub fn export_profiles(_names: &[String]) -> Result<Vec<Secret>, Refusal> {
     Err(Refusal::NotApproved)
 }
 
@@ -174,6 +217,26 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
+    /// The fresh-context security review, finding 2: Windows' tool is asked for each ticked
+    /// network by its name, and only for those; a name that is not plain text stops it before
+    /// anything runs; nothing ever asks for every network.
+    #[test]
+    fn only_the_ticked_networks_are_asked_for_by_name() {
+        let names = vec!["Home".to_string(), "Caf\u{e9} 5G".to_string()];
+        let calls = export_args(&names, r"C:\Temp\pctwin-helper-wifi-x").unwrap();
+        assert_eq!(calls.len(), 2);
+        for (call, name) in calls.iter().zip(&names) {
+            assert_eq!(call[1], format!("name=\"{name}\""));
+            assert_eq!(call.iter().filter(|a| a.starts_with("name=")).count(), 1);
+            assert!(call.contains(&"key=clear".to_string()));
+        }
+        assert_eq!(export_args(&[], "x"), Some(vec![]));
+        for bad in ["", "a\"b", "a%PATH%", "line\nbreak", &"x".repeat(33)] {
+            assert_eq!(export_args(&[bad.to_string()], "x"), None, "{bad:?}");
+        }
+        assert_eq!(export_args(&names, "a\"b"), None);
+    }
+
     /// Windows' own tool, for real: whatever this laptop has (a runner without Wi-Fi has none),
     /// nothing of it is left on the disk, and each profile is the system's own kind.
     #[cfg(windows)]
@@ -181,7 +244,7 @@ mod tests {
     fn the_real_tool_leaves_nothing_behind() {
         let before = sweep_leftovers(&std::env::temp_dir());
         let _ = before;
-        match export_profiles() {
+        match export_profiles(&["PCTwin lab, not here".to_string()]) {
             Ok(profiles) => {
                 assert!(profiles.iter().all(|p| p.as_str().contains("WLANProfile")));
             }

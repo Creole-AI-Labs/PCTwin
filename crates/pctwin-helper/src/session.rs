@@ -22,8 +22,10 @@ pub type Scanner<'a> = dyn FnMut(&str) -> Result<crate::person::PersonScan, Refu
 /// Makes an approved person's account (see [`crate::account::create_account`]).
 pub type AccountMaker<'a> = dyn FnMut(&str, &str) -> Result<crate::account::Made, Refusal> + 'a;
 
-/// Reads this laptop's saved Wi-Fi networks with their passwords (see [`crate::wifi`]).
-pub type WifiReader<'a> = dyn FnMut() -> Result<Vec<crate::protocol::Secret>, Refusal> + 'a;
+/// Reads the saved Wi-Fi networks named (the ones the person ticked) with their passwords, and
+/// no other (see [`crate::wifi`]).
+pub type WifiReader<'a> =
+    dyn FnMut(&[String]) -> Result<Vec<crate::protocol::Secret>, Refusal> + 'a;
 
 /// What the helper was started for.
 pub struct Session<'s> {
@@ -384,10 +386,17 @@ impl<'s> Session<'s> {
                     let answer = self.broker_answer(request);
                     send_answer(channel, &answer)?;
                 }
-                Request::WifiProfiles => {
-                    // Once, and only for a helper started for it.
+                Request::WifiProfiles { names } => {
+                    // Once, and only for a helper started for it; only the networks named, each
+                    // plain text, never more than the bound.
                     let answer = match self.wifi.take() {
-                        Some(read) => match read() {
+                        Some(_) if names.len() > crate::protocol::MAX_WIFI_PROFILES => {
+                            Answer::Refused(Refusal::TooMuch)
+                        }
+                        Some(_) if !names.iter().all(|n| crate::wifi::name_ok(n)) => {
+                            Answer::Refused(Refusal::NotPlain)
+                        }
+                        Some(read) => match read(&names) {
                             Ok(profiles) => Answer::WifiProfiles { profiles },
                             Err(why) => Answer::Refused(why),
                         },

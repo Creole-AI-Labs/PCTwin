@@ -172,13 +172,22 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
         Conflict::KeepBoth,
         Now::real(),
     );
+    // Kept aside (the system trusts `~/.ssh`; the fresh-context security review, finding 1): the
+    // person's keys come, never into `~/.ssh`, and the result says where they are, as the
+    // person's step (never "copied" into the app's place).
     assert_eq!(
         applied.result.status(),
-        ItemStatus::Copied,
+        ItemStatus::NeedsAction,
         "{}",
         applied.words
     );
-    assert!(new.join(".ssh/work_key").is_file());
+    assert!(
+        applied.words.contains("PCTwin brought over"),
+        "{}",
+        applied.words
+    );
+    assert!(new.join("PCTwin brought over/.ssh/work_key").is_file());
+    assert!(!new.join(".ssh").exists());
     for (i, p) in plan.landing_order().into_iter().enumerate() {
         if p.component.id == key.component.id {
             continue;
@@ -251,7 +260,10 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
             .is_file()
     );
     // The public keys joined the secret's owner-only folder.
-    assert!(new.join(".ssh/id_ed25519.pub").is_file());
+    assert!(
+        new.join("PCTwin brought over/.ssh/id_ed25519.pub")
+            .is_file()
+    );
     // Nothing machine-bound arrived.
     assert!(
         !new.join("AppData/Local/Chromey/User Data/Default/Cookies")
@@ -325,8 +337,10 @@ fn a_person_s_app_data_moves_through_the_api_with_honest_words() {
 #[test]
 fn undo_keeps_what_the_person_changed_since() {
     pctwin_special::content::install_reader(&OWN_READERS);
-    // T25-054.
-    let t = temp();
+    // T25-054. On Linux and macOS on a drive undo removes from (Cargo's own folder for test files,
+    // `.noindex` so Spotlight never holds a file open), and on a Mac with a test Trash on that
+    // drive, never the person's own.
+    let t = undo_temp();
     let old = t.path().join("old");
     put(&old.join("AppData/Roaming/Notes/a.txt"), b"one");
     put(&old.join("AppData/Roaming/Notes/b.txt"), b"two");
@@ -411,15 +425,62 @@ fn undo_keeps_what_the_person_changed_since() {
     .unwrap();
     let permit = j.begin_undo().unwrap();
     let undone = undo(&rec, &permit, &home, effect_id).unwrap();
-    if cfg!(windows) {
-        assert_eq!(undone, Undone::KeptChanged { kept: 1 });
-        assert_eq!(
-            std::fs::read(new.join("AppData/Roaming/Notes/a.txt")).unwrap(),
-            b"the person's newer words"
+    // The person's file stays, as they left it, and is said kept, on every system.
+    assert_eq!(
+        std::fs::read(new.join("AppData/Roaming/Notes/a.txt")).unwrap(),
+        b"the person's newer words"
+    );
+    let b = new.join("AppData/Roaming/Notes/b.txt");
+    // A drive undo cannot remove from on Linux or macOS (tmpfs, a container's own file system)
+    // keeps both, said as kept; that is allowed only where the drive test is not required.
+    if !cfg!(windows) && b.exists() {
+        assert!(
+            std::env::var_os("PCTWIN_REQUIRE_UNIX_UNDO").is_none(),
+            "undo must remove here: {undone:?}"
         );
-        assert!(!new.join("AppData/Roaming/Notes/b.txt").exists());
-    } else {
-        assert!(matches!(undone, Undone::NotDone(_)));
+        assert_eq!(undone, Undone::KeptChanged { kept: 2 });
+        return;
+    }
+    assert_eq!(undone, Undone::KeptChanged { kept: 1 });
+    // What PCTwin wrote and nobody changed is gone from the app's place (on a Mac, in the Trash).
+    assert!(!b.exists());
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::fs::read_dir(trash_home().join(".Trash")).is_ok_and(|entries| entries
+            .flatten()
+            .any(|e| std::fs::read(e.path()).is_ok_and(|bytes| bytes == b"two"))),
+        "a Mac moves it into the Trash, never deletes it"
+    );
+}
+
+/// macOS: the home whose `.Trash` undo uses in these tests (on the build's drive), never the
+/// person's own.
+#[cfg(target_os = "macos")]
+fn trash_home() -> &'static std::path::Path {
+    static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        tempfile::Builder::new()
+            .suffix(".noindex")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap()
+    })
+    .path()
+}
+
+/// A folder on a drive undo removes from (see the test above).
+fn undo_temp() -> tempfile::TempDir {
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "macos")]
+        pctwin_gate::use_trash_home(trash_home().to_path_buf());
+        tempfile::Builder::new()
+            .suffix(".noindex")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap()
+    }
+    #[cfg(not(unix))]
+    {
+        temp()
     }
 }
 

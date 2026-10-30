@@ -477,13 +477,15 @@ fn holding_and_handing_over_only_for_approved_people() {
 
 /// Runs one session on `requests` with the saved Wi-Fi networks to read (`wifi`), counting how
 /// often they were read.
-fn wifi_session(requests: &[Request], wifi: bool) -> (Vec<FromHelper>, usize) {
+fn wifi_session(requests: &[Request], wifi: bool) -> (Vec<FromHelper>, usize, Vec<Vec<String>>) {
     let mut scanner = |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
         Err(Refusal::NotApproved)
     };
     let mut reads = 0usize;
-    let mut reader = || {
+    let mut asked: Vec<Vec<String>> = Vec::new();
+    let mut reader = |names: &[String]| {
         reads += 1;
+        asked.push(names.to_vec());
         Ok(vec![pctwin_helper::Secret::from("<WLANProfile/>")])
     };
     let mut wire = Vec::new();
@@ -508,17 +510,50 @@ fn wifi_session(requests: &[Request], wifi: bool) -> (Vec<FromHelper>, usize) {
     while !read.is_empty() {
         out.push(read_from_helper(&mut read).unwrap());
     }
-    (out, reads)
+    (out, reads, asked)
+}
+
+fn wifi(names: &[&str]) -> Request {
+    Request::WifiProfiles {
+        names: names.iter().map(|n| n.to_string()).collect(),
+    }
+}
+
+/// The fresh-context security review, finding 2: the helper reads only the networks the person
+/// ticked, by name, never every saved network; a name that is not plain text, or more names
+/// than the bound, is refused before anything is read.
+#[test]
+fn only_the_ticked_networks_are_read() {
+    let (out, reads, asked) = wifi_session(&[hello(), wifi(&["Home", "Office"])], true);
+    assert_eq!(reads, 1);
+    assert_eq!(asked, vec![vec!["Home".to_string(), "Office".to_string()]]);
+    assert!(matches!(
+        out[1],
+        FromHelper::Answer(Answer::WifiProfiles { .. })
+    ));
+    let (out, reads, _) = wifi_session(&[hello(), wifi(&["Home\" key=clear \""])], true);
+    assert_eq!(reads, 0);
+    assert_eq!(
+        out[1],
+        FromHelper::Answer(Answer::Refused(Refusal::NotPlain))
+    );
+    let many: Vec<String> = (0..=pctwin_helper::protocol::MAX_WIFI_PROFILES)
+        .map(|n| format!("n{n}"))
+        .collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    let (out, reads, _) = wifi_session(&[hello(), wifi(&many)], true);
+    assert_eq!(reads, 0);
+    assert_eq!(
+        out[1],
+        FromHelper::Answer(Answer::Refused(Refusal::TooMuch))
+    );
 }
 
 /// 2.4: the saved Wi-Fi networks are read only by a helper the administrator started for them,
 /// only inside the session, and only once.
 #[test]
 fn saved_wifi_is_read_once_and_only_when_the_administrator_approved_it() {
-    let (out, reads) = wifi_session(
-        &[hello(), Request::WifiProfiles, Request::WifiProfiles],
-        true,
-    );
+    let (out, reads, _) = wifi_session(&[hello(), wifi(&["Home"]), wifi(&["Home"])], true);
     assert_eq!(reads, 1);
     assert_eq!(
         out[1],
@@ -531,14 +566,14 @@ fn saved_wifi_is_read_once_and_only_when_the_administrator_approved_it() {
         FromHelper::Answer(Answer::Refused(Refusal::NotApproved))
     );
     // Not started for them: refused, never read.
-    let (out, reads) = wifi_session(&[hello(), Request::WifiProfiles], false);
+    let (out, reads, _) = wifi_session(&[hello(), wifi(&["Home"])], false);
     assert_eq!(reads, 0);
     assert_eq!(
         out[1],
         FromHelper::Answer(Answer::Refused(Refusal::NotApproved))
     );
     // Before the session's token: nothing.
-    let (out, reads) = wifi_session(&[Request::WifiProfiles], true);
+    let (out, reads, _) = wifi_session(&[wifi(&["Home"])], true);
     assert_eq!(reads, 0);
     assert_eq!(
         out,

@@ -178,17 +178,41 @@ pub fn mark_on_makers_site(
 /// system call) and parsed with [`where_froms_address`], at most [`MAX_MARK_BYTES`].
 pub const MAC_MARK: &str = "com.apple.metadata:kMDItemWhereFroms";
 
+/// Windows: `FILE_FLAG_OPEN_REPARSE_POINT`, the open that never follows a link or junction.
+#[cfg(windows)]
+const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+/// Windows: `FILE_ATTRIBUTE_REPARSE_POINT`, a link, a junction or another reparse point.
+#[cfg(windows)]
+const REPARSE_POINT: u32 = 0x0400;
+
 /// Reads the Windows mark beside `file`, at most [`MAX_MARK_BYTES`]. Nothing when there is none
-/// or it cannot be read.
+/// or it cannot be read, and nothing for a link or junction (the fresh-context security review,
+/// finding 3): the mark is read only from the file found itself, opened without following any
+/// reparse point, and checked again on the handle opened.
 pub fn read_windows_mark(file: &std::path::Path) -> Option<MarkAddress> {
     #[cfg(windows)]
     {
         use std::io::Read as _;
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        let not_link = |m: &std::fs::Metadata| {
+            !m.file_type().is_symlink() && m.file_attributes() & REPARSE_POINT == 0
+        };
+        if !std::fs::symlink_metadata(file).is_ok_and(|m| not_link(&m)) {
+            return None;
+        }
         let mut stream = file.as_os_str().to_owned();
         stream.push(":Zone.Identifier");
+        let mut opened = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(OPEN_REPARSE_POINT)
+            .open(stream)
+            .ok()?;
+        // What was opened is not a link either (the name may have been swapped meanwhile).
+        if !opened.metadata().is_ok_and(|m| not_link(&m)) {
+            return None;
+        }
         let mut text = String::new();
-        std::fs::File::open(stream)
-            .ok()?
+        (&mut opened)
             .take(MAX_MARK_BYTES as u64 + 1)
             .read_to_string(&mut text)
             .ok()?;
@@ -283,5 +307,74 @@ mod mark_tests {
         let a =
             zone_identifier_address(&zone("https://dl.example-music.com/secret-token")).unwrap();
         assert!(!format!("{a:?}").contains("secret-token"));
+    }
+}
+
+/// The fresh-context security review, finding 3: the mark is read from the file found itself,
+/// never through a link to another file (a link would let anything that can make one point PCTwin
+/// at a mark it never found).
+#[cfg(windows)]
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    fn zone() -> &'static str {
+        "[ZoneTransfer]
+ZoneId=3
+HostUrl=https://dl.example-music.com/tunes.exe
+"
+    }
+
+    #[test]
+    fn a_mark_is_never_read_through_a_link() {
+        let t = tempfile::tempdir().unwrap();
+        let real = t.path().join("tunes-setup.exe");
+        std::fs::write(&real, b"MZ").unwrap();
+        let mut stream = real.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        if std::fs::write(&stream, zone()).is_err() {
+            eprintln!("skipped: this drive keeps no download marks");
+            return;
+        }
+        assert!(
+            read_windows_mark(&real).is_some(),
+            "the file's own mark is read"
+        );
+        let link = t.path().join("link-setup.exe");
+        if std::os::windows::fs::symlink_file(&real, &link).is_err() {
+            eprintln!("skipped: this account may not make links");
+            return;
+        }
+        assert!(read_windows_mark(&link).is_none(), "never through a link");
+    }
+
+    /// A junction (a link any account may make) to a folder with a mark: never read through.
+    #[test]
+    fn a_mark_is_never_read_through_a_junction() {
+        let t = tempfile::tempdir().unwrap();
+        let real = t.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let mut stream = real.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        if std::fs::write(&stream, zone()).is_err() {
+            eprintln!("skipped: this drive keeps no download marks");
+            return;
+        }
+        assert!(
+            read_windows_mark(&real).is_some(),
+            "the folder's own mark is read"
+        );
+        let link = t.path().join("link");
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&real)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        assert!(made, "a junction is made without any privilege");
+        assert!(
+            read_windows_mark(&link).is_none(),
+            "never through a junction"
+        );
     }
 }

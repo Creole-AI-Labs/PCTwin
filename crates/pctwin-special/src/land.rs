@@ -146,13 +146,48 @@ fn check_import(
     Ok(())
 }
 
+/// Where each settings root a target names is in a home, as each system lays it out by default
+/// (home-relative), so a target can be held against [`crate::roots::TRUSTED_PLACES`].
+fn homes_of(root: SettingsRoot) -> &'static [&'static str] {
+    match root {
+        SettingsRoot::Config => &[".config", "AppData/Roaming", "Library/Application Support"],
+        SettingsRoot::LocalData => &[".local/share", "AppData/Local"],
+        SettingsRoot::Preferences => &["Library/Preferences"],
+        SettingsRoot::Home => &[""],
+    }
+}
+
+/// Refuses a landing folder that is, is inside, or holds a place the system runs at sign-in or
+/// trusts ([`crate::roots::trusted_place`]), on any system's layout. Every landing passes here
+/// before anything is made or written, whoever chose the folder (the fresh-context security
+/// review's finding 1, defence in depth: the new laptop's placement already keeps such a
+/// component aside).
+fn refuse_trusted(root: SettingsRoot, folder: &str) -> Result<(), LandError> {
+    let trusted = homes_of(root).iter().any(|base| {
+        let path = if base.is_empty() {
+            folder.to_string()
+        } else {
+            format!("{base}/{folder}")
+        };
+        crate::roots::trusted_place(&path, true).is_some()
+    });
+    if trusted {
+        return Err(LandError::Denied(
+            "PCTwin never puts anything where the system runs or trusts it at sign-in",
+        ));
+    }
+    Ok(())
+}
+
 /// The folder name to land in: the target's, or a new one beside it.
 fn choose(
     dest: &Destination,
     target: &Target,
     conflict: Conflict,
 ) -> Result<(String, bool), LandError> {
+    refuse_trusted(target.root, &target.folder)?;
     if let Some(m) = &target.made {
+        refuse_trusted(target.root, &m.folder)?;
         return Ok((m.folder.clone(), m.beside));
     }
     let (parent, top) = match target.folder.rsplit_once('/') {

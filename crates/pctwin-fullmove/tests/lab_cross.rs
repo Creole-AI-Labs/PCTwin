@@ -972,6 +972,16 @@ impl Steps for NewPerson {
 
 /* ---------- The move ---------- */
 
+/// Whether the drive holding `dir` treats names that differ only in letter case as one, found by
+/// trying it (as the gate's own drive check does).
+fn folds_case(dir: &Path) -> bool {
+    let upper = dir.join("PCTwin-Case-Probe.tmp");
+    std::fs::write(&upper, b"probe").unwrap();
+    let folds = dir.join("pctwin-case-probe.tmp").exists();
+    std::fs::remove_file(&upper).unwrap();
+    folds
+}
+
 /// macOS: the home folder whose `.Trash` undo uses in these tests, on the build's drive (shared
 /// by every test of this run); the person's own Trash is never touched.
 #[cfg(target_os = "macos")]
@@ -1305,15 +1315,14 @@ async fn cross_move(a: Kind, b: Kind, strict: Strict) {
         }
         landed_names.push(d.final_path.clone());
     }
+    // Distinct as the drive they landed on tells names apart: the files land on the machine
+    // running the test, so its own drive decides (a Mac's or Windows' folds letter case, Linux's
+    // does not), never the target system's name. On a drive that folds case the landing had to
+    // give one of `Report.txt` and `report.txt` another name.
+    let folds = folds_case(&new_docs);
     let distinct: std::collections::BTreeSet<String> = landed_names
         .iter()
-        .map(|n| {
-            if b == Kind::Linux {
-                n.clone()
-            } else {
-                n.to_lowercase()
-            }
-        })
+        .map(|n| if folds { n.to_lowercase() } else { n.clone() })
         .collect();
     assert_eq!(distinct.len(), files.len(), "{landed_names:?}");
     // The old laptop is read only: its files and app data are as they were.

@@ -1437,10 +1437,13 @@ fn land_data(
         return done;
     };
     let home_text = home_path.display().to_string();
-    let names: std::collections::BTreeMap<String, String> = sink
-        .arrived
+    // Each component's app as the plan the person approved named it (never the name its record
+    // arrived with): a component whose record names another app is kept aside, not landed in
+    // its place (fresh-context security review, finding 1).
+    let names: std::collections::BTreeMap<String, String> = plan
+        .special
         .iter()
-        .filter_map(|(id, a)| Some((id.clone(), a.record.as_ref()?.app.clone())))
+        .flat_map(|line| line.ids.iter().map(|id| (id.clone(), line.name.clone())))
         .collect();
     let landing = pctwin_fullmove::data::Landing {
         journal,

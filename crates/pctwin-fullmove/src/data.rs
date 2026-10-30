@@ -939,8 +939,15 @@ pub fn land_all(
             out.push(needs("not every file arrived checked", DataWhy::NotWhole));
             continue;
         }
-        // Where it goes here, decided here (the old laptop planned for its own kind of system).
-        let placed = placed_here(r, n.from, n.system, &special_rows);
+        // Where it goes here, decided here (the old laptop planned for its own kind of system),
+        // for the app the plan the person approved named for it.
+        let placed = placed_here(
+            r,
+            apps.get(id).map(String::as_str),
+            n.from,
+            n.system,
+            &special_rows,
+        );
         let r = &placed;
         // An app's settings files the catalogue describes are put right in staging first; the
         // record then names exactly the bytes that land.
@@ -958,18 +965,24 @@ pub fn land_all(
 }
 
 /// `r` placed for this laptop (`to`), as this laptop's own catalogue says for data from a laptop
-/// of `from` ([`pctwin_special::classify::placement_of`]). The old laptop names only where the
-/// data was there (its root and folder, sent as `Same`); a component it sent kept aside stays
-/// kept aside, and one it sent already placed elsewhere is not trusted: kept aside too.
+/// of `from` ([`pctwin_special::classify::placement_of`]), for the app the approved plan named
+/// for it (`approved`; `None`: the plan named none). The old laptop names only where the data
+/// was there (its root and folder, sent as `Same`), which is only a key to look up; a component
+/// it sent kept aside stays kept aside; one it sent already placed elsewhere, or under another
+/// app's name than the plan showed, is not trusted: kept aside too.
 pub fn placed_here(
     r: &Record,
+    approved: Option<&str>,
     from: System,
     to: System,
     rows: &pctwin_catalogue::Catalogue<pctwin_special::catalogue::SpecialRow>,
 ) -> Record {
     let placement = match &r.placement {
+        PlacementWire::Same { .. } if approved != Some(r.app.as_str()) => {
+            PlacementWire::PreservedOnly
+        }
         PlacementWire::Same { root, folder } => {
-            (&pctwin_special::classify::placement_of(*root, folder, from, to, rows)).into()
+            (&pctwin_special::classify::placement_of(*root, folder, &r.app, from, to, rows)).into()
         }
         PlacementWire::Translated { .. } | PlacementWire::PreservedOnly => {
             PlacementWire::PreservedOnly
@@ -1241,14 +1254,28 @@ mod placed_tests {
         };
         let r = record(same(RootKind::Roaming), RootKind::Roaming);
         assert_eq!(
-            placed_here(&r, System::Windows, System::Mac, &rows).placement,
+            placed_here(
+                &r,
+                Some("Visual Studio Code"),
+                System::Windows,
+                System::Mac,
+                &rows
+            )
+            .placement,
             PlacementWire::Translated {
                 root: RootKind::ApplicationSupport,
                 folder: "Code".into()
             }
         );
         assert_eq!(
-            placed_here(&r, System::Windows, System::Linux, &rows).placement,
+            placed_here(
+                &r,
+                Some("Visual Studio Code"),
+                System::Windows,
+                System::Linux,
+                &rows
+            )
+            .placement,
             PlacementWire::Translated {
                 root: RootKind::XdgConfig,
                 folder: "Code".into()
@@ -1256,7 +1283,14 @@ mod placed_tests {
         );
         // The same kind of laptop: the same place.
         assert_eq!(
-            placed_here(&r, System::Windows, System::Windows, &rows).placement,
+            placed_here(
+                &r,
+                Some("Visual Studio Code"),
+                System::Windows,
+                System::Windows,
+                &rows
+            )
+            .placement,
             same(RootKind::Roaming)
         );
         // A folder no row names for this system: kept aside, never guessed.
@@ -1268,7 +1302,14 @@ mod placed_tests {
             RootKind::Roaming,
         );
         assert_eq!(
-            placed_here(&unknown, System::Windows, System::Mac, &rows).placement,
+            placed_here(
+                &unknown,
+                Some("Visual Studio Code"),
+                System::Windows,
+                System::Mac,
+                &rows
+            )
+            .placement,
             PlacementWire::PreservedOnly
         );
         // The old laptop's own word for another place is not taken.
@@ -1280,7 +1321,88 @@ mod placed_tests {
             RootKind::Roaming,
         );
         assert_eq!(
-            placed_here(&claimed, System::Windows, System::Mac, &rows).placement,
+            placed_here(
+                &claimed,
+                Some("Visual Studio Code"),
+                System::Windows,
+                System::Mac,
+                &rows
+            )
+            .placement,
+            PlacementWire::PreservedOnly
+        );
+        // Review finding 1: between laptops of the same kind the old laptop's folder is a key,
+        // never a place taken as given.
+        let untied = |app: &str, root, folder: &str| {
+            let mut r = record(
+                PlacementWire::Same {
+                    root,
+                    folder: folder.into(),
+                },
+                root,
+            );
+            r.app = app.into();
+            r
+        };
+        let mail = untied("LabMail", RootKind::Roaming, "LabMail");
+        assert_eq!(
+            placed_here(
+                &mail,
+                Some("LabMail"),
+                System::Windows,
+                System::Windows,
+                &rows
+            )
+            .placement,
+            PlacementWire::Same {
+                root: RootKind::Roaming,
+                folder: "LabMail".into()
+            },
+            "the app's own folder, as the approved plan named it"
+        );
+        // Another app's name than the plan showed: kept aside.
+        assert_eq!(
+            placed_here(
+                &mail,
+                Some("Other"),
+                System::Windows,
+                System::Windows,
+                &rows
+            )
+            .placement,
+            PlacementWire::PreservedOnly
+        );
+        // A folder that is not the app's own: kept aside.
+        let fish = untied("LabMail", RootKind::XdgConfig, "fish");
+        assert_eq!(
+            placed_here(&fish, Some("LabMail"), System::Linux, System::Linux, &rows).placement,
+            PlacementWire::PreservedOnly
+        );
+        // A place the system runs at sign-in or trusts, even named as the app: kept aside.
+        for (root, folder) in [
+            (RootKind::XdgConfig, "autostart"),
+            (RootKind::XdgConfig, "systemd"),
+            (RootKind::XdgConfig, "environment.d"),
+            (RootKind::HomeDot, ".ssh"),
+            (RootKind::HomeDot, ".config"),
+        ] {
+            let r = untied(folder, root, folder);
+            assert_eq!(
+                placed_here(&r, Some(folder), System::Linux, System::Linux, &rows).placement,
+                PlacementWire::PreservedOnly,
+                "{folder}"
+            );
+        }
+        let start = untied("Microsoft/Windows", RootKind::Roaming, "Microsoft/Windows");
+        assert_eq!(
+            placed_here(
+                &start,
+                Some("Microsoft/Windows"),
+                System::Windows,
+                System::Windows,
+                &rows
+            )
+            .placement,
             PlacementWire::PreservedOnly
         );
     }
