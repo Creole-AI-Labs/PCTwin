@@ -93,6 +93,27 @@ pub fn file_name_ok(n: &str) -> bool {
         && !n.chars().any(|c| {
             c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
         })
+        && !reserved_on_windows(stem)
+}
+
+/// A name Windows keeps for a device (CON, NUL, COM1 and the like), with or without an ending.
+fn reserved_on_windows(stem: &str) -> bool {
+    let base = stem
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((base.starts_with("COM") || base.starts_with("LPT"))
+            && base.len() == 4
+            && matches!(base.as_bytes()[3], b'1'..=b'9'))
+}
+
+/// A locale name the parser process answered, checked again here before it becomes part of a
+/// path (2.5 security review, 30 October 2026): 1 to 16 letters, digits or underscores only.
+fn locale_ok(l: &str) -> bool {
+    (1..=16).contains(&l.len()) && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 fn text_ok(t: &str) -> bool {
@@ -694,7 +715,7 @@ pub fn capture(
             Ok(Found::AddOn {
                 name: None,
                 locale: Some(l),
-            }) => {
+            }) if locale_ok(&l) => {
                 // The name is a message: read it from the add-on's own messages for its locale.
                 let messages = joined(base, parent(rel))
                     .join("_locales")
@@ -1074,5 +1095,37 @@ mod words_tests {
             page.html.contains("<h2>Extensions</h2>")
                 && page.html.contains("<h2>Pages ouvertes</h2>")
         );
+    }
+}
+
+#[cfg(test)]
+mod name_checks {
+    use super::*;
+
+    #[test]
+    fn a_device_name_is_never_a_file_name_and_a_locale_is_checked_again() {
+        for bad in [
+            "CON.html",
+            "nul.html",
+            "Com1.html",
+            "LPT9.html",
+            "aux .html",
+            "PRN.x.html",
+        ] {
+            assert!(!file_name_ok(bad), "{bad}");
+        }
+        for good in [
+            "Bookmarks.html",
+            "Console.html",
+            "COM.html",
+            "COM10.html",
+            "Lpt.html",
+        ] {
+            assert!(file_name_ok(good), "{good}");
+        }
+        assert!(locale_ok("en_GB") && locale_ok("pt") && locale_ok("zh_CN"));
+        for bad in ["", "../x", "en-GB", "a/b", "x".repeat(17).as_str(), r"fr\x"] {
+            assert!(!locale_ok(bad), "{bad}");
+        }
     }
 }

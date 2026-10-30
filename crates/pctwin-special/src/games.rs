@@ -1725,6 +1725,7 @@ pub fn find(i: &FindInput<'_>) -> GameReport {
     for s in &mut report.saves {
         s.route = route_of(&s.base, i);
         s.notes = notes_of(s, system, i.to, &entries);
+        said_for_route(&mut s.notes, s.route);
     }
     report
 }
@@ -1860,6 +1861,18 @@ fn route_of(base: &Path, i: &FindInput<'_>) -> Route {
         Route::WithFiles
     } else {
         Route::Own
+    }
+}
+
+/// Saves among the person's own files move with them: their programs are not held back there, so
+/// the note says what really happens (2.5 security review, 30 October 2026).
+fn said_for_route(notes: &mut [Note], route: Route) {
+    if route == Route::WithFiles {
+        for n in notes.iter_mut() {
+            if *n == Note::ModProgramsHeld {
+                *n = Note::ModProgramsAsFiles;
+            }
+        }
     }
 }
 
@@ -2239,5 +2252,25 @@ mod tests {
             installed_result(Some(true)).status(),
             pctwin_types::ItemStatus::Reinstalled
         );
+    }
+}
+
+#[cfg(test)]
+mod route_notes {
+    use super::*;
+
+    #[test]
+    fn programs_in_saves_among_the_persons_files_are_said_to_move_as_files() {
+        let mut with_files = vec![Note::CloudSavesMayDiffer, Note::ModProgramsHeld];
+        said_for_route(&mut with_files, Route::WithFiles);
+        assert_eq!(
+            with_files,
+            [Note::CloudSavesMayDiffer, Note::ModProgramsAsFiles]
+        );
+        for route in [Route::WithAppData, Route::Own] {
+            let mut held = vec![Note::ModProgramsHeld];
+            said_for_route(&mut held, route);
+            assert_eq!(held, [Note::ModProgramsHeld], "{route:?}");
+        }
     }
 }

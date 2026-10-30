@@ -100,6 +100,10 @@ pub enum Note {
     /// Programs inside a game's saves or add-ons: listed apart, never copied as data or turned
     /// on; they come again from their maker (`games`).
     ModProgramsHeld,
+    /// Programs inside a game's saves that sit among the person's own files (Documents): they
+    /// move with those files as plain files, never turned on; working copies come from their
+    /// maker (`games`; the 2.5 security review, 30 October 2026: "not copied" is not true there).
+    ModProgramsAsFiles,
     /// Installed games: the launcher on the new laptop finds and checks them with its own
     /// "locate" and "verify"; the games' own files are not copied unless the person chooses.
     LauncherVerify,

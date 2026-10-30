@@ -615,12 +615,14 @@ fn session(bytes: &[u8]) -> Result<Found, ContentError> {
         .split_first_chunk::<4>()
         .ok_or_else(|| ContentError::Damaged("its size is missing".into()))?;
     let size = u32::from_le_bytes(*size) as usize;
-    if size > MAX_SESSION {
+    // The size a session file claims is held to what is read as JSON (2.5 security review, 30
+    // October 2026): a crafted file never makes the parser reserve more than that.
+    if size > MAX_SESSION.min(crate::content::MAX_JSON * 4) {
         return Err(ContentError::TooLarge);
     }
     let plain = lz4_flex::block::decompress(block, size)
         .map_err(|e| ContentError::Damaged(e.to_string()))?;
-    if plain.len() > crate::content::MAX_JSON * 16 {
+    if plain.len() > crate::content::MAX_JSON * 4 {
         return Err(ContentError::TooLarge);
     }
     pctwin_types::nesting::check_bytes(&plain, pctwin_types::nesting::Syntax::Json)

@@ -432,6 +432,9 @@
               "note": "mod-programs-held"
             },
             {
+              "note": "mod-programs-as-files"
+            },
+            {
               "note": "launcher-verify"
             }
           ],

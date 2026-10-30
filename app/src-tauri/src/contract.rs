@@ -358,6 +358,7 @@ fn rebuild_plan() -> crate::fullmove::RebuildPlanView {
                     Note::SaveMayNotWorkHere,
                     Note::StoreProtectedSaves,
                     Note::ModProgramsHeld,
+                    Note::ModProgramsAsFiles,
                     Note::LauncherVerify,
                 ],
                 ..change(

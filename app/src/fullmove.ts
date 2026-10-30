@@ -42,6 +42,7 @@ export const SPECIAL_NOTES = [
   "save-may-not-work-here",
   "store-protected-saves",
   "mod-programs-held",
+  "mod-programs-as-files",
   "launcher-verify",
 ] as const;
 export type SpecialNote = { note: Exclude<(typeof SPECIAL_NOTES)[number], "own-sync"> } | { note: "own-sync"; page: string | null };

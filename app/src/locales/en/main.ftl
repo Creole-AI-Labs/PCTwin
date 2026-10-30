@@ -3068,4 +3068,5 @@ special-note-saves-in-launcher-cloud = Your game launcher keeps these saves onli
 special-note-save-may-not-work-here = These saves come from a different kind of system. PCTwin keeps them on your new laptop, but the game there may not be able to open them.
 special-note-store-protected-saves = The store keeps these saves for itself, so PCTwin cannot copy them. They come back when you sign in to the store on your new laptop and install the game.
 special-note-mod-programs-held = Some of this game's add-ons are programs. PCTwin lists them but does not copy them or turn them on. Get them again from their maker.
+special-note-mod-programs-as-files = Some of this game's add-ons are programs. They move with your other files as plain files, and PCTwin never turns them on. Get working copies from their maker.
 special-note-launcher-verify = Install the launcher on your new laptop and sign in. Then use its own verify or locate step so it finds and checks your games. PCTwin copies installed games only if you choose to.

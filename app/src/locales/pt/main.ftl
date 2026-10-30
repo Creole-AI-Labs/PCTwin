@@ -3296,4 +3296,5 @@ special-note-saves-in-launcher-cloud = O inicializador do seu jogo guarda esses 
 special-note-save-may-not-work-here = Esses jogos salvos vêm de outro tipo de sistema. O PCTwin os guarda no seu novo notebook, mas o jogo lá talvez não consiga abri-los.
 special-note-store-protected-saves = A loja guarda esses jogos salvos para si, então o PCTwin não pode copiá-los. Eles voltam quando você entra na loja no seu novo notebook e instala o jogo.
 special-note-mod-programs-held = Alguns complementos deste jogo são programas. O PCTwin os lista, mas não os copia nem os ativa. Obtenha-os de novo com quem os criou.
+special-note-mod-programs-as-files = Alguns complementos deste jogo são programas. Eles vão com seus outros arquivos como arquivos comuns, e o PCTwin nunca os ativa. Obtenha cópias que funcionem com quem os criou.
 special-note-launcher-verify = Instale o inicializador no seu novo notebook e entre nele. Depois use a etapa própria dele de verificar ou localizar, para que ele encontre e confira seus jogos. O PCTwin só copia jogos instalados se você escolher.
