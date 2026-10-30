@@ -41,7 +41,7 @@ sha2 = "0.10.9"
 # pctwin-apps and pctwin-scan; MIT).
 plist = "1.10"
 # 2.5 browsers: a Mozilla session file is an LZ4 block; decoded in the parser process with the
-# safe decoder only (no unsafe code; MIT).
+# safe decoder only (MIT).
 lz4_flex = { version = "0.14.0", default-features = false, features = ["alloc", "safe-decode", "safe-encode", "checked-decode"] }
 
 [target.'cfg(windows)'.dependencies]

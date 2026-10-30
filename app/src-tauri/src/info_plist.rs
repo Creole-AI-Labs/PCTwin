@@ -157,10 +157,11 @@ fn the_finders_send_with_pctwin_is_one_service_for_any_file_or_folder() {
     ));
     // The provider answers that message, and the name is there in every launch language.
     let code = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/finder_send.rs"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/pctwin-helper-os/src/mac.rs"),
     )
     .unwrap();
-    assert!(code.contains("method(sendFiles:userData:error:)"));
+    assert!(code.contains("sel!(sendFiles:userData:error:)"));
     let conf = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
     )

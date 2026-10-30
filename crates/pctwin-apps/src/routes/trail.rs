@@ -174,22 +174,9 @@ pub fn mark_on_makers_site(
     Some(row.on_makers_site(&mark.0))
 }
 
-/// Reads the Mac mark on `file` (`com.apple.metadata:kMDItemWhereFroms`, never following a link),
-/// at most [`MAX_MARK_BYTES`]. Nothing when there is none, it is larger, or it cannot be read.
-pub fn read_mac_mark(file: &std::path::Path) -> Option<MarkAddress> {
-    #[cfg(target_os = "macos")]
-    {
-        let mut buf = vec![0u8; MAX_MARK_BYTES];
-        let n = rustix::fs::lgetxattr(file, "com.apple.metadata:kMDItemWhereFroms", &mut buf[..])
-            .ok()?;
-        where_froms_address(buf.get(..n)?)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = file;
-        None
-    }
-}
+/// The extended attribute holding a Mac download mark, read by the app (which wraps the
+/// system call) and parsed with [`where_froms_address`], at most [`MAX_MARK_BYTES`].
+pub const MAC_MARK: &str = "com.apple.metadata:kMDItemWhereFroms";
 
 /// Reads the Windows mark beside `file`, at most [`MAX_MARK_BYTES`]. Nothing when there is none
 /// or it cannot be read.

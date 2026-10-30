@@ -2,7 +2,8 @@
 //! off through SMAppService.
 //!
 //! The four `os_daemon_*` / `os_open_login_items` functions, `os_od_create_user` and
-//! `os_authorization_holds` are the only unsafe code here, one block each, listed in
+//! `os_authorization_holds` (and the later ones each marked with its approval, such as
+//! `os_services_provider`) are the only unsafe code here, one block each, listed in
 //! scripts/unsafe-fence.sh: the Service Management and Open Directory bindings mark every method
 //! unsafe, and the security-framework wrapper has no way to check a right on an approval made
 //! elsewhere. Reading the caller and asking an administrator need none (nix, libproc and
@@ -526,4 +527,97 @@ fn os_sandbox_init(profile: &std::ffi::CStr) -> Result<(), String> {
 pub fn sandbox_parser() -> Result<(), String> {
     let profile = std::ffi::CString::new(PARSER_PROFILE).map_err(|e| e.to_string())?;
     os_sandbox_init(&profile)
+}
+
+/// Where the Finder's "Send with PCTwin" hands the chosen items: their file addresses.
+static FINDER_HAND: std::sync::OnceLock<Box<dyn Fn(Vec<String>) + Send + Sync>> =
+    std::sync::OnceLock::new();
+/// Most items taken from one choice in the Finder.
+const FINDER_MOST: usize = 1000;
+
+/// Makes this app the provider of the Finder's "Send with PCTwin" service (the app's Info.plist
+/// declares it: `NSServices`, message `sendFiles`, any file or folder). `hand` receives the file
+/// addresses (`file://` text) of the items the person chose, at most 1000; what they mean is the
+/// app's to check. Call once, on the main thread, while the app starts; false when it could not
+/// be set up.
+pub fn finder_send_service(hand: impl Fn(Vec<String>) + Send + Sync + 'static) -> bool {
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    if FINDER_HAND.set(Box::new(hand)).is_err() {
+        return false;
+    }
+    let ok = os_services_provider(mtm);
+    if ok {
+        objc2_app_kit::NSUpdateDynamicServices();
+    }
+    ok
+}
+
+/// The file addresses on the pasteboard the Finder hands over (`public.file-url`), as text.
+fn file_addresses(pasteboard: &objc2_app_kit::NSPasteboard) -> Vec<String> {
+    let Some(items) = pasteboard.pasteboardItems() else {
+        return Vec::new();
+    };
+    let file_url = NSString::from_str("public.file-url");
+    items
+        .iter()
+        .filter_map(|item| item.stringForType(&file_url))
+        .map(|s| s.to_string())
+        .take(FINDER_MOST)
+        .collect()
+}
+
+/// The service's message, as AppKit sends it: the chosen items are on `pasteboard`.
+extern "C-unwind" fn finder_send_files(
+    _provider: &AnyObject,
+    _message: objc2::runtime::Sel,
+    pasteboard: &objc2_app_kit::NSPasteboard,
+    _user_data: Option<&NSString>,
+    _error: *mut *mut NSString,
+) {
+    let files = file_addresses(pasteboard);
+    if let (false, Some(hand)) = (files.is_empty(), FINDER_HAND.get()) {
+        hand(files);
+    }
+}
+
+/// Registers a class answering `sendFiles:userData:error:` with [`finder_send_files`] and makes
+/// one of it the application's services provider, kept for as long as the app runs. Added 30
+/// October 2026 for the Finder's "Send with PCTwin" (a Quick Send entry point); approved by the
+/// founder, 30 October 2026.
+fn os_services_provider(mtm: objc2::MainThreadMarker) -> bool {
+    use objc2::ClassType;
+    let Some(mut builder) =
+        objc2::runtime::ClassBuilder::new(c"PCTwinFinderSend", objc2::runtime::NSObject::class())
+    else {
+        return false;
+    };
+    // SAFETY: the method's types are exactly AppKit's for a service message (the provider, the
+    // selector, an NSPasteboard, an optional NSString, an NSString out-pointer it never writes);
+    // the class is a plain NSObject subclass with no state of its own, so `new` makes a whole
+    // one; AppKit retains the provider it is given and only sends it the message Info.plist names.
+    #[expect(
+        unsafe_code,
+        reason = "AppKit's services provider has no safe binding: set up here only"
+    )]
+    let provider = unsafe {
+        builder.add_method(
+            objc2::sel!(sendFiles:userData:error:),
+            finder_send_files
+                as extern "C-unwind" fn(
+                    &AnyObject,
+                    objc2::runtime::Sel,
+                    &objc2_app_kit::NSPasteboard,
+                    Option<&NSString>,
+                    *mut *mut NSString,
+                ),
+        );
+        let class = builder.register();
+        let provider: objc2::rc::Retained<AnyObject> = objc2::msg_send![class, new];
+        objc2_app_kit::NSApplication::sharedApplication(mtm).setServicesProvider(Some(&*provider));
+        provider
+    };
+    std::mem::forget(provider);
+    true
 }

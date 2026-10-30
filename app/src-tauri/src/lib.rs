@@ -26,8 +26,6 @@ mod finish_cleanup;
 mod finish_doctor;
 mod finish_store;
 // The full move: apps, settings and special categories joined to the move (Phase 2 joining).
-#[cfg(target_os = "macos")]
-mod finder_send;
 mod fullmove;
 #[cfg(test)]
 mod guard_examples;
@@ -583,13 +581,22 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             if !has_tray::<R>() {
                 return Ok(());
             }
-            // The Finder's "Send with PCTwin": the chosen files join the chosen list.
+            // The Finder's "Send with PCTwin" (Info.plist `NSServices`; its words in each launch
+            // language, macos/<language>.lproj/ServicesMenu.strings): the chosen files join the
+            // chosen list exactly as Open With's do. Nothing is sent before the person chooses Send.
             #[cfg(target_os = "macos")]
             {
                 let handle = app.handle().clone();
-                finder_send::set_up(move |paths| {
-                    show_main(&handle);
-                    quicksend::dropped(&handle, paths);
+                pctwin_helper_os::finder_send_service(move |addresses| {
+                    let urls: Vec<tauri::Url> = addresses
+                        .iter()
+                        .filter_map(|a| tauri::Url::parse(a).ok())
+                        .collect();
+                    let paths = handed::opened(&urls);
+                    if !paths.is_empty() {
+                        show_main(&handle);
+                        quicksend::dropped(&handle, paths);
+                    }
                 });
             }
             let menu = tray_menu(app.handle(), "PCTwin", "PCTwin", "PCTwin")?;

@@ -12,8 +12,9 @@
 //!   With and a drop on the Dock icon hand the files to the running app as an "opened" run
 //!   event, which [`opened`] reads; a small plugin inside `app()` (lib.rs) passes them to
 //!   `quicksend::dropped`. The app never becomes the default for any file type (Info.plist rank
-//!   "Alternate"). A Finder Quick Action needs native code or a workflow tested on a Mac, and a
-//!   true Share extension needs its own signed target: neither is built.
+//!   "Alternate"). The Finder's right-click "Send with PCTwin" is a service the app provides
+//!   (`pctwin_helper_os::finder_send_service`); its file addresses go through [`opened`] too.
+//!   A true Share extension needs its own signed target and is not built.
 //! - **The widget**: a drop on the widget joins the chosen list (`quicksend::dropped`).
 //! - **The tray**: its "Send" item shows the window and opens the pick page (lib.rs).
 //!

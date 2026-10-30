@@ -19,6 +19,9 @@
 #                     their app is open: Windows Restart Manager names the app holding a file;
 #                     asked for in the 2.6 wiring brief; approved by the founder, 29 October
 #                     2026)
+#                     (os_services_provider added 30 October 2026, the Finder's "Send with
+#                     PCTwin": AppKit's services provider, a class built at run time so no
+#                     unsafe sits outside the function; approved by the founder, 30 October 2026)
 #
 # Every other crate must say `[lints] workspace = true`, which brings in the workspace's
 # `unsafe_code = "forbid"`. A crate that sets its own unsafe_code, or whose sources contain an
@@ -48,7 +51,7 @@ bad() { echo "UNSAFE FENCE: $*" >&2; fail=1; }
 exception_fns() {
   case "$1" in
     pctwin-lease) echo "fcntl_int" ;;
-    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_native_machine os_net_user_add os_expire_password os_create_dir_with_sddl os_create_profile os_set_process_sddl os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items os_od_create_user os_authorization_holds os_windows_dir os_machine_text os_token_elevated os_session_on_screen os_win_verify_trust os_disk_hotplug os_assoc_is_dangerous os_start_contained os_sandbox_init os_administrators_count os_rm_holders" ;;
+    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_native_machine os_net_user_add os_expire_password os_create_dir_with_sddl os_create_profile os_set_process_sddl os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items os_od_create_user os_authorization_holds os_windows_dir os_machine_text os_token_elevated os_session_on_screen os_win_verify_trust os_disk_hotplug os_assoc_is_dangerous os_start_contained os_sandbox_init os_administrators_count os_rm_holders os_services_provider" ;;
     *) echo "" ;;
   esac
 }

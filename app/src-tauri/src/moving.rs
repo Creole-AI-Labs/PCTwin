@@ -4344,20 +4344,30 @@ fn old_laptop_apps(
         });
         // Where each linked installer was downloaded from, as its mark says: only whether that
         // was the maker's own site is kept (Security Design, the scan rules, 30 October 2026).
+        #[cfg(windows)]
+        let read_mark = pctwin_apps::routes::trail::read_windows_mark;
+        #[cfg(target_os = "macos")]
+        let read_mark = read_mac_mark;
         pctwin_apps::found::note_download_marks(
             &mut apps,
             &candidates,
-            if cfg!(windows) {
-                &pctwin_apps::routes::trail::read_windows_mark
-            } else {
-                &pctwin_apps::routes::trail::read_mac_mark
-            },
+            &read_mark,
             pctwin_apps::routes::counterpart::shipped(),
         );
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     let _ = (record, roots);
     apps
+}
+
+/// Reads the Mac download mark on `file` (never following a link), at most
+/// `MAX_MARK_BYTES`; nothing when there is none, it is larger, or it cannot be read.
+#[cfg(target_os = "macos")]
+fn read_mac_mark(file: &std::path::Path) -> Option<pctwin_apps::routes::trail::MarkAddress> {
+    use pctwin_apps::routes::trail::{MAC_MARK, MAX_MARK_BYTES, where_froms_address};
+    let mut buf = vec![0u8; MAX_MARK_BYTES];
+    let n = rustix::fs::lgetxattr(file, MAC_MARK, &mut buf[..]).ok()?;
+    where_froms_address(buf.get(..n)?)
 }
 
 #[cfg(test)]

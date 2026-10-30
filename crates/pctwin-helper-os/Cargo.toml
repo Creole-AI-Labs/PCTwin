@@ -55,7 +55,9 @@ rustix = { version = "1.1.5", features = ["fs", "net", "process", "system"] }
 libproc = "0.14.11"
 nix = { version = "0.31.3", features = ["socket"] }
 objc2 = "0.6.5"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
+# The Finder's "Send with PCTwin" service (os_services_provider; the founder, 30 October 2026).
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSPasteboardItem", "NSResponder"] }
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 objc2-open-directory = { version = "0.3.2", default-features = false, features = ["std", "CFOpenDirectory", "CFOpenDirectoryConstants", "ODNode", "ODRecord", "ODSession"] }
 security-framework = "3"
