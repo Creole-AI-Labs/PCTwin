@@ -194,16 +194,39 @@ pub fn link_installers(
     candidates: &[(pctwin_record::ItemId, std::path::PathBuf)],
     read: &dyn Fn(&std::path::Path) -> pctwin_maker::OldCopy,
 ) {
+    link_installers_by(apps, candidates, &|path| match read(path).maker {
+        pctwin_maker::OldMaker::Signed(s) => Some(pctwin_maker::Maker::Windows(s)),
+        _ => None,
+    });
+}
+
+/// As [`link_installers`], on a Mac: `team` is the Apple team whose signature on the file holds
+/// (`pctwin_maker::mac::old_installer_team`).
+pub fn link_mac_installers(
+    apps: &mut AppList,
+    candidates: &[(pctwin_record::ItemId, std::path::PathBuf)],
+    team: &dyn Fn(&std::path::Path) -> Option<pctwin_maker::facts::MacTeam>,
+) {
+    link_installers_by(apps, candidates, &|path| {
+        team(path).map(pctwin_maker::Maker::Mac)
+    });
+}
+
+/// Links each app to the files `maker_of` says the same maker signed, by the maker check's rule.
+fn link_installers_by(
+    apps: &mut AppList,
+    candidates: &[(pctwin_record::ItemId, std::path::PathBuf)],
+    maker_of: &dyn Fn(&std::path::Path) -> Option<pctwin_maker::Maker>,
+) {
     let signed: Vec<(pctwin_record::ItemId, pctwin_maker::Maker)> = candidates
         .iter()
         .take(MAX_INSTALLER_FILES)
-        .filter_map(|(id, path)| match read(path).maker {
-            pctwin_maker::OldMaker::Signed(s) => Some((*id, pctwin_maker::Maker::Windows(s))),
-            _ => None,
-        })
+        .filter_map(|(id, path)| Some((*id, maker_of(path)?)))
         .collect();
     for app in &mut apps.found {
-        let Some(old @ pctwin_maker::Maker::Windows(_)) = maker_of_record(&app.maker) else {
+        let Some(old @ (pctwin_maker::Maker::Windows(_) | pctwin_maker::Maker::Mac(_))) =
+            maker_of_record(&app.maker)
+        else {
             continue;
         };
         for (id, found) in &signed {
@@ -544,6 +567,47 @@ HostUrl={url}
         };
         link_installers(&mut apps, &candidates, &read);
         assert_eq!(apps.found[0].installers, vec![id(1), id(3)]);
+    }
+
+    /// A Mac app is linked to the packages and disk images its own Apple team signed, never to
+    /// one named like it and signed by another team, nor to an unsigned one.
+    #[test]
+    fn mac_apps_link_installers_their_own_team_signed() {
+        let mut apps = AppList::default();
+        apps.found.push(FoundApp {
+            name: "Writer".into(),
+            version: None,
+            publisher: None,
+            owner: Owner::Shared,
+            system: pctwin_record::AppSystem::Mac,
+            found: pctwin_record::FoundWhere::Snap { name: "w".into() },
+            arch: AppArch::UNKNOWN,
+            maker: pctwin_record::AppMaker::MacTeam {
+                team_id: "SKMME9E2Y8".into(),
+            },
+            web: None,
+            update_feed: None,
+            installers: vec![],
+            notes: vec![],
+        });
+        let id = |n: u8| pctwin_record::ItemId::from_hex(&format!("{n:02x}").repeat(16)).unwrap();
+        let at = |n: &str| std::path::Path::new("d").join(n);
+        let candidates = vec![
+            (id(1), at("Writer.dmg")),
+            (id(2), at("Writer-fake.pkg")),
+            (id(3), at("plain.pkg")),
+        ];
+        let team = |p: &std::path::Path| match p.file_name().unwrap().to_str().unwrap() {
+            "Writer.dmg" => Some(pctwin_maker::facts::MacTeam {
+                team_id: "SKMME9E2Y8".into(),
+            }),
+            "Writer-fake.pkg" => Some(pctwin_maker::facts::MacTeam {
+                team_id: "OTHERTEAM1".into(),
+            }),
+            _ => None,
+        };
+        link_mac_installers(&mut apps, &candidates, &team);
+        assert_eq!(apps.found[0].installers, vec![id(1)]);
     }
 
     #[test]

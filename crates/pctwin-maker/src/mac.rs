@@ -331,6 +331,31 @@ pub fn check_app(runner: &dyn Runner, path: &Path, t: Duration) -> MacFacts {
     }
 }
 
+/// The Apple team that signed an installer file found on the old laptop (an installer package or
+/// a disk image), told by its first and last bytes, never its name; `None` unless its signature
+/// holds. Used only to link the file to the app it installs (`pctwin_apps::found`): nothing is
+/// installed from it.
+pub fn old_installer_team(runner: &dyn Runner, path: &Path, t: Duration) -> Option<MacTeam> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let (head, tail) = crate::own::ends(&mut file, size).ok()?;
+    match crate::sniff::sniff(&head, &tail).format {
+        crate::facts::Format::MacInstaller => {
+            let pkg = parse_pkg(&runner.run(&pkg_call(path, t)));
+            (pkg.signature == Signature::Trusted)
+                .then_some(pkg.team)
+                .flatten()
+        }
+        crate::facts::Format::MacDiskImage => {
+            let shown = runner.run(&display_call(path, t)).ok()?;
+            (parse_verify(&runner.run(&verify_call(path, t))) == Signature::Trusted)
+                .then(|| parse_display(&shown).team)
+                .flatten()
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +607,46 @@ Runtime Version=14.0.0
             Some("ABCDE12345".into())
         );
         assert_eq!(team_in_brackets("Name ABCDE12345"), None);
+    }
+
+    /// An old installer file is linked by who signed it, told by its bytes: a package by
+    /// `pkgutil`, a disk image by `codesign`; an unsigned one, or anything else, by nobody.
+    #[test]
+    fn an_old_installers_team_comes_from_its_signature_only() {
+        let dir = std::env::temp_dir().join(format!("pctwin-old-team-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pkg = dir.join("named-like-a-disk-image.dmg");
+        std::fs::write(&pkg, b"xar!\0\x1c\0\x01rest of a package").unwrap();
+        let mut dmg_bytes = vec![0u8; 2048];
+        let n = dmg_bytes.len();
+        dmg_bytes[n - 512..n - 508].copy_from_slice(b"koly");
+        let dmg = dir.join("named-like-a-package.pkg");
+        std::fs::write(&dmg, &dmg_bytes).unwrap();
+        let other = dir.join("notes.pkg");
+        std::fs::write(&other, b"just text").unwrap();
+        let team = Some(MacTeam {
+            team_id: "SKMME9E2Y8".into(),
+        });
+        let t = Duration::from_secs(1);
+        let signed = Canned(vec![
+            ("pkgutil --check-signature", out(PKG, 0)),
+            ("codesign -dv", err(DISPLAY, 0)),
+            ("codesign --verify", err("", 0)),
+        ]);
+        assert_eq!(old_installer_team(&signed, &pkg, t), team);
+        assert_eq!(old_installer_team(&signed, &dmg, t), team);
+        assert_eq!(old_installer_team(&signed, &other, t), None);
+        let unsigned = Canned(vec![
+            (
+                "pkgutil --check-signature",
+                out("Package \"x.pkg\":\n   Status: no signature\n", 1),
+            ),
+            ("codesign -dv", err(DISPLAY, 0)),
+            ("codesign --verify", err("a sealed resource is missing", 1)),
+        ]);
+        assert_eq!(old_installer_team(&unsigned, &pkg, t), None);
+        assert_eq!(old_installer_team(&unsigned, &dmg, t), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     struct Canned(Vec<(&'static str, Result<Ran, RunError>)>);

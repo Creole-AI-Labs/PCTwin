@@ -4298,15 +4298,15 @@ fn old_laptop_apps(
         .filter_map(|r| Some((r.account_id.clone()?, r.home.clone())))
         .collect();
     #[cfg_attr(
-        not(windows),
-        expect(unused_mut, reason = "installers are linked on Windows only")
+        not(any(windows, target_os = "macos")),
+        expect(unused_mut, reason = "installers are linked on Windows and a Mac only")
     )]
     let mut apps = pctwin_apps::found::read_here(
         &people,
         &census.me,
         crate::parser(crate::Files::InstalledHere),
     );
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let candidates: Vec<(ItemId, std::path::PathBuf)> = record
             .items
@@ -4329,19 +4329,33 @@ fn old_laptop_apps(
             })
             .take(pctwin_apps::found::MAX_INSTALLER_FILES)
             .collect();
+        #[cfg(windows)]
         pctwin_apps::found::link_installers(&mut apps, &candidates, &|p: &std::path::Path| {
             pctwin_maker::windows_old_copy(p, crate::parser(crate::Files::FoundInstallers))
+        });
+        // A Mac: who signed each package or disk image, by Apple's own tools.
+        #[cfg(target_os = "macos")]
+        pctwin_apps::found::link_mac_installers(&mut apps, &candidates, &|p: &std::path::Path| {
+            pctwin_maker::mac::old_installer_team(
+                &pctwin_maker::run::SystemRunner,
+                p,
+                std::time::Duration::from_secs(20),
+            )
         });
         // Where each linked installer was downloaded from, as its mark says: only whether that
         // was the maker's own site is kept (Security Design, the scan rules, 30 October 2026).
         pctwin_apps::found::note_download_marks(
             &mut apps,
             &candidates,
-            &pctwin_apps::routes::trail::read_windows_mark,
+            if cfg!(windows) {
+                &pctwin_apps::routes::trail::read_windows_mark
+            } else {
+                &pctwin_apps::routes::trail::read_mac_mark
+            },
             pctwin_apps::routes::counterpart::shipped(),
         );
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = (record, roots);
     apps
 }

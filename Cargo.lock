@@ -3751,6 +3751,7 @@ dependencies = [
  "plist",
  "reqwest",
  "roxmltree",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

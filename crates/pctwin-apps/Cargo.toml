@@ -31,6 +31,11 @@ url = "2.5.8"
 # Licence keys found for the person are wiped from memory when dropped (src/keys.rs).
 zeroize = "1.9.0"
 
+# A Mac installer's download mark (routes/trail.rs): an extended attribute, read without
+# following a link.
+[target.'cfg(target_os = "macos")'.dependencies]
+rustix = { version = "1.1", features = ["fs"] }
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 # Whether the network is metered: Windows' own connection profile (safe WinRT calls).
