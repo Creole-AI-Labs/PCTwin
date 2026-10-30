@@ -9,7 +9,7 @@ use pctwin_settings::catalogue::{Catalogue, System, Writer};
 use pctwin_settings::classify::{Ctx, FolderMap, Why};
 use pctwin_settings::files::{
     FileCtx, FileOutcome, FoundFile, Left, OLDER_APP, discover_files, format_of, plan_file,
-    rewrite_recent_list, strip_jsonc, swap_modifiers,
+    rewrite_recent_list, strip_jsonc, translate,
 };
 
 fn folders() -> FolderMap {
@@ -191,7 +191,11 @@ fn keyboard_shortcuts_between_a_mac_and_windows_are_an_equivalent() {
     ));
     assert!(!equivalent);
     assert!(out.contains("ctrl+shift+k"));
-    assert_eq!(swap_modifiers("cmd+s", false), "ctrl+s");
+    let t = &cat.tables["vscode-keys"];
+    assert_eq!(
+        translate(t, "cmd+s", System::Mac, System::Windows, true),
+        "ctrl+s"
+    );
 }
 
 #[test]

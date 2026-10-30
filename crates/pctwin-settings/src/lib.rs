@@ -44,6 +44,7 @@ pub mod catalogue;
 pub mod classify;
 pub mod codec;
 pub mod confirm;
+pub mod extensions;
 pub mod files;
 pub mod found;
 pub mod generic;

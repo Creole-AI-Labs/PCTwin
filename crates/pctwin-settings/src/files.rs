@@ -26,7 +26,9 @@ use pctwin_types::nesting::{self, MAX_NESTING, Syntax};
 use serde_json::Value;
 
 use crate::apps::{parse_version, path_matches};
-use crate::catalogue::{AppEntry, AppFile, Catalogue, FileFormat, MacroRoot, Rule, System, Writer};
+use crate::catalogue::{
+    AppEntry, AppFile, Catalogue, FileFormat, MacroRoot, Rule, System, Table, Writer,
+};
 use crate::classify::{Ctx, Fate, Why, classify};
 
 /// The largest settings file read ([`pctwin_types::limits`]).
@@ -228,7 +230,9 @@ pub fn plan_file(cat: &Catalogue, f: &FoundFile, bytes: &[u8], ctx: &FileCtx<'_>
     let format = entry.map(|(_, af)| af.format).or(f.format);
     let rules: Vec<(String, Rule)> = entry
         .map(|(_, af)| {
-            let cross = (ctx.from == System::Mac) != (ctx.to == System::Mac);
+            // Between different systems (Windows, a Mac, Linux); two Linux desktops keep an
+            // app's files the same way.
+            let cross = ctx.from.column() != ctx.to.column();
             af.rules
                 .iter()
                 .chain(af.cross_os.iter().filter(|_| cross))
@@ -241,6 +245,7 @@ pub fn plan_file(cat: &Catalogue, f: &FoundFile, bytes: &[u8], ctx: &FileCtx<'_>
         .unwrap_or(Rule::Copy);
     let macros = entry.map(|(_, af)| af.macros.clone()).unwrap_or_default();
     let mut w = Walker {
+        tables: &cat.tables,
         ctx,
         store: f.rel.clone(),
         rules,
@@ -295,6 +300,7 @@ fn version_gate(app: &AppEntry, f: &FoundFile, ctx: &FileCtx<'_>) -> Option<&'st
 }
 
 struct Walker<'a, 'b> {
+    tables: &'a BTreeMap<String, Table>,
     ctx: &'a FileCtx<'b>,
     store: String,
     rules: Vec<(String, Rule)>,
@@ -364,17 +370,39 @@ impl Walker<'_, '_> {
                 self.leave(path, Why::StartsProgram);
                 return Leaf::Replace(off);
             }
-            Rule::SwapModifiers => {
-                if let Value::String(s) = v {
-                    self.equivalent = true;
-                    return Leaf::Replace(Value::String(swap_modifiers(
-                        s,
-                        self.ctx.to == System::Mac,
-                    )));
+            Rule::Translate { table, keys } => {
+                if let Value::String(s) = v
+                    && let Some(t) = self.tables.get(&table)
+                {
+                    let new = translate(t, s, self.ctx.from, self.ctx.to, keys);
+                    // A whole value the table names (a keymap such as `$default`) is one of
+                    // the catalogue's own checked names, not a place to judge.
+                    let named = !keys
+                        && t.column(self.ctx.from.column())
+                            .is_some_and(|c| t.rows.iter().any(|r| r[c].eq_ignore_ascii_case(s)));
+                    if named {
+                        self.equivalent |= new != *s;
+                        return Leaf::Replace(Value::String(new));
+                    }
+                    if new != *s {
+                        // The translated value is judged by the same rules as any other.
+                        return match self.judge(name, &Value::String(new.clone())) {
+                            Leaf::Keep => {
+                                self.equivalent = true;
+                                Leaf::Replace(Value::String(new))
+                            }
+                            other => other,
+                        };
+                    }
                 }
             }
             Rule::Copy | Rule::RewritePath => {}
         }
+        self.judge(name, v)
+    }
+
+    /// The generic rules for one leaf.
+    fn judge(&mut self, name: &str, v: &Value) -> Leaf {
         let sv = match v {
             Value::String(s) => SettingValue::Text(s.clone()),
             Value::Bool(b) => SettingValue::Bool(*b),
@@ -580,10 +608,12 @@ impl Walker<'_, '_> {
             let own_name = node.attribute("name").unwrap_or(node.tag_name().name());
             let mut drop_it: Option<Why> = None;
             for a in node.attributes() {
-                if a.name() == "name" {
+                let apath = format!("{epath}/@{}", a.name());
+                // An element's name is what it is, not a value; only a rule makes it one
+                // (`<active_keymap name="..."/>`).
+                if a.name() == "name" && self.rule_for(&apath).is_none() {
                     continue;
                 }
-                let apath = format!("{epath}/@{}", a.name());
                 // `<option name="x" value="y"/>`: the value is named by its element's name.
                 let name = if a.name() == "value" {
                     own_name
@@ -746,22 +776,33 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// Keyboard shortcuts between a Mac and another system: `ctrl` and `cmd` swap.
-pub fn swap_modifiers(keys: &str, to_mac: bool) -> String {
-    keys.split(' ')
-        .map(|chord| {
-            chord
-                .split('+')
-                .map(|k| match (k.to_ascii_lowercase().as_str(), to_mac) {
-                    ("ctrl", true) => "cmd".to_string(),
-                    ("cmd", false) => "ctrl".to_string(),
-                    _ => k.to_string(),
-                })
-                .collect::<Vec<_>>()
-                .join("+")
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+/// A value between systems through a catalogue table ([`Rule::Translate`]): from the old
+/// system's column to the new one's. With `keys`, each key name of a shortcut on its own (split
+/// at spaces and `+`, which are kept), so the table's rows swap modifiers both ways
+/// (`ctrl` and `cmd`, `win` and `ctrl`) and no two old shortcuts become one. A name the table
+/// does not hold stays as it is.
+pub fn translate(t: &Table, value: &str, from: System, to: System, keys: bool) -> String {
+    let (f, n) = (from.column(), to.column());
+    if f == n {
+        return value.to_string();
+    }
+    let one = |k: &str| t.lookup(f, k, n, false).unwrap_or(k).to_string();
+    if !keys {
+        return one(value);
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut word = String::new();
+    for c in value.chars() {
+        if c == ' ' || c == '+' {
+            out.push_str(&one(&word));
+            word.clear();
+            out.push(c);
+        } else {
+            word.push(c);
+        }
+    }
+    out.push_str(&one(&word));
+    out
 }
 
 /// JSON with comments and trailing commas, as plain JSON. `None` for an unclosed string or
@@ -852,7 +893,9 @@ fn strip_comments(s: &str) -> Option<String> {
 /// private-data role writes): the same list with entries pointed at the moved files, and those
 /// whose files did not move left out. 2.4 gives 2.5 this value; it never opens the database.
 pub fn rewrite_recent_list(json: &str, ctx: &FileCtx<'_>) -> Result<(String, Vec<Left>), Why> {
+    let no_tables = BTreeMap::new();
     let mut w = Walker {
+        tables: &no_tables,
         ctx,
         store: "recent".into(),
         rules: Vec::new(),
