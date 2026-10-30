@@ -33,6 +33,18 @@
     {"system": "any", "root": "home-dot", "folder": ".cursor", "name": "Cursor", "category": "ai-tool", "checked_on": "2026-10-29"},
     {"system": "any", "root": "home-dot", "folder": ".vscode", "name": "Visual Studio Code add-ons", "category": "ai-tool", "checked_on": "2026-10-29"},
     {"system": "any", "root": "home-dot", "folder": ".ollama", "name": "Ollama", "category": "ai-tool", "checked_on": "2026-10-29"},
-    {"system": "any", "root": "home-dot", "folder": ".lmstudio", "name": "LM Studio", "category": "ai-tool", "checked_on": "2026-10-29"}
+    {"system": "any", "root": "home-dot", "folder": ".lmstudio", "name": "LM Studio", "category": "ai-tool", "checked_on": "2026-10-29"},
+    {"system": "windows", "root": "local", "folder": "Google/Chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Google/Chrome"}, {"system": "linux", "root": "xdg-config", "folder": "google-chrome"}]},
+    {"system": "mac", "root": "application-support", "folder": "Google/Chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Google/Chrome"}, {"system": "linux", "root": "xdg-config", "folder": "google-chrome"}]},
+    {"system": "linux", "root": "xdg-config", "folder": "google-chrome", "name": "Google Chrome", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Google/Chrome"}, {"system": "mac", "root": "application-support", "folder": "Google/Chrome"}]},
+    {"system": "windows", "root": "local", "folder": "Microsoft/Edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "mac", "root": "application-support", "folder": "Microsoft Edge"}, {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge"}]},
+    {"system": "mac", "root": "application-support", "folder": "Microsoft Edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Microsoft/Edge"}, {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge"}]},
+    {"system": "linux", "root": "xdg-config", "folder": "microsoft-edge", "name": "Microsoft Edge", "category": "browser", "checked_on": "2026-10-30",
+     "elsewhere": [{"system": "windows", "root": "local", "folder": "Microsoft/Edge"}, {"system": "mac", "root": "application-support", "folder": "Microsoft Edge"}]}
   ]
 }
