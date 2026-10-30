@@ -10,14 +10,16 @@
 //!   Dolphin and Nemo list it under Open With.
 //! - **Mac**: the app declares that it opens any file and folder (`CFBundleDocumentTypes`); Open
 //!   With and a drop on the Dock icon hand the files to the running app as an "opened" run
-//!   event, which [`opened`] reads. Not wired yet: `run()` is pinned by the lockdown test (a
-//!   security decision for the Chief), so the run-event hook waits for that change. A true Share
-//!   extension needs its own signed target and is not built.
-//! - **The widget**: a drop on the widget joins the chosen list (`quicksend::dropped`); the
-//!   tray's Send item is the screens' to add.
+//!   event, which [`opened`] reads; a small plugin inside `app()` (lib.rs) passes them to
+//!   `quicksend::dropped`. The app never becomes the default for any file type (Info.plist rank
+//!   "Alternate"). A Finder Quick Action needs native code or a workflow tested on a Mac, and a
+//!   true Share extension needs its own signed target: neither is built.
+//! - **The widget**: a drop on the widget joins the chosen list (`quicksend::dropped`).
+//! - **The tray**: its "Send" item shows the window and opens the pick page (lib.rs).
 //!
-//! When PCTwin is already running, a second start with `--send` must hand its paths to the first
-//! one (a single-instance plugin, not yet added: noted for the Chief).
+//! When PCTwin is already running, a second start with `--send` hands its paths to the first one
+//! (the single-instance plugin, registered first in lib.rs; [`second_start`] reads its
+//! arguments), and the running window is shown and focused. Not built on Tauri's mock runtime.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -53,6 +55,12 @@ fn waiting() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// The paths a second start was given (its arguments, program name first): what
+/// [`paths_in`] takes, from the strings the single-instance plugin hands over.
+pub fn second_start(args: &[String]) -> Vec<PathBuf> {
+    paths_in(args.iter().map(std::ffi::OsString::from))
+}
+
 /// Keeps `paths` for the pick page.
 pub fn keep(paths: Vec<PathBuf>) {
     let mut w = waiting();
@@ -66,7 +74,13 @@ pub fn keep_args() {
 }
 
 /// The Mac's "opened" files (Open With, a drop on the Dock icon).
-#[allow(dead_code, reason = "the run-event hook waits for the lockdown change")]
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "ios")),
+    allow(
+        dead_code,
+        reason = "only the Mac's run event calls it; the tests run it everywhere"
+    )
+)]
 pub fn opened(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter(|u| u.scheme() == "file")
@@ -109,6 +123,22 @@ mod tests {
         assert!(paths_in(args(&["pctwin".as_ref(), a.as_os_str()])).is_empty());
         // The program's own name is never taken for the flag.
         assert!(paths_in(args(&[SEND_FLAG.as_ref(), a.as_os_str()])).is_empty());
+    }
+
+    #[test]
+    fn a_second_starts_arguments_give_the_same_paths() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("a.txt");
+        std::fs::write(&a, b"x").unwrap();
+        let a_str = a.to_str().unwrap().to_owned();
+        let args = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<String>>();
+        assert_eq!(
+            second_start(&args(&["pctwin", SEND_FLAG, &a_str, "relative"])),
+            vec![a]
+        );
+        // A plain second start (no flag) only brings the window forward.
+        assert!(second_start(&args(&["pctwin"])).is_empty());
+        assert!(second_start(&args(&["pctwin", &a_str])).is_empty());
     }
 
     #[test]

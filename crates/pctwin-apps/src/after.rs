@@ -203,6 +203,9 @@ pub enum Todo {
         product_id: Option<String>,
     },
     Restart,
+    /// Built for Intel Macs only, on an Apple-silicon Mac: it runs through Rosetta (which macOS
+    /// offers to install the first time it is opened), and Apple is ending Rosetta.
+    Rosetta,
     /// Other programs appeared with it; the person can remove them.
     Extras(Vec<String>),
 }

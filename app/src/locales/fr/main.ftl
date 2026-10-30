@@ -1014,6 +1014,7 @@ plan-blocked-fix = Choisir les comptes
 ## Tray menu
 
 tray-show = Afficher PCTwin
+tray-send = Envoyer des fichiers
 tray-quit = Quitter PCTwin
 
 ## F01 secondary actions and their coming-soon pages
@@ -1480,6 +1481,12 @@ qs-eyebrow-receiving = Réception sur votre ordinateur portable
 qs-label-this = Ce portable
 qs-label-other = L’autre portable
 qs-pick-failed = Le sélecteur n’a pas pu s’ouvrir. Réessayez.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 fichier ou dossier a été confié à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+        [many] { $count } de fichiers ou dossiers ont été confiés à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+       *[other] { $count } fichiers ou dossiers ont été confiés à PCTwin pour l’envoi. Vérifiez la liste avant de continuer.
+    }
 qs-pick-too-many = C’est plus de fichiers qu’un seul envoi ne peut en emporter. Décochez quelques dossiers, ou envoyez-les en plusieurs fois.
 qs-problem-lost-title = La connexion entre les ordinateurs a été perdue
 qs-problem-failed-title = Les fichiers n’ont pas pu être envoyés cette fois
@@ -2168,12 +2175,14 @@ fullmove-extras-refused = Les réglages et données d’applications de l’anci
 fullmove-app-from = PCTwin installe le paquet winget { $id } de son créateur, après avoir vérifié que c’est cette application et le même créateur.
 fullmove-here-older = Une version plus ancienne ({ $version }) est sur cet ordinateur. PCTwin la laisse telle quelle.
 fullmove-step-sites = Les connexions enregistrées aux sites web restent liées à l’ancien ordinateur. Reconnectez-vous à ces sites sur cet ordinateur.
+fullmove-app-rosetta = Conçue pour les anciens Mac Intel. Sur ce Mac, elle fonctionne grâce à Rosetta, qu’Apple va arrêter : elle pourrait cesser de fonctionner après une future mise à jour de macOS. Cherchez une version plus récente chez son éditeur.
 fullmove-links = Raccourcis vers d’autres endroits parmi vos fichiers, que PCTwin ne suit pas et ne transfère pas : { $count }
 fullmove-note-sign-in = Ouvrez-la et connectez-vous à votre compte.
 fullmove-note-licence-key = Ouvrez-la et saisissez votre clé de licence, ou connectez-vous au compte qui détient votre licence.
 fullmove-note-registration = Votre ancien ordinateur l’indiquait comme enregistrée au nom de { $who }.
 fullmove-note-product-id = Son identifiant de produit sur votre ancien ordinateur était { $id }.
 fullmove-note-extras = D’autres programmes sont arrivés avec elle : { $apps }. Supprimez-les dans les paramètres de votre ordinateur si vous n’en voulez pas.
+fullmove-note-rosetta = Conçue pour les Mac Intel, elle a besoin de Rosetta. Si ce Mac propose d’installer Rosetta quand vous ouvrez l’app, choisissez Installer.
 fullmove-data-lost = La connexion a été perdue avant l’arrivée de ces données. Elles sont toujours en sécurité sur votre ancien ordinateur. Lancez un nouveau transfert pour les apporter.
 fullmove-data-did-not-arrive = Ces données ne sont pas arrivées. Elles sont toujours en sécurité sur votre ancien ordinateur. Lancez un nouveau transfert pour les apporter.
 fullmove-data-app-open = L’application était ouverte sur votre ancien ordinateur, donc ses données n’ont pas été copiées. Fermez-la là-bas, puis lancez un nouveau transfert pour les apporter.

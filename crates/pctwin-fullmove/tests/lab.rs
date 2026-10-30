@@ -324,6 +324,7 @@ impl Steps for NewPerson {
             installed: &self.installed,
             folders: self.folders.clone(),
             winget: &winget,
+            casks: None,
         };
         let plan = FullPlan::build(record, MOVER, Some((&x, digest)), &here, &mut |_, _| {
             Some(None)

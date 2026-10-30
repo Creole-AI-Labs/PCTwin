@@ -860,6 +860,7 @@ plan-blocked-fix = Choose accounts
 ## Tray menu
 
 tray-show = Show PCTwin
+tray-send = Send files
 tray-quit = Quit PCTwin
 
 ## F01 secondary actions and their coming-soon pages
@@ -1307,6 +1308,11 @@ qs-eyebrow-receiving = Receiving on your laptop
 qs-label-this = This laptop
 qs-label-other = The other laptop
 qs-pick-failed = The picker could not open. Try again.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 file or folder was handed to PCTwin to send. Check the list before you continue.
+       *[other] { $count } files or folders were handed to PCTwin to send. Check the list before you continue.
+    }
 qs-pick-too-many = That is more files than one send can carry. Untick some folders, or send them in parts.
 qs-problem-lost-title = The connection between the laptops was lost
 qs-problem-failed-title = The files could not be sent this time
@@ -1973,12 +1979,14 @@ fullmove-app-from = PCTwin installs the winget package { $id } from its maker, a
 
 fullmove-here-older = An older version ({ $version }) is on this laptop. PCTwin leaves it as it is.
 fullmove-step-sites = Saved sign-ins to websites stay tied to the old laptop. Sign in to the websites again on this laptop.
+fullmove-app-rosetta = Made for older Intel Macs. On this Mac it runs through Rosetta, which Apple is ending, so it may stop working after a later macOS update. Look for a newer version from its maker.
 fullmove-links = Shortcuts to other places among your files, which PCTwin does not follow or move: { $count }
 fullmove-note-sign-in = Open it and sign in to your account.
 fullmove-note-licence-key = Open it and enter your licence key, or sign in to the account that holds your licence.
 fullmove-note-registration = Your old laptop listed it as registered to { $who }.
 fullmove-note-product-id = Its product ID on your old laptop was { $id }.
 fullmove-note-extras = Other programs came with it: { $apps }. Remove them in your laptop’s settings if you do not want them.
+fullmove-note-rosetta = Made for Intel Macs, so it needs Rosetta. If this Mac offers to install Rosetta when you open the app, choose Install.
 fullmove-data-lost = The connection was lost before this data arrived. It is still safe on your old laptop. Start a new move to bring it.
 fullmove-data-did-not-arrive = This data did not arrive. It is still safe on your old laptop. Start a new move to bring it.
 fullmove-data-app-open = The app was open on your old laptop, so its data was not copied. Close the app there, then start a new move to bring it.

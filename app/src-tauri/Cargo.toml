@@ -23,6 +23,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
+# A second start hands its files to the running app (src/handed.rs); registered first in lib.rs.
+tauri-plugin-single-instance = "2.5"
 # Updates (src/updates.rs): a newer build is checked against the update key in tauri.conf.json
 # before it is installed. Driven from the engine only; the screens get no updater permission.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }

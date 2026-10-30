@@ -28,6 +28,13 @@ pub enum Tool {
     /// Linux NetworkManager's `nmcli` (Wi-Fi profiles; secrets only on its standard input and
     /// output, never on its command line: [`Runner::run_secret`]).
     Nmcli,
+    /// macOS `networksetup` (only reading the Wi-Fi device and its saved networks).
+    Networksetup,
+    /// macOS `security` (only `find-generic-password` for a saved Wi-Fi network's item in the
+    /// System keychain; its password only on standard output, after macOS's own prompt).
+    Security,
+    /// macOS `open` (only a file PCTwin wrote, or a System Settings page).
+    Open,
 }
 
 impl Tool {
@@ -42,6 +49,9 @@ impl Tool {
             Tool::XdgSettings => "/usr/bin/xdg-settings".into(),
             Tool::Dconf => "/usr/bin/dconf".into(),
             Tool::Nmcli => "/usr/bin/nmcli".into(),
+            Tool::Networksetup => "/usr/sbin/networksetup".into(),
+            Tool::Security => "/usr/bin/security".into(),
+            Tool::Open => "/usr/bin/open".into(),
             Tool::Netsh => {
                 let root = std::env::var_os("SystemRoot")
                     .map(|r| r.to_string_lossy().into_owned())
@@ -89,6 +99,18 @@ pub trait Runner {
 pub const MAX_OUTPUT: u64 = 8 * 1024 * 1024;
 /// How long a tool may take.
 pub const TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a tool that waits on the system's own prompt for a secret may take: macOS asks for
+/// the administrator's password before `security` gives a saved Wi-Fi password, and the person
+/// may take a while to type it.
+pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How long `tool` may take when it is given or prints a secret ([`Runner::run_secret`]).
+pub fn secret_timeout(tool: Tool) -> Duration {
+    match tool {
+        Tool::Security => PROMPT_TIMEOUT,
+        _ => TIMEOUT,
+    }
+}
 
 /// Runs the real tools.
 #[derive(Debug, Default)]
@@ -182,7 +204,7 @@ impl Runner for SystemRunner {
             if let Some(s) = child.try_wait().map_err(|e| e.kind().to_string())? {
                 break s;
             }
-            if start.elapsed() > TIMEOUT {
+            if start.elapsed() > secret_timeout(tool) {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err("the system's settings tool did not answer in time".into());
@@ -195,5 +217,25 @@ impl Runner for SystemRunner {
             ok: status.success(),
             stdout: text,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_tool_behind_the_systems_password_prompt_waits_longer() {
+        assert_eq!(secret_timeout(Tool::Security), PROMPT_TIMEOUT);
+        assert!(PROMPT_TIMEOUT >= Duration::from_secs(5 * 60));
+        for t in [
+            Tool::Nmcli,
+            Tool::Netsh,
+            Tool::Networksetup,
+            Tool::Open,
+            Tool::Defaults,
+        ] {
+            assert_eq!(secret_timeout(t), TIMEOUT, "{t:?}");
+        }
     }
 }

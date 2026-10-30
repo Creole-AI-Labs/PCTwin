@@ -8,6 +8,14 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** the last pieces of this stage, independent reviews of the newest parts, then one full test run before it is merged.
 
+## 30 October 2026
+
+**In progress (Macs, tested on GitHub's Macs, not yet on a real one)**
+
+- **Apps come back on a Mac too.** For an app Homebrew's public list knows, PCTwin downloads it itself, as you. Homebrew does not need to be on the Mac. PCTwin only installs it after checking that it is the same app from the same developer, and that Apple has checked it. It goes into Applications. If you cannot change that folder, it goes into your own Applications folder instead. An app made only for Intel Macs says it needs Rosetta.
+- **Saved Wi-Fi networks on a Mac (built, not in the move yet).** PCTwin can now read them with the Mac's own tools. The Mac asks before it gives each password. On the new Mac they are added through System Settings, where you approve them once. They join the move together with the Wi-Fi step for every system.
+- **Sending files is easier to start.** The menu bar or tray icon has a Send item. On a Mac you can open files with PCTwin from the Finder. If PCTwin is already open, starting it again with files hands them to the open app.
+
 ## 28 October 2026
 
 **In progress (first test on two real Windows laptops)**

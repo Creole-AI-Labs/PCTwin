@@ -112,12 +112,16 @@ pub enum Route {
     StoreListing {
         family_name: String,
     },
+    /// A plain Homebrew cask ([`brew`]), its build for the new Mac's processor: PCTwin downloads
+    /// it itself (never through the `brew` program) and places its one `app`.
     Cask {
         token: String,
         version: String,
         url: String,
         sha256: Option<[u8; 32]>,
         auto_updates: bool,
+        /// The `.app` it installs, as the cask names it.
+        app: String,
     },
     MacAppStore {
         adam_id: u64,
@@ -481,13 +485,17 @@ pub fn plan(app: &FoundApp, target: Target, here: &Here, hints: &Hints<'_>) -> A
                     }
                 }
             }
-            for c in casks {
+            // Only a plain cask: one app, nothing the cask would run.
+            for c in casks.into_iter().filter(|c| c.plain) {
+                let Some(app) = c.apps.first() else { continue };
+                let build = c.build_for(target.arch.arm64);
                 plan.routes.push(Route::Cask {
                     token: c.token.clone(),
-                    version: c.version.clone(),
-                    url: c.url.clone(),
-                    sha256: c.sha256,
+                    version: build.version,
+                    url: build.url,
+                    sha256: build.sha256,
                     auto_updates: c.auto_updates,
+                    app: app.clone(),
                 });
             }
         }

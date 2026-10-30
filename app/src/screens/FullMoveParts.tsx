@@ -25,8 +25,13 @@ export function TitleText({ title }: { title: Title }) {
   return title.kind === "name" ? <Name>{title.value}</Name> : <>{l10n.getString(title.value)}</>;
 }
 
-/** What a change still needs from the person, or what it does, in words. */
+/** What a change still needs from the person, or what it does, in words; an app made for Intel Macs says it needs Rosetta after that. */
 function changeDetail(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
+  const what = changeWhat(c, l10n);
+  return c.note?.note === "intel-only" ? [what, l10n.getString("fullmove-app-rosetta")].join(" ") : what;
+}
+
+function changeWhat(c: ChangeView, l10n: ReturnType<typeof useLocalization>["l10n"]): string {
   if (c.note?.note === "sites") return l10n.getString("fullmove-step-sites");
   if (c.note?.note === "older-here") return l10n.getString("fullmove-here-older", { version: shownName(c.note.version) });
   if (c.special) return l10n.getString(`fullmove-step-${c.special}`);
@@ -305,6 +310,8 @@ function noteText(n: LineNote, l: RebuiltLine, l10n: L10n): string {
       return l10n.getString("fullmove-note-extras", { apps: n.apps.map(shownName).join(", ") });
     case "sites":
       return l10n.getString("fullmove-step-sites");
+    case "rosetta":
+      return l10n.getString("fullmove-note-rosetta");
     case "data":
       return l10n.getString(`fullmove-data-${n.why}`, n.folder === undefined ? {} : { folder: shownName(n.folder) });
   }

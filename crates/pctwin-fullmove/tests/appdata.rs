@@ -210,6 +210,7 @@ impl Steps for NewPerson {
             installed: &installed,
             folders: vec![],
             winget: &no_hints,
+            casks: None,
         };
         let plan = FullPlan::build(
             record,

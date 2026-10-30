@@ -155,6 +155,9 @@
                 "Writer Helper"
               ],
               "note": "extras"
+            },
+            {
+              "note": "rosetta"
             }
           ],
           "reason": "sign-in",

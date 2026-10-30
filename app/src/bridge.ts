@@ -1528,7 +1528,8 @@ export const setWindowMode = (mode: WindowMode): Promise<void> => runInApp("set_
 export const windowDrag = (): Promise<void> => runInApp("window_drag", {});
 
 /** The tray menu speaks the person's language too. */
-export const setTrayLabels = (show: string, quit: string): Promise<void> => runInApp("set_tray_labels", { show, quit });
+export const setTrayLabels = (show: string, send: string, quit: string): Promise<void> =>
+  runInApp("set_tray_labels", { show, send, quit });
 
 /** Our own site in the person's browser (the shell allows https://getpctwin.com/ only). Outside the app, a new tab. */
 export async function openInBrowser(url: string): Promise<void> {

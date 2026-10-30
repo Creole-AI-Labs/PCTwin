@@ -1009,6 +1009,7 @@ plan-blocked-fix = Escolher contas
 ## Tray menu
 
 tray-show = Mostrar o PCTwin
+tray-send = Enviar arquivos
 tray-quit = Sair do PCTwin
 
 ## F01 secondary actions and their coming-soon pages
@@ -1475,6 +1476,12 @@ qs-eyebrow-receiving = Recebendo no seu notebook
 qs-label-this = Este notebook
 qs-label-other = O outro notebook
 qs-pick-failed = Não foi possível abrir o seletor. Tente de novo.
+qs-handed =
+    { NUMBER($count) ->
+        [one] 1 arquivo ou pasta foi entregue ao PCTwin para enviar. Confira a lista antes de continuar.
+        [many] { $count } de arquivos ou pastas foram entregues ao PCTwin para enviar. Confira a lista antes de continuar.
+       *[other] { $count } arquivos ou pastas foram entregues ao PCTwin para enviar. Confira a lista antes de continuar.
+    }
 qs-pick-too-many = São mais arquivos do que um único envio comporta. Desmarque algumas pastas ou envie-as em partes.
 qs-problem-lost-title = A conexão entre os notebooks caiu
 qs-problem-failed-title = Desta vez não foi possível enviar os arquivos
@@ -2163,12 +2170,14 @@ fullmove-extras-refused = Não foi possível ler aqui as configurações e os da
 fullmove-app-from = O PCTwin instala o pacote do winget { $id } do criador, depois de verificar que é este app e o mesmo criador.
 fullmove-here-older = Há uma versão mais antiga ({ $version }) neste notebook. O PCTwin a deixa como está.
 fullmove-step-sites = Os logins salvos em sites continuam presos ao notebook antigo. Entre de novo nesses sites neste notebook.
+fullmove-app-rosetta = Feito para Macs antigos com Intel. Neste Mac ele funciona pelo Rosetta, que a Apple vai encerrar, então pode parar de funcionar depois de uma atualização futura do macOS. Procure uma versão mais nova do fabricante.
 fullmove-links = Atalhos para outros lugares entre seus arquivos, que o PCTwin não segue nem transfere: { $count }
 fullmove-note-sign-in = Abra o app e entre na sua conta.
 fullmove-note-licence-key = Abra o app e digite sua chave de licença, ou entre na conta que tem a sua licença.
 fullmove-note-registration = Seu notebook antigo mostrava o app registrado em nome de { $who }.
 fullmove-note-product-id = O ID do produto no seu notebook antigo era { $id }.
 fullmove-note-extras = Outros programas vieram junto: { $apps }. Remova-os nas configurações do notebook se não os quiser.
+fullmove-note-rosetta = Feito para Macs com Intel, então precisa do Rosetta. Se este Mac oferecer instalar o Rosetta quando você abrir o app, escolha Instalar.
 fullmove-data-lost = A conexão caiu antes de estes dados chegarem. Eles continuam seguros no seu notebook antigo. Comece uma nova transferência para trazê-los.
 fullmove-data-did-not-arrive = Estes dados não chegaram. Eles continuam seguros no seu notebook antigo. Comece uma nova transferência para trazê-los.
 fullmove-data-app-open = O app estava aberto no seu notebook antigo, então os dados dele não foram copiados. Feche o app lá e comece uma nova transferência para trazê-los.

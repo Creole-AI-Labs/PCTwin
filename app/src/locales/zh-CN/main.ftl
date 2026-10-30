@@ -803,6 +803,7 @@ plan-blocked-fix = 选择账户
 ## Tray menu
 
 tray-show = 显示PCTwin
+tray-send = 发送文件
 tray-quit = 退出PCTwin
 
 ## F01 secondary actions and their coming-soon pages
@@ -1221,6 +1222,10 @@ qs-eyebrow-receiving = 在你的笔记本电脑上接收
 qs-label-this = 这台笔记本电脑
 qs-label-other = 另一台笔记本电脑
 qs-pick-failed = 无法打开选择窗口。请重试。
+qs-handed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件或文件夹被交给 PCTwin 发送。继续前请检查列表。
+    }
 qs-pick-too-many = 文件太多，一次发送装不下。请取消勾选一些文件夹，或分几次发送。
 qs-problem-lost-title = 两台电脑之间的连接已断开
 qs-problem-failed-title = 这次未能发送文件
@@ -1856,12 +1861,14 @@ fullmove-extras-refused = 无法在这里读取旧电脑的设置和应用数据
 fullmove-app-from = PCTwin 会从开发者那里安装 winget 软件包 { $id }，安装前会检查它就是这个应用、且开发者相同。
 fullmove-here-older = 这台电脑上有较旧的版本（{ $version }）。PCTwin 保持原样。
 fullmove-step-sites = 网站上保存的登录仍与旧电脑绑定。请在这台电脑上重新登录这些网站。
+fullmove-app-rosetta = 这是为较旧的 Intel Mac 制作的。在这台 Mac 上它通过 Rosetta 运行，而 Apple 将停止提供 Rosetta，所以在以后的 macOS 更新后它可能无法使用。请向它的开发者查找较新的版本。
 fullmove-links = 你的文件中指向其他位置的快捷方式，PCTwin 不会跟随也不会移动：{ $count }
 fullmove-note-sign-in = 打开它并登录你的账户。
 fullmove-note-licence-key = 打开它并输入你的许可证密钥，或登录持有你许可证的账户。
 fullmove-note-registration = 你的旧电脑显示它注册在 { $who } 名下。
 fullmove-note-product-id = 它在旧电脑上的产品 ID 是 { $id }。
 fullmove-note-extras = 随它一起来了其他程序：{ $apps }。如果你不需要，请在电脑设置中删除它们。
+fullmove-note-rosetta = 这是为 Intel Mac 制作的，因此需要 Rosetta。打开该应用时，如果这台 Mac 提示安装 Rosetta，请选择“安装”。
 fullmove-data-lost = 这些数据到达前连接已断开。它们仍安全地保存在你的旧电脑上。开始新的移动即可带过来。
 fullmove-data-did-not-arrive = 这些数据没有到达。它们仍安全地保存在你的旧电脑上。开始新的移动即可带过来。
 fullmove-data-app-open = 这个应用在旧电脑上是打开的，所以它的数据没有复制。请在那里关闭应用，然后开始新的移动把它带过来。

@@ -225,6 +225,7 @@ fn windows_taskbar_light() -> bool {
 }
 
 const TRAY_SHOW: &str = "show";
+const TRAY_SEND: &str = "send";
 const TRAY_QUIT: &str = "quit";
 
 /// Tray menu labels come from the screens' translation files, so the menu speaks the person's
@@ -233,20 +234,76 @@ const TRAY_QUIT: &str = "quit";
 fn set_tray_labels<R: Runtime>(
     app: AppHandle<R>,
     show: String,
+    send: String,
     quit: String,
 ) -> Result<(), String> {
     let short = |s: &str| s.chars().take(60).collect::<String>();
-    let menu = tray_menu(&app, &short(&show), &short(&quit)).map_err(|e| e.to_string())?;
+    let menu =
+        tray_menu(&app, &short(&show), &short(&send), &short(&quit)).map_err(|e| e.to_string())?;
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-fn tray_menu<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::Result<Menu<R>> {
+fn tray_menu<R: Runtime>(
+    app: &AppHandle<R>,
+    show: &str,
+    send: &str,
+    quit: &str,
+) -> tauri::Result<Menu<R>> {
     let show = MenuItem::with_id(app, TRAY_SHOW, show, true, None::<&str>)?;
+    let send = MenuItem::with_id(app, TRAY_SEND, send, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, TRAY_QUIT, quit, true, None::<&str>)?;
-    Menu::with_items(app, &[&show, &quit])
+    Menu::with_items(app, &[&show, &send, &quit])
+}
+
+/// Brings the main window forward, whatever state it is in.
+fn show_main<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Files the system hands the running app. On the Mac, Open With and a drop on the Dock icon
+/// arrive as an "opened" run event (this plugin passes them on); elsewhere the plugin is empty.
+/// It is a plugin so `run()` stays exactly as the lockdown test pins it.
+fn handed_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("handed")
+        .on_event(|app, event| {
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let tauri::RunEvent::Opened { urls } = event {
+                let paths = handed::opened(urls);
+                if !paths.is_empty() {
+                    show_main(app);
+                    quicksend::dropped(app, paths);
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+            let _ = (app, event);
+        })
+        .build()
+}
+
+/// A second start hands its files (after `--send`) to the app already running, and that app's
+/// window comes forward. It needs the system's real windowing, so the mock runtime has none.
+///
+/// Known limit (security review, 30 October 2026; no fix now): the plugin finds the running app
+/// through a name every program of the person's can use (a socket under the temporary folder on
+/// Linux and macOS, a named object on Windows). Another program running as the person can hold
+/// that name first, so PCTwin's own second start cannot reach the running app and its files are
+/// not handed over (a denial of service by something that already runs as the person). Nothing
+/// is sent because of it: handed files only ever join the chosen list, shown to the person.
+fn single_instance_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri_plugin_single_instance::init(|app, args, _cwd| {
+        let paths = handed::second_start(&args);
+        show_main(app);
+        if !paths.is_empty() {
+            quicksend::dropped(app, paths);
+        }
+    })
 }
 
 /// The screens are the app's own files. Anything else (a remote page, a file URL) is refused;
@@ -416,8 +473,15 @@ fn has_tray<R: Runtime>() -> bool {
 /// refuses code that names a capability or the permission store.
 pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     install_content_readers();
+    // Single-instance must be the first plugin registered (its own documentation).
+    let builder = if has_tray::<R>() {
+        builder.plugin(single_instance_plugin())
+    } else {
+        builder
+    };
     builder
         .plugin(navigation_guard())
+        .plugin(handed_plugin())
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -476,18 +540,17 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             if !has_tray::<R>() {
                 return Ok(());
             }
-            let menu = tray_menu(app.handle(), "PCTwin", "PCTwin")?;
+            let menu = tray_menu(app.handle(), "PCTwin", "PCTwin", "PCTwin")?;
             let mut tray = TrayIconBuilder::with_id("main")
                 .tooltip("PCTwin")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    TRAY_SHOW => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                    TRAY_SHOW => show_main(app),
+                    // Opens the pick page with nothing chosen yet; nothing is sent before Send.
+                    TRAY_SEND => {
+                        show_main(app);
+                        quicksend::dropped(app, Vec::new());
                     }
                     TRAY_QUIT => app.exit(0),
                     _ => {}

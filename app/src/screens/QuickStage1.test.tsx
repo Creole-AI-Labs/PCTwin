@@ -486,6 +486,9 @@ describe("files PCTwin was started with", () => {
       expect(screen.getByText("Handed over.pdf")).toBeTruthy();
     });
     expect(called("quicksend_pick")).toBe(false);
+    // Said, never silent: things handed to PCTwin from outside.
+    const said = plain(text("qs-handed", { count: 1 }));
+    expect(screen.getAllByRole("status").some((s) => plain(s.textContent).includes(said))).toBe(true);
     send("quicksend-launch", [
       { id: "p9", name: "Handed over.pdf", kind: "file", included: true, bytes: 5000, files: null },
       { id: "p10", name: "Second.txt", kind: "file", included: true, bytes: 10, files: null },

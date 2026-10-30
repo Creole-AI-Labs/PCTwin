@@ -20,6 +20,10 @@
           "Show"
         ],
         [
+          "send",
+          "Send files"
+        ],
+        [
           "quit",
           "Quit"
         ]

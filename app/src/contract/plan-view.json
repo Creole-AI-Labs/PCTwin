@@ -199,7 +199,9 @@
           "files": 0,
           "kind": "app",
           "needs": null,
-          "note": null,
+          "note": {
+            "note": "intel-only"
+          },
           "notes": [],
           "secret": null,
           "source": "Example.Viewer",

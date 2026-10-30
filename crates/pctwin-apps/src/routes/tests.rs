@@ -310,6 +310,57 @@ fn a_mac_app_tries_the_app_store_casks_then_its_own_feed_and_never_an_older_cask
 }
 
 #[test]
+fn only_plain_casks_are_routes_each_with_the_build_for_the_new_mac() {
+    let casks = brew::CaskIndex::parse(
+        br#"[{"token":"painter","version":"4.3.0","sha256":"no_check","url":"https://example.com/arm.dmg","artifacts":[{"app":["Painter.app"]}],
+              "variations":{"sonoma":{"url":"https://example.com/intel.dmg"}}},
+             {"token":"painter-pkg","version":"4.3.0","sha256":"no_check","url":"https://example.com/p.pkg","artifacts":[{"app":["Painter.app"]},{"pkg":["p.pkg"]}]}]"#,
+    )
+    .unwrap();
+    let r = rows("");
+    let mut app = mac_app();
+    app.found = FoundWhere::MacBundle {
+        bundle_id: "com.example.painter".into(),
+        folder: "Painter.app".into(),
+        app_store_id: None,
+    };
+    let hints = Hints {
+        rows: &r,
+        winget: &none,
+        casks: Some(&casks),
+    };
+    let casks_of = |t: Target| -> Vec<(String, String, String)> {
+        plan(&app, t, &Here::Absent, &hints)
+            .routes
+            .into_iter()
+            .filter_map(|r| match r {
+                Route::Cask {
+                    token, url, app, ..
+                } => Some((token, url, app)),
+                _ => None,
+            })
+            .collect()
+    };
+    // The package cask is never a route; Apple silicon gets the list's own build.
+    assert_eq!(
+        casks_of(mac_target()),
+        [(
+            "painter".to_string(),
+            "https://example.com/arm.dmg".to_string(),
+            "Painter.app".to_string()
+        )]
+    );
+    let mut intel = mac_target();
+    intel.arch = AppArch {
+        known: true,
+        x86: false,
+        x64: true,
+        arm64: false,
+    };
+    assert_eq!(casks_of(intel)[0].1, "https://example.com/intel.dmg");
+}
+
+#[test]
 fn linux_apps_come_from_the_same_kind_of_source() {
     let r = rows("");
     let h = Hints {

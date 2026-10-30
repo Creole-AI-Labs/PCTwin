@@ -129,6 +129,9 @@ deny = [
     # replacing anything (renameat2 / renameatx_np) and opening it without following a link
     # (security review finding 2, 26 October 2026).
     "pctwin-executor",
+    # A Mac app is moved into place without replacing anything (renameatx_np RENAME_EXCL), from
+    # PCTwin's own checked copy (security review, 30 October 2026).
+    "pctwin-fullmove",
     # Quick Send's remembered connections: a remembered folder opened again without following a
     # link (O_NOFOLLOW), and the Linux key folder checked to be the person's own (29 October 2026).
     "pctwin-known",

@@ -516,19 +516,21 @@ pub(crate) fn add(qs: &QuickSend, paths: Vec<PathBuf>) -> Vec<PickedView> {
 }
 
 /// Things dropped on the window, or handed over by the system (Send to, a file manager entry,
-/// the share action): added to what is chosen, and the screens are sent the list (names and
-/// sizes, never a path): while the pick page is open as the pick list, otherwise as a launch the
-/// screens may open the pick page for. Nothing is sent before the person chooses Send.
+/// the share action, a second start). While the pick page is open they are added to what is
+/// chosen and the screens are sent the list (names and sizes, never a path). Otherwise they
+/// wait with the files a start was given ([`crate::handed`]), and the screens are told only that
+/// something was handed over: the pick page takes them when it opens and says how many were
+/// handed to PCTwin before they join the list (security review, 30 October 2026: never silently).
+/// Nothing is sent before the person chooses Send.
 pub fn dropped<R: Runtime>(app: &AppHandle<R>, paths: Vec<PathBuf>) {
     use tauri::Manager;
     let qs = app.state::<AppQuickSend>();
-    let list = add(&qs, paths);
     if qs.accepting.load(Ordering::Acquire) {
+        let list = add(&qs, paths);
         let _ = app.emit(PICKED_EVENT, list);
     } else {
-        // A drop on the widget, or files the system handed PCTwin: the screens open the pick
-        // page with them, or ignore it (nothing is sent before the person chooses Send).
-        let _ = app.emit(LAUNCH_EVENT, list);
+        crate::handed::keep(paths);
+        let _ = app.emit(LAUNCH_EVENT, Vec::<PickedView>::new());
     }
 }
 

@@ -1627,6 +1627,10 @@ criteria = "safe-to-deploy"
 version = "2.7.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.tauri-plugin-single-instance]]
+version = "2.5.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.tauri-plugin-updater]]
 version = "2.14.0"
 criteria = "safe-to-deploy"

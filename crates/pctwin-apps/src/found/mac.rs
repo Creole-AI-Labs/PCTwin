@@ -65,6 +65,13 @@ pub fn bundle_info(bytes: &[u8], folder: &str) -> Result<BundleInfo, String> {
     })
 }
 
+/// The oldest macOS a bundle says it runs on (`LSMinimumSystemVersion`), from its `Info.plist`.
+pub fn minimum_system(bytes: &[u8]) -> Option<String> {
+    let value: plist::Value = plist::from_bytes(bytes).ok()?;
+    plist_text(value.as_dictionary()?, "LSMinimumSystemVersion")
+        .and_then(|v| clean(&v, MAX_APP_TEXT))
+}
+
 /// `mdls -raw -name kMDItemAppStoreAdamID <bundle>`.
 pub fn adam_id_call(bundle: &Path) -> Call {
     Call {

@@ -279,6 +279,7 @@ mod tests {
             installed,
             folders: vec![],
             winget: &winget,
+            casks: None,
         };
         FullPlan::build(&record, "1000", None, &here, &mut |_, _| None)
     }

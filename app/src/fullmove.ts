@@ -107,7 +107,7 @@ export type Tested = {
   version: string | null;
 };
 
-export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" };
+export type ChangeNote = { note: "older-here"; version: string } | { note: "sites" } | { note: "intel-only" };
 
 /** Why an app's data needs the person (`DataWhy`). */
 export const DATA_WHYS = ["lost", "did-not-arrive", "app-open", "changing", "unreadable", "not-read", "not-whole", "not-landed", "beside", "placed"] as const;
@@ -120,6 +120,7 @@ export type LineNote =
   | { note: "registration"; owner: string | null; company: string | null; productId: string | null }
   | { note: "extras"; apps: string[] }
   | { note: "sites" }
+  | { note: "rosetta" }
   | { note: "data"; why: DataWhy; folder?: string };
 
 /** An app already on this laptop, left as it is (`HereLine`). */
@@ -224,7 +225,7 @@ function nameOrNull(v: unknown): v is string | null {
 function parseChangeNote(v: unknown): ChangeNote | null | undefined {
   if (v === null) return null;
   const kind = typeof v === "object" ? (v as Fields).note : undefined;
-  if (kind === "sites") return exactly(v, ["note"]) ? { note: kind } : undefined;
+  if (kind === "sites" || kind === "intel-only") return exactly(v, ["note"]) ? { note: kind } : undefined;
   if (kind === "older-here") {
     const f = exactly(v, ["note", "version"]);
     return f && typeof f.version === "string" ? { note: kind, version: f.version } : undefined;
@@ -234,7 +235,7 @@ function parseChangeNote(v: unknown): ChangeNote | null | undefined {
 
 function parseLineNote(v: unknown): LineNote | null {
   const kind = typeof v === "object" && v !== null ? (v as Fields).note : undefined;
-  if (kind === "sign-in" || kind === "licence-key" || kind === "sites") return exactly(v, ["note"]) ? { note: kind } : null;
+  if (kind === "sign-in" || kind === "licence-key" || kind === "sites" || kind === "rosetta") return exactly(v, ["note"]) ? { note: kind } : null;
   if (kind === "registration") {
     const f = exactly(v, ["note", "owner", "company", "productId"]);
     return f && nameOrNull(f.owner) && nameOrNull(f.company) && nameOrNull(f.productId) ? { note: kind, owner: f.owner, company: f.company, productId: f.productId } : null;
