@@ -1015,6 +1015,10 @@ mod words_tests {
                 ..fr.clone()
             },
             Words {
+                bookmarks_file: "a\u{7}b.html".into(),
+                ..fr.clone()
+            },
+            Words {
                 bookmarks_file: format!("{}.html", "x".repeat(96)),
                 ..fr.clone()
             },
