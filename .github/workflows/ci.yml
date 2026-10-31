@@ -589,7 +589,10 @@ jobs:
     # for GitHub's six-hour limit. The Intel Mac is the slowest runner: with a cold cache (the
     # first nightly run) it needed more than an hour, so it gets 90 minutes.
     # Windows also builds the release installer and installs it for real; the Intel Mac is slow.
-    timeout-minutes: ${{ (matrix.os == 'macos-15-intel' || matrix.os == 'windows-latest') && 90 || 60 }}
+    # Since the Phase 2 joins (30 October 2026) the Apple-silicon Mac and Windows on Arm also pass
+    # every test but run past 60 minutes in the release-build permission sweep, so a cut-off job
+    # never saved its cache and the next run started cold again: every runner gets 90 minutes.
+    timeout-minutes: 90
     steps:
       - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         if: runner.os == 'Linux'
