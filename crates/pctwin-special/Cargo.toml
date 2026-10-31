@@ -24,6 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
 blake3 = "1.8"
+# Trusted-place names compared as a drive stores them (NFKC; already used by pctwin-gate; MIT or Apache-2.0).
+unicode-normalization = "0.1.25"
 base64 = "0.22.1"
 pctwin-settings = { path = "../pctwin-settings" }
 # Other apps' SQLite databases: read and backed up through SQLite's own online backup, never

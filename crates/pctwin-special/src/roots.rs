@@ -442,6 +442,12 @@ pub const TRUSTED_PLACES: &[(&str, Trusted)] = &[
     (".gnupg/*.conf", Trusted::KeptAside),
     (".gnupg/sshcontrol", Trusted::KeptAside),
     (".gnupg/random_seed", Trusted::NeverCopied),
+    // GnuPG on Windows keeps the same files in its own folder under Roaming.
+    ("AppData/Roaming/gnupg/*.conf", Trusted::KeptAside),
+    ("AppData/Roaming/gnupg/sshcontrol", Trusted::KeptAside),
+    ("AppData/Roaming/gnupg/random_seed", Trusted::NeverCopied),
+    // Git's own settings can run a program (`core.sshCommand`, `core.fsmonitor`).
+    (".config/git/config", Trusted::KeptAside),
     // Trusted as a whole: certificates, Windows' own protected secrets.
     (".pki", Trusted::Trust),
     ("AppData/Roaming/Microsoft/Protect", Trusted::Trust),
@@ -454,11 +460,23 @@ pub const TRUSTED_PLACES: &[(&str, Trusted)] = &[
     ("AppData/Local/Microsoft/Credentials", Trusted::Trust),
 ];
 
-/// The names of a home-relative path, for comparing (letter case ignored).
+/// The names of a home-relative path, for comparing, each in the form any drive would store it
+/// (second fresh-context review, 31 October 2026: the check and the write must agree). Letter
+/// case is ignored; letters that only look different are made one (NFKC: the long `ſ` is `s`, the
+/// `ﬁ` ligature is `fi`); trailing dots and spaces are dropped, as a Windows drive drops them
+/// (`config.` is stored as `config`). Done on every drive: comparing too widely only keeps more
+/// aside, never less.
 fn names_of(path: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
     path.split(['/', '\\'])
-        .filter(|p| !p.is_empty() && *p != ".")
-        .map(str::to_lowercase)
+        .map(|p| {
+            p.nfkc()
+                .collect::<String>()
+                .to_lowercase()
+                .trim_end_matches(['.', ' '])
+                .to_string()
+        })
+        .filter(|p| !p.is_empty())
         .collect()
 }
 
@@ -745,6 +763,40 @@ pub fn find_folders(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Second fresh-context review (31 October 2026): a name is checked in the form a drive
+    /// stores it, so a trailing dot or space, another letter case or a look-alike letter never
+    /// slips a trusted file or place past the table; an ordinary key still lands.
+    #[test]
+    fn trusted_names_are_checked_as_a_drive_stores_them() {
+        for tricky in [
+            ".ssh/config.",
+            ".ssh/config ",
+            ".ssh/config. .",
+            ".SSH/Config",
+            ".ssh./config",
+            ".ssh/authorized_keyſ",
+            ".ssh/conﬁg",
+            "AppData/Roaming/gnupg/gpg-agent.conf",
+            ".config/git/config",
+        ] {
+            assert_eq!(
+                trusted_place(tricky, false),
+                Some(Trusted::KeptAside),
+                "{tricky}"
+            );
+        }
+        assert_eq!(
+            trusted_place("AppData/Roaming/Microsoft/Windows./Start Menu", false),
+            Some(Trusted::SignIn)
+        );
+        assert_eq!(
+            trusted_place("AppData/Roaming/gnupg/random_seed.", false),
+            Some(Trusted::NeverCopied)
+        );
+        assert_eq!(trusted_place(".ssh/id_ed25519", false), None);
+        assert_eq!(trusted_place(".ssh/known_hosts", false), None);
+    }
     use pctwin_record::{AppArch, AppSystem, PackageSigning};
 
     fn app(name: &str, publisher: Option<&str>, found: FoundWhere, maker: AppMaker) -> FoundApp {

@@ -101,6 +101,8 @@ pub fn name_ok(name: &str) -> bool {
         && name.len() <= 128
         && !name.contains(['"', '%'])
         && !name.chars().any(char::is_control)
+        // A trailing backslash would escape the closing quote of `name="..."`.
+        && !name.ends_with('\\')
 }
 
 /// What Windows' tool is told, once for each network named, in order: each always names its one
@@ -191,6 +193,14 @@ pub fn sweep_leftovers(parent: &Path) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A name ending in a backslash would escape the closing quote of `name="..."`: refused.
+    #[test]
+    fn a_name_ending_in_a_backslash_is_refused() {
+        assert!(!name_ok("Home\\"));
+        assert!(name_ok("Home\\Office"));
+        assert!(name_ok("Home"));
+    }
 
     #[test]
     fn profiles_are_taken_whole_and_gone_from_the_disk() {
