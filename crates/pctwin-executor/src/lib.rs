@@ -612,6 +612,7 @@ pub(crate) fn hashes(files: Vec<SettingsFile>) -> Vec<pctwin_journal::FileHash> 
         .map(|f| pctwin_journal::FileHash {
             hash: pctwin_journal::content_hash(&f.bytes),
             path: f.path,
+            id: None,
         })
         .collect()
 }

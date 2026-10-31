@@ -470,6 +470,8 @@ fn look(dest: &Destination, folder: &str, capture: &Capture) -> Vec<FileHash> {
                 out.push(FileHash {
                     path: f.rel.clone(),
                     hash: pctwin_journal::content_hash(&bytes),
+                    // Which file it is, so undo removes only this very file.
+                    id: dest.stat(&stored).ok().flatten().map(|s| s.id),
                 });
             }
         }
@@ -728,6 +730,11 @@ fn remove_placed(
         let Some(stat) = dest.stat(&stored).map_err(|e| e.kind().to_string())? else {
             continue;
         };
+        // Another file stands there now (even with the same bytes): kept, never removed.
+        if h.id.is_some_and(|id| id != stat.id) {
+            kept += 1;
+            continue;
+        }
         let want = h.hash;
         let verify = |f: &mut std::fs::File| -> std::io::Result<bool> {
             let mut bytes = Vec::new();
@@ -771,12 +778,12 @@ fn placed_at<'a>(
     dest: &'a Destination,
     folder: &'a str,
     placed: &'a [pctwin_journal::FileHash],
-) -> impl Iterator<Item = (String, [u8; 32])> + 'a {
+) -> impl Iterator<Item = (String, [u8; 32], Option<pctwin_journal::FileId>)> + 'a {
     placed.iter().filter_map(move |h| {
         let (stored, _) = IncomingPath::parse(&format!("{folder}/{}", h.path))
             .ok()
             .and_then(|p| dest.find(&p))?;
-        Some((stored, h.hash))
+        Some((stored, h.hash, h.id))
     })
 }
 
@@ -862,7 +869,7 @@ fn remove_placed(
     use pctwin_gate::Check;
     let mut kept = 0usize;
     let mut folders = std::collections::BTreeSet::new();
-    for (stored, want) in placed_at(dest, folder, placed) {
+    for (stored, want, landed) in placed_at(dest, folder, placed) {
         let mut parts: Vec<&str> = stored.split('/').collect();
         while parts.len() > 1 {
             parts.pop();
@@ -871,6 +878,11 @@ fn remove_placed(
         let Some(stat) = dest.stat(&stored).map_err(|e| e.kind().to_string())? else {
             continue;
         };
+        // Another file stands there now (even with the same bytes): kept, never removed.
+        if landed.is_some_and(|id| id != stat.id) {
+            kept += 1;
+            continue;
+        }
         let copy = match dest.check_copy(&stored, stat.id, same_bytes(want)) {
             Ok(Check::Ready(copy)) => copy,
             Ok(Check::Done(r)) => {
@@ -954,8 +966,8 @@ fn finish_part_way(
     use pctwin_journal::Undo;
     // Only a file this very landing placed is ever looked for.
     let Some(want) = placed_at(dest, folder, placed)
-        .find(|(stored, _)| stored == path)
-        .map(|(_, h)| h)
+        .find(|(stored, _, _)| stored == path)
+        .map(|(_, h, _)| h)
     else {
         return Err("a file undo was removing is not one this landing placed".into());
     };

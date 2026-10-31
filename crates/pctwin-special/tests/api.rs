@@ -661,3 +661,103 @@ fn matching_bytes_alone_never_label_app_data_machine_checked() {
         assert_eq!(applied.outcome.readiness, want, "{}", applied.words);
     }
 }
+
+/// Undo removes only the very file that landed (founder, 31 October 2026: its identity is recorded
+/// as it lands): another file put in its place since, even with the very same bytes, stays.
+#[cfg(windows)]
+#[test]
+fn undo_keeps_another_file_put_there_with_the_same_bytes() {
+    pctwin_special::content::install_reader(&OWN_READERS);
+    // T25-054. On Linux and macOS on a drive undo removes from (Cargo's own folder for test files,
+    // `.noindex` so Spotlight never holds a file open), and on a Mac with a test Trash on that
+    // drive, never the person's own.
+    let t = undo_temp();
+    let old = t.path().join("old");
+    put(&old.join("AppData/Roaming/Notes/a.txt"), b"one");
+    put(&old.join("AppData/Roaming/Notes/b.txt"), b"two");
+    let owner = Owner::Person {
+        account_id: "1001".into(),
+    };
+    let cat = Catalogue::<SpecialRow>::shipped(SHIPPED);
+    let plan = plan(&owner, &old, &[], System::Windows, System::Windows, &cat);
+    let p = &plan.components[0];
+    let new = t.path().join("new");
+    std::fs::create_dir_all(new.join("AppData/Roaming")).unwrap();
+    let home = Destination::open(&new).unwrap();
+    let j = Journal::open_with_record_key(
+        &t.path().join("j.redb"),
+        pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32]),
+    )
+    .unwrap();
+    let rec = j.imports(&keys().capture);
+    let stop = Stop::new();
+    let made = MadeFolders::default();
+    let n = NewLaptop {
+        rec: &rec,
+        home: &home,
+        home_path: &new,
+        root: RootRef::new(20),
+        seal: seal(),
+        system: System::Windows,
+        owner_only: &AppOwnerOnly,
+        stop: &stop,
+        made: &made,
+    };
+    let k = &keys().capture;
+    let approved = approve(p, seal(), RootRef::new(10), 1);
+    let work = t.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let cap = capture_planned(
+        p,
+        Grant::Ordinary(
+            k.grant(
+                seal(),
+                vec![RootRef::new(10)],
+                CaptureEffect::ReadPrivate,
+                MIN,
+                Now::real(),
+            )
+            .unwrap(),
+        ),
+        &approved,
+        &work,
+        &Free,
+        &stop,
+        Now::real(),
+    )
+    .unwrap();
+    let applied = apply(
+        &n,
+        Grant::Ordinary(
+            k.grant(
+                seal(),
+                vec![RootRef::new(20)],
+                CaptureEffect::Import,
+                MIN,
+                Now::real(),
+            )
+            .unwrap(),
+        ),
+        &approved,
+        &effect(0),
+        p,
+        &cap,
+        &work,
+        Conflict::KeepBoth,
+        Now::real(),
+    );
+    assert_eq!(applied.result.status(), ItemStatus::Copied);
+    let effect_id = applied.landed.unwrap().effect;
+    // The file is deleted and made again with exactly the same bytes: a different file.
+    let b = new.join("AppData/Roaming/Notes/b.txt");
+    std::fs::remove_file(&b).unwrap();
+    std::fs::write(&b, b"two").unwrap();
+    let permit = j.begin_undo().unwrap();
+    let undone = undo(&rec, &permit, &home, effect_id).unwrap();
+    assert_eq!(undone, Undone::KeptChanged { kept: 1 });
+    assert_eq!(std::fs::read(&b).unwrap(), b"two", "the new file stays");
+    assert!(
+        !new.join("AppData/Roaming/Notes/a.txt").exists(),
+        "the file that landed and nobody touched is removed"
+    );
+}

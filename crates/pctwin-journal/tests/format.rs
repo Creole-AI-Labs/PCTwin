@@ -292,6 +292,7 @@ fn the_saved_format_3_example_still_opens() {
     let found = Found::Files(vec![FileHash {
         path: "vlcrc".into(),
         hash: content_hash(b"new"),
+        id: None,
     }]);
     if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_journal::FORMAT == 3 {
         let _ = std::fs::remove_file(&saved);

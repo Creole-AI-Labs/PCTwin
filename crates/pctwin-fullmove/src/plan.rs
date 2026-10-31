@@ -1047,7 +1047,9 @@ impl FullPlan {
                 files: s.files,
                 category: Some(s.category),
                 notes: s.notes.clone(),
-                secret: s.secret.then_some(at as u32),
+                // The person's own keys move without a tick (founder, 31 October 2026).
+                secret: (s.secret && !pctwin_special::roots::own_keys(&s.name))
+                    .then_some(at as u32),
                 update: None,
                 source: None,
                 note: s.sites.then_some(ChangeNote::Sites),
@@ -1286,7 +1288,8 @@ impl FullPlan {
                 continue;
             }
             if s.secret {
-                if picked.contains(&(at as u32)) {
+                // Ticked one by one, except the person's own keys (founder, 31 October 2026).
+                if picked.contains(&(at as u32)) || pctwin_special::roots::own_keys(&s.name) {
                     c.secrets.extend(s.ids.iter().cloned());
                 }
             } else {
@@ -1716,6 +1719,41 @@ mod tests {
         let c = plan.choice(&[]);
         assert_eq!(c.copy, vec!["m1".to_string(), "c1".to_string()]);
         assert_eq!(plan.room_needed().app_data, APP_DATA_FILE + 2000);
+    }
+
+    /// The person's own SSH and GnuPG keys move without a tick, and are not offered as a tick on
+    /// the plan; every other secret still moves only when ticked (founder, 31 October 2026).
+    #[test]
+    fn own_keys_move_without_a_tick_and_other_secrets_still_need_one() {
+        let secret = |name: &str, id: &str| SpecialLine {
+            name: name.into(),
+            step: SpecialStep::Copy,
+            files: 1,
+            secret: true,
+            ids: vec![id.into()],
+            sites: false,
+            category: Default::default(),
+            notes: Vec::new(),
+            bytes: 0,
+            parts: Vec::new(),
+        };
+        let plan = FullPlan {
+            special: vec![
+                secret(".ssh", "k1"),
+                secret("gnupg", "k2"),
+                secret("Password Vault", "p1"),
+            ],
+            ..FullPlan::default()
+        };
+        assert_eq!(plan.choice(&[]).secrets, ["k1", "k2"]);
+        assert_eq!(plan.choice(&[2]).secrets, ["k1", "k2", "p1"]);
+        let ticks: Vec<Option<u32>> = plan
+            .changes()
+            .iter()
+            .filter(|c| c.kind == Kind::Special)
+            .map(|c| c.secret)
+            .collect();
+        assert_eq!(ticks, [None, None, Some(2)]);
     }
 
     /// Task List 2.9: every special category's step is said with what undo can do: app data PCTwin

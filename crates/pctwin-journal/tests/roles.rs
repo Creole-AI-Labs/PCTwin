@@ -566,6 +566,7 @@ fn a_recorded_observation_changed_by_hand_never_supplies_a_path() {
             &Found::Files(vec![pctwin_journal::FileHash {
                 path: "inbox.mbox".into(),
                 hash: [1; 32],
+                id: None,
             }]),
             false,
         )

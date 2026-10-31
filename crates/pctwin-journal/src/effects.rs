@@ -183,11 +183,16 @@ pub struct KeptFile {
     pub size: u64,
 }
 
-/// A file found at a place: its path inside the place and its content hash.
+/// A file found at a place: its path inside the place, its content hash, and, where it was
+/// recorded as it landed, which file it is on its drive (founder, 31 October 2026: undo then
+/// removes only that very file, never another with the same bytes put there since). Older
+/// records have none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileHash {
     pub path: String,
     pub hash: [u8; 32],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<crate::FileId>,
 }
 
 /// Which move, item, recipe step and person an effect is for.

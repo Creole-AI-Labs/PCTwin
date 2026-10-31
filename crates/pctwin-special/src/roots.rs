@@ -460,6 +460,19 @@ pub const TRUSTED_PLACES: &[(&str, Trusted)] = &[
     ("AppData/Local/Microsoft/Credentials", Trusted::Trust),
 ];
 
+/// The person's own key folders (OpenSSH, GnuPG; GnuPG's own folder under Roaming on Windows):
+/// their keys move without a tick, since they only let the person sign in elsewhere and grant
+/// nobody access to this laptop (founder, 31 October 2026). The files in them that grant access
+/// or run a program stay aside ([`TRUSTED_PLACES`]); every other app secret still needs its tick.
+pub const OWN_KEY_FOLDERS: &[&str] = &[".ssh", ".gnupg", "gnupg"];
+
+/// Whether `folder` (one name, as a special line names its app data folder) is one of the
+/// person's own key folders ([`OWN_KEY_FOLDERS`]), compared as a drive stores names.
+pub fn own_keys(folder: &str) -> bool {
+    let have = names_of(folder);
+    have.len() == 1 && OWN_KEY_FOLDERS.iter().any(|k| names_of(k) == have)
+}
+
 /// The names of a home-relative path, for comparing, each in the form any drive would store it
 /// (second fresh-context review, 31 October 2026: the check and the write must agree). Letter
 /// case is ignored; letters that only look different are made one (NFKC: the long `ſ` is `s`, the
