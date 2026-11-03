@@ -53,7 +53,7 @@ jobs:
       security: ${{ steps.decide.outputs.security }}
       codeql: ${{ steps.decide.outputs.codeql }}
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
@@ -112,7 +112,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
@@ -320,7 +320,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
@@ -497,7 +497,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           # Audit only: these tests send to the local multicast group (device discovery), which a
           # blocking policy refuses.
@@ -553,7 +553,7 @@ jobs:
       - name: Fence canary
         run: bash scripts/clippy-canary.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest@0.9.148
       - name: Tests
@@ -591,7 +591,7 @@ jobs:
     # Windows also builds the release installer and installs it for real; the Intel Mac is slow.
     timeout-minutes: ${{ (matrix.os == 'macos-15-intel' || matrix.os == 'windows-latest') && 90 || 60 }}
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           # Audit only: these tests send to the local multicast group (device discovery), which a
@@ -673,7 +673,7 @@ jobs:
       # test in its own process and tries a failed test once more: a test that then passes is
       # still named FLAKY in the summary (.config/nextest.toml).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest@0.9.148
       - name: Tests
@@ -869,7 +869,7 @@ jobs:
     # Two whole-disk sweeps of a Mac runner (with and without an administrator) take most of an hour.
     timeout-minutes: 120
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -1012,7 +1012,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -1089,7 +1089,7 @@ jobs:
     runs-on: ${{ matrix.to }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -1176,7 +1176,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
