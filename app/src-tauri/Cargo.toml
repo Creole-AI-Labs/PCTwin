@@ -27,7 +27,7 @@ tauri-plugin-window-state = "2"
 # before it is installed. Driven from the engine only; the screens get no updater permission.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # The laptop's own name, as its settings show it (src/laptop_name.rs), suggested as its PCTwin name.
-whoami = { version = "1", default-features = false }
+whoami = { version = "2", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The system's own window for a new account's temporary password (never the screens).
